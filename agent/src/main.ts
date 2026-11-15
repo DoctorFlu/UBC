@@ -7,6 +7,16 @@ import { SERVER_VERSION } from "./version";
 
 const SHUTDOWN_GRACE_MS = 10_000;
 
+/**
+ * How long an idle keep-alive connection stays open.
+ *
+ * It must be longer than the idle timeout of whatever proxy sits in front of this server.
+ * Node's default is 5 s, while cloudflared reuses an idle origin connection for up to 90 s.
+ * With the default, a request that arrives just as Node closes the connection never reaches
+ * this process, the proxy answers 502, and the MCP client reports a failed tool call.
+ */
+const KEEP_ALIVE_TIMEOUT_MS = 120_000;
+
 /** Runs `build`, and on a configuration problem prints it (never a value) and exits. */
 function orExit<T>(build: () => T, envFile: string): T {
   try {
@@ -27,16 +37,25 @@ function main(): void {
   const logger = createLogger({ level: config.logLevel });
   const server = orExit(() => createMandateServer(config, logger), envFileLabel);
 
-  const listener = serve({ fetch: server.fetch, port: config.port, hostname: config.host }, (info) => {
-    logger.info("server.listening", {
-      host: config.host,
-      port: info.port,
-      endpoint: "/mcp",
-      version: SERVER_VERSION,
-      tools: server.tools.map((tool) => tool.name),
-      envFile: envFileLabel,
-    });
-  });
+  const listener = serve(
+    {
+      fetch: server.fetch,
+      port: config.port,
+      hostname: config.host,
+      serverOptions: { keepAliveTimeout: KEEP_ALIVE_TIMEOUT_MS },
+    },
+    (info) => {
+      logger.info("server.listening", {
+        host: config.host,
+        port: info.port,
+        endpoint: "/mcp",
+        version: SERVER_VERSION,
+        keepAliveTimeoutMs: KEEP_ALIVE_TIMEOUT_MS,
+        tools: server.tools.map((tool) => tool.name),
+        envFile: envFileLabel,
+      });
+    },
+  );
   listener.on("error", (error: Error) => {
     logger.error("server.listen_failed", { name: error.name, message: error.message });
     process.exit(1);
