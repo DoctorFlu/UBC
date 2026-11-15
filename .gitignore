@@ -35,3 +35,6 @@ devchain/cache/
 
 contracts/out/
 contracts/cache/
+
+# agent worktrees and local tool state
+.claude/
