@@ -1,4 +1,5 @@
 import type { Tool } from "../mcp/tool";
+import { buySignal } from "./buy-signal";
 import { getSetupState } from "./get-setup-state";
 import { ping } from "./ping";
 import { whoami } from "./whoami";
@@ -11,6 +12,7 @@ import { whoami } from "./whoami";
  */
 // prettier-ignore
 export const tools: readonly Tool[] = [
+  buySignal,
   getSetupState,
   ping,
   whoami,
