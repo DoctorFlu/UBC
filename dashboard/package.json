@@ -10,7 +10,7 @@
     "start": "next start",
     "typegen": "next typegen",
     "typecheck": "npm run typegen && tsc --noEmit",
-    "e2e": "playwright test --project=smoke",
+    "e2e": "playwright test --project=smoke && E2E_SUITE=live playwright test --project=live",
     "screenshots": "E2E_SERVER=prod playwright test --project=screenshots"
   },
   "dependencies": {

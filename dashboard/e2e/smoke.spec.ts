@@ -77,28 +77,48 @@ for (const scheme of schemes) {
   }
 }
 
-test.describe("phone flows", () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+// The smoke suite only reads the seeded demo, so its tests can run in parallel. Owner actions (approve,
+// reject, pause) change the chain and live in live.spec.ts, which has a chain of its own.
 
-  test("approve a held intent by pressing twice", async ({ page }) => {
-    await page.goto("/activity");
-    const approve = page.getByRole("button", { name: /^Approve \$28\.80/ }).filter({ visible: true });
-    await approve.first().click();
-    await approve.first().click();
-    await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Approved");
-  });
+/** The 404 status itself is logged by Chrome; that is the expected outcome, not a problem. */
+const notFoundResponse = /the server responded with a status of 404/;
 
-  test("pause the agent with the keyboard alternative", async ({ page }) => {
-    await page.goto("/");
-    const isolator = page.getByRole("button", { name: /Pause/ }).filter({ visible: true }).first();
-    await isolator.focus();
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Enter");
-    await expect(page.getByTestId("paused-banner")).toBeVisible();
-  });
-
+test.describe("public pages", () => {
   test("an unknown agent address is a 404", async ({ page }) => {
+    const problems = watchConsole(page);
     const response = await page.goto("/agent/not-an-address");
     expect(response?.status()).toBe(404);
+    await expect(page.getByText("Nothing at this address")).toBeVisible();
+    expect(problems.filter((problem) => !notFoundResponse.test(problem))).toEqual([]);
+  });
+
+  test("an address that is not the contract's agent is a 404", async ({ page }) => {
+    const problems = watchConsole(page);
+    const response = await page.goto(`/agent/${OWNER_ADDRESS}`);
+    expect(response?.status()).toBe(404);
+    await expect(page.getByText("Nothing at this address")).toBeVisible();
+    expect(problems.filter((problem) => !notFoundResponse.test(problem))).toEqual([]);
+  });
+});
+
+test.describe("seeded demo", () => {
+  test("the reason the agent linked offchain checks out", async ({ page }) => {
+    await page.goto("/activity/0");
+    const sealed = page.getByTestId("sealed-reason");
+    await expect(page.getByText("Recorded offchain", { exact: true })).toBeVisible();
+    await expect(sealed).toContainText("Verified");
+    await expect(sealed).toContainText("The $65,000 rung pays first");
+  });
+
+  test("an intent without a link says no reason was recorded", async ({ page }) => {
+    await page.goto("/activity/1");
+    await expect(page.getByTestId("sealed-reason")).toContainText("No reason recorded");
+  });
+
+  test("the audit counts blocked intents by the contract's reason", async ({ page }) => {
+    await page.goto("/audit");
+    const blocked = page.locator("main");
+    await expect(blocked.getByText("over max trade size", { exact: true }).first()).toBeVisible();
+    await expect(blocked.getByText("category not allowed", { exact: true }).first()).toBeVisible();
   });
 });
