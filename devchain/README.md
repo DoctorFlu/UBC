@@ -35,6 +35,11 @@ It deletes the file when it stops, since the chain's state goes with it.
 Accounts are anvil's public test accounts: 0 is the user (deployer), 1 the agent, 2 the executor.
 Their keys are public, so never use them on Arc testnet.
 
+Tests and scripts that need a whole chain in one call use `startDevchain({ contract, port })`, which starts anvil, deploys and sets the demo rules, and returns the RPC URL, the deployment and a `stop` function.
+Pass `port: 0` for a free port.
+`devPrivateKey(role)` returns the public test key of the user, agent or executor account.
+`npm run mcp:e2e` uses both to run the MCP server end to end (see `agent/README.md`).
+
 ## Tests
 
 `npx vitest run devchain` compiles both contracts, then on a fresh anvil:

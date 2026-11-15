@@ -12,7 +12,7 @@ Scripts that create secrets write them straight into `.env` without printing the
 | --- | --- | --- |
 | `ARC_RPC_URL` | no | Arc testnet RPC endpoint. Defaults to `https://rpc.testnet.arc.io`. |
 | `POLICY_ADDRESS` | no | Deployed Policy contract. When empty, the local devchain deployment is used. |
-| `POLICY_DEPLOY_BLOCK` | no | Block the Policy contract was deployed in, so event scans start there instead of block 0. |
+| `POLICY_DEPLOY_BLOCK` | no | Block the Policy contract was deployed in, so event scans start there instead of block 0. The MCP server reads it too, to recover rejection reasons from events; when it is unset, the server scans only the last 200,000 blocks. |
 
 ## Agent (MCP server)
 
