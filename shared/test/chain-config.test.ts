@@ -9,9 +9,9 @@ import {
   applyFeeFloor,
   arcTestnet,
   devchain,
-  explorerAddressUrl,
-  explorerBlockUrl,
-  explorerTxUrl,
+  chainExplorerAddressUrl,
+  chainExplorerBlockUrl,
+  chainExplorerTxUrl,
   PolicyRevertError,
   revertErrorName,
   tradeIntentSchema,
@@ -33,12 +33,12 @@ describe("chains", () => {
   });
 
   it("builds explorer links, or null without an explorer", () => {
-    expect(explorerTxUrl(arcTestnet, TX)).toBe(`https://explorer.testnet.arc.io/tx/${TX}`);
-    expect(explorerAddressUrl(arcTestnet, ADDRESS)).toBe(
+    expect(chainExplorerTxUrl(arcTestnet, TX)).toBe(`https://explorer.testnet.arc.io/tx/${TX}`);
+    expect(chainExplorerAddressUrl(arcTestnet, ADDRESS)).toBe(
       `https://explorer.testnet.arc.io/address/${ADDRESS}`,
     );
-    expect(explorerBlockUrl(arcTestnet, 12n)).toBe("https://explorer.testnet.arc.io/block/12");
-    expect(explorerTxUrl(devchain, TX)).toBeNull();
+    expect(chainExplorerBlockUrl(arcTestnet, 12n)).toBe("https://explorer.testnet.arc.io/block/12");
+    expect(chainExplorerTxUrl(devchain, TX)).toBeNull();
   });
 });
 

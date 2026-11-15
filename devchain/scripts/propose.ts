@@ -18,7 +18,7 @@ import {
   categoryLabel,
   describeReason,
   dollarsToCents,
-  explorerTxUrl,
+  chainExplorerTxUrl,
   formatCents,
   isCategoryId,
   outcomeSchema,
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
     const result = await client.proposeTrade(intent);
     console.log(`Intent #${result.intentId}: ${describe(result)}`);
     console.log(`Transaction ${result.txHash} in block ${result.blockNumber}`);
-    const link = explorerTxUrl(deployment.chain, result.txHash);
+    const link = chainExplorerTxUrl(deployment.chain, result.txHash);
     if (link) console.log(link);
   }
 }
