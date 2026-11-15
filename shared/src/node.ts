@@ -10,10 +10,18 @@ import { PolicyClient, type PolicyClientOptions } from "./client";
 import { deploymentFileSchema, type DeploymentFile } from "./deployment";
 import { addressSchema } from "./types";
 
-/** Where `npm run dev:chain` writes the local deployment. */
+/** Where `npm run dev:chain` writes the local deployment, unless `POLICY_DEPLOYMENT_FILE` says otherwise. */
 export const LOCAL_DEPLOYMENT_PATH = fileURLToPath(
   new URL("../../devchain/deployments/local.json", import.meta.url),
 );
+
+/**
+ * The local deployment file to read and write: `POLICY_DEPLOYMENT_FILE` when set (tests that run their
+ * own chain point every process at their own file), otherwise `LOCAL_DEPLOYMENT_PATH`.
+ */
+export function localDeploymentPath(env: NodeJS.ProcessEnv = process.env): string {
+  return env.POLICY_DEPLOYMENT_FILE?.trim() || LOCAL_DEPLOYMENT_PATH;
+}
 
 export interface ResolvedDeployment {
   source: "env" | "devchain";
@@ -33,13 +41,13 @@ export class DeploymentNotFoundError extends Error {
 /**
  * Finds the Policy contract to talk to:
  * 1. `POLICY_ADDRESS` (Arc testnet, RPC from `ARC_RPC_URL`, optional `POLICY_DEPLOY_BLOCK`), otherwise
- * 2. the local devchain deployment file written by `npm run dev:chain`.
+ * 2. the local devchain deployment file written by `npm run dev:chain` (see `localDeploymentPath`).
  */
 export function resolvePolicyDeployment(
   options: { env?: NodeJS.ProcessEnv; localPath?: string } = {},
 ): ResolvedDeployment {
   const env = options.env ?? process.env;
-  const localPath = options.localPath ?? LOCAL_DEPLOYMENT_PATH;
+  const localPath = options.localPath ?? localDeploymentPath(env);
 
   const envAddress = env.POLICY_ADDRESS?.trim();
   if (envAddress) {

@@ -20,7 +20,7 @@ import {
   type DeploymentFile,
   type PolicyRules,
 } from "@mandate/shared";
-import { LOCAL_DEPLOYMENT_PATH } from "@mandate/shared/node";
+import { localDeploymentPath } from "@mandate/shared/node";
 import { devAccount, type DevRole } from "./accounts";
 import { DEVCHAIN_DIR, PRODUCTION_OUT_DIR } from "./foundry";
 
@@ -124,7 +124,7 @@ export function devPolicyClient(rpcUrl: string, address: Address, role: DevRole)
 /** Writes the deployment file other packages read through `resolvePolicyDeployment()`. */
 export function writeDeploymentFile(
   file: DeploymentFile,
-  path: string = LOCAL_DEPLOYMENT_PATH,
+  path: string = localDeploymentPath(),
 ): DeploymentFile {
   const valid = deploymentFileSchema.parse(file);
   mkdirSync(dirname(path), { recursive: true });

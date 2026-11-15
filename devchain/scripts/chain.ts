@@ -10,7 +10,7 @@
 import { existsSync, unlinkSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { categoryLabel, categoriesFromMask, formatCents } from "@mandate/shared";
-import { LOCAL_DEPLOYMENT_PATH } from "@mandate/shared/node";
+import { localDeploymentPath } from "@mandate/shared/node";
 import {
   buildContracts,
   DEMO_POLICY,
@@ -32,6 +32,7 @@ if (!isPolicyContractKind(contract)) {
   process.exit(1);
 }
 const port = Number(process.env.DEVCHAIN_PORT ?? 8545);
+const deploymentPath = localDeploymentPath();
 
 console.log("Compiling contracts/src/Policy.sol and devchain/contracts/PolicyReference.sol with forge...");
 buildContracts();
@@ -43,7 +44,7 @@ const deployment = await deployPolicy({ rpcUrl: anvil.rpcUrl, contract });
 const user = devPolicyClient(anvil.rpcUrl, deployment.address, "user");
 await user.setPolicy(DEMO_POLICY);
 const capabilities = await user.getCapabilities();
-const record = writeDeploymentFile(deploymentRecord(anvil.rpcUrl, deployment));
+const record = writeDeploymentFile(deploymentRecord(anvil.rpcUrl, deployment), deploymentPath);
 
 const categories = categoriesFromMask(DEMO_POLICY.allowedCategories).map(categoryLabel).join(", ");
 const extensions =
@@ -58,7 +59,7 @@ Mandate devchain is running (development only).
   User       ${record.user}  (anvil account 0)
   Agent      ${record.agent}  (anvil account 1)
   Executor   ${record.executor}  (anvil account 2)
-  Written to ${LOCAL_DEPLOYMENT_PATH}
+  Written to ${deploymentPath}
 
 Demo rules: budget ${formatCents(DEMO_POLICY.budgetCents)}, max trade ${formatCents(DEMO_POLICY.maxTradeCents)}, \
 categories ${categories}, approval above ${formatCents(DEMO_POLICY.approvalAboveCents)}, \
@@ -72,7 +73,7 @@ async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
   // The chain's state dies with anvil, so a leftover file would point other packages at nothing.
-  if (existsSync(LOCAL_DEPLOYMENT_PATH)) unlinkSync(LOCAL_DEPLOYMENT_PATH);
+  if (existsSync(deploymentPath)) unlinkSync(deploymentPath);
   await anvil.stop();
   console.log("\nDevchain stopped.");
   process.exit(0);
@@ -82,6 +83,6 @@ process.on("SIGTERM", () => void shutdown());
 anvil.process.once("exit", (code) => {
   if (stopping) return;
   console.error(`anvil exited unexpectedly with code ${String(code)}`);
-  if (existsSync(LOCAL_DEPLOYMENT_PATH)) unlinkSync(LOCAL_DEPLOYMENT_PATH);
+  if (existsSync(deploymentPath)) unlinkSync(deploymentPath);
   process.exit(1);
 });
