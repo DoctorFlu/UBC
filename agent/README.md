@@ -104,10 +104,34 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 | `CONSOLE_URL` | `http://localhost:3000` | holdings and change requests |
 | `CONSOLE_SERVICE_TOKEN` | unset | holdings and change requests |
 | `SIGNALS_URL` | `http://localhost:4021` | buying signals |
+| `X402_BUYER_PRIVATE_KEY` | unset | buying signals (pays from its Circle Gateway balance) |
+| `SIGNAL_DAILY_BUDGET_USDC` | `0.02` | buying signals: most spent per UTC day |
+| `SIGNAL_MAX_PRICE_USDC` | `0.005` | buying signals: most paid for one signal |
+| `AGENT_DATA_DIR` | `.data/agent` | spend ledger and purchased signals (git-ignored) |
 
 Only `MCP_AUTH_TOKEN` is always required.
 `POLICY_ADDRESS`, `AGENT_PRIVATE_KEY` and `CONSOLE_SERVICE_TOKEN` are required only when a registered tool lists them in `requires`, so a partly configured server still starts and `get_setup_state` tells the owner what is missing.
 The repo-wide list is in [docs/configuration.md](../docs/configuration.md).
+
+## Buying signals
+
+`buy_signal` pays the signal API (`signals/`) a fraction of a cent from the buyer's Circle Gateway balance for a hedge signal on one Gemini ladder, and returns a compact signal plus its `receiptId`, the nonce of the payment authorization.
+In order, it:
+
+1. stops without contacting anyone if today's budget is used up;
+2. asks the signal API without paying, which answers with its price or refuses for free (unknown asset, no such ladder, market data down);
+3. refuses a price above `SIGNAL_MAX_PRICE_USDC`;
+4. reserves the price in the spend ledger, or stops if it would go over `SIGNAL_DAILY_BUDGET_USDC`;
+5. pays with that price as a hard cap, which `X402Buyer` checks before it signs;
+6. records the amount paid and stores the signal under its receipt id.
+
+An exhausted budget, a price above the maximum, a seller refusal and a Gateway rejection are verdicts (`rejected` or `unavailable` with a reason and `nextAction`), not errors.
+The spend ledger (`<AGENT_DATA_DIR>/signal-spend.jsonl`) is an append-only file written with `fsync`, so the budget survives a restart; a payment whose outcome is unknown stays counted against the budget.
+Purchased signals live in `<AGENT_DATA_DIR>/signals/<receiptId>.json`, so a later tool call in a fresh session can use a signal by receipt id: `services.payments.purchasedSignal(receiptId)` returns `{ receiptId, signal }` ready for the planner's `signal` input.
+The server never deposits into Gateway.
+
+`ENV_FILE=/path/to/.env npm run signal:e2e` runs the whole flow once on Arc testnet: it starts the signal API and this server on free ports, calls `buy_signal` with the SDK client over HTTP, plans a hedge with and without the signal, and looks the payment up in Gateway's transfer history.
+It spends the signal price (0.001 USDC by default) per run and keeps its data in `.data/signal-e2e`.
 
 ## Layout
 
@@ -125,7 +149,8 @@ src/
   http/              Hono app, bearer auth, rate limiter
   mcp/               tool framework, verdict envelope, untrusted text, MCP endpoint
   tools/             one file per tool, plus index.ts, the registry
-scripts/             mcp:token, dev:tunnel, mcp:smoke
+  x402/              x402 buyer, signal payments, spend ledger, purchased-signal store
+scripts/             mcp:token, dev:tunnel, mcp:smoke, x402:*, signal:e2e
 test/                Vitest, offline
 ```
 
