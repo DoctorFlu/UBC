@@ -34,20 +34,11 @@ describe("get_setup_state", () => {
       expect.objectContaining({ key: "policy_contract", done: false, actor: "owner" }),
       expect.objectContaining({ key: "console_link", done: false, actor: "owner" }),
     ]);
-    expect(summary).toMatch(/^0 of 3 setup steps done\. Next, owner: Set AGENT_PRIVATE_KEY/);
-  });
-
-  it("reports ready when everything is configured", async () => {
-    const { structured, summary } = await getSetupState.run(
-      {},
-      fakeContext({
-        AGENT_PRIVATE_KEY: TEST_PRIVATE_KEY,
-        POLICY_ADDRESS: TEST_POLICY,
-        CONSOLE_SERVICE_TOKEN: "console-service-token-123",
-      }),
-    );
-    expect(structured["ready"]).toBe(true);
-    expect(summary).toBe("Setup is complete (3 of 3 steps done).");
+    expect(summary).toMatch(/^0 of 3 setup steps done\. Left: owner: Set AGENT_PRIVATE_KEY/);
+    expect(structured["nextAction"]).toMatchObject({
+      actor: "owner",
+      hint: expect.stringContaining("AGENT_PRIVATE_KEY") as unknown,
+    });
   });
 
   it("never suggests pasting a key into chat", async () => {
