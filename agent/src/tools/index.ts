@@ -11,6 +11,7 @@ import { ping } from "./ping";
 import { planHedge } from "./plan-hedge";
 import { proposeTrade } from "./propose-trade";
 import { requestPairing } from "./request-pairing";
+import { requestPolicyChange } from "./request-policy-change";
 import { simulateTrade } from "./simulate-trade";
 import { whoami } from "./whoami";
 
@@ -34,6 +35,7 @@ export const tools: readonly Tool[] = [
   planHedge,
   proposeTrade,
   requestPairing,
+  requestPolicyChange,
   simulateTrade,
   whoami,
 ];
