@@ -82,11 +82,16 @@ export function createPolicyClient(
   options: {
     account?: Account;
     deployment?: ResolvedDeployment;
-  } & Pick<PolicyClientOptions, "minMaxFeePerGas" | "receiptTimeoutMs" | "maxLogBlockRange"> = {},
+  } & Pick<
+    PolicyClientOptions,
+    "minMaxFeePerGas" | "receiptTimeoutMs" | "receiptPollingMs" | "maxLogBlockRange"
+  > = {},
 ): PolicyClient {
   const { account, deployment = resolvePolicyDeployment(), ...rest } = options;
   const transport = http(deployment.rpcUrl);
-  const publicClient = createPublicClient({ chain: deployment.chain, transport });
+  // Anvil mines instantly and Arc settles in under a second, so poll faster than viem's 4 s default.
+  const pollingInterval = deployment.source === "devchain" ? 100 : 1_000;
+  const publicClient = createPublicClient({ chain: deployment.chain, transport, pollingInterval });
   const base: PolicyClientOptions = { address: deployment.address, publicClient, ...rest };
   if (!account) return new PolicyClient(base);
   const walletClient = createWalletClient({ chain: deployment.chain, transport, account });

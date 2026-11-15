@@ -1,13 +1,14 @@
 import {
   BaseError,
   ContractFunctionRevertedError,
+  TransactionReceiptNotFoundError,
+  decodeFunctionData,
   encodeFunctionData,
   getContractError,
   parseEventLogs,
   type Account,
   type Address,
   type Chain,
-  type ContractFunctionName,
   type ContractFunctionReturnType,
   type Hex,
   type Log,
@@ -75,6 +76,8 @@ export interface PolicyClientOptions {
   minMaxFeePerGas?: bigint;
   /** How long to wait for a receipt before giving up, in milliseconds. Defaults to 60 seconds. */
   receiptTimeoutMs?: number;
+  /** Longest delay between receipt checks (they back off from 10 ms), in milliseconds. Defaults to 1000. */
+  receiptPollingMs?: number;
   /** Largest block range per `eth_getLogs` call. Defaults to 10,000. */
   maxLogBlockRange?: bigint;
 }
@@ -96,8 +99,6 @@ export class PolicyRevertError extends PolicyClientError {
   }
 }
 
-type WriteFunctionName = ContractFunctionName<PolicyAbi, "nonpayable">;
-
 /**
  * Typed access to the Policy contract with one method per role action:
  * - anyone: reads, `previewTrade`, `getEvents`, `watchEvents`
@@ -115,6 +116,7 @@ export class PolicyClient {
   readonly walletClient: WalletClient<Transport, Chain, Account> | undefined;
   private readonly minMaxFeePerGas: bigint;
   private readonly receiptTimeoutMs: number;
+  private readonly receiptPollingMs: number;
   private readonly maxLogBlockRange: bigint;
   private writeQueue: Promise<unknown> = Promise.resolve();
 
@@ -124,6 +126,7 @@ export class PolicyClient {
     this.walletClient = options.walletClient;
     this.minMaxFeePerGas = options.minMaxFeePerGas ?? ARC_MIN_MAX_FEE_PER_GAS;
     this.receiptTimeoutMs = options.receiptTimeoutMs ?? 60_000;
+    this.receiptPollingMs = options.receiptPollingMs ?? 1_000;
     this.maxLogBlockRange = options.maxLogBlockRange ?? 10_000n;
     if (this.maxLogBlockRange < 1n) throw new PolicyClientError("maxLogBlockRange must be at least 1");
   }
@@ -297,7 +300,6 @@ export class PolicyClient {
   async proposeTrade(input: TradeIntentInput): Promise<ProposeResult> {
     const intent = tradeIntentSchema.parse(input);
     const receipt = await this.send(
-      "proposeTrade",
       encodeFunctionData({
         abi: policyAbi,
         functionName: "proposeTrade",
@@ -324,7 +326,6 @@ export class PolicyClient {
   async setPolicy(policy: Policy): Promise<TxResult> {
     return txResult(
       await this.send(
-        "setPolicy",
         encodeFunctionData({
           abi: policyAbi,
           functionName: "setPolicy",
@@ -336,7 +337,6 @@ export class PolicyClient {
 
   async approveIntent(intentId: number): Promise<ApproveResult> {
     const receipt = await this.send(
-      "approveIntent",
       encodeFunctionData({ abi: policyAbi, functionName: "approveIntent", args: [BigInt(intentId)] }),
     );
     const verdict = this.verdictFor(receipt, intentId);
@@ -349,7 +349,6 @@ export class PolicyClient {
   async rejectIntent(intentId: number): Promise<TxResult> {
     return txResult(
       await this.send(
-        "rejectIntent",
         encodeFunctionData({ abi: policyAbi, functionName: "rejectIntent", args: [BigInt(intentId)] }),
       ),
     );
@@ -357,28 +356,19 @@ export class PolicyClient {
 
   async setPaused(paused: boolean): Promise<TxResult> {
     return txResult(
-      await this.send(
-        "setPaused",
-        encodeFunctionData({ abi: policyAbi, functionName: "setPaused", args: [paused] }),
-      ),
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setPaused", args: [paused] })),
     );
   }
 
   async setAgent(agent: Address): Promise<TxResult> {
     return txResult(
-      await this.send(
-        "setAgent",
-        encodeFunctionData({ abi: policyAbi, functionName: "setAgent", args: [agent] }),
-      ),
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setAgent", args: [agent] })),
     );
   }
 
   async setExecutor(executor: Address): Promise<TxResult> {
     return txResult(
-      await this.send(
-        "setExecutor",
-        encodeFunctionData({ abi: policyAbi, functionName: "setExecutor", args: [executor] }),
-      ),
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setExecutor", args: [executor] })),
     );
   }
 
@@ -387,7 +377,6 @@ export class PolicyClient {
   async recordResult(result: RecordResultInput): Promise<TxResult> {
     return txResult(
       await this.send(
-        "recordResult",
         encodeFunctionData({
           abi: policyAbi,
           functionName: "recordResult",
@@ -415,7 +404,8 @@ export class PolicyClient {
    * Simulates, sends and awaits one write. The call data is encoded by the caller with
    * `encodeFunctionData`, which keeps every call site fully typed against the ABI.
    */
-  private send(functionName: WriteFunctionName, data: Hex): Promise<TransactionReceipt> {
+  private send(data: Hex): Promise<TransactionReceipt> {
+    const { functionName, args } = decodeFunctionData({ abi: policyAbi, data });
     const run = async (): Promise<TransactionReceipt> => {
       const wallet = this.walletClient;
       if (!wallet) throw new PolicyClientError(`${functionName} needs a wallet client`);
@@ -428,7 +418,7 @@ export class PolicyClient {
         const decoded = getContractError(error, {
           abi: policyAbi,
           address: this.address,
-          args: undefined,
+          args,
           functionName,
           sender: account.address,
         });
@@ -441,10 +431,7 @@ export class PolicyClient {
         data,
         ...fees,
       });
-      const receipt = await this.publicClient.waitForTransactionReceipt({
-        hash,
-        timeout: this.receiptTimeoutMs,
-      });
+      const receipt = await this.waitForReceipt(hash);
       if (receipt.status !== "success") {
         throw new PolicyClientError(`${functionName} transaction ${hash} reverted`);
       }
@@ -453,6 +440,30 @@ export class PolicyClient {
     const result = this.writeQueue.then(run, run);
     this.writeQueue = result.catch(() => undefined);
     return result;
+  }
+
+  /**
+   * Polls `eth_getTransactionReceipt` directly. viem's `waitForTransactionReceipt` compares against a
+   * cached block number, which adds a full polling interval per write on a fast chain such as anvil.
+   */
+  private async waitForReceipt(hash: Hex): Promise<TransactionReceipt> {
+    const deadline = Date.now() + this.receiptTimeoutMs;
+    // Back off from 10 ms: anvil mines within milliseconds, Arc within about a second.
+    let delay = 10;
+    for (;;) {
+      try {
+        return await this.publicClient.getTransactionReceipt({ hash });
+      } catch (error) {
+        if (!(error instanceof TransactionReceiptNotFoundError)) throw error;
+      }
+      if (Date.now() > deadline) {
+        throw new PolicyClientError(
+          `no receipt for ${hash} after ${this.receiptTimeoutMs} ms; on Arc this usually means the fee was too low`,
+        );
+      }
+      await sleep(delay);
+      delay = Math.min(delay * 2, this.receiptPollingMs);
+    }
   }
 
   private receiptEvents(receipt: TransactionReceipt) {
