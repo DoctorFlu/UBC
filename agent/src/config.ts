@@ -16,6 +16,7 @@ export const ENV_KEYS = [
   "MCP_AUTH_TOKEN",
   "MCP_ALLOWED_ORIGINS",
   "MCP_LOG_LEVEL",
+  "MCP_ADVERTISE_OUTPUT_SCHEMAS",
   "ARC_RPC_URL",
   "POLICY_ADDRESS",
   "POLICY_DEPLOY_BLOCK",
@@ -60,6 +61,12 @@ export interface Config {
   readonly port: number;
   readonly host: string;
   readonly logLevel: LogLevel;
+  /**
+   * Whether `tools/list` includes each tool's output schema. Off by default: the schemas are three
+   * quarters of the list's size, a chat agent reads the result itself, and results are validated
+   * against them on the server either way.
+   */
+  readonly advertiseOutputSchemas: boolean;
   /** Bearer token Grok Bot presents. */
   readonly authToken: Secret;
   /** Extra hostnames allowed in a browser `Origin` header, on top of localhost. */
@@ -112,6 +119,10 @@ const EnvSchema = z.object({
     )
     .default([]),
   MCP_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  MCP_ADVERTISE_OUTPUT_SCHEMAS: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   ARC_RPC_URL: url("the Arc RPC").default(ARC_TESTNET.rpcUrl),
   POLICY_ADDRESS: z
     .string()
@@ -178,6 +189,7 @@ export function parseConfig(
     port: vars.MCP_PORT,
     host: vars.MCP_HOST,
     logLevel: vars.MCP_LOG_LEVEL,
+    advertiseOutputSchemas: vars.MCP_ADVERTISE_OUTPUT_SCHEMAS,
     authToken: new Secret(vars.MCP_AUTH_TOKEN),
     allowedOrigins: vars.MCP_ALLOWED_ORIGINS,
     arcRpcUrl: new Secret(vars.ARC_RPC_URL),

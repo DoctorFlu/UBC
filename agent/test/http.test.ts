@@ -13,6 +13,33 @@ describe("GET /health", () => {
   });
 });
 
+describe("request log", () => {
+  it("records the MCP method, the client and the response size, and never the parameters", async () => {
+    const server = testServer();
+    const initialize = {
+      ...initializeRequest,
+      params: {
+        ...initializeRequest.params,
+        clientInfo: { name: "grok-gateway<script>", version: "1.2.3" },
+      },
+    };
+    await post(server, initialize, authHeader(TEST_TOKEN));
+    await post(server, { ...listTools, params: { cursor: "secret-looking-value" } }, authHeader(TEST_TOKEN));
+    const records = server.lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((record) => record["event"] === "mcp.request");
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      rpc: ["initialize"],
+      client: "grok-gatewayscript 1.2.3",
+      status: 200,
+    });
+    expect(records[1]).toMatchObject({ rpc: ["tools/list"], status: 200 });
+    expect(records[1]?.["responseBytes"]).toBeGreaterThan(1_000);
+    expect(server.lines.join("\n")).not.toContain("secret-looking-value");
+  });
+});
+
 describe("authentication", () => {
   it.each([
     ["no Authorization header", {}],

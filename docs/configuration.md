@@ -24,6 +24,7 @@ Scripts that create secrets write them straight into `.env` without printing the
 | `MCP_HOST` | no | Interface the MCP server listens on. Defaults to `127.0.0.1`. |
 | `MCP_ALLOWED_ORIGINS` | no | Comma-separated hostnames allowed in a browser `Origin` header, in addition to localhost. |
 | `MCP_LOG_LEVEL` | no | `debug`, `info`, `warn` or `error`. Defaults to `info`. |
+| `MCP_ADVERTISE_OUTPUT_SCHEMAS` | no | `true` to include each tool's output schema in `tools/list`. Defaults to `false`, which makes the list about four times smaller; results are validated on the server either way. |
 
 The MCP server starts with only `MCP_AUTH_TOKEN`.
 A variable marked "for ... tools" becomes required once a registered tool declares it; until then `get_setup_state` reports it as a remaining step.
