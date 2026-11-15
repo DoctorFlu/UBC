@@ -7,7 +7,10 @@ export default defineConfig({
     alias: [{ find: /^@\//, replacement: fileURLToPath(new URL("./dashboard/src/", import.meta.url)) }],
   },
   test: {
-    include: ["{shared,gemini,planner,agent,signals,devchain,streams}/**/*.test.ts", "dashboard/src/**/*.test.ts"],
+    include: [
+      "{shared,gemini,planner,agent,signals,devchain,streams}/**/*.test.ts",
+      "dashboard/src/**/*.test.ts",
+    ],
     passWithNoTests: true,
     testTimeout: 20_000,
   },
