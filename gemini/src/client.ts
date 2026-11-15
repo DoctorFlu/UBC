@@ -11,6 +11,7 @@ import {
   ladderRungs,
   listingFromEvent,
   normalizeBook,
+  normalizeCandles,
   normalizeEvent,
   normalizeSettled,
   normalizeTicker,
@@ -19,6 +20,7 @@ import {
 } from "./normalize";
 import { TokenBucket } from "./rate-limiter";
 import {
+  candlesSchema,
   categoriesSchema,
   eventSchema,
   eventsResponseSchema,
@@ -27,6 +29,8 @@ import {
   type RawEvent,
 } from "./schemas";
 import type {
+  Candle,
+  CandleTimeFrame,
   EventSummary,
   Ladder,
   LadderKind,
@@ -52,6 +56,8 @@ export interface CacheTtls {
   spot: number;
   settled: number;
   categories: number;
+  /** Spot candles. A new hourly candle appears once an hour, so they are cached longest. */
+  candles: number;
 }
 
 const DEFAULT_TTLS: CacheTtls = {
@@ -61,6 +67,7 @@ const DEFAULT_TTLS: CacheTtls = {
   spot: 2_000,
   settled: 30_000,
   categories: 300_000,
+  candles: 300_000,
 };
 
 export interface GeminiClientOptions {
@@ -129,6 +136,8 @@ export interface GeminiClient {
   getEvent(eventTicker: string): Promise<MarketEvent>;
   getOrderBook(instrumentSymbol: string): Promise<OrderBook>;
   getSpot(asset: string): Promise<SpotPrice>;
+  /** Spot-market candles for the asset against USD, oldest first. Gemini returns about 60 days of hourly candles. */
+  getCandles(asset: string, timeFrame: CandleTimeFrame): Promise<Candle[]>;
   listRecentlySettled(options?: SettledOptions): Promise<SettledEvent[]>;
   listCategories(): Promise<string[]>;
   /** Open ladders for an asset, soonest expiry first. */
@@ -224,6 +233,14 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
       });
     }
     return spot;
+  }
+
+  async function getCandles(asset: string, timeFrame: CandleTimeFrame): Promise<Candle[]> {
+    requireToken(asset, "asset");
+    requireToken(timeFrame, "timeFrame");
+    const path = `/v2/candles/${spotSymbol(asset.toUpperCase())}/${timeFrame}`;
+    const raw = await cache.getOrLoad(path, ttl.candles, () => getJson(http, path, candlesSchema));
+    return normalizeCandles(raw);
   }
 
   async function listRecentlySettled(opts: SettledOptions = {}): Promise<SettledEvent[]> {
@@ -334,6 +351,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     getEvent,
     getOrderBook,
     getSpot,
+    getCandles,
     listRecentlySettled,
     listCategories,
     listLadders,
