@@ -10,8 +10,7 @@ import {
   helloRoute,
   type ResourceCatalog,
 } from "../src/index";
-import { FakeGatewayFacilitator } from "../src/testing";
-import { recordedGemini, RECORDED_AT } from "./fixtures";
+import { FakeGatewayFacilitator, recordedGemini, RECORDED_AT } from "../src/testing";
 
 const SELLER = "0x6969C08b342f099377956e2143f3F13E91a4907D";
 const BASE = "http://signals.test";

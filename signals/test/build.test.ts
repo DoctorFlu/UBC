@@ -2,7 +2,7 @@ import type { Ladder } from "@mandate/gemini";
 import { hedgeSignalSchema, verifyHedgeSignal, type HedgeSignal } from "@mandate/shared";
 import { describe, expect, it } from "vitest";
 import { buildHedgeSignal, DEFAULT_SIGNAL_MODEL, HOUR_MS, type BuildResult } from "../src/index";
-import { hourlyCandles, RECORDED_AT, weeklyLadder } from "./fixtures";
+import { hourlyCandles, RECORDED_AT, weeklyLadder } from "../src/testing";
 
 function signalOf(result: BuildResult): HedgeSignal {
   if (!result.ok) throw new Error(`expected a signal, got ${result.code}: ${result.message}`);
