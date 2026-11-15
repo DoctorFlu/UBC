@@ -1,0 +1,195 @@
+import { describe, expect, it } from "vitest";
+import { encodeFunctionData, toEventSignature, toFunctionSignature, type AbiFunction } from "viem";
+import {
+  decodePolicyLogs,
+  EventDecodeError,
+  policyAbi,
+  policyBaseAbi,
+  policyEventSchema,
+  policyExtensionsAbi,
+  rulesFromChain,
+  rulesFromTuple,
+  rulesToChain,
+  UnitError,
+  ZERO_HASH,
+} from "../src";
+import { makeLog, POLICY_ADDRESS } from "./logs";
+
+const CONTEXT: `0x${string}` = `0x${"ab".repeat(32)}`;
+const AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+
+function signatures(abi: readonly { type: string }[]): string[] {
+  return abi
+    .map((item) => {
+      if (item.type === "event") return toEventSignature(item as never);
+      if (item.type === "function") return toFunctionSignature(item as AbiFunction);
+      return null;
+    })
+    .filter((s): s is string => s !== null);
+}
+
+describe("ABI", () => {
+  it("keeps the spec's write functions and events in the base ABI", () => {
+    const base = signatures(policyBaseAbi);
+    expect(base).toEqual(
+      expect.arrayContaining([
+        "setPolicy((uint256,uint256,uint256,uint256,uint256,bool))",
+        "approveIntent(uint256)",
+        "rejectIntent(uint256)",
+        "setPaused(bool)",
+        "proposeTrade(string,uint8,string,bool,uint256,uint256)",
+        "recordResult(uint256,bool,uint256,int256)",
+        "IntentApproved(uint256,string,string,bool,uint256,uint256)",
+        "IntentRejected(uint256,string)",
+        "IntentNeedsApproval(uint256,uint256)",
+        "ResultRecorded(uint256,bool,uint256,int256)",
+        "PolicyUpdated(uint256,uint256,uint256,uint256,uint256,bool)",
+        "Paused(bool)",
+      ]),
+    );
+  });
+
+  it("keeps the extensions separate and additive", () => {
+    expect(signatures(policyExtensionsAbi)).toEqual([
+      "IntentProposed(uint256,address,string,uint8,string,bool,uint256,uint256,bytes32)",
+      "proposeTrade(string,uint8,string,bool,uint256,uint256,bytes32)",
+      "previewTrade(uint8,bool,uint256)",
+    ]);
+    const base = new Set(signatures(policyBaseAbi));
+    for (const extension of signatures(policyExtensionsAbi)) expect(base.has(extension)).toBe(false);
+    expect(policyAbi).toHaveLength(policyBaseAbi.length + policyExtensionsAbi.length);
+  });
+
+  it("encodes both proposeTrade overloads", () => {
+    const base = ["GEMI-BTC2611202200-HI65000", 0, "YES", true, 1000n, 65n] as const;
+    const six = encodeFunctionData({ abi: policyAbi, functionName: "proposeTrade", args: base });
+    const seven = encodeFunctionData({
+      abi: policyAbi,
+      functionName: "proposeTrade",
+      args: [...base, ZERO_HASH],
+    });
+    expect(six.slice(0, 10)).not.toBe(seven.slice(0, 10));
+  });
+});
+
+describe("rules conversions", () => {
+  it("round-trips through the chain's struct and the policy() tuple", () => {
+    const rules = {
+      budgetCents: 20_000,
+      maxTradeCents: 2_500,
+      allowedCategories: 1,
+      approvalAboveCents: 2_000,
+      dailyLossCents: 4_000,
+      paused: true,
+    };
+    expect(rulesFromChain(rulesToChain(rules))).toEqual(rules);
+    expect(rulesFromTuple([20_000n, 2_500n, 1n, 2_000n, 4_000n, true])).toEqual(rules);
+  });
+});
+
+describe("decodePolicyLogs", () => {
+  it("decodes every event type into typed, JSON-safe events", () => {
+    const at = (logIndex: number) => ({ blockNumber: 7, logIndex, blockTimestamp: 1_763_200_000 });
+    const chainRules = rulesToChain({
+      budgetCents: 20_000,
+      maxTradeCents: 2_500,
+      allowedCategories: 1,
+      approvalAboveCents: 2_000,
+      dailyLossCents: 4_000,
+      paused: false,
+    });
+    const logs = [
+      makeLog("PolicyUpdated", chainRules, at(0)),
+      makeLog("Paused", { paused: true }, at(1)),
+      makeLog(
+        "IntentProposed",
+        {
+          intentId: 0n,
+          agent: AGENT,
+          market: "GEMI-BTC2611202200-HI65000",
+          category: 0,
+          outcome: "YES",
+          isBuy: true,
+          amountCents: 1_000n,
+          limitPrice: 65n,
+          contextHash: CONTEXT,
+        },
+        at(2),
+      ),
+      makeLog(
+        "IntentApproved",
+        {
+          intentId: 0n,
+          market: "GEMI-BTC2611202200-HI65000",
+          outcome: "YES",
+          isBuy: true,
+          amountCents: 1_000n,
+          limitPrice: 65n,
+        },
+        at(3),
+      ),
+      makeLog("IntentNeedsApproval", { intentId: 1n, amountCents: 2_200n }, at(4)),
+      makeLog("IntentRejected", { intentId: 2n, reason: "over budget" }, at(5)),
+      makeLog("ResultRecorded", { intentId: 0n, filled: true, filledCents: 999n, pnlCents: -250n }, at(6)),
+    ];
+
+    const events = decodePolicyLogs(logs);
+    expect(events.map((e) => e.type)).toEqual([
+      "PolicyUpdated",
+      "Paused",
+      "IntentProposed",
+      "IntentApproved",
+      "IntentNeedsApproval",
+      "IntentRejected",
+      "ResultRecorded",
+    ]);
+    expect(events[0]).toMatchObject({ rules: rulesFromChain(chainRules), blockNumber: 7, logIndex: 0 });
+    expect(events[2]).toMatchObject({
+      intentId: 0,
+      agent: AGENT,
+      amountCents: 1_000,
+      limitPrice: 65,
+      contextHash: CONTEXT,
+    });
+    expect(events[6]).toMatchObject({
+      filled: true,
+      filledCents: 999,
+      pnlCents: -250,
+      blockTimestamp: 1_763_200_000,
+    });
+
+    for (const event of events) {
+      expect(policyEventSchema.parse(JSON.parse(JSON.stringify(event)))).toEqual(event);
+    }
+  });
+
+  it("skips logs from other contracts and unrelated events", () => {
+    const other = "0x0000000000000000000000000000000000000001";
+    const ours = makeLog("Paused", { paused: true }, { blockNumber: 1, logIndex: 0, blockTimestamp: 1 });
+    const theirs = makeLog(
+      "Paused",
+      { paused: false },
+      { blockNumber: 1, logIndex: 1, blockTimestamp: 1, address: other },
+    );
+    const foreign = { ...ours, logIndex: 2, topics: [`0x${"11".repeat(32)}`] as [`0x${string}`] };
+
+    expect(decodePolicyLogs([ours, theirs, foreign], { address: POLICY_ADDRESS })).toHaveLength(1);
+    expect(decodePolicyLogs([ours, theirs, foreign])).toHaveLength(2);
+  });
+
+  it("takes timestamps from the log, else from the lookup, else fails loudly", () => {
+    const log = makeLog("Paused", { paused: true }, { blockNumber: 9, logIndex: 0 });
+    expect(() => decodePolicyLogs([log])).toThrow(EventDecodeError);
+    const [event] = decodePolicyLogs([log], { blockTimestamps: new Map([[9n, 1234]]) });
+    expect(event?.blockTimestamp).toBe(1234);
+  });
+
+  it("refuses values that do not fit a safe integer instead of losing precision", () => {
+    const huge = makeLog(
+      "IntentNeedsApproval",
+      { intentId: 1n, amountCents: 2n ** 60n },
+      { blockNumber: 1, logIndex: 0, blockTimestamp: 1 },
+    );
+    expect(() => decodePolicyLogs([huge])).toThrow(UnitError);
+  });
+});

@@ -25,6 +25,7 @@ contracts/cache/
 contracts/broadcast/
 devchain/out/
 devchain/cache/
+devchain/deployments/
 
 # local data
 *.sqlite
