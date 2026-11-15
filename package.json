@@ -27,7 +27,12 @@
     "signals:start": "npm run start -w @mandate/signals",
     "x402:keygen": "npm run x402:keygen -w @mandate/agent",
     "x402:hello": "npm run x402:hello -w @mandate/agent --",
-    "x402:status": "npm run x402:status -w @mandate/agent"
+    "x402:status": "npm run x402:status -w @mandate/agent",
+    "dev:mcp": "npm run dev:mcp -w @mandate/agent --",
+    "start:mcp": "npm run start:mcp -w @mandate/agent --",
+    "dev:tunnel": "npm run dev:tunnel -w @mandate/agent --",
+    "mcp:token": "npm run mcp:token -w @mandate/agent --",
+    "mcp:smoke": "npm run mcp:smoke -w @mandate/agent --"
   },
   "overrides": {
     "minimatch": "^11.0.8"

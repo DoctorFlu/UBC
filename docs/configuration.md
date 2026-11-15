@@ -17,16 +17,23 @@ Scripts that create secrets write them straight into `.env` without printing the
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `AGENT_PRIVATE_KEY` | yes | Key of the agent's Arc account. It can only propose trades. |
-| `MCP_AUTH_TOKEN` | yes | Token Grok Bot presents to the MCP server. |
+| `AGENT_PRIVATE_KEY` | for trading tools | Key of the agent's Arc account. It can only propose trades. |
+| `MCP_AUTH_TOKEN` | yes | Token Grok Bot presents to the MCP server, at least 32 characters. Create or rotate it with `npm run mcp:token`. |
 | `MCP_PORT` | no | Port of the MCP server. Defaults to `8787`. |
+| `MCP_HOST` | no | Interface the MCP server listens on. Defaults to `127.0.0.1`. |
+| `MCP_ALLOWED_ORIGINS` | no | Comma-separated hostnames allowed in a browser `Origin` header, in addition to localhost. |
+| `MCP_LOG_LEVEL` | no | `debug`, `info`, `warn` or `error`. Defaults to `info`. |
+
+The MCP server starts with only `MCP_AUTH_TOKEN`.
+A variable marked "for ... tools" becomes required once a registered tool declares it; until then `get_setup_state` reports it as a remaining step.
+See [agent/README.md](../agent/README.md).
 
 ## Console
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `CONSOLE_URL` | no | Address of the console backend. Defaults to `http://localhost:3000`. |
-| `CONSOLE_SERVICE_TOKEN` | yes | Shared secret between the console backend and the MCP server. |
+| `CONSOLE_SERVICE_TOKEN` | for console tools | Shared secret between the console backend and the MCP server. |
 
 ## QuickNode Streams
 
