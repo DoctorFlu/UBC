@@ -20,6 +20,8 @@
  *   --prod                           Build the console and serve the build instead of `next dev`.
  *   --no-executor                    Do not start the simulated executor.
  *   --console-port <port>            Console port (default 3000).
+ *   --mcp-public-url <url>           Public address of the MCP server (the tunnel), shown on the console's
+ *                                    Setup page. Defaults to MCP_PUBLIC_URL.
  *
  * The chain and the console's store are new on every run. Ctrl+C stops everything.
  */
@@ -58,6 +60,7 @@ const { values } = parseArgs({
     prod: { type: "boolean", default: false },
     "no-executor": { type: "boolean", default: false },
     "console-port": { type: "string", default: "3000" },
+    "mcp-public-url": { type: "string" },
   },
 });
 
@@ -82,6 +85,9 @@ const signalsPort = Number(process.env.SIGNALS_PORT ?? 8788);
 if (!process.env.MCP_AUTH_TOKEN?.trim()) {
   fail("MCP_AUTH_TOKEN is not set. Run `npm run mcp:token` once, then start the stack again.");
 }
+
+const mcpPublicUrl = values["mcp-public-url"]?.trim() || process.env.MCP_PUBLIC_URL?.trim() || undefined;
+if (mcpPublicUrl !== undefined && !URL.canParse(mcpPublicUrl)) fail("--mcp-public-url must be a URL");
 
 const consoleUrl = `http://localhost:${String(consolePort)}`;
 const mcpUrl = `http://127.0.0.1:${String(mcpPort)}`;
@@ -263,6 +269,7 @@ async function main(): Promise<void> {
     CONSOLE_DATA_DIR: dataDir,
     CONSOLE_SERVICE_TOKEN: serviceToken,
     CONSOLE_URL: consoleUrl,
+    ...(mcpPublicUrl === undefined ? {} : { MCP_PUBLIC_URL: mcpPublicUrl }),
   };
   const next = (command: string): string[] => [
     "exec",
@@ -319,10 +326,12 @@ async function main(): Promise<void> {
     ? "none yet: create the mandate in the console"
     : `budget ${formatCents(DEMO_POLICY.budgetCents)}, max trade ${formatCents(DEMO_POLICY.maxTradeCents)}, ` +
       `approval above ${formatCents(DEMO_POLICY.approvalAboveCents)}, daily loss ${formatCents(DEMO_POLICY.dailyLossCents)}`;
+  const reach =
+    mcpPublicUrl === undefined ? "expose it with `npm run dev:tunnel`" : `public at ${mcpPublicUrl}`;
   console.log(`
 Mandate local stack is running (development only).
   Console     ${consoleUrl}  (owner signs with the test signer, anvil account 0)
-  MCP server  ${mcpUrl}/mcp  (expose it with \`npm run dev:tunnel\`)
+  MCP server  ${mcpUrl}/mcp  (${reach})
   Signal API  ${signalsUrl}
   Chain       ${record.rpcUrl}  Policy ${record.address} (${record.contract})
   Agent       ${record.agent}  (anvil account 1)
@@ -330,7 +339,7 @@ Mandate local stack is running (development only).
   Agent API   ${consoleUrl}${CONSOLE_AGENT_API_BASE}
   Rules       ${rules}
 
-Next: open the console, enter a holding under Setup, then ask the agent to protect it.
+Next: open the console, enter a holding under Hedge, then ask the agent to protect it.
 Press Ctrl+C to stop everything.`);
 }
 
