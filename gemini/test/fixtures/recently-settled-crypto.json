@@ -1,0 +1,252 @@
+{
+  "data": [
+    {
+      "id": "466579",
+      "title": "ETH price today at 3:15pm EST",
+      "slug": "eth-price-today-at-315pm-est",
+      "type": "binary",
+      "category": "Crypto",
+      "ticker": "ETH05M2611152015",
+      "status": "settled",
+      "createdAt": "2026-11-15T19:06:11.442Z",
+      "contracts": [
+        {
+          "id": "466579-1164141",
+          "label": "Up",
+          "prices": {
+            "buy": {},
+            "sell": {}
+          },
+          "status": "settled",
+          "createdAt": "2026-11-15T19:06:11.442Z",
+          "ticker": "UP",
+          "instrumentSymbol": "GEMI-ETH05M2611152015-UP",
+          "marketState": "closed",
+          "abbreviatedName": "Up",
+          "expiryDate": "2026-11-15T20:15:00.000Z",
+          "resolutionSide": "no",
+          "resolvedAt": "2026-11-15T20:15:05.835Z",
+          "effectiveDate": "2026-11-15T20:10:00.000Z",
+          "sortOrder": 0,
+          "strike": {
+            "type": "reference",
+            "value": "1819.15",
+            "availableAt": "2026-11-15T20:10:00.000Z"
+          },
+          "source": "LS-LRRR-ETHUSD",
+          "settlementValue": "1817.0294833333332",
+          "isCombo": false,
+          "quantityIncrement": "0.01",
+          "quantityMinimum": "0.01",
+          "priceIncrement": "0.01",
+          "quoteAssetPrecision": 2,
+          "priceMinimum": "0.01"
+        }
+      ],
+      "effectiveDate": "2026-11-15T19:06:11.442Z",
+      "isLive": false,
+      "series": "ETH05M",
+      "resolvedAt": "2026-11-15T20:15:05.835Z",
+      "volume": "0",
+      "volume24h": "0",
+      "tags": ["Ether"],
+      "expiryDate": "2026-11-15T20:15:00.000Z",
+      "startTime": "2026-11-15T20:10:00.000Z",
+      "subcategory": {
+        "id": 33,
+        "slug": "crypto_ether",
+        "name": "Ether",
+        "path": ["Crypto", "Ether"]
+      },
+      "template": "crypto-up-down",
+      "eventTags": [
+        {
+          "id": 11,
+          "name": "Five Minute",
+          "slug": "five-minute"
+        },
+        {
+          "id": 19,
+          "name": "Up Down",
+          "slug": "up-down"
+        }
+      ],
+      "source": "LS-LRRR-ETHUSD",
+      "settlement": {
+        "value": "1817.0294833333332"
+      },
+      "sourceDetails": {
+        "agency": "lukka",
+        "index": "LS-LRRR-ETHUSD"
+      },
+      "volumeDelta24hPct": "0"
+    },
+    {
+      "id": "466581",
+      "title": "XRP price today at 3:15pm EST",
+      "slug": "xrp-price-today-at-315pm-est",
+      "type": "binary",
+      "category": "Crypto",
+      "ticker": "XRP05M2611152015",
+      "status": "settled",
+      "createdAt": "2026-11-15T19:06:24.996Z",
+      "contracts": [
+        {
+          "id": "466581-1164143",
+          "label": "Up",
+          "prices": {
+            "buy": {},
+            "sell": {}
+          },
+          "status": "settled",
+          "createdAt": "2026-11-15T19:06:24.996Z",
+          "ticker": "UP",
+          "instrumentSymbol": "GEMI-XRP05M2611152015-UP",
+          "marketState": "closed",
+          "abbreviatedName": "Up",
+          "expiryDate": "2026-11-15T20:15:00.000Z",
+          "resolutionSide": "no",
+          "resolvedAt": "2026-11-15T20:15:05.805Z",
+          "effectiveDate": "2026-11-15T20:10:00.000Z",
+          "sortOrder": 0,
+          "strike": {
+            "type": "reference",
+            "value": "0.9564530123333334",
+            "availableAt": "2026-11-15T20:10:00.000Z"
+          },
+          "source": "LS-LRRR-XRPUSD",
+          "settlementValue": "0.9551259211",
+          "isCombo": false,
+          "quantityIncrement": "0.01",
+          "quantityMinimum": "0.01",
+          "priceIncrement": "0.01",
+          "quoteAssetPrecision": 2,
+          "priceMinimum": "0.01"
+        }
+      ],
+      "effectiveDate": "2026-11-15T19:06:24.996Z",
+      "isLive": false,
+      "series": "XRP05M",
+      "resolvedAt": "2026-11-15T20:15:05.805Z",
+      "volume": "0",
+      "volume24h": "0",
+      "tags": ["XRP"],
+      "expiryDate": "2026-11-15T20:15:00.000Z",
+      "startTime": "2026-11-15T20:10:00.000Z",
+      "subcategory": {
+        "id": 34,
+        "slug": "crypto_xrp",
+        "name": "XRP",
+        "path": ["Crypto", "XRP"]
+      },
+      "template": "crypto-up-down",
+      "eventTags": [
+        {
+          "id": 11,
+          "name": "Five Minute",
+          "slug": "five-minute"
+        },
+        {
+          "id": 19,
+          "name": "Up Down",
+          "slug": "up-down"
+        }
+      ],
+      "source": "LS-LRRR-XRPUSD",
+      "settlement": {
+        "value": "0.9551259211"
+      },
+      "sourceDetails": {
+        "agency": "lukka",
+        "index": "LS-LRRR-XRPUSD"
+      },
+      "volumeDelta24hPct": "0"
+    },
+    {
+      "id": "466532",
+      "title": "BTC price today at 3:15pm EST",
+      "slug": "btc-price-today-at-315pm-est",
+      "type": "binary",
+      "category": "Crypto",
+      "ticker": "BTC15M2611152015",
+      "status": "settled",
+      "createdAt": "2026-11-15T18:56:32.787Z",
+      "contracts": [
+        {
+          "id": "466532-1164022",
+          "label": "Up",
+          "prices": {
+            "buy": {},
+            "sell": {}
+          },
+          "status": "settled",
+          "createdAt": "2026-11-15T18:56:32.787Z",
+          "ticker": "UP",
+          "instrumentSymbol": "GEMI-BTC15M2611152015-UP",
+          "marketState": "closed",
+          "abbreviatedName": "Up",
+          "expiryDate": "2026-11-15T20:15:00.000Z",
+          "resolutionSide": "no",
+          "resolvedAt": "2026-11-15T20:15:05.805Z",
+          "effectiveDate": "2026-11-15T20:00:00.000Z",
+          "sortOrder": 0,
+          "strike": {
+            "type": "reference",
+            "value": "64926.96",
+            "availableAt": "2026-11-15T20:00:00.000Z"
+          },
+          "source": "LS-LRRR-XBTUSD",
+          "settlementValue": "64697.49316666667",
+          "isCombo": false,
+          "quantityIncrement": "0.01",
+          "quantityMinimum": "0.01",
+          "priceIncrement": "0.01",
+          "quoteAssetPrecision": 2,
+          "priceMinimum": "0.01"
+        }
+      ],
+      "effectiveDate": "2026-11-15T18:56:32.787Z",
+      "isLive": false,
+      "series": "BTC15M",
+      "resolvedAt": "2026-11-15T20:15:05.805Z",
+      "volume": "0",
+      "volume24h": "0",
+      "tags": ["Bitcoin"],
+      "expiryDate": "2026-11-15T20:15:00.000Z",
+      "startTime": "2026-11-15T20:00:00.000Z",
+      "subcategory": {
+        "id": 32,
+        "slug": "crypto_bitcoin",
+        "name": "Bitcoin",
+        "path": ["Crypto", "Bitcoin"]
+      },
+      "template": "crypto-up-down",
+      "eventTags": [
+        {
+          "id": 12,
+          "name": "Fifteen Minute",
+          "slug": "fifteen-minute"
+        },
+        {
+          "id": 19,
+          "name": "Up Down",
+          "slug": "up-down"
+        }
+      ],
+      "source": "LS-LRRR-XBTUSD",
+      "settlement": {
+        "value": "64697.49316666667"
+      },
+      "sourceDetails": {
+        "agency": "lukka",
+        "index": "LS-LRRR-XBTUSD"
+      },
+      "volumeDelta24hPct": "0"
+    }
+  ],
+  "pagination": {
+    "limit": 3,
+    "offset": 0,
+    "total": 1000
+  }
+}
