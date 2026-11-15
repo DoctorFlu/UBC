@@ -13,7 +13,8 @@
     "planner",
     "agent",
     "signals",
-    "devchain"
+    "devchain",
+    "streams"
   ],
   "scripts": {
     "lint": "eslint .",
