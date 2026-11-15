@@ -7,6 +7,7 @@ export * from "./arc";
 export * from "./categories";
 export * from "./chains";
 export * from "./client";
+export * from "./console-api";
 export * from "./context";
 export * from "./deployment";
 export * from "./env";
