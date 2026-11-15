@@ -1,47 +1,71 @@
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 import type { PolicyState } from "./evaluate";
 import { compareEvents, eventKey } from "./events";
-import type { Intent, Policy, PolicyEvent } from "./types";
+import type { IntentStatus } from "./reasons";
+import type { Intent, PolicyEvent, PolicyRules } from "./types";
 
 /**
  * Rebuilds the full Policy contract state from its events. The dashboard and the agent use this instead of
- * many view calls, and the devchain fuzz test checks it against the contract's own views.
+ * many view calls, and the devchain tests check it against the contract's own views.
  *
  * Guarantees:
  * - Deterministic: the result depends only on the set of events, never on delivery order.
  * - Idempotent: an event seen twice (same `transactionHash` and `logIndex`) is applied once.
  * - Out-of-order safe: an event older than the newest applied one triggers a rebuild in chain order.
  *
- * Per-intent records need `IntentProposed` (requested extension 2). Totals such as spend, losses and
- * rejection counts only need the spec events, so they stay correct even against a spec-only contract.
+ * Works with the production contract's events alone. Totals (committed spend, losses, rejection counts)
+ * are always exact. Per-intent details are exact when the contract emits `IntentProposed` (requested
+ * extension 1); without it, an intent rejected at proposal has no market or amount in the log, so those
+ * fields stay null until `mergeIntentDetails` fills them from `getIntent`.
  */
 
 export const SECONDS_PER_DAY = 86_400;
 
-/** An intent as the event log describes it, with links to the transactions that changed it. */
-export interface IntentView extends Intent {
+/** An intent as the event log describes it. Detail fields are null when no event carried them. */
+export interface IntentView {
+  id: number;
+  status: IntentStatus;
+  /** Rejection reason, or null when not rejected. */
+  reason: string | null;
+  market: string | null;
+  category: number | null;
+  outcome: string | null;
+  isBuy: boolean | null;
+  amountCents: number | null;
+  limitPrice: number | null;
+  /** Only known from `IntentProposed`. */
+  agent: Address | null;
+  /** Only known from `IntentProposed`. */
+  contextHash: Hex | null;
+  /** Unix seconds of the first event seen for the intent, which is the proposal when history is complete. */
+  proposedAt: number;
+  /** Set once a result is recorded. */
+  filledCents: number | null;
+  pnlCents: number | null;
+  /** Transaction that proposed the intent (the first event seen for it). */
   proposedTxHash: Hex;
-  /** Transaction that gave the final verdict (approved or rejected), or null while none. */
+  /** Transaction that approved or rejected it, or null while none. */
   decidedTxHash: Hex | null;
   resultTxHash: Hex | null;
 }
 
 export interface EventCounts {
+  /** Intents seen, by any event. */
   proposed: number;
   approved: number;
   rejected: number;
   needsApproval: number;
-  filled: number;
-  unfilled: number;
+  executed: number;
+  failed: number;
 }
 
 export interface PolicyViewState {
-  /** Latest policy, or null before the first `PolicySet`. Its `paused` always equals `paused` below. */
-  policy: Policy | null;
+  /** Latest rules, or null before the first `PolicyUpdated`. Its `paused` always equals `paused` below. */
+  rules: PolicyRules | null;
   paused: boolean;
   /** Intents by id. */
   intents: Record<number, IntentView>;
-  spentCents: number;
+  committedCents: number;
   /** Realized loss per UTC day number (`floor(unix seconds / 86400)`). */
   lossByDay: Record<number, number>;
   realizedPnlCents: number;
@@ -55,14 +79,14 @@ export interface PolicyViewState {
 
 export function emptyPolicyViewState(): PolicyViewState {
   return {
-    policy: null,
+    rules: null,
     paused: false,
     intents: {},
-    spentCents: 0,
+    committedCents: 0,
     lossByDay: {},
     realizedPnlCents: 0,
     rejectionsByReason: {},
-    counts: { proposed: 0, approved: 0, rejected: 0, needsApproval: 0, filled: 0, unfilled: 0 },
+    counts: { proposed: 0, approved: 0, rejected: 0, needsApproval: 0, executed: 0, failed: 0 },
     openBuyAmounts: {},
     events: [],
   };
@@ -116,7 +140,7 @@ export function lossTodayCents(state: PolicyViewState, nowSeconds: number): numb
 
 /** The state `evaluateIntent` needs, as of `nowSeconds` (use the latest block's timestamp). */
 export function policyStateAt(state: PolicyViewState, nowSeconds: number): PolicyState {
-  return { spentCents: state.spentCents, lossTodayCents: lossTodayCents(state, nowSeconds) };
+  return { committedCents: state.committedCents, lossTodayCents: lossTodayCents(state, nowSeconds) };
 }
 
 /** Intents in id order. */
@@ -124,9 +148,34 @@ export function listIntents(state: PolicyViewState): IntentView[] {
   return Object.values(state.intents).sort((a, b) => a.id - b.id);
 }
 
-/** Intents waiting for the owner, oldest first. */
+/** Intents waiting for the user, oldest first. */
 export function pendingApprovals(state: PolicyViewState): IntentView[] {
   return listIntents(state).filter((intent) => intent.status === "needs_approval");
+}
+
+/** Ids of intents whose details the log did not carry, to read with `getIntent`. */
+export function intentsMissingDetails(state: PolicyViewState): number[] {
+  return listIntents(state)
+    .filter((intent) => intent.market === null || intent.category === null)
+    .map((intent) => intent.id);
+}
+
+/**
+ * Fills detail fields the log did not carry from the contract's stored intent. Status, reason, results and
+ * transaction links always come from events, so a stale read never overrides newer events.
+ */
+export function mergeIntentDetails(view: IntentView, stored: Intent): IntentView {
+  if (stored.id !== view.id) throw new RangeError(`intent ${stored.id} does not match view ${view.id}`);
+  return {
+    ...view,
+    market: view.market ?? stored.market,
+    category: view.category ?? stored.category,
+    outcome: view.outcome ?? stored.outcome,
+    isBuy: view.isBuy ?? stored.isBuy,
+    amountCents: view.amountCents ?? stored.amountCents,
+    limitPrice: view.limitPrice ?? stored.limitPrice,
+    proposedAt: stored.proposedAt,
+  };
 }
 
 // ------------------------------------------------------------------ internals
@@ -143,65 +192,90 @@ function cloneState(state: PolicyViewState): PolicyViewState {
   };
 }
 
+function blankIntent(id: number, event: PolicyEvent): IntentView {
+  return {
+    id,
+    status: "none",
+    reason: null,
+    market: null,
+    category: null,
+    outcome: null,
+    isBuy: null,
+    amountCents: null,
+    limitPrice: null,
+    agent: null,
+    contextHash: null,
+    proposedAt: event.blockTimestamp,
+    filledCents: null,
+    pnlCents: null,
+    proposedTxHash: event.transactionHash,
+    decidedTxHash: null,
+    resultTxHash: null,
+  };
+}
+
 /** Applies one event in place. Only called on a fresh copy. Intent records are replaced, never mutated. */
 function step(state: PolicyViewState, event: PolicyEvent): void {
-  const updateIntent = (id: number, patch: Partial<IntentView>): void => {
-    const existing = state.intents[id];
-    if (existing) state.intents[id] = { ...existing, ...patch };
+  /** Creates the intent on its first event, then merges `patch` into a new record. */
+  const update = (id: number, patch: Partial<IntentView>): void => {
+    let existing = state.intents[id];
+    if (!existing) {
+      existing = blankIntent(id, event);
+      state.counts.proposed += 1;
+    }
+    state.intents[id] = { ...existing, ...patch };
   };
 
   switch (event.type) {
-    case "PolicySet":
-      state.policy = { ...event.policy };
-      state.paused = event.policy.paused;
+    case "PolicyUpdated":
+      state.rules = { ...event.rules };
+      state.paused = event.rules.paused;
       return;
 
-    case "PausedSet":
+    case "Paused":
       state.paused = event.paused;
-      if (state.policy) state.policy = { ...state.policy, paused: event.paused };
+      if (state.rules) state.rules = { ...state.rules, paused: event.paused };
       return;
 
     case "IntentProposed":
-      state.counts.proposed += 1;
-      state.intents[event.intentId] = {
-        id: event.intentId,
-        agent: event.agent,
+      update(event.intentId, {
         market: event.market,
         category: event.category,
         outcome: event.outcome,
         isBuy: event.isBuy,
         amountCents: event.amountCents,
         limitPrice: event.limitPrice,
+        agent: event.agent,
         contextHash: event.contextHash,
-        status: "none",
-        reason: null,
-        proposedAt: event.blockTimestamp,
-        filledCents: null,
-        pnlCents: null,
-        proposedTxHash: event.transactionHash,
-        decidedTxHash: null,
-        resultTxHash: null,
-      };
+      });
       return;
 
     case "IntentNeedsApproval":
       state.counts.needsApproval += 1;
-      updateIntent(event.intentId, { status: "needs_approval" });
+      update(event.intentId, { status: "needs_approval", amountCents: event.amountCents });
       return;
 
     case "IntentApproved":
       state.counts.approved += 1;
       if (event.isBuy) {
-        state.spentCents += event.amountCents;
+        state.committedCents += event.amountCents;
         state.openBuyAmounts[event.intentId] = event.amountCents;
       }
-      updateIntent(event.intentId, { status: "approved", decidedTxHash: event.transactionHash });
+      update(event.intentId, {
+        status: "approved",
+        market: event.market,
+        outcome: event.outcome,
+        isBuy: event.isBuy,
+        amountCents: event.amountCents,
+        limitPrice: event.limitPrice,
+        decidedTxHash: event.transactionHash,
+      });
       return;
 
     case "IntentRejected":
       state.counts.rejected += 1;
       state.rejectionsByReason[event.reason] = (state.rejectionsByReason[event.reason] ?? 0) + 1;
-      updateIntent(event.intentId, {
+      update(event.intentId, {
         status: "rejected",
         reason: event.reason,
         decidedTxHash: event.transactionHash,
@@ -209,12 +283,12 @@ function step(state: PolicyViewState, event: PolicyEvent): void {
       return;
 
     case "ResultRecorded": {
-      if (event.filled) state.counts.filled += 1;
-      else state.counts.unfilled += 1;
+      if (event.filled) state.counts.executed += 1;
+      else state.counts.failed += 1;
 
       const openBuy = state.openBuyAmounts[event.intentId];
       if (openBuy !== undefined) {
-        state.spentCents += event.filledCents - openBuy;
+        state.committedCents -= openBuy - event.filledCents;
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- record keyed by intent id
         delete state.openBuyAmounts[event.intentId];
       }
@@ -223,8 +297,8 @@ function step(state: PolicyViewState, event: PolicyEvent): void {
         const day = utcDay(event.blockTimestamp);
         state.lossByDay[day] = (state.lossByDay[day] ?? 0) - event.pnlCents;
       }
-      updateIntent(event.intentId, {
-        status: event.filled ? "filled" : "unfilled",
+      update(event.intentId, {
+        status: event.filled ? "executed" : "failed",
         filledCents: event.filledCents,
         pnlCents: event.pnlCents,
         resultTxHash: event.transactionHash,

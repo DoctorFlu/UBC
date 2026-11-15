@@ -4,23 +4,27 @@ import {
   applyEvent,
   applyEvents,
   emptyPolicyViewState,
+  intentsMissingDetails,
   listIntents,
   lossTodayCents,
+  mergeIntentDetails,
   pendingApprovals,
   policyStateAt,
   reduceEvents,
   SECONDS_PER_DAY,
   ZERO_HASH,
   type EventMeta,
-  type Policy,
+  type Intent,
   type PolicyEvent,
+  type PolicyRules,
 } from "../src";
 
 const AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const MARKET = "GEMI-BTC2611202200-HI65000";
 const DAY = 20_000; // a UTC day number
 const NOON = DAY * SECONDS_PER_DAY + 12 * 3600;
 
-const policy: Policy = {
+const rules: PolicyRules = {
   budgetCents: 20_000,
   maxTradeCents: 2_500,
   allowedCategories: 1,
@@ -52,7 +56,7 @@ const proposed =
     type: "IntentProposed",
     intentId,
     agent: AGENT,
-    market: "GEMI-BTC2611202200-HI65000",
+    market: MARKET,
     category: 0,
     outcome: "YES",
     isBuy,
@@ -66,7 +70,7 @@ const approved =
     ...meta,
     type: "IntentApproved",
     intentId,
-    market: "GEMI-BTC2611202200-HI65000",
+    market: MARKET,
     outcome: "YES",
     isBuy,
     amountCents,
@@ -88,32 +92,35 @@ const result =
     filledCents,
     pnlCents,
   });
-const policySet =
-  (p: Policy) =>
-  (meta: EventMeta): PolicyEvent => ({ ...meta, type: "PolicySet", policy: p });
-const pausedSet =
+const policyUpdated =
+  (r: PolicyRules) =>
+  (meta: EventMeta): PolicyEvent => ({ ...meta, type: "PolicyUpdated", rules: r });
+const pausedEvent =
   (paused: boolean) =>
-  (meta: EventMeta): PolicyEvent => ({ ...meta, type: "PausedSet", paused });
+  (meta: EventMeta): PolicyEvent => ({ ...meta, type: "Paused", paused });
 
-/** A realistic history covering every event type and status. */
+/**
+ * A realistic history covering every event type and status. Ids start at 0, like the contract's array.
+ * `setPolicy` emits `PolicyUpdated` then `Paused`, so the first transaction carries both.
+ */
 function scenario() {
   const c = chain();
-  c.tx([policySet(policy)]);
-  c.tx([proposed(1, 1_000), approved(1, 1_000)]); // auto approved buy
-  c.tx([proposed(2, 2_200), needsApproval(2, 2_200)]); // held
-  c.tx([proposed(3, 3_000), rejected(3, "OVER_MAX_TRADE")]);
-  c.tx([result(1, true, 900, -300)]); // partial fill, loss
-  c.tx([approved(2, 2_200)]); // owner approves
-  c.tx([proposed(4, 2_100), needsApproval(4, 2_100)]);
-  c.tx([rejected(4, "REJECTED_BY_OWNER")]);
-  c.tx([result(2, false, 0, 0)]); // unfilled: budget released
-  c.tx([proposed(5, 500, false), approved(5, 500, false)]); // sell: no budget
-  c.tx([result(5, true, 500, 120)]);
-  c.tx([proposed(6, 400), needsApproval(6, 400)]); // left waiting
-  c.tx([proposed(7, 300, false), approved(7, 300, false)], SECONDS_PER_DAY); // next UTC day
-  c.tx([result(7, true, 300, -50)]);
-  c.tx([pausedSet(true)]);
-  c.tx([proposed(8, 100), rejected(8, "PAUSED")]);
+  c.tx([policyUpdated(rules), pausedEvent(false)]);
+  c.tx([proposed(0, 1_000), approved(0, 1_000)]); // auto approved buy
+  c.tx([proposed(1, 2_200), needsApproval(1, 2_200)]); // held
+  c.tx([proposed(2, 3_000), rejected(2, "over max trade size")]);
+  c.tx([result(0, true, 900, -300)]); // partial fill, loss
+  c.tx([approved(1, 2_200)]); // user approves
+  c.tx([proposed(3, 2_100), needsApproval(3, 2_100)]);
+  c.tx([rejected(3, "rejected by user")]);
+  c.tx([result(1, false, 0, 0)]); // unfilled: budget released
+  c.tx([proposed(4, 500, false), approved(4, 500, false)]); // sell: no budget
+  c.tx([result(4, true, 500, 120)]);
+  c.tx([proposed(5, 400), needsApproval(5, 400)]); // left waiting
+  c.tx([proposed(6, 300, false), approved(6, 300, false)], SECONDS_PER_DAY); // next UTC day
+  c.tx([result(6, true, 300, -50)]);
+  c.tx([pausedEvent(true)]);
+  c.tx([proposed(7, 100), rejected(7, "agent paused")]);
   return c.events;
 }
 
@@ -128,41 +135,44 @@ function shuffled<T>(items: readonly T[], seed: number): T[] {
   return out;
 }
 
+const REJECTIONS = { "over max trade size": 1, "rejected by user": 1, "agent paused": 1 };
+
 describe("reduceEvents", () => {
-  it("rebuilds policy, intents, spend, losses and counts", () => {
+  it("rebuilds rules, intents, committed spend, losses and counts", () => {
     const state = reduceEvents(scenario());
 
-    expect(state.policy).toEqual({ ...policy, paused: true });
+    expect(state.rules).toEqual({ ...rules, paused: true });
     expect(state.paused).toBe(true);
-    // 1000 approved then corrected to 900; 2200 approved then released to 0; sell 5 does not count.
-    expect(state.spentCents).toBe(900);
+    // 1000 approved then corrected to 900; 2200 approved then released to 0; sells never count.
+    expect(state.committedCents).toBe(900);
     expect(state.realizedPnlCents).toBe(-300 + 0 + 120 - 50);
     expect(state.lossByDay).toEqual({ [DAY]: 300, [DAY + 1]: 50 });
-    expect(state.rejectionsByReason).toEqual({ OVER_MAX_TRADE: 1, REJECTED_BY_OWNER: 1, PAUSED: 1 });
+    expect(state.rejectionsByReason).toEqual(REJECTIONS);
     expect(state.counts).toEqual({
       proposed: 8,
       approved: 4,
       rejected: 3,
       needsApproval: 3,
-      filled: 3,
-      unfilled: 1,
+      executed: 3,
+      failed: 1,
     });
 
     const statuses = Object.fromEntries(listIntents(state).map((i) => [i.id, i.status]));
     expect(statuses).toEqual({
-      1: "filled",
-      2: "unfilled",
+      0: "executed",
+      1: "failed",
+      2: "rejected",
       3: "rejected",
-      4: "rejected",
-      5: "filled",
-      6: "needs_approval",
-      7: "filled",
-      8: "rejected",
+      4: "executed",
+      5: "needs_approval",
+      6: "executed",
+      7: "rejected",
     });
-    expect(state.intents[1]).toMatchObject({ filledCents: 900, pnlCents: -300, reason: null });
-    expect(state.intents[4]?.reason).toBe("REJECTED_BY_OWNER");
-    expect(state.intents[2]?.decidedTxHash).not.toBe(state.intents[2]?.proposedTxHash);
-    expect(pendingApprovals(state).map((i) => i.id)).toEqual([6]);
+    expect(state.intents[0]).toMatchObject({ filledCents: 900, pnlCents: -300, reason: null, agent: AGENT });
+    expect(state.intents[3]?.reason).toBe("rejected by user");
+    expect(state.intents[1]?.decidedTxHash).not.toBe(state.intents[1]?.proposedTxHash);
+    expect(pendingApprovals(state).map((i) => i.id)).toEqual([5]);
+    expect(intentsMissingDetails(state)).toEqual([]);
   });
 
   it("gives the same state for any delivery order", () => {
@@ -183,13 +193,60 @@ describe("reduceEvents", () => {
   it("starts empty", () => {
     expect(reduceEvents([])).toEqual(emptyPolicyViewState());
   });
+});
 
-  it("keeps totals right without IntentProposed (spec-only contract)", () => {
-    const events = scenario().filter((e) => e.type !== "IntentProposed");
-    const state = reduceEvents(events);
-    expect(state.spentCents).toBe(900);
-    expect(state.rejectionsByReason).toEqual({ OVER_MAX_TRADE: 1, REJECTED_BY_OWNER: 1, PAUSED: 1 });
-    expect(listIntents(state)).toEqual([]);
+describe("production contract events only (no IntentProposed)", () => {
+  const baseOnly = () => scenario().filter((e) => e.type !== "IntentProposed");
+
+  it("keeps every total and status exact", () => {
+    const full = reduceEvents(scenario());
+    const state = reduceEvents(baseOnly());
+    expect(state.committedCents).toBe(full.committedCents);
+    expect(state.lossByDay).toEqual(full.lossByDay);
+    expect(state.rejectionsByReason).toEqual(REJECTIONS);
+    expect(state.counts).toEqual(full.counts);
+    expect(listIntents(state).map((i) => i.status)).toEqual(listIntents(full).map((i) => i.status));
+  });
+
+  it("leaves details of intents rejected at proposal empty, and lists them for getIntent", () => {
+    const state = reduceEvents(baseOnly());
+    expect(state.intents[2]).toMatchObject({
+      status: "rejected",
+      market: null,
+      amountCents: null,
+      agent: null,
+    });
+    // Held intents carry the amount but not the market until approved.
+    expect(state.intents[5]).toMatchObject({ status: "needs_approval", amountCents: 400, market: null });
+    expect(state.intents[0]?.market).toBe(MARKET);
+    // No base event carries the category, so every intent needs one getIntent read.
+    expect(state.intents[0]?.category).toBeNull();
+    expect(intentsMissingDetails(state)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("fills missing details from getIntent without overriding what events say", () => {
+    const state = reduceEvents(baseOnly());
+    const view = state.intents[2];
+    if (!view) throw new Error("missing intent 2");
+    const stored: Intent = {
+      id: 2,
+      market: MARKET,
+      category: 0,
+      outcome: "YES",
+      isBuy: true,
+      amountCents: 3_000,
+      limitPrice: 65,
+      // A stale read: the status must still come from the events.
+      status: "none",
+      proposedAt: view.proposedAt,
+      filledCents: 0,
+      pnlCents: 0,
+    };
+    const merged = mergeIntentDetails(view, stored);
+    expect(merged).toMatchObject({ status: "rejected", reason: "over max trade size", amountCents: 3_000 });
+    expect(merged.market).toBe(MARKET);
+    expect(merged.agent).toBeNull();
+    expect(() => mergeIntentDetails(view, { ...stored, id: 3 })).toThrow(RangeError);
   });
 });
 
@@ -227,6 +284,6 @@ describe("loss today", () => {
     expect(lossTodayCents(state, NOON)).toBe(300);
     expect(lossTodayCents(state, NOON + SECONDS_PER_DAY)).toBe(50);
     expect(lossTodayCents(state, NOON + 2 * SECONDS_PER_DAY)).toBe(0);
-    expect(policyStateAt(state, NOON)).toEqual({ spentCents: 900, lossTodayCents: 300 });
+    expect(policyStateAt(state, NOON)).toEqual({ committedCents: 900, lossTodayCents: 300 });
   });
 });

@@ -1,12 +1,18 @@
 /**
- * ABI of the Policy contract: the tech spec interface plus the extensions requested in
- * `docs/contract-interface.md`. This is the only ABI offchain code should import.
+ * ABIs of the Policy contract.
  *
- * `internalType` is left out on purpose so the ABI does not depend on the contract's Solidity names.
- * The devchain test suite checks that the reference contract compiles to exactly this ABI.
+ * - `policyBaseAbi` matches the production contract (`contracts/src/Policy.sol`) exactly.
+ * - `policyExtensionsAbi` holds the additions requested in `docs/contract-interface.md`. The devchain
+ *   reference contract has them; the production contract may not yet. `PolicyClient` detects them at
+ *   runtime and falls back when they are missing.
+ * - `policyAbi` is both together, for decoding anything either contract emits.
+ *
+ * `internalType` is left out so the ABI does not depend on Solidity type names. The devchain tests check
+ * that the production contract compiles to exactly `policyBaseAbi`, and the reference contract to exactly
+ * `policyAbi`.
  */
 
-const policyComponents = [
+const policyRulesComponents = [
   { name: "budgetCents", type: "uint256" },
   { name: "maxTradeCents", type: "uint256" },
   { name: "allowedCategories", type: "uint256" },
@@ -15,28 +21,74 @@ const policyComponents = [
   { name: "paused", type: "bool" },
 ] as const;
 
+const policyRulesEventInputs = [
+  { name: "budgetCents", type: "uint256", indexed: false },
+  { name: "maxTradeCents", type: "uint256", indexed: false },
+  { name: "allowedCategories", type: "uint256", indexed: false },
+  { name: "approvalAboveCents", type: "uint256", indexed: false },
+  { name: "dailyLossCents", type: "uint256", indexed: false },
+  { name: "paused", type: "bool", indexed: false },
+] as const;
+
 const intentComponents = [
-  { name: "agent", type: "address" },
   { name: "market", type: "string" },
   { name: "category", type: "uint8" },
   { name: "outcome", type: "string" },
   { name: "isBuy", type: "bool" },
   { name: "amountCents", type: "uint256" },
   { name: "limitPrice", type: "uint256" },
-  { name: "contextHash", type: "bytes32" },
   { name: "status", type: "uint8" },
-  { name: "reason", type: "string" },
   { name: "proposedAt", type: "uint64" },
   { name: "filledCents", type: "uint256" },
   { name: "pnlCents", type: "int256" },
 ] as const;
 
-export const policyAbi = [
-  // ------------------------------------------------------------ spec: owner
+const proposeTradeInputs = [
+  { name: "market", type: "string" },
+  { name: "category", type: "uint8" },
+  { name: "outcome", type: "string" },
+  { name: "isBuy", type: "bool" },
+  { name: "amountCents", type: "uint256" },
+  { name: "limitPrice", type: "uint256" },
+] as const;
+
+const view = (name: string, type: string) =>
+  ({
+    type: "function",
+    name,
+    inputs: [],
+    outputs: [{ name: "", type }],
+    stateMutability: "view",
+  }) as const;
+
+/** The production contract's ABI, without the constructor. */
+export const policyBaseAbi = [
+  // ------------------------------------------------------------ user
   {
     type: "function",
     name: "setPolicy",
-    inputs: [{ name: "p", type: "tuple", components: policyComponents }],
+    inputs: [{ name: "p", type: "tuple", components: policyRulesComponents }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setPaused",
+    inputs: [{ name: "paused_", type: "bool" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setAgent",
+    inputs: [{ name: "agent_", type: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setExecutor",
+    inputs: [{ name: "executor_", type: "address" }],
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -54,30 +106,15 @@ export const policyAbi = [
     outputs: [],
     stateMutability: "nonpayable",
   },
-  {
-    type: "function",
-    name: "setPaused",
-    inputs: [{ name: "paused", type: "bool" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  // ------------------------------------------------------------ spec: agent (plus extension 1: contextHash)
+  // ------------------------------------------------------------ agent
   {
     type: "function",
     name: "proposeTrade",
-    inputs: [
-      { name: "market", type: "string" },
-      { name: "category", type: "uint8" },
-      { name: "outcome", type: "string" },
-      { name: "isBuy", type: "bool" },
-      { name: "amountCents", type: "uint256" },
-      { name: "limitPrice", type: "uint256" },
-      { name: "contextHash", type: "bytes32" },
-    ],
+    inputs: proposeTradeInputs,
     outputs: [{ name: "intentId", type: "uint256" }],
     stateMutability: "nonpayable",
   },
-  // ------------------------------------------------------------ spec: executor
+  // ------------------------------------------------------------ executor
   {
     type: "function",
     name: "recordResult",
@@ -90,7 +127,38 @@ export const policyAbi = [
     outputs: [],
     stateMutability: "nonpayable",
   },
-  // ------------------------------------------------------------ spec: events
+  // ------------------------------------------------------------ views
+  view("user", "address"),
+  view("agent", "address"),
+  view("executor", "address"),
+  {
+    type: "function",
+    name: "policy",
+    inputs: [],
+    outputs: policyRulesComponents,
+    stateMutability: "view",
+  },
+  view("committedCents", "uint256"),
+  view("lossDay", "uint256"),
+  view("dayLossCents", "uint256"),
+  view("intentCount", "uint256"),
+  {
+    type: "function",
+    name: "getIntent",
+    inputs: [{ name: "intentId", type: "uint256" }],
+    outputs: [{ name: "", type: "tuple", components: intentComponents }],
+    stateMutability: "view",
+  },
+  view("remainingBudgetCents", "uint256"),
+  view("lossTodayCents", "uint256"),
+  // ------------------------------------------------------------ events
+  { type: "event", name: "PolicyUpdated", inputs: policyRulesEventInputs, anonymous: false },
+  {
+    type: "event",
+    name: "Paused",
+    inputs: [{ name: "paused", type: "bool", indexed: false }],
+    anonymous: false,
+  },
   {
     type: "event",
     name: "IntentApproved",
@@ -133,7 +201,17 @@ export const policyAbi = [
     ],
     anonymous: false,
   },
-  // ------------------------------------------------------------ extension 2 and 3: events
+  // ------------------------------------------------------------ errors
+  { type: "error", name: "NotUser", inputs: [] },
+  { type: "error", name: "NotAgent", inputs: [] },
+  { type: "error", name: "NotExecutor", inputs: [] },
+  { type: "error", name: "WrongStatus", inputs: [{ name: "current", type: "uint8" }] },
+  { type: "error", name: "FillExceedsIntent", inputs: [] },
+] as const;
+
+/** Requested additions, each independent of the others. */
+export const policyExtensionsAbi = [
+  // Request 1: details of every proposal in the log, so rejected intents keep them.
   {
     type: "event",
     name: "IntentProposed",
@@ -150,75 +228,15 @@ export const policyAbi = [
     ],
     anonymous: false,
   },
-  {
-    type: "event",
-    name: "PolicySet",
-    inputs: [{ name: "policy", type: "tuple", indexed: false, components: policyComponents }],
-    anonymous: false,
-  },
-  {
-    type: "event",
-    name: "PausedSet",
-    inputs: [{ name: "paused", type: "bool", indexed: false }],
-    anonymous: false,
-  },
-  // ------------------------------------------------------------ extension 4 and 5: views
+  // Request 2: a proposeTrade overload that records the decision context hash.
   {
     type: "function",
-    name: "policy",
-    inputs: [],
-    outputs: [{ name: "", type: "tuple", components: policyComponents }],
-    stateMutability: "view",
+    name: "proposeTrade",
+    inputs: [...proposeTradeInputs, { name: "contextHash", type: "bytes32" }],
+    outputs: [{ name: "intentId", type: "uint256" }],
+    stateMutability: "nonpayable",
   },
-  {
-    type: "function",
-    name: "owner",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "agent",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "executor",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "spentCents",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "lossTodayCents",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "intentCount",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getIntent",
-    inputs: [{ name: "intentId", type: "uint256" }],
-    outputs: [{ name: "", type: "tuple", components: intentComponents }],
-    stateMutability: "view",
-  },
+  // Request 3: a dry run that uses the same rule function as proposeTrade.
   {
     type: "function",
     name: "previewTrade",
@@ -233,33 +251,9 @@ export const policyAbi = [
     ],
     stateMutability: "view",
   },
-  // ------------------------------------------------------------ open question: role management
-  {
-    type: "function",
-    name: "setAgent",
-    inputs: [{ name: "newAgent", type: "address" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "setExecutor",
-    inputs: [{ name: "newExecutor", type: "address" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  // ------------------------------------------------------------ errors (requested names, so clients can explain reverts)
-  { type: "error", name: "NotOwner", inputs: [] },
-  { type: "error", name: "NotAgent", inputs: [] },
-  { type: "error", name: "NotExecutor", inputs: [] },
-  { type: "error", name: "ZeroAddress", inputs: [] },
-  { type: "error", name: "InvalidAmount", inputs: [] },
-  { type: "error", name: "InvalidLimitPrice", inputs: [] },
-  { type: "error", name: "InvalidOutcome", inputs: [] },
-  { type: "error", name: "InvalidMarket", inputs: [] },
-  { type: "error", name: "IntentNotPending", inputs: [{ name: "intentId", type: "uint256" }] },
-  { type: "error", name: "IntentNotApproved", inputs: [{ name: "intentId", type: "uint256" }] },
-  { type: "error", name: "InvalidFill", inputs: [{ name: "intentId", type: "uint256" }] },
 ] as const;
 
+export const policyAbi = [...policyBaseAbi, ...policyExtensionsAbi] as const;
+
+export type PolicyBaseAbi = typeof policyBaseAbi;
 export type PolicyAbi = typeof policyAbi;

@@ -84,7 +84,7 @@ export function createPolicyClient(
     deployment?: ResolvedDeployment;
   } & Pick<
     PolicyClientOptions,
-    "minMaxFeePerGas" | "receiptTimeoutMs" | "receiptPollingMs" | "maxLogBlockRange"
+    "capabilities" | "minMaxFeePerGas" | "receiptTimeoutMs" | "receiptPollingMs" | "maxLogBlockRange"
   > = {},
 ): PolicyClient {
   const { account, deployment = resolvePolicyDeployment(), ...rest } = options;

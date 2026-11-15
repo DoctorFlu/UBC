@@ -1,6 +1,6 @@
 import { isAddressEqual, parseEventLogs, type Address, type Log } from "viem";
 import { policyAbi } from "./abi";
-import type { EventMeta, Policy, PolicyEvent } from "./types";
+import type { EventMeta, PolicyEvent, PolicyRules } from "./types";
 import { toSafeNumber } from "./units";
 
 export interface DecodeOptions {
@@ -90,16 +90,16 @@ export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = 
           filledCents: toSafeNumber(log.args.filledCents, "filledCents"),
           pnlCents: toSafeNumber(log.args.pnlCents, "pnlCents"),
         };
-      case "PolicySet":
-        return { ...meta, type: "PolicySet", policy: policyFromChain(log.args.policy) };
-      case "PausedSet":
-        return { ...meta, type: "PausedSet", paused: log.args.paused };
+      case "PolicyUpdated":
+        return { ...meta, type: "PolicyUpdated", rules: rulesFromChain(log.args) };
+      case "Paused":
+        return { ...meta, type: "Paused", paused: log.args.paused };
     }
   });
 }
 
-/** The tuple the contract returns or emits for a policy. */
-export interface ChainPolicy {
+/** The rules as the contract returns or emits them, with uint256 fields as bigints. */
+export interface ChainPolicyRules {
   budgetCents: bigint;
   maxTradeCents: bigint;
   allowedCategories: bigint;
@@ -108,7 +108,7 @@ export interface ChainPolicy {
   paused: boolean;
 }
 
-export function policyFromChain(p: ChainPolicy): Policy {
+export function rulesFromChain(p: ChainPolicyRules): PolicyRules {
   return {
     budgetCents: toSafeNumber(p.budgetCents, "budgetCents"),
     maxTradeCents: toSafeNumber(p.maxTradeCents, "maxTradeCents"),
@@ -119,7 +119,22 @@ export function policyFromChain(p: ChainPolicy): Policy {
   };
 }
 
-export function policyToChain(p: Policy): ChainPolicy {
+/** The `policy()` getter returns the fields as a tuple, in struct order. */
+export function rulesFromTuple(
+  tuple: readonly [bigint, bigint, bigint, bigint, bigint, boolean],
+): PolicyRules {
+  const [budgetCents, maxTradeCents, allowedCategories, approvalAboveCents, dailyLossCents, paused] = tuple;
+  return rulesFromChain({
+    budgetCents,
+    maxTradeCents,
+    allowedCategories,
+    approvalAboveCents,
+    dailyLossCents,
+    paused,
+  });
+}
+
+export function rulesToChain(p: PolicyRules): ChainPolicyRules {
   return {
     budgetCents: BigInt(p.budgetCents),
     maxTradeCents: BigInt(p.maxTradeCents),

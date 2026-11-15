@@ -1,11 +1,11 @@
-/** Verdicts, reason codes and intent statuses, with their onchain encodings and human-readable text. */
+/** Verdicts, rejection reasons and intent statuses, with their onchain encodings and human-readable text. */
 
 // ------------------------------------------------------------------ verdicts
 
 export const VERDICTS = ["approved", "needs_approval", "rejected"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
-/** `previewTrade` returns the verdict as a uint8: 0 approve, 1 needs approval, 2 reject. */
+/** `previewTrade` (requested extension) returns the verdict as a uint8: 0 approve, 1 needs approval, 2 reject. */
 export function verdictFromCode(code: number): Verdict {
   const verdict = VERDICTS[code];
   if (verdict === undefined) throw new RangeError(`unknown verdict code ${code}`);
@@ -18,19 +18,24 @@ export function verdictToCode(verdict: Verdict): number {
 
 export const VERDICT_LABELS: Readonly<Record<Verdict, string>> = {
   approved: "Approved",
-  needs_approval: "Waiting for owner approval",
+  needs_approval: "Waiting for the user's approval",
   rejected: "Rejected",
 };
 
-// ------------------------------------------------------------------ reason codes
+// ------------------------------------------------------------------ rejection reasons
 
+/**
+ * The exact strings the contract puts in `IntentRejected`, in the order `_violation` checks them, followed
+ * by the two reasons `approveIntent` and `rejectIntent` emit.
+ */
 export const REASON_CODES = [
-  "PAUSED",
-  "CATEGORY_NOT_ALLOWED",
-  "OVER_MAX_TRADE",
-  "OVER_BUDGET",
-  "DAILY_LOSS_LIMIT",
-  "REJECTED_BY_OWNER",
+  "agent paused",
+  "zero amount",
+  "daily loss limit reached",
+  "over max trade size",
+  "category not allowed",
+  "over budget",
+  "rejected by user",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 
@@ -42,31 +47,35 @@ export interface ReasonInfo {
 }
 
 export const REASONS: Readonly<Record<ReasonCode, ReasonInfo>> = {
-  PAUSED: {
+  "agent paused": {
     label: "Paused",
-    explanation: "The owner has paused the agent, so no new trades are allowed until trading is resumed.",
+    explanation: "The user has paused the agent, so no new trades are allowed until trading is resumed.",
   },
-  CATEGORY_NOT_ALLOWED: {
-    label: "Category not allowed",
-    explanation:
-      "This market's category is not in the list of categories the owner allows the agent to trade.",
+  "zero amount": {
+    label: "Zero amount",
+    explanation: "The trade amount was zero, so there was nothing to approve.",
   },
-  OVER_MAX_TRADE: {
-    label: "Over max trade size",
-    explanation: "This trade is larger than the maximum size the owner allows for a single trade.",
-  },
-  OVER_BUDGET: {
-    label: "Over budget",
-    explanation: "This buy would take the agent's total committed spend past the budget the owner set.",
-  },
-  DAILY_LOSS_LIMIT: {
+  "daily loss limit reached": {
     label: "Daily loss limit reached",
     explanation:
-      "Realized losses today have reached the owner's daily loss limit, so new trades wait until tomorrow (UTC).",
+      "Realized losses today have reached the user's daily loss limit, so new trades wait until 00:00 UTC.",
   },
-  REJECTED_BY_OWNER: {
-    label: "Rejected by owner",
-    explanation: "The trade needed the owner's approval and the owner declined it.",
+  "over max trade size": {
+    label: "Over max trade size",
+    explanation: "This trade is larger than the maximum size the user allows for a single trade.",
+  },
+  "category not allowed": {
+    label: "Category not allowed",
+    explanation:
+      "This market's category is not in the list of categories the user allows the agent to trade.",
+  },
+  "over budget": {
+    label: "Over budget",
+    explanation: "This buy would take the agent's committed spend past the budget the user set.",
+  },
+  "rejected by user": {
+    label: "Rejected by user",
+    explanation: "The trade needed the user's approval and the user declined it.",
   },
 };
 
@@ -74,7 +83,7 @@ export function isReasonCode(value: string): value is ReasonCode {
   return (REASON_CODES as readonly string[]).includes(value);
 }
 
-/** Label and explanation for any reason string, including codes this version does not know. */
+/** Label and explanation for any reason string, including reasons this version does not know. */
 export function describeReason(reason: string): ReasonInfo {
   if (isReasonCode(reason)) return REASONS[reason];
   return {
@@ -85,14 +94,14 @@ export function describeReason(reason: string): ReasonInfo {
 
 // ------------------------------------------------------------------ intent status
 
-/** Order matches the contract's `Status` enum. `none` means no verdict is known for the intent. */
+/** Order and names match the contract's `Status` enum. */
 export const INTENT_STATUSES = [
   "none",
-  "needs_approval",
   "approved",
+  "needs_approval",
   "rejected",
-  "filled",
-  "unfilled",
+  "executed",
+  "failed",
 ] as const;
 export type IntentStatus = (typeof INTENT_STATUSES)[number];
 
@@ -103,10 +112,10 @@ export function intentStatusFromCode(code: number): IntentStatus {
 }
 
 export const INTENT_STATUS_LABELS: Readonly<Record<IntentStatus, string>> = {
-  none: "No verdict",
-  needs_approval: "Waiting for approval",
+  none: "No verdict yet",
   approved: "Approved",
+  needs_approval: "Waiting for approval",
   rejected: "Rejected",
-  filled: "Filled",
-  unfilled: "Not filled",
+  executed: "Executed",
+  failed: "Failed",
 };

@@ -80,12 +80,16 @@ describe("tradeIntentSchema", () => {
     expect(tradeIntentSchema.parse(valid).contextHash).toBe(ZERO_HASH);
   });
 
+  it("lets a zero amount through, since the contract answers it with a 'zero amount' rejection", () => {
+    expect(tradeIntentSchema.parse({ ...valid, amountCents: 0 }).amountCents).toBe(0);
+  });
+
   it("rejects malformed intents before they reach the chain", () => {
     for (const bad of [
       { ...valid, market: " " },
       { ...valid, category: 7 },
       { ...valid, outcome: "MAYBE" },
-      { ...valid, amountCents: 0 },
+      { ...valid, amountCents: -1 },
       { ...valid, amountCents: 10.5 },
       { ...valid, limitPrice: 100 },
       { ...valid, limitPrice: 0 },
@@ -139,7 +143,8 @@ describe("resolvePolicyDeployment", () => {
         rpcUrl: "http://127.0.0.1:8545",
         address: ADDRESS,
         blockNumber: 1,
-        owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        contract: "reference",
+        user: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
         agent: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
         executor: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
         deployedAt: "2026-11-15T12:00:00.000Z",

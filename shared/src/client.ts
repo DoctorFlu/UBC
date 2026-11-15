@@ -9,7 +9,6 @@ import {
   type Account,
   type Address,
   type Chain,
-  type ContractFunctionReturnType,
   type Hex,
   type Log,
   type PublicClient,
@@ -17,22 +16,23 @@ import {
   type Transport,
   type WalletClient,
 } from "viem";
-import { policyAbi, type PolicyAbi } from "./abi";
-import { headroom, type Headroom, type PolicyState, type RuleInput } from "./evaluate";
-import { decodePolicyLogs, policyFromChain, policyToChain } from "./events";
+import { policyAbi } from "./abi";
+import { evaluateIntent, headroom, type Headroom, type PolicyState, type RuleInput } from "./evaluate";
+import { decodePolicyLogs, rulesFromTuple, rulesToChain } from "./events";
 import { ARC_MIN_MAX_FEE_PER_GAS, applyFeeFloor } from "./fees";
-import { intentStatusFromCode, verdictFromCode, type Verdict } from "./reasons";
+import { intentStatusFromCode, verdictFromCode } from "./reasons";
 import {
-  policySchema,
+  policyRulesSchema,
   tradeIntentSchema,
+  ZERO_HASH,
   type Intent,
-  type Policy,
   type PolicyEvent,
+  type PolicyRules,
   type TradeIntentInput,
 } from "./types";
 import { toSafeNumber } from "./units";
 
-/** A verdict as the chain reports it. Reasons are strings because a contract may add codes. */
+/** A verdict as the chain reports it. Reasons are strings because a contract may add new ones. */
 export type ChainVerdict =
   { verdict: "approved" } | { verdict: "needs_approval" } | { verdict: "rejected"; reason: string };
 
@@ -41,21 +41,29 @@ export interface TxResult {
   blockNumber: number;
 }
 
-export type ProposeResult = ChainVerdict & TxResult & { intentId: number };
+export type ProposeResult = ChainVerdict &
+  TxResult & {
+    intentId: number;
+    /** False when a non-zero context hash could not be recorded because the contract lacks the overload. */
+    contextHashRecorded: boolean;
+  };
 
-/** Outcome of `approveIntent`: approved, or rejected with OVER_BUDGET when the intent no longer fits. */
+/** Outcome of `approveIntent`: approved, or rejected with "over budget" when the intent no longer fits. */
 export type ApproveResult = Extract<ChainVerdict, { verdict: "approved" | "rejected" }> &
   TxResult & { intentId: number };
+
+/** `previewTrade` result, saying whether the contract answered or the TypeScript mirror did. */
+export type PreviewResult = ChainVerdict & { source: "contract" | "offchain" };
 
 export interface PolicySnapshot extends PolicyState {
   blockNumber: number;
   /** Unix seconds of the block all values were read at. */
   blockTimestamp: number;
-  policy: Policy;
+  rules: PolicyRules;
 }
 
 export interface Roles {
-  owner: Address;
+  user: Address;
   agent: Address;
   executor: Address;
 }
@@ -67,11 +75,27 @@ export interface RecordResultInput {
   pnlCents: number;
 }
 
+/**
+ * Optional contract features requested in `docs/contract-interface.md`. `IntentProposed` needs no flag:
+ * the reducer uses it whenever the log contains it.
+ */
+export interface Capabilities {
+  /** `previewTrade(uint8,bool,uint256)`. Without it, previews use the TypeScript evaluator. */
+  previewTrade: boolean;
+  /** `proposeTrade(..., bytes32 contextHash)`. Without it, the context hash is not recorded onchain. */
+  proposeWithContext: boolean;
+}
+
 export interface PolicyClientOptions {
   address: Address;
   publicClient: PublicClient<Transport, Chain>;
   /** Needed only for writes. Its account decides which role methods will succeed. */
   walletClient?: WalletClient<Transport, Chain, Account>;
+  /**
+   * Skip detection for these features. Anything not given is detected once, on first use, by probing the
+   * contract with read-only calls.
+   */
+  capabilities?: Partial<Capabilities>;
   /** Lowest `maxFeePerGas` any write uses. Defaults to 20 gwei, the Arc testnet minimum. */
   minMaxFeePerGas?: bigint;
   /** How long to wait for a receipt before giving up, in milliseconds. Defaults to 60 seconds. */
@@ -86,7 +110,7 @@ export class PolicyClientError extends Error {
   override name = "PolicyClientError";
 }
 
-/** A write the contract refused, with its custom error name when the ABI knows it (for example "NotOwner"). */
+/** A write the contract refused, with its custom error name when the ABI knows it (for example "NotUser"). */
 export class PolicyRevertError extends PolicyClientError {
   override name = "PolicyRevertError";
   constructor(
@@ -99,11 +123,15 @@ export class PolicyRevertError extends PolicyClientError {
   }
 }
 
+/** An address that is never the agent, used to probe for the `proposeTrade` overload without side effects. */
+const PROBE_SENDER: Address = "0x000000000000000000000000000000000000dEaD";
+
 /**
- * Typed access to the Policy contract with one method per role action:
+ * Typed access to the Policy contract, working against the production contract and against the
+ * reference contract with extensions. One method per role action:
  * - anyone: reads, `previewTrade`, `getEvents`, `watchEvents`
  * - agent: `proposeTrade`
- * - owner: `setPolicy`, `approveIntent`, `rejectIntent`, `setPaused`, `setAgent`, `setExecutor`
+ * - user: `setPolicy`, `setPaused`, `approveIntent`, `rejectIntent`, `setAgent`, `setExecutor`
  * - executor: `recordResult`
  *
  * Every write is simulated first (so a revert surfaces with the contract's error name), sent with EIP-1559
@@ -118,12 +146,15 @@ export class PolicyClient {
   private readonly receiptTimeoutMs: number;
   private readonly receiptPollingMs: number;
   private readonly maxLogBlockRange: bigint;
+  private readonly capabilityOverrides: Partial<Capabilities>;
+  private capabilitiesPromise: Promise<Capabilities> | undefined;
   private writeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(options: PolicyClientOptions) {
     this.address = options.address;
     this.publicClient = options.publicClient;
     this.walletClient = options.walletClient;
+    this.capabilityOverrides = options.capabilities ?? {};
     this.minMaxFeePerGas = options.minMaxFeePerGas ?? ARC_MIN_MAX_FEE_PER_GAS;
     this.receiptTimeoutMs = options.receiptTimeoutMs ?? 60_000;
     this.receiptPollingMs = options.receiptPollingMs ?? 1_000;
@@ -136,109 +167,153 @@ export class PolicyClient {
     return this.walletClient?.account;
   }
 
+  // ---------------------------------------------------------------- capabilities
+
+  /** Which requested extensions this contract has. Detected once with read-only calls, then cached. */
+  getCapabilities(): Promise<Capabilities> {
+    this.capabilitiesPromise ??= this.detectCapabilities();
+    return this.capabilitiesPromise;
+  }
+
+  private async detectCapabilities(): Promise<Capabilities> {
+    const { previewTrade, proposeWithContext } = this.capabilityOverrides;
+    const [hasPreview, hasContext] = await Promise.all([
+      previewTrade ?? this.probePreviewTrade(),
+      proposeWithContext ?? this.probeProposeWithContext(),
+    ]);
+    return { previewTrade: hasPreview, proposeWithContext: hasContext };
+  }
+
+  private async probePreviewTrade(): Promise<boolean> {
+    try {
+      await this.publicClient.readContract({
+        address: this.address,
+        abi: policyAbi,
+        functionName: "previewTrade",
+        args: [0, true, 1n],
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** The overload exists if a call from a non-agent reverts with `NotAgent` rather than empty data. */
+  private async probeProposeWithContext(): Promise<boolean> {
+    const args = ["probe", 0, "YES", true, 1n, 1n, ZERO_HASH] as const;
+    const data = encodeFunctionData({ abi: policyAbi, functionName: "proposeTrade", args });
+    try {
+      await this.publicClient.call({ account: PROBE_SENDER, to: this.address, data });
+      return true;
+    } catch (error) {
+      if (!(error instanceof BaseError)) return false;
+      const decoded = getContractError(error, {
+        abi: policyAbi,
+        address: this.address,
+        args,
+        functionName: "proposeTrade",
+      });
+      return revertErrorName(decoded) === "NotAgent";
+    }
+  }
+
   // ---------------------------------------------------------------- reads
 
-  async getPolicy(): Promise<Policy> {
-    return policyFromChain(await this.read("policy"));
+  async getRules(): Promise<PolicyRules> {
+    return rulesFromTuple(
+      await this.publicClient.readContract({ address: this.address, abi: policyAbi, functionName: "policy" }),
+    );
   }
 
   async getRoles(): Promise<Roles> {
-    const [owner, agent, executor] = await Promise.all([
-      this.read("owner"),
-      this.read("agent"),
-      this.read("executor"),
-    ]);
-    return { owner, agent, executor };
+    const read = (functionName: "user" | "agent" | "executor") =>
+      this.publicClient.readContract({ address: this.address, abi: policyAbi, functionName });
+    const [user, agent, executor] = await Promise.all([read("user"), read("agent"), read("executor")]);
+    return { user, agent, executor };
   }
 
-  /** Policy, spend and today's loss, all read at the same block. */
+  /** Rules, committed spend and today's loss, all read at the same block. */
   async getSnapshot(): Promise<PolicySnapshot> {
     const block = await this.publicClient.getBlock({ blockTag: "latest" });
-    const blockNumber = block.number;
-    const at = { blockNumber };
-    const [policy, spent, loss] = await Promise.all([
-      this.publicClient.readContract({
-        address: this.address,
-        abi: policyAbi,
-        functionName: "policy",
-        ...at,
-      }),
-      this.publicClient.readContract({
-        address: this.address,
-        abi: policyAbi,
-        functionName: "spentCents",
-        ...at,
-      }),
-      this.publicClient.readContract({
-        address: this.address,
-        abi: policyAbi,
-        functionName: "lossTodayCents",
-        ...at,
-      }),
+    const at = { address: this.address, abi: policyAbi, blockNumber: block.number } as const;
+    const [rules, committed, loss] = await Promise.all([
+      this.publicClient.readContract({ ...at, functionName: "policy" }),
+      this.publicClient.readContract({ ...at, functionName: "committedCents" }),
+      this.publicClient.readContract({ ...at, functionName: "lossTodayCents" }),
     ]);
     return {
-      blockNumber: toSafeNumber(blockNumber, "blockNumber"),
+      blockNumber: toSafeNumber(block.number, "blockNumber"),
       blockTimestamp: toSafeNumber(block.timestamp, "blockTimestamp"),
-      policy: policyFromChain(policy),
-      spentCents: toSafeNumber(spent, "spentCents"),
+      rules: rulesFromTuple(rules),
+      committedCents: toSafeNumber(committed, "committedCents"),
       lossTodayCents: toSafeNumber(loss, "lossTodayCents"),
     };
   }
 
   async getHeadroom(): Promise<Headroom> {
     const snapshot = await this.getSnapshot();
-    return headroom(snapshot.policy, snapshot);
+    return headroom(snapshot.rules, snapshot);
   }
 
   async getIntentCount(): Promise<number> {
-    return toSafeNumber(await this.read("intentCount"), "intentCount");
+    const count = await this.publicClient.readContract({
+      address: this.address,
+      abi: policyAbi,
+      functionName: "intentCount",
+    });
+    return toSafeNumber(count, "intentCount");
   }
 
-  /** The stored intent, or null when no intent has this id. */
+  /** The stored intent, or null when no intent has this id (ids start at 0). */
   async getIntent(intentId: number): Promise<Intent | null> {
+    if (!Number.isSafeInteger(intentId) || intentId < 0) return null;
+    if (intentId >= (await this.getIntentCount())) return null;
     const raw = await this.publicClient.readContract({
       address: this.address,
       abi: policyAbi,
       functionName: "getIntent",
       args: [BigInt(intentId)],
     });
-    if (raw.status === 0 && raw.proposedAt === 0n) return null;
-    const filledOrUnfilled = raw.status === 4 || raw.status === 5;
     return {
       id: intentId,
-      agent: raw.agent,
       market: raw.market,
       category: raw.category,
       outcome: raw.outcome,
       isBuy: raw.isBuy,
       amountCents: toSafeNumber(raw.amountCents, "amountCents"),
       limitPrice: toSafeNumber(raw.limitPrice, "limitPrice"),
-      contextHash: raw.contextHash,
       status: intentStatusFromCode(raw.status),
-      reason: raw.reason === "" ? null : raw.reason,
       proposedAt: toSafeNumber(raw.proposedAt, "proposedAt"),
-      filledCents: filledOrUnfilled ? toSafeNumber(raw.filledCents, "filledCents") : null,
-      pnlCents: filledOrUnfilled ? toSafeNumber(raw.pnlCents, "pnlCents") : null,
+      filledCents: toSafeNumber(raw.filledCents, "filledCents"),
+      pnlCents: toSafeNumber(raw.pnlCents, "pnlCents"),
     };
   }
 
-  /** Every stored intent in id order. Prefer `getEvents` plus `reduceEvents` for large histories. */
-  async getIntents(): Promise<Intent[]> {
-    const count = await this.getIntentCount();
-    const ids = Array.from({ length: count }, (_, i) => i + 1);
-    const intents = await Promise.all(ids.map((id) => this.getIntent(id)));
+  /** Stored intents in id order (all of them, or the given ids). */
+  async getIntents(ids?: readonly number[]): Promise<Intent[]> {
+    const wanted = ids ?? Array.from({ length: await this.getIntentCount() }, (_, i) => i);
+    const intents = await Promise.all(wanted.map((id) => this.getIntent(id)));
     return intents.filter((intent): intent is Intent => intent !== null);
   }
 
-  /** Dry run against current chain state, using the contract's own rule function. */
-  async previewTrade(input: RuleInput): Promise<ChainVerdict> {
+  /**
+   * What `proposeTrade` would decide right now. Uses the contract's `previewTrade` when it has one,
+   * otherwise runs the TypeScript mirror of the rules on a fresh snapshot.
+   */
+  async previewTrade(input: RuleInput): Promise<PreviewResult> {
+    const { previewTrade } = await this.getCapabilities();
+    if (!previewTrade) {
+      const snapshot = await this.getSnapshot();
+      return { ...evaluateIntent(snapshot.rules, snapshot, input), source: "offchain" };
+    }
     const [code, reason] = await this.publicClient.readContract({
       address: this.address,
       abi: policyAbi,
       functionName: "previewTrade",
       args: [input.category, input.isBuy, BigInt(input.amountCents)],
     });
-    return toChainVerdict(verdictFromCode(code), reason);
+    const verdict = verdictFromCode(code);
+    return verdict === "rejected" ? { verdict, reason, source: "contract" } : { verdict, source: "contract" };
   }
 
   /** Decoded Policy events in `[fromBlock, toBlock]`, split into ranges the RPC accepts. */
@@ -275,7 +350,7 @@ export class PolicyClient {
     const loop = async (): Promise<void> => {
       while (!isStopped()) {
         try {
-          const latest = await this.publicClient.getBlockNumber();
+          const latest = await this.publicClient.getBlockNumber({ cacheTime: 0 });
           next ??= latest + 1n;
           if (latest >= next) {
             const events = await this.getEvents({ fromBlock: next, toBlock: latest });
@@ -296,42 +371,62 @@ export class PolicyClient {
 
   // ---------------------------------------------------------------- agent
 
-  /** Proposes an intent and returns the contract's verdict. A rejection is a result, not an error. */
+  /**
+   * Proposes an intent and returns the contract's verdict. A rejection is a result, not an error.
+   * The context hash is recorded only when the contract has the `proposeTrade` overload for it.
+   */
   async proposeTrade(input: TradeIntentInput): Promise<ProposeResult> {
     const intent = tradeIntentSchema.parse(input);
-    const receipt = await this.send(
-      encodeFunctionData({
-        abi: policyAbi,
-        functionName: "proposeTrade",
-        args: [
-          intent.market,
-          intent.category,
-          intent.outcome,
-          intent.isBuy,
-          BigInt(intent.amountCents),
-          BigInt(intent.limitPrice),
-          intent.contextHash,
-        ],
-      }),
-    );
-    const proposed = this.receiptEvents(receipt).find((log) => log.eventName === "IntentProposed");
-    const intentId = proposed
-      ? toSafeNumber(proposed.args.intentId, "intentId")
-      : this.verdictIntentId(receipt);
-    return { ...this.verdictFor(receipt, intentId), intentId, ...txResult(receipt) };
+    const { proposeWithContext } = await this.getCapabilities();
+    const base = [
+      intent.market,
+      intent.category,
+      intent.outcome,
+      intent.isBuy,
+      BigInt(intent.amountCents),
+      BigInt(intent.limitPrice),
+    ] as const;
+    const data = proposeWithContext
+      ? encodeFunctionData({
+          abi: policyAbi,
+          functionName: "proposeTrade",
+          args: [...base, intent.contextHash],
+        })
+      : encodeFunctionData({ abi: policyAbi, functionName: "proposeTrade", args: base });
+    const receipt = await this.send(data);
+    const intentId = this.verdictIntentId(receipt);
+    return {
+      ...this.verdictFor(receipt, intentId),
+      intentId,
+      contextHashRecorded: proposeWithContext || intent.contextHash === ZERO_HASH,
+      ...txResult(receipt),
+    };
   }
 
-  // ---------------------------------------------------------------- owner
+  // ---------------------------------------------------------------- user
 
-  async setPolicy(policy: Policy): Promise<TxResult> {
+  async setPolicy(rules: PolicyRules): Promise<TxResult> {
+    const p = rulesToChain(policyRulesSchema.parse(rules));
     return txResult(
-      await this.send(
-        encodeFunctionData({
-          abi: policyAbi,
-          functionName: "setPolicy",
-          args: [policyToChain(policySchema.parse(policy))],
-        }),
-      ),
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setPolicy", args: [p] })),
+    );
+  }
+
+  async setPaused(paused: boolean): Promise<TxResult> {
+    return txResult(
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setPaused", args: [paused] })),
+    );
+  }
+
+  async setAgent(agent: Address): Promise<TxResult> {
+    return txResult(
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setAgent", args: [agent] })),
+    );
+  }
+
+  async setExecutor(executor: Address): Promise<TxResult> {
+    return txResult(
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setExecutor", args: [executor] })),
     );
   }
 
@@ -354,24 +449,6 @@ export class PolicyClient {
     );
   }
 
-  async setPaused(paused: boolean): Promise<TxResult> {
-    return txResult(
-      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setPaused", args: [paused] })),
-    );
-  }
-
-  async setAgent(agent: Address): Promise<TxResult> {
-    return txResult(
-      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setAgent", args: [agent] })),
-    );
-  }
-
-  async setExecutor(executor: Address): Promise<TxResult> {
-    return txResult(
-      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setExecutor", args: [executor] })),
-    );
-  }
-
   // ---------------------------------------------------------------- executor
 
   async recordResult(result: RecordResultInput): Promise<TxResult> {
@@ -387,12 +464,6 @@ export class PolicyClient {
   }
 
   // ---------------------------------------------------------------- internals
-
-  private read<
-    fn extends "policy" | "owner" | "agent" | "executor" | "spentCents" | "lossTodayCents" | "intentCount",
-  >(functionName: fn): Promise<ContractFunctionReturnType<PolicyAbi, "view", fn>> {
-    return this.publicClient.readContract({ address: this.address, abi: policyAbi, functionName });
-  }
 
   /** Current EIP-1559 fees with the configured floor applied. */
   async fees(): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }> {
@@ -474,6 +545,7 @@ export class PolicyClient {
     });
   }
 
+  /** The id of the intent a proposal created, from its verdict event (present on every contract). */
   private verdictIntentId(receipt: TransactionReceipt): number {
     for (const log of this.receiptEvents(receipt)) {
       if (
@@ -514,17 +586,13 @@ export class PolicyClient {
   }
 }
 
-/** The contract error name inside a viem error (for example "NotOwner"), or null when there is none. */
+/** The contract error name inside an error (for example "NotUser"), or null when there is none. */
 export function revertErrorName(error: unknown): string | null {
   if (error instanceof PolicyRevertError) return error.errorName;
   if (!(error instanceof BaseError)) return null;
   const reverted = error.walk((e) => e instanceof ContractFunctionRevertedError);
   if (reverted instanceof ContractFunctionRevertedError) return reverted.data?.errorName ?? null;
   return null;
-}
-
-function toChainVerdict(verdict: Verdict, reason: string): ChainVerdict {
-  return verdict === "rejected" ? { verdict, reason } : { verdict };
 }
 
 function txResult(receipt: TransactionReceipt): TxResult {

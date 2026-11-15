@@ -19,48 +19,53 @@ export const outcomeSchema = z.enum(["YES", "NO"]);
 export type Outcome = z.infer<typeof outcomeSchema>;
 /** Gemini's `instrumentSymbol`, for example `GEMI-BTC2611202200-HI65000`. */
 export const marketSchema = z.string().trim().min(1).max(128);
+/** Intent ids are array indexes in the contract: the first intent is 0. */
+export const intentIdSchema = z.int().nonnegative();
 export const addressSchema = z.custom<Address>((value) => typeof value === "string" && isAddress(value), {
   message: "not a valid address",
 });
 export const bytes32Schema = z.custom<Hex>(
   (value) => typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value),
-  {
-    message: "not a 32-byte hex string",
-  },
+  { message: "not a 32-byte hex string" },
 );
 export const txHashSchema = bytes32Schema;
 
 export const ZERO_HASH: Hex = `0x${"0".repeat(64)}`;
 
-// ------------------------------------------------------------------ policy
+// ------------------------------------------------------------------ rules
 
-export const policySchema = z.object({
-  /** Rule 1: total the agent may deploy. */
+/** The contract's `PolicyRules` struct (the spec calls it `Policy`). */
+export const policyRulesSchema = z.object({
+  /** Rule 1: total the agent may deploy on buys. */
   budgetCents: centsSchema,
-  /** Rule 2: largest single intent. */
+  /** Rule 2: largest single order. */
   maxTradeCents: centsSchema,
   /** Rule 3: bitmask of allowed category ids. */
   allowedCategories: centsSchema,
-  /** Rule 4: intents above this wait for the owner. 0 means never ask. */
+  /** Rule 4: orders above this wait for the user. 0 means never ask. */
   approvalAboveCents: centsSchema,
   /** Rule 5: realized loss per UTC day that stops new intents. 0 means off. */
   dailyLossCents: centsSchema,
   /** Rule 6: kill switch. */
   paused: z.boolean(),
 });
-export type Policy = z.infer<typeof policySchema>;
+export type PolicyRules = z.infer<typeof policyRulesSchema>;
 
 // ------------------------------------------------------------------ intents
 
-/** What the agent proposes. Validated before it is sent so malformed input never reaches the chain. */
+/**
+ * What the agent proposes. Validated before it is sent. Offchain conventions (price 1 to 99, YES or NO) are
+ * stricter than the contract; a zero amount is allowed because the contract answers it with a verdict
+ * ("zero amount") rather than an error.
+ */
 export const tradeIntentSchema = z.object({
   market: marketSchema,
   category: categoryIdSchema,
   outcome: outcomeSchema,
   isBuy: z.boolean(),
-  amountCents: centsSchema.positive(),
+  amountCents: centsSchema,
   limitPrice: limitPriceSchema,
-  /** keccak256 of the canonical decision context. Zero when there is none. */
+  /** keccak256 of the canonical decision context. Zero when there is none. Needs requested extension 2. */
   contextHash: bytes32Schema.default(ZERO_HASH),
 });
 export type TradeIntent = z.infer<typeof tradeIntentSchema>;
@@ -68,25 +73,21 @@ export type TradeIntentInput = z.input<typeof tradeIntentSchema>;
 
 export const intentStatusSchema = z.enum(INTENT_STATUSES);
 
-/** An intent as stored by the contract (`getIntent`), with its id. */
+/** An intent as the contract stores it (`getIntent`), with its id. Field order follows the struct. */
 export const intentSchema = z.object({
-  id: z.int().positive(),
-  agent: addressSchema,
+  id: intentIdSchema,
   market: z.string(),
   category: anyCategorySchema,
   outcome: z.string(),
   isBuy: z.boolean(),
   amountCents: centsSchema,
   limitPrice: z.int().nonnegative(),
-  contextHash: bytes32Schema,
   status: intentStatusSchema,
-  /** Reason code when rejected, otherwise null. */
-  reason: z.string().nullable(),
   /** Unix seconds of the block that stored the proposal. */
   proposedAt: z.int().nonnegative(),
-  /** Set once a result is recorded, otherwise null. */
-  filledCents: centsSchema.nullable(),
-  pnlCents: signedCentsSchema.nullable(),
+  /** 0 until a result is recorded, and 0 for a failed order. */
+  filledCents: centsSchema,
+  pnlCents: signedCentsSchema,
 });
 export type Intent = z.infer<typeof intentSchema>;
 
@@ -101,10 +102,19 @@ export const eventMetaSchema = z.object({
 });
 export type EventMeta = z.infer<typeof eventMetaSchema>;
 
+/** Decoded Policy events. `IntentProposed` is requested extension 1; the rest are in the production contract. */
 export const policyEventSchema = z.discriminatedUnion("type", [
   eventMetaSchema.extend({
+    type: z.literal("PolicyUpdated"),
+    rules: policyRulesSchema,
+  }),
+  eventMetaSchema.extend({
+    type: z.literal("Paused"),
+    paused: z.boolean(),
+  }),
+  eventMetaSchema.extend({
     type: z.literal("IntentProposed"),
-    intentId: z.int().positive(),
+    intentId: intentIdSchema,
     agent: addressSchema,
     market: z.string(),
     category: anyCategorySchema,
@@ -116,7 +126,7 @@ export const policyEventSchema = z.discriminatedUnion("type", [
   }),
   eventMetaSchema.extend({
     type: z.literal("IntentApproved"),
-    intentId: z.int().positive(),
+    intentId: intentIdSchema,
     market: z.string(),
     outcome: z.string(),
     isBuy: z.boolean(),
@@ -125,28 +135,21 @@ export const policyEventSchema = z.discriminatedUnion("type", [
   }),
   eventMetaSchema.extend({
     type: z.literal("IntentRejected"),
-    intentId: z.int().positive(),
+    intentId: intentIdSchema,
     reason: z.string(),
   }),
   eventMetaSchema.extend({
     type: z.literal("IntentNeedsApproval"),
-    intentId: z.int().positive(),
+    intentId: intentIdSchema,
     amountCents: centsSchema,
   }),
   eventMetaSchema.extend({
     type: z.literal("ResultRecorded"),
-    intentId: z.int().positive(),
+    intentId: intentIdSchema,
     filled: z.boolean(),
+    /** The amount actually used: 0 whenever `filled` is false. */
     filledCents: centsSchema,
     pnlCents: signedCentsSchema,
-  }),
-  eventMetaSchema.extend({
-    type: z.literal("PolicySet"),
-    policy: policySchema,
-  }),
-  eventMetaSchema.extend({
-    type: z.literal("PausedSet"),
-    paused: z.boolean(),
   }),
 ]);
 export type PolicyEvent = z.infer<typeof policyEventSchema>;

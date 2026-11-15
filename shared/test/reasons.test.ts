@@ -11,7 +11,7 @@ import {
 } from "../src";
 
 describe("verdict codes", () => {
-  it("matches the contract's uint8 encoding", () => {
+  it("matches the previewTrade uint8 encoding", () => {
     expect(verdictFromCode(0)).toBe("approved");
     expect(verdictFromCode(1)).toBe("needs_approval");
     expect(verdictFromCode(2)).toBe("rejected");
@@ -20,37 +20,40 @@ describe("verdict codes", () => {
   });
 });
 
-describe("reason codes", () => {
-  it("has the six fixed codes, each with a label and a one-sentence explanation", () => {
+describe("rejection reasons", () => {
+  it("are the contract's exact strings, each with a label and a one-sentence explanation", () => {
     expect(REASON_CODES).toEqual([
-      "PAUSED",
-      "CATEGORY_NOT_ALLOWED",
-      "OVER_MAX_TRADE",
-      "OVER_BUDGET",
-      "DAILY_LOSS_LIMIT",
-      "REJECTED_BY_OWNER",
+      "agent paused",
+      "zero amount",
+      "daily loss limit reached",
+      "over max trade size",
+      "category not allowed",
+      "over budget",
+      "rejected by user",
     ]);
     for (const code of REASON_CODES) {
       const { label, explanation } = REASONS[code];
       expect(label.length).toBeGreaterThan(0);
-      expect(explanation).toMatch(/^[A-Z][^.]*\.$/);
-      expect(explanation).not.toContain("—");
+      expect(explanation).toMatch(/^[A-Z][^]*\.$/);
+      expect(explanation.split(". ")).toHaveLength(1);
+      expect(explanation).not.toContain("—"); // no em dashes in user-facing text
     }
   });
 
   it("describes unknown reasons without throwing", () => {
-    expect(isReasonCode("OVER_BUDGET")).toBe(true);
-    expect(isReasonCode("SOMETHING_NEW")).toBe(false);
-    expect(describeReason("OVER_BUDGET")).toBe(REASONS.OVER_BUDGET);
-    expect(describeReason("SOMETHING_NEW").label).toBe("SOMETHING_NEW");
+    expect(isReasonCode("over budget")).toBe(true);
+    expect(isReasonCode("OVER_BUDGET")).toBe(false);
+    expect(describeReason("over budget")).toBe(REASONS["over budget"]);
+    expect(describeReason("something new").label).toBe("something new");
     expect(describeReason("").label).toBe("Unknown");
   });
 });
 
 describe("intent status codes", () => {
-  it("matches the contract's Status enum order", () => {
-    expect(INTENT_STATUSES).toEqual(["none", "needs_approval", "approved", "rejected", "filled", "unfilled"]);
-    expect(intentStatusFromCode(4)).toBe("filled");
+  it("matches the contract's Status enum order and names", () => {
+    expect(INTENT_STATUSES).toEqual(["none", "approved", "needs_approval", "rejected", "executed", "failed"]);
+    expect(intentStatusFromCode(2)).toBe("needs_approval");
+    expect(intentStatusFromCode(4)).toBe("executed");
     expect(() => intentStatusFromCode(6)).toThrow(RangeError);
   });
 });
