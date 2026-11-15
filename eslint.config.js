@@ -6,6 +6,9 @@ export default tseslint.config(
   {
     ignores: [
       "**/node_modules/**",
+      // Agent worktrees are full copies of this repository; linting them multiplies the work
+      // several times over and runs the type-aware linter out of memory.
+      ".claude/**",
       "**/dist/**",
       "**/.next/**",
       "**/out/**",
