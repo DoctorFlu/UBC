@@ -1,0 +1,13 @@
+{
+  "name": "@mandate/devchain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local chain with a reference Policy contract and simulated executor, for development only.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
