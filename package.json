@@ -34,6 +34,7 @@
     "dev:tunnel": "npm run dev:tunnel -w @mandate/agent --",
     "mcp:token": "npm run mcp:token -w @mandate/agent --",
     "mcp:smoke": "npm run mcp:smoke -w @mandate/agent --",
+    "mcp:e2e": "npm run mcp:e2e -w @mandate/agent --",
     "dev:chain": "tsx devchain/scripts/chain.ts",
     "dev:executor": "tsx devchain/scripts/executor.ts",
     "dev:propose": "tsx devchain/scripts/propose.ts",

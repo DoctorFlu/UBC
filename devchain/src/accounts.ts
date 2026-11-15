@@ -16,6 +16,11 @@ const ANVIL_TEST_KEYS = {
 /** The contract's roles (`user`, `agent`, `executor`) plus an account that holds none of them. */
 export type DevRole = keyof typeof ANVIL_TEST_KEYS;
 
+/** The public test key of a devchain role, for a process that reads its key from the environment. */
+export function devPrivateKey(role: DevRole): Hex {
+  return ANVIL_TEST_KEYS[role];
+}
+
 /** Devchain account for a role: the user deploys and sets rules, the agent proposes, the executor records results. */
 export function devAccount(role: DevRole): PrivateKeyAccount {
   return privateKeyToAccount(ANVIL_TEST_KEYS[role]);
