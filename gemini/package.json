@@ -1,0 +1,13 @@
+{
+  "name": "@mandate/gemini",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only client for Gemini prediction-market data.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

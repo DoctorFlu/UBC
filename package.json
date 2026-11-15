@@ -1,0 +1,40 @@
+{
+  "name": "mandate",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Guardrailed prediction-market agents: rules on Arc, trading on Gemini, Grok Bot as the agent.",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "shared",
+    "gemini",
+    "planner",
+    "agent",
+    "signals",
+    "devchain"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test"
+  },
+  "overrides": {
+    "minimatch": "^11.0.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  }
+}
