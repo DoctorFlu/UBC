@@ -9,5 +9,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2"
+  },
+  "dependencies": {
+    "@mandate/gemini": "0.0.0"
   }
 }
