@@ -72,6 +72,8 @@ const ROLES_REFRESH_MS = 10_000;
 const MAX_BACKOFF_MS = 30_000;
 /** With the Stream as the primary source, the RPC only checks for gaps this often. */
 const STREAM_SAFETY_POLL_MS = 15_000;
+/** Longest a browser waits for a feed update that is not news (the synced block moving on). */
+const QUIET_PUSH_MS = 10_000;
 /** The Stream emits empty batches, so this long without a delivery means it is late or paused. */
 const STREAM_STALE_MS = 30_000;
 
@@ -106,6 +108,7 @@ export class ConsoleService {
   private snapshotCache: ConsoleSnapshot | null = null;
   private readonly listeners = new Set<(snapshot: ConsoleSnapshot) => void>();
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastPushAt = 0;
 
   private running = false;
   private abort = new AbortController();
@@ -468,11 +471,19 @@ export class ConsoleService {
 
   // ---------------------------------------------------------------- snapshots
 
+  /**
+   * Updates the feed status. A poll that only confirms the console is current (a new `lastSyncAt` or
+   * `syncedBlock`, nothing else) is not news: it refreshes the snapshot for the next reader and reaches
+   * browsers at most every `QUIET_PUSH_MS`, instead of pushing the whole snapshot on every poll.
+   */
   private setFeed(patch: Partial<FeedStatus>): void {
     const next = { ...this.feed, ...patch };
     if (JSON.stringify(next) === JSON.stringify(this.feed)) return;
+    const quiet = (feed: FeedStatus) => JSON.stringify({ ...feed, lastSyncAt: null, syncedBlock: null });
+    const news = quiet(next) !== quiet(this.feed);
     this.feed = next;
-    this.changed();
+    if (news || Date.now() - this.lastPushAt >= QUIET_PUSH_MS) this.changed();
+    else this.snapshotCache = null;
   }
 
   /** Marks the state changed and tells listeners soon after; bursts of changes become one message. */
@@ -481,6 +492,7 @@ export class ConsoleService {
     if (this.notifyTimer || this.listeners.size === 0) return;
     this.notifyTimer = setTimeout(() => {
       this.notifyTimer = null;
+      this.lastPushAt = Date.now();
       const snapshot = this.snapshot();
       for (const listener of this.listeners) listener(snapshot);
     }, 20);
