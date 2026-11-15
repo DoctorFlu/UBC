@@ -263,3 +263,73 @@ describe("hedge planner invariants", () => {
     );
   });
 });
+
+describe("hedge planner invariants with a paid signal", () => {
+  const withSignal = fc
+    .tuple(
+      scenario,
+      fc.array(fc.integer({ min: 0, max: 10_000 }), { minLength: 25, maxLength: 25 }),
+      fc.integer({ min: 0, max: 1_000 }),
+    )
+    .map(([s, probabilities, fairBandBps]) => ({
+      s,
+      signal: {
+        receiptId: `0x${"ab".repeat(32)}`,
+        signal: {
+          signalId: `0x${"cd".repeat(32)}`,
+          asset: "BTC",
+          eventTicker: s.input.ladder.eventTicker,
+          model: { fairBandBps },
+          strikes: s.input.ladder.rungs.map((r, i) => ({
+            strikeCents: r.strikeCents,
+            modelYesBps: probabilities[i] ?? 5_000,
+          })),
+        },
+      },
+    }));
+
+  it("keeps every limit and never over-hedges, whatever the signal says", () => {
+    fc.assert(
+      fc.property(withSignal, ({ s, signal }) => {
+        const plan = planHedge({ ...s.input, signal });
+        const baseline = planHedge(s.input);
+        expect(plan.signal?.used).toBe(true);
+        expect(plan.totals.costCents).toBeLessThanOrEqual(
+          Math.min(s.input.maxCostCents, s.input.limits.remainingBudgetCents),
+        );
+        for (const order of plan.orders)
+          expect(order.amountCents).toBeLessThanOrEqual(s.input.limits.maxTradeCents);
+        // The staircase is the same; the signal only changes which rungs a binding cap cuts.
+        expect(plan.ceilingCents).toBe(baseline.ceilingCents);
+        expect(plan.floorCents).toBe(baseline.floorCents);
+        const strikes = plan.rungs.map((r) => r.strikeCents);
+        expect(strikes).toEqual([...strikes].sort((a, b) => b - a));
+        if (plan.ceilingCents === null || plan.floorCents === null) {
+          expect(plan.orders).toEqual([]);
+          return;
+        }
+        const units = parseHoldingUnits(s.input.holding.quantity);
+        for (const price of probePrices(s, plan)) {
+          const payoutScaled = BigInt(hedgePayoutCents(plan.rungs, price)) * HOLDING_SCALE;
+          const protectedLoss = plan.ceilingCents - Math.max(price, plan.floorCents);
+          expect(payoutScaled <= (protectedLoss > 0 ? units * BigInt(protectedLoss) : 0n)).toBe(true);
+        }
+      }),
+      RUNS,
+    );
+  });
+
+  it("changes nothing about the orders when no limit binds", () => {
+    fc.assert(
+      fc.property(
+        withSignal.filter(({ s }) => s.unconstrained),
+        ({ s, signal }) => {
+          const plan = planHedge({ ...s.input, signal });
+          expect(plan.orders).toEqual(planHedge(s.input).orders);
+          expect(plan.signal?.changedOrders).toBe(false);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+});

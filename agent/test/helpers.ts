@@ -5,12 +5,16 @@ import { DEFAULT_LIMITS, parseConfig, type Config, type Limits } from "../src/co
 import type { Clock } from "../src/context";
 import { createLogger, type Logger } from "../src/logger";
 import type { Tool } from "../src/mcp/tool";
+import type { Services } from "../src/services";
 
 export const TEST_TOKEN = randomBytes(32).toString("base64url");
 /** A throwaway key (the well-known first Hardhat account), never used for anything real. */
 export const TEST_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 export const TEST_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 export const TEST_POLICY = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+/** Another throwaway key (the second Hardhat account) for the signal buyer, never funded. */
+export const TEST_BUYER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+export const TEST_BUYER_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
 export function testConfig(env: Record<string, string> = {}, limits: Partial<Limits> = {}): Config {
   return parseConfig({ MCP_AUTH_TOKEN: TEST_TOKEN, ...env }, { ...DEFAULT_LIMITS, ...limits });
@@ -24,12 +28,19 @@ export function captureLogs(): { logger: Logger; lines: string[] } {
 export const fixedClock: Clock = { now: () => new Date("2026-11-15T12:00:00.000Z") };
 
 export function testServer(
-  options: { env?: Record<string, string>; limits?: Partial<Limits>; tools?: readonly Tool[] } = {},
+  options: {
+    env?: Record<string, string>;
+    limits?: Partial<Limits>;
+    tools?: readonly Tool[];
+    services?: Partial<Services>;
+    clock?: Clock;
+  } = {},
 ): MandateServer & { lines: string[] } {
   const { logger, lines } = captureLogs();
   const server = createMandateServer(testConfig(options.env, options.limits), logger, {
-    clock: fixedClock,
+    clock: options.clock ?? fixedClock,
     ...(options.tools === undefined ? {} : { tools: options.tools }),
+    ...(options.services === undefined ? {} : { services: options.services }),
   });
   return Object.assign(server, { lines });
 }

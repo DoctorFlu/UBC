@@ -15,11 +15,9 @@ import {
   buildContracts,
   DEMO_POLICY,
   deploymentRecord,
-  deployPolicy,
-  devPolicyClient,
   isPolicyContractKind,
   POLICY_CONTRACTS,
-  startAnvil,
+  startDevchain,
   writeDeploymentFile,
 } from "../src";
 
@@ -38,12 +36,7 @@ console.log("Compiling contracts/src/Policy.sol and devchain/contracts/PolicyRef
 buildContracts();
 
 console.log(`Starting anvil on 127.0.0.1:${port}...`);
-const anvil = await startAnvil({ port });
-
-const deployment = await deployPolicy({ rpcUrl: anvil.rpcUrl, contract });
-const user = devPolicyClient(anvil.rpcUrl, deployment.address, "user");
-await user.setPolicy(DEMO_POLICY);
-const capabilities = await user.getCapabilities();
+const { anvil, deployment, capabilities } = await startDevchain({ contract, port });
 const record = writeDeploymentFile(deploymentRecord(anvil.rpcUrl, deployment), deploymentPath);
 
 const categories = categoriesFromMask(DEMO_POLICY.allowedCategories).map(categoryLabel).join(", ");

@@ -110,6 +110,11 @@ export const tickerSchema = z.object({
   last: optionalDecimal,
 });
 
+/** `GET /v2/candles/:symbol/:timeFrame`: `[timeMs, open, high, low, close, volume]` rows, newest first. */
+export const candlesSchema = z.array(
+  z.tuple([z.number(), z.number(), z.number(), z.number(), z.number(), z.number()]),
+);
+
 export const categoriesSchema = z.object({
   categories: z.array(z.string()),
 });
@@ -119,3 +124,4 @@ export type RawEvent = z.infer<typeof eventSchema>;
 export type RawEventsResponse = z.infer<typeof eventsResponseSchema>;
 export type RawOrderBook = z.infer<typeof orderBookSchema>;
 export type RawTicker = z.infer<typeof tickerSchema>;
+export type RawCandles = z.infer<typeof candlesSchema>;

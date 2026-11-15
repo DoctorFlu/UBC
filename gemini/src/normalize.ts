@@ -2,8 +2,9 @@
  * Pure conversions from validated raw responses to the public types. No I/O here, so the
  * agent, the dashboard and tests can all build ladders from recorded data.
  */
-import type { RawContract, RawEvent, RawOrderBook, RawTicker } from "./schemas";
+import type { RawCandles, RawContract, RawEvent, RawOrderBook, RawTicker } from "./schemas";
 import type {
+  Candle,
   ContractQuote,
   EventSummary,
   Ladder,
@@ -294,4 +295,28 @@ export function normalizeTicker(asset: string, raw: RawTicker, fetchedAt: string
 
 export function spotSymbol(asset: string): string {
   return `${asset.toLowerCase()}usd`;
+}
+
+/**
+ * Candles in time order, oldest first, with prices in integer cents. Gemini sends candle prices
+ * as JSON numbers; each is converted through its shortest decimal string, so no float arithmetic
+ * touches a price. Rows with a price that has no plain decimal form (exponent notation, negative,
+ * zero) and repeated timestamps are dropped.
+ */
+export function normalizeCandles(raw: RawCandles): Candle[] {
+  const byTime = new Map<number, Candle>();
+  const cents = (value: number): number | null => {
+    const converted = toCents(String(value), "half-up");
+    return converted === null || converted <= 0 ? null : converted;
+  };
+  for (const [time, open, high, low, close] of raw) {
+    if (!Number.isSafeInteger(time) || time < 0 || byTime.has(time)) continue;
+    const openCents = cents(open);
+    const highCents = cents(high);
+    const lowCents = cents(low);
+    const closeCents = cents(close);
+    if (openCents === null || highCents === null || lowCents === null || closeCents === null) continue;
+    byTime.set(time, { openTimeMs: time, openCents, highCents, lowCents, closeCents });
+  }
+  return [...byTime.values()].sort((a, b) => a.openTimeMs - b.openTimeMs);
 }

@@ -74,3 +74,13 @@ export function summarizeVerdict(v: Verdict): string {
   const next = v.nextAction === undefined ? "" : ` Next, ${v.nextAction.actor}: ${v.nextAction.hint}`;
   return `${v.status}${reasons === "" ? "." : `: ${reasons}.`}${next}`;
 }
+
+/**
+ * The reasons and next step of a verdict without its status, for a summary that already states the
+ * outcome in words, for example `ALREADY_EXECUTED (This plan ran before.). Next, agent: ...`.
+ */
+export function verdictDetails(v: Verdict): string {
+  const reasons = v.reasons.map((r) => `${r.code} (${r.message}).`).join(" ");
+  const next = v.nextAction === undefined ? "" : `Next, ${v.nextAction.actor}: ${v.nextAction.hint}`;
+  return [reasons, next].filter((part) => part !== "").join(" ");
+}

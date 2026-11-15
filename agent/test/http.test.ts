@@ -13,6 +13,33 @@ describe("GET /health", () => {
   });
 });
 
+describe("request log", () => {
+  it("records the MCP method, the client and the response size, and never the parameters", async () => {
+    const server = testServer();
+    const initialize = {
+      ...initializeRequest,
+      params: {
+        ...initializeRequest.params,
+        clientInfo: { name: "grok-gateway<script>", version: "1.2.3" },
+      },
+    };
+    await post(server, initialize, authHeader(TEST_TOKEN));
+    await post(server, { ...listTools, params: { cursor: "secret-looking-value" } }, authHeader(TEST_TOKEN));
+    const records = server.lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((record) => record["event"] === "mcp.request");
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      rpc: ["initialize"],
+      client: "grok-gatewayscript 1.2.3",
+      status: 200,
+    });
+    expect(records[1]).toMatchObject({ rpc: ["tools/list"], status: 200 });
+    expect(records[1]?.["responseBytes"]).toBeGreaterThan(1_000);
+    expect(server.lines.join("\n")).not.toContain("secret-looking-value");
+  });
+});
+
 describe("authentication", () => {
   it.each([
     ["no Authorization header", {}],
@@ -92,14 +119,19 @@ describe("routing and limits", () => {
     expect(await response.json()).toMatchObject({ error: { code: -32700 } });
   });
 
-  it("rate limits per token with 429 and Retry-After", async () => {
+  it("rate limits tool calls per token with 429 and Retry-After", async () => {
     const server = testServer({ limits: { rateLimit: { capacity: 3, refillPerSecond: 0.01 } } });
+    const call = { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "ping", arguments: {} } };
     const statuses: number[] = [];
     for (let i = 0; i < 5; i += 1) {
-      statuses.push((await post(server, initializeRequest, authHeader())).status);
+      statuses.push((await post(server, call, authHeader())).status);
     }
     expect(statuses).toEqual([200, 200, 200, 429, 429]);
-    const limited = await post(server, initializeRequest, authHeader());
+    const limited = await post(server, call, authHeader());
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    // The handshake a stateless client repeats before every call costs nothing.
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post(server, initializeRequest, authHeader())).status).toBe(200);
+    }
   });
 });

@@ -1,62 +1,179 @@
 /**
  * Service interfaces tool handlers depend on.
  *
- * Each interface is deliberately minimal: it names the dependency and carries only what is known
- * today. The issue that implements a service extends its interface here with the methods its
- * tools need and adds the factory in `createServices`. A service is `undefined` when the
- * configuration it needs is missing, so a tool can answer with an `unavailable` verdict instead of
- * failing.
+ * Each interface names one dependency and carries only what the tools need, so tests can pass a
+ * small fake. A service is `undefined` when the configuration it needs is missing, so a tool can
+ * answer with an `unavailable` verdict instead of failing. Process-wide state that must survive
+ * between tool calls (Grok Bot opens a fresh MCP session for every call) lives in `plans` and
+ * `ledger`, which always exist.
  */
+import type {
+  EventSummary,
+  GetLadderOptions,
+  Ladder,
+  LadderListing,
+  MarketEvent,
+  SpotPrice,
+} from "@mandate/gemini";
+import type { HedgeInput, HedgePlan } from "@mandate/planner";
+import type {
+  Capabilities as ContractCapabilities,
+  ContextResponse,
+  DecisionContext,
+  HedgeSignalQuery,
+  HoldingsResponse,
+  Intent,
+  IntentView,
+  PairingResponse,
+  PlanResponse,
+  PolicyChangeRequest,
+  PolicySnapshot,
+  PostPlanRequest,
+  PostPolicyChangeRequest,
+  PreviewResult,
+  ProposeResult,
+  PutPairingRequest,
+  Roles,
+  RuleInput,
+  TradeIntentInput,
+} from "@mandate/shared";
+import { createAgentPolicy } from "./chain/agent-policy";
 import type { Address, Config } from "./config";
+import { createConsoleClient } from "./console/client";
+import { createGeminiMarkets, type ResolvedMarket } from "./markets/gemini";
+import { createHedgePlanner } from "./planning/planner";
+import { ProposalLedger } from "./state/ledger";
+import { PlanStore } from "./state/plans";
+import { createSignalPayments, type BudgetState, type BuySignalOutcome } from "./x402/payments";
+import type { SignalPurchase } from "./x402/signal-store";
 
-/** Reads the onchain Policy contract and submits intents to it (issues #10, #11, #32, #33). */
-export interface PolicyClient {
-  /** Address of the Policy contract this client talks to. */
+/**
+ * The agent's view of the onchain Policy contract (issues #10, #11, #32, #33).
+ *
+ * It is deliberately narrow: reads, a preview, and `propose`, the agent role's only write. There is
+ * no method that changes the policy, pauses or unpauses, approves or rejects an intent, changes a
+ * role or records a result, so no tool can reach one. `test/no-owner-calls.test.ts` enforces this.
+ */
+export interface AgentPolicy {
   readonly policyAddress: Address;
+  /** The agent's public address, or undefined when no agent key is configured (read-only). */
+  readonly agentAddress: Address | undefined;
+  /** Which optional contract extensions the deployed contract has (detected once, then cached). */
+  capabilities(): Promise<ContractCapabilities>;
+  /** Rules, committed spend and today's loss, read at one block. */
+  snapshot(): Promise<PolicySnapshot>;
+  roles(): Promise<Roles>;
+  /** The agent's native gas balance in wei (Arc pays gas in USDC, 18 decimals), or null without a key. */
+  agentGasBalance(): Promise<bigint | null>;
+  intentCount(): Promise<number>;
+  /** The stored intent, or null when no intent has this id. */
+  intent(id: number): Promise<Intent | null>;
+  /** Intents as the event log describes them, for the blocks this server has scanned. */
+  intentEvents(): Promise<ReadonlyMap<number, IntentView>>;
+  /** The contract's `previewTrade` when it has one, otherwise the TypeScript evaluator on a fresh snapshot. */
+  preview(input: RuleInput): Promise<PreviewResult>;
+  /** Submits one intent from the agent key. Throws when no agent key is configured. */
+  propose(input: TradeIntentInput): Promise<ProposeResult>;
+  /** Block explorer link for a transaction, or null on a chain without an explorer. */
+  explorerTxUrl(txHash: `0x${string}`): string | null;
 }
+
+/** A Gemini market resolved from its `instrumentSymbol`, with the category the mandate checks. */
+export type { ResolvedMarket } from "./markets/gemini";
 
 /** Read-only access to Gemini prediction-market data from `@mandate/gemini` (issue #10). */
 export interface MarketsClient {
   /** The venue the markets come from. */
   readonly venue: "gemini";
+  /** Active events, optionally limited to Gemini category names and a title search. */
+  listEvents(options: { categories?: readonly string[]; search?: string }): Promise<EventSummary[]>;
+  getEvent(eventTicker: string): Promise<MarketEvent>;
+  listLadders(asset: string): Promise<LadderListing[]>;
+  getLadder(options: GetLadderOptions): Promise<Ladder>;
+  getSpot(asset: string): Promise<SpotPrice>;
+  /** The event and contract behind a symbol, or null when Gemini has no such market. */
+  resolveMarket(instrumentSymbol: string): Promise<ResolvedMarket | null>;
 }
 
 /** Turns a holding and a strike ladder into a protection plan, from `@mandate/planner` (issue #10). */
 export interface HedgePlanner {
   /** Version of the planning model, recorded with each plan. */
   readonly version: string;
+  plan(input: HedgeInput): HedgePlan;
+  /** Three to five plain sentences with exact numbers, generated from the plan alone. */
+  summarize(plan: HedgePlan): string;
 }
 
-/** The console backend: holdings the owner entered and policy change requests (issues #10, #32, #34). */
+/**
+ * The console backend: holdings, decision contexts, plans, change requests and pairing
+ * (issues #10, #32, #33, #34). Wire shapes are `@mandate/shared` `console-api.ts`. Methods throw
+ * `ConsoleClientError`; tools turn it into an `unavailable` verdict.
+ */
 export interface ConsoleClient {
   /** Base URL of the console backend. */
   readonly baseUrl: string;
+  getHoldings(signal?: AbortSignal): Promise<HoldingsResponse>;
+  putContext(hash: `0x${string}`, document: DecisionContext, signal?: AbortSignal): Promise<ContextResponse>;
+  /** The stored document, or null when the console has none under this hash. */
+  getContext(hash: `0x${string}`, signal?: AbortSignal): Promise<ContextResponse | null>;
+  postPlan(request: PostPlanRequest, signal?: AbortSignal): Promise<PlanResponse>;
+  postPolicyChangeRequest(
+    request: PostPolicyChangeRequest,
+    signal?: AbortSignal,
+  ): Promise<PolicyChangeRequest>;
+  /** Announces the agent (idempotent). */
+  putPairing(request: PutPairingRequest, signal?: AbortSignal): Promise<PairingResponse>;
+  /** The pairing state, or null when the agent never asked to pair. */
+  getPairing(signal?: AbortSignal): Promise<PairingResponse | null>;
 }
 
-/** Pays for signals through the x402 buyer in `src/x402` and enforces the daily tool budget (issue #21). */
+/**
+ * Pays for signals through the x402 buyer in `src/x402` and enforces the daily tool budget (issue #21).
+ * `SignalPayments` in `src/x402/payments.ts` implements it.
+ */
 export interface PaymentsClient {
   /** Address of the wallet that pays for signals. */
   readonly payer: Address;
+  /** Most the signal tool may spend per UTC day, in USDC base units. */
+  readonly dailyBudget: bigint;
+  /** Most one signal may cost, in USDC base units. */
+  readonly maxPrice: bigint;
+  /** Today's budget and spend. */
+  budget(at: Date): BudgetState;
+  /** Buys one hedge signal. Expected refusals (budget, price, seller, Gateway) are outcomes, not errors. */
+  buySignal(request: {
+    query: HedgeSignalQuery;
+    at: Date;
+    signal?: AbortSignal | undefined;
+  }): Promise<BuySignalOutcome>;
+  /**
+   * A signal bought earlier, by its receipt id (the payment nonce). Pass it to `planHedge` as
+   * `signal: { receiptId, signal }` to let the plan use it.
+   */
+  purchasedSignal(receiptId: string): SignalPurchase | undefined;
 }
 
 export interface Services {
-  readonly policy: PolicyClient | undefined;
+  readonly policy: AgentPolicy | undefined;
   readonly markets: MarketsClient | undefined;
   readonly planner: HedgePlanner | undefined;
   readonly console: ConsoleClient | undefined;
   readonly payments: PaymentsClient | undefined;
+  /** Hedge plans and their execution progress, kept by the server process between sessions. */
+  readonly plans: PlanStore;
+  /** Recent proposals: replay protection, decision contexts, and documents waiting for the console. */
+  readonly ledger: ProposalLedger;
 }
 
-/**
- * Builds the services the configuration allows. Until an issue adds a real implementation, a
- * service is `undefined`, which tools report as `unavailable`.
- */
-export function createServices(_config: Config): Services {
+/** Builds the services the configuration allows. A missing service is `undefined`, which tools report as `unavailable`. */
+export function createServices(config: Config): Services {
   return {
-    policy: undefined,
-    markets: undefined,
-    planner: undefined,
-    console: undefined,
-    payments: undefined,
+    policy: createAgentPolicy(config),
+    markets: createGeminiMarkets(),
+    planner: createHedgePlanner(),
+    console: createConsoleClient(config),
+    payments: createSignalPayments(config),
+    plans: new PlanStore(),
+    ledger: new ProposalLedger(),
   };
 }

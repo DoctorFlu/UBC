@@ -1,6 +1,13 @@
 import * as z from "zod";
+import type { HoldingsResponse, PairingResponse, PolicySnapshot, Roles } from "@mandate/shared";
 import { isConfigured, type Config } from "../config";
+import type { ToolContext } from "../context";
+import { ok, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
+import { describeFailure } from "../support/failures";
+
+/** Below this the agent cannot pay for a few proposals: 0.01 USDC in Arc's 18-decimal gas units. */
+export const MIN_AGENT_GAS_WEI = 10n ** 16n;
 
 const SetupStepSchema = z.object({
   key: z.string().describe("Stable step id"),
@@ -10,10 +17,7 @@ const SetupStepSchema = z.object({
 });
 type SetupStep = z.infer<typeof SetupStepSchema>;
 
-/**
- * Setup steps derived from the server's configuration. Issue #32 adds steps that need live state
- * (pairing, funded balances, an active mandate).
- */
+/** Steps that depend only on the server's configuration. */
 export function setupSteps(config: Config): SetupStep[] {
   return [
     {
@@ -37,27 +41,140 @@ export function setupSteps(config: Config): SetupStep[] {
   ];
 }
 
+/** Runs a read, logging and swallowing an expected failure so one broken dependency does not hide the other steps. */
+async function attempt<T>(ctx: ToolContext, read: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await read();
+  } catch (error) {
+    describeFailure(error, ctx);
+    return undefined;
+  }
+}
+
+/** Every step, including the ones that need live state: the chain, the agent role, gas, pairing and holdings. */
+export async function liveSetupSteps(ctx: ToolContext): Promise<SetupStep[]> {
+  const steps = setupSteps(ctx.config);
+  const policy = ctx.policy;
+  const consoleClient = ctx.console;
+  const address = ctx.config.agentAddress;
+
+  const [snapshot, roles, gas, pairingRead, holdings] = await Promise.all([
+    policy === undefined ? undefined : attempt<PolicySnapshot>(ctx, () => policy.snapshot()),
+    policy === undefined ? undefined : attempt<Roles>(ctx, () => policy.roles()),
+    policy === undefined || address === undefined ? undefined : attempt(ctx, () => policy.agentGasBalance()),
+    consoleClient === undefined
+      ? undefined
+      : attempt<{ pairing: PairingResponse | null }>(ctx, async () => ({
+          pairing: await consoleClient.getPairing(ctx.signal),
+        })),
+    consoleClient === undefined
+      ? undefined
+      : attempt<HoldingsResponse>(ctx, () => consoleClient.getHoldings(ctx.signal)),
+  ]);
+
+  if (policy !== undefined) {
+    steps.push({
+      key: "chain_reachable",
+      done: snapshot !== undefined,
+      actor: "owner",
+      hint: "The server cannot read the Policy contract. Check POLICY_ADDRESS and ARC_RPC_URL in the server's .env file.",
+    });
+  }
+  if (policy !== undefined && address !== undefined) {
+    steps.push({
+      key: "agent_role",
+      done: roles !== undefined && roles.agent.toLowerCase() === address.toLowerCase(),
+      actor: "owner",
+      hint: `Name ${address} as the mandate's agent in the console, signing with the owner's wallet.`,
+    });
+    steps.push({
+      key: "agent_gas",
+      done: typeof gas === "bigint" && gas >= MIN_AGENT_GAS_WEI,
+      actor: "owner",
+      hint: `Send a little Arc testnet USDC to ${address} for network fees, for example from faucet.circle.com.`,
+    });
+  }
+  if (snapshot !== undefined) {
+    const { rules } = snapshot;
+    steps.push({
+      key: "mandate_rules",
+      done: rules.budgetCents > 0 && rules.maxTradeCents > 0 && rules.allowedCategories !== 0,
+      actor: "owner",
+      hint: "Set a budget, a max trade size and at least one allowed category for the mandate in the console.",
+    });
+    steps.push({
+      key: "not_paused",
+      done: !rules.paused,
+      actor: "owner",
+      hint: "The mandate is paused. Unpause it in the console when the agent may trade again.",
+    });
+  }
+  if (consoleClient !== undefined) {
+    steps.push({
+      key: "console_reachable",
+      done: pairingRead !== undefined || holdings !== undefined,
+      actor: "owner",
+      hint: "The console did not answer. Start it, and check CONSOLE_URL and that both sides use the same CONSOLE_SERVICE_TOKEN.",
+    });
+    if (address !== undefined) {
+      const pairing = pairingRead?.pairing ?? null;
+      steps.push({
+        key: "pairing_requested",
+        done: pairing !== null,
+        actor: "agent",
+        hint: "Call request_pairing, then give the owner the claim link it returns.",
+      });
+      steps.push({
+        key: "pairing_confirmed",
+        done: pairing?.status === "confirmed",
+        actor: "owner",
+        hint:
+          pairing === null
+            ? "Confirm the agent in the console once it has asked to pair."
+            : `Open ${pairing.claimUrl} and confirm agent ${pairing.agentAddress}.`,
+      });
+    }
+    steps.push({
+      key: "holdings",
+      done: holdings !== undefined && holdings.holdings.length > 0,
+      actor: "owner",
+      hint: "Enter the holdings to protect (asset and quantity) in the console.",
+    });
+  }
+  return steps;
+}
+
 export const getSetupState = defineTool({
   name: "get_setup_state",
   title: "List remaining setup steps",
   description:
-    "Lists the setup steps for this agent, which are done, and who must do each remaining one (the agent or the owner). Call it at the start of a session or after any 'unavailable' result, then tell the owner what is left.",
+    "Checks everything this agent needs before it can trade (keys, the Policy contract, the agent role, gas, the console link, pairing, holdings) and lists each step as done or not, with who must act (agent or owner) and a plain hint. Call it at the start of every conversation and after any 'unavailable' result, then tell the owner exactly what is left.",
   inputSchema: z.object({}),
-  outputSchema: z.object({
+  outputSchema: verdictSchema({
     ready: z.boolean().describe("True when every step is done"),
     steps: z.array(SetupStepSchema),
   }),
-  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  handler: (_input, { config }) => {
-    const steps = setupSteps(config);
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  handler: async (_input, ctx) => {
+    const steps = await liveSetupSteps(ctx);
     const remaining = steps.filter((step) => !step.done);
     const next = remaining[0];
+    // The agent can act on its own steps right away; list the owner's after.
+    const agentStep = remaining.find((step) => step.actor === "agent");
+    const v = ok(
+      [],
+      next === undefined
+        ? { actor: "agent", hint: "Setup is complete: call get_policy and get_portfolio, then plan." }
+        : { actor: (agentStep ?? next).actor, hint: (agentStep ?? next).hint },
+    );
     return {
-      structured: { ready: next === undefined, steps },
+      structured: { ...v, ready: next === undefined, steps },
       summary:
         next === undefined
           ? `Setup is complete (${steps.length} of ${steps.length} steps done).`
-          : `${steps.length - remaining.length} of ${steps.length} setup steps done. Next, ${next.actor}: ${next.hint}`,
+          : `${steps.length - remaining.length} of ${steps.length} setup steps done. Left: ${remaining
+              .map((step) => `${step.actor}: ${step.hint}`)
+              .join(" ")}`,
     };
   },
 });
