@@ -1,0 +1,13 @@
+{
+  "name": "@mandate/signals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "x402-paywalled hedge signal API.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

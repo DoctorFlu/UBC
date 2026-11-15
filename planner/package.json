@@ -1,0 +1,13 @@
+{
+  "name": "@mandate/planner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hedge planner: turns a strike ladder into a protection plan.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

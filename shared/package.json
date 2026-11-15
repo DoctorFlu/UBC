@@ -1,0 +1,13 @@
+{
+  "name": "@mandate/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Contract interface, types, units and chain config shared by every package.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
