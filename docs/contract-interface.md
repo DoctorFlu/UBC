@@ -1,238 +1,132 @@
-# Policy contract interface
+# Policy contract interface (offchain view)
 
-This document is what the offchain code (agent, console, executor) expects from the Policy contract on Arc.
-It is written for the contract owner and can be handed over as is.
+This document is for whoever owns `contracts/src/Policy.sol`.
+It says what the offchain code (agent, console, executor) uses from that contract today, which small additions would help, and what looked surprising.
+Line numbers refer to `contracts/src/Policy.sol` as merged on main.
 
-- Part 1 restates the tech spec, which the offchain code already relies on.
-- Part 2 lists the extensions we request, each with the reason it is needed.
-- Part 3 lists open questions that need a decision from the contract owner.
+The production contract is the source of truth.
+`@mandate/shared` mirrors it exactly, and the devchain tests enforce that:
 
-The machine-readable version is the ABI in `shared/src/abi.ts` (`policyAbi` in `@mandate/shared`).
-A reference implementation of everything below lives in `devchain/contracts/PolicyReference.sol`.
-It exists only so offchain work can run on a laptop; the production contract lives in `/contracts`.
-The devchain test suite checks that the reference contract compiles to exactly `policyAbi`, so the production contract can be checked the same way.
+- `policyBaseAbi` in `shared/src/abi.ts` must equal the ABI forge produces from `contracts/src/Policy.sol` (constructor and `internalType` aside).
+- The rule tests and a 600-case fuzz test run against `contracts/src/Policy.sol` compiled as is, comparing the TypeScript evaluator with the verdict each real `proposeTrade` transaction emits.
+- The same tests run against `devchain/contracts/PolicyReference.sol`, which is `Policy.sol` plus the three additions below, so the additions are proven to change nothing else.
+
+Nothing under `/contracts` is modified by this work.
+
+## 1. What the offchain code uses as is
+
+| Contract feature | Offchain use |
+| --- | --- |
+| `PolicyRules` struct, `setPolicy`, `policy()` (L21-28, L90-96, L47) | `PolicyRules` type in `@mandate/shared`, same field order and names. |
+| `setPaused`, `setAgent`, `setExecutor`, `user()`, `agent()`, `executor()` (L43-45, L98-109) | `PolicyClient` user methods and `getRoles()`. |
+| `proposeTrade` (6 arguments, L136-177) | `PolicyClient.proposeTrade`. The intent id and verdict are read from the verdict event in the receipt. |
+| `approveIntent`, `rejectIntent` (L112-130) | Console approval flow. |
+| `recordResult` (L183-205) | Executor. |
+| `Status` enum (L10-17) | `INTENT_STATUSES`: `none`, `approved`, `needs_approval`, `rejected`, `executed`, `failed`. |
+| Reason strings in `_violation` (L228-236), plus `"rejected by user"` (L129) | `REASON_CODES`, each with a label and a one-sentence explanation for the console and agent. |
+| Rule order in `_violation`, then the approval threshold (L170) | `evaluateIntent` in TypeScript, checked against the contract by the fuzz test. |
+| `committedCents`, `lossTodayCents()`, `intentCount()`, `getIntent()` (L48, L209-224) | `getSnapshot()`, `getHeadroom()`, `getIntent()`. |
+| Events `PolicyUpdated`, `Paused`, `IntentApproved`, `IntentRejected`, `IntentNeedsApproval`, `ResultRecorded` (L56-68) | The event reducer, which rebuilds rules, committed spend, losses per UTC day, rejection counts and intent statuses from logs alone. |
+| Errors `NotUser`, `NotAgent`, `NotExecutor`, `WrongStatus`, `FillExceedsIntent` (L70-74) | Decoded by name in `PolicyRevertError`. |
+
+Without any additions, everything works.
+Previews run the TypeScript evaluator on a fresh snapshot, and intent details missing from the log are read with `getIntent`.
+
+## 2. Requested additions, in priority order
+
+Each one is small, independent and purely additive: existing selectors, events and storage stay as they are.
+`PolicyClient` detects each one with a read-only probe and uses it only when present.
+The exact Solidity is in `devchain/contracts/PolicyReference.sol`, marked `EXTENSION`.
+
+### 2.1 `IntentProposed` event
+
+```solidity
+event IntentProposed(
+    uint256 indexed intentId, address indexed agent, string market, uint8 category,
+    string outcome, bool isBuy, uint256 amountCents, uint256 limitPrice, bytes32 contextHash
+);
+```
+
+Emitted in `proposeTrade` right after the push, before the verdict event.
+
+Why: today an intent rejected at proposal leaves only `IntentRejected(id, reason)` in the log, and no event carries `category` at all.
+The dashboard's audit trail ("what did the agent try, and why was it blocked") then needs one `getIntent` call per intent, and an indexer cannot be built from logs alone.
+With this event, the log is a complete audit record.
+
+### 2.2 `proposeTrade` overload with a `contextHash`
+
+```solidity
+function proposeTrade(
+    string calldata market, uint8 category, string calldata outcome,
+    bool isBuy, uint256 amountCents, uint256 limitPrice, bytes32 contextHash
+) external returns (uint256 intentId);
+```
+
+The 6-argument version keeps working and records a zero hash.
+The hash only needs to appear in `IntentProposed`; it does not need storage.
+
+Why: the agent hashes its decision context (the user's request, the plan, the signals it paid for) with `hashContext` in `@mandate/shared`.
+Putting that hash onchain lets anyone later prove which reasoning produced a given trade.
+Without it, `PolicyClient` reports `contextHashRecorded: false`.
+
+### 2.3 `previewTrade` view
+
+```solidity
+function previewTrade(uint8 category, bool isBuy, uint256 amountCents)
+    external view returns (uint8 verdict, string memory reason); // 0 approve, 1 needs approval, 2 reject
+```
+
+Same checks as `proposeTrade` (`_violation`, then the threshold), with no state change.
+
+Why: the agent wants to know a trade's fate before spending gas, and the console shows "what would happen" as the user edits rules.
+The TypeScript evaluator does this today and is fuzz-tested against the contract, so this is the least urgent request.
+An onchain answer removes any chance of drift if the rules change later.
+
+## 3. Behavior worth a second look
+
+These are observations, not bug reports.
+Each is pinned by a test that runs against `Policy.sol`, so a deliberate change will show up in CI.
+
+1. Rejected intents keep no reason in storage (L163-167, `Intent` at L30-41).
+   The reason exists only in the `IntentRejected` event.
+2. `approveIntent` re-checks only the budget (L116-121).
+   A held intent can be approved while the agent is paused, after the daily loss limit is hit, or after its category or the max trade size was tightened.
+3. The daily loss check runs before the max trade size and category checks (L231-233).
+   Once the limit is hit, every proposal reports `"daily loss limit reached"`, even one that would also break another rule.
+4. Daily loss counts only negative results (L192-199).
+   Profits do not offset losses within a day, and sells count toward the loss like buys.
+5. `budgetCents` is a lifetime cap on committed buys, not a per-day budget (L190, L234).
+   Budget is released only for the unfilled part of a buy; executed buys stay committed forever.
+6. `recordResult` with `filled = false` and a non-zero `filledCents` succeeds and stores a zero fill (L189), but it still reverts with `FillExceedsIntent` if `filledCents` exceeds the amount (L187).
+7. `setPolicy` always emits `Paused` after `PolicyUpdated`, even when the pause flag did not change (L95).
+8. `setAgent` and `setExecutor` emit no event and accept the zero address (L103-109).
+   Role changes are invisible in the log, so the dashboard must read `agent()` and `executor()`.
+9. `getIntent` with an id that does not exist reverts with a panic (L214); ids start at 0 (L146).
+   `PolicyClient.getIntent` checks `intentCount()` first and returns null.
+10. There is no validation of `market`, `outcome` or `limitPrice` (L136-160).
+    The offchain schema enforces a non-blank market, `YES` or `NO`, and a price from 1 to 99 cents before sending.
+11. `committedCents + amountCents` (L117, L234) reverts with an overflow panic instead of returning `"over budget"` when the sum exceeds `2^256 - 1`.
+    Only reachable if `maxTradeCents` is set near `2^256`; offchain code refuses anything above `2^53 - 1` anyway.
+12. A zero amount is a recorded rejection (`"zero amount"`, L230), not a revert, so it uses an intent id.
+
+## 4. Open questions for the contract owner
+
+1. Category numbers: offchain code uses bit 0 Crypto, 1 Sports, 2 Economics, 3 Commodities, 4 Weather, 5 Politics, 6 Other (`shared/src/categories.ts`).
+   `contracts/README.md` asks for these to be agreed; please confirm or send the list you want.
+2. `limitPrice` units: offchain code sends cents per one-dollar contract (1 to 99), matching Gemini prediction markets.
+   The struct comment says "venue's price units" (L36); please confirm.
+3. Should items 2 and 8 in section 3 change?
+   Offchain code works either way, and the tests will flag the change.
+4. The contracts README says to copy the ABI and an `addresses.json` into `/shared`.
+   `@mandate/shared` instead keeps a typed ABI that CI proves equal to the forge output, and reads the address from `POLICY_ADDRESS` (plus optional `POLICY_DEPLOY_BLOCK`).
+   Please post the Arc testnet address and deploy block once deployed.
 
 ## Conventions
 
 | Thing | Convention |
 | --- | --- |
 | Money | Integer cents in `uint256` (`int256` for profit and loss). `2500` is $25.00. |
-| `limitPrice` | Cents per one-dollar contract, an integer from 1 to 99. `65` is $0.65. |
+| Offchain numbers | JavaScript numbers; any value above `2^53 - 1` is refused with a clear error, so please avoid `type(uint256).max` as an "unlimited" sentinel. |
 | `market` | Gemini's `instrumentSymbol`, for example `GEMI-BTC2611202200-HI65000`. |
-| `outcome` | `"YES"` or `"NO"`. |
-| Quantity | Offchain only: contracts = `amountCents / limitPrice`, floored to 2 decimals. From a quantity, amount = `ceil(quantity * limitPrice)`. |
-| `category` | Bit position in `allowedCategories`: 0 Crypto, 1 Sports, 2 Economics, 3 Commodities, 4 Weather, 5 Politics, 6 Other. |
-| Day | UTC day number, `block.timestamp / 1 days`. |
-
-Offchain code holds amounts as JavaScript numbers.
-It refuses (with a clear error) any value above 2^53 - 1, so please do not use `type(uint256).max` as an "unlimited" sentinel.
-
-## Part 1: tech spec (unchanged)
-
-```solidity
-struct Policy {
-    uint256 budgetCents;        // rule 1: total the agent may deploy
-    uint256 maxTradeCents;      // rule 2
-    uint256 allowedCategories;  // rule 3, bitmask
-    uint256 approvalAboveCents; // rule 4, 0 = never ask
-    uint256 dailyLossCents;     // rule 5, 0 = off
-    bool paused;                // rule 6
-}
-
-// owner
-function setPolicy(Policy calldata p) external;
-function approveIntent(uint256 intentId) external;
-function rejectIntent(uint256 intentId) external;
-function setPaused(bool paused) external;
-
-// agent
-function proposeTrade(string calldata market, uint8 category, string calldata outcome, bool isBuy,
-    uint256 amountCents, uint256 limitPrice) external returns (uint256 intentId);
-
-// executor
-function recordResult(uint256 intentId, bool filled, uint256 filledCents, int256 pnlCents) external;
-
-event IntentApproved(uint256 indexed intentId, string market, string outcome, bool isBuy, uint256 amountCents, uint256 limitPrice);
-event IntentRejected(uint256 indexed intentId, string reason);
-event IntentNeedsApproval(uint256 indexed intentId, uint256 amountCents);
-event ResultRecorded(uint256 indexed intentId, bool filled, uint256 filledCents, int256 pnlCents);
-```
-
-Behavior the offchain code relies on:
-
-- Three roles: owner (the user), agent, executor.
-- `proposeTrade` runs every rule and emits exactly one of `IntentApproved`, `IntentRejected` or `IntentNeedsApproval`.
-- `proposeTrade` does not revert on a rule violation, so blocked attempts stay in the log.
-- `approveIntent` on an intent waiting for approval emits `IntentApproved`.
-
-## Part 2: requested extensions
-
-Each item says what we need and why.
-All of them are implemented in the reference contract, so you can read working code for any of them.
-
-### 1. `bytes32 contextHash` as a seventh parameter of `proposeTrade`
-
-```solidity
-function proposeTrade(string calldata market, uint8 category, string calldata outcome, bool isBuy,
-    uint256 amountCents, uint256 limitPrice, bytes32 contextHash) external returns (uint256 intentId);
-```
-
-The hash is keccak256 of the agent's decision context (the request, the plan, the ladder it saw, the signals it bought, its stated reason), serialized as canonical JSON.
-Zero is allowed and means "no context".
-Why: this is how we prove the agent's stated reason was not rewritten after the fact ("sealed reasons" in issue #30).
-The contract only stores and emits it; it never interprets it.
-
-### 2. `IntentProposed` for every proposal, before its verdict event
-
-```solidity
-event IntentProposed(uint256 indexed intentId, address indexed agent, string market, uint8 category,
-    string outcome, bool isBuy, uint256 amountCents, uint256 limitPrice, bytes32 contextHash);
-```
-
-Why: `IntentRejected` and `IntentNeedsApproval` carry no trade details, so without this event a blocked attempt cannot be shown ("the agent tried to buy $30 of X and was stopped").
-The dashboard and the public scorecard rebuild everything from events, so the details must be in the log.
-
-### 3. `PolicySet` and `PausedSet` events
-
-```solidity
-event PolicySet(Policy policy);
-event PausedSet(bool paused);
-```
-
-Why: the console shows the history of rule changes and the current rules from events alone, and the public scorecard needs to prove which rules were in force when each verdict was given.
-
-### 4. Views
-
-```solidity
-function policy() external view returns (Policy memory);
-function owner() external view returns (address);
-function agent() external view returns (address);
-function executor() external view returns (address);
-function spentCents() external view returns (uint256);
-function lossTodayCents() external view returns (uint256);
-function intentCount() external view returns (uint256);
-function getIntent(uint256 intentId) external view returns (Intent memory);
-
-enum Status { None, NeedsApproval, Approved, Rejected, Filled, Unfilled }
-
-struct Intent {
-    address agent;
-    string market;
-    uint8 category;
-    string outcome;
-    bool isBuy;
-    uint256 amountCents;
-    uint256 limitPrice;
-    bytes32 contextHash;
-    Status status;
-    string reason;       // reason code when rejected, otherwise empty
-    uint64 proposedAt;   // block.timestamp of the proposal
-    uint256 filledCents;
-    int256 pnlCents;
-}
-```
-
-Why: the agent needs its remaining headroom before it proposes, the console needs the current state without replaying the whole log, and the executor needs to confirm an intent is still `Approved` before it records a result.
-Please return the structs from explicit functions, not public state variables, because an automatic getter returns the fields as a tuple and changes the ABI.
-Intent ids start at 1, so an id of 0 or above `intentCount()` returns a zeroed struct with status `None`.
-
-### 5. `previewTrade`
-
-```solidity
-function previewTrade(uint8 category, bool isBuy, uint256 amountCents)
-    external view returns (uint8 verdict, string memory reason);
-```
-
-Verdict: 0 approve, 1 needs approval, 2 reject (with a reason code).
-It must call the same internal rule function as `proposeTrade`, so the two can never disagree.
-Why: the agent asks "would this pass?" before spending gas, and the console's "simulate" view relies on it (issue #30, "simulate before acting").
-
-### 6. Fixed reason codes
-
-| Code | Meaning |
-| --- | --- |
-| `PAUSED` | The owner paused the agent. |
-| `CATEGORY_NOT_ALLOWED` | The category bit is not set in `allowedCategories`. |
-| `OVER_MAX_TRADE` | `amountCents > maxTradeCents`. |
-| `OVER_BUDGET` | A buy would take `spentCents` past `budgetCents`. |
-| `DAILY_LOSS_LIMIT` | Today's realized loss is at or above `dailyLossCents`. |
-| `REJECTED_BY_OWNER` | The owner rejected an intent that was waiting for approval. |
-
-Why: the agent and console map each code to a label and a one-sentence explanation, and the scorecard counts rejections by code.
-Please use exactly these strings; offchain code shows unknown codes as raw text but cannot explain them.
-
-### 7. Rule order
-
-`proposeTrade` and `previewTrade` check, in this order, and stop at the first failure:
-
-1. paused
-2. category
-3. max trade
-4. budget (buys only)
-5. daily loss
-6. approval threshold (needs approval when `approvalAboveCents != 0 && amountCents > approvalAboveCents`)
-
-Why: when several rules fail, the reason must be the same onchain and offchain.
-The TypeScript mirror (`evaluateIntent` in `@mandate/shared`) uses this order, and a 600-case fuzz test checks it against the contract.
-
-### 8. Budget semantics
-
-- `spentCents` grows by `amountCents` when a buy intent is approved, whether automatically or by the owner.
-- When the result is recorded, `spentCents` is corrected from `amountCents` to `filledCents`, which releases the unfilled remainder.
-- Sells never consume budget, but they are still subject to pause, category and max trade (and the daily loss rule).
-- An intent waiting for approval reserves nothing.
-  The budget is checked again in `approveIntent`; if the buy no longer fits, the intent is rejected with `OVER_BUDGET` and `IntentRejected` is emitted instead of reverting.
-- The budget check is `spentCents <= budgetCents && amountCents <= budgetCents - spentCents`, so no input can overflow and lowering the budget below current spend blocks every buy.
-
-Why: the agent must be able to compute its headroom exactly, and a failed or partial fill must not burn budget.
-
-### 9. Daily loss
-
-- On `recordResult`, a negative `pnlCents` adds `-pnlCents` to the loss of the current UTC day (`block.timestamp / 1 days`).
-- `lossTodayCents()` returns that sum for the current day, and 0 once the day has changed.
-- When `dailyLossCents != 0` and `lossTodayCents() >= dailyLossCents`, new intents are rejected with `DAILY_LOSS_LIMIT`.
-
-Why: this is the "risk rules, not only spend rules" part of the product, and the offchain mirror needs the exact definition.
-
-### 10. Input validation and custom errors (recommended)
-
-The reference contract reverts, rather than storing a rejected intent, on malformed input: empty `market`, an `outcome` other than `YES` or `NO`, `amountCents == 0`, or a `limitPrice` outside 1 to 99.
-It also uses custom errors so clients can say exactly what went wrong:
-
-```solidity
-error NotOwner();
-error NotAgent();
-error NotExecutor();
-error ZeroAddress();
-error InvalidAmount();
-error InvalidLimitPrice();
-error InvalidOutcome();
-error InvalidMarket();
-error IntentNotPending(uint256 intentId);   // approve or reject an intent that is not waiting
-error IntentNotApproved(uint256 intentId);  // record a result for an intent that is not Approved
-error InvalidFill(uint256 intentId);        // filledCents > amountCents, or filled == false with filledCents != 0
-```
-
-Why: these are bugs in the caller, not policy decisions, so they should not pollute the verdict log.
-The names are in `policyAbi`, so `PolicyClient` reports them as, for example, "setPolicy reverted with NotOwner".
-If you prefer different names, tell us and we will update the ABI.
-
-## Part 3: open questions for the contract owner
-
-1. **How are the agent and executor addresses set?**
-   The reference contract takes them in the constructor and adds owner-only `setAgent(address)` and `setExecutor(address)`.
-   Rotation matters because the agent key lives on a server and may need to be replaced.
-2. **One contract per owner, or one contract for many owners?**
-   The reference contract and all offchain code assume one deployment per owner, with one agent and one executor.
-   A shared contract would need an owner or agent key on every function and event, which changes the ABI.
-3. **Should anything besides the budget be re-checked in `approveIntent`?**
-   The reference contract re-checks only the budget, as specified.
-   It does not re-check pause or the daily loss limit, so an owner can approve a waiting intent while trading is paused.
-   If the kill switch should also block approvals, please re-check pause there too and tell us.
-4. **Should `setPolicy` and role changes emit events for `setAgent` and `setExecutor` too?**
-   We do not need them today, but the public scorecard would be more complete with them.
-5. **Partial fills.**
-   We assume one `recordResult` per intent, with `filled == true` and `filledCents < amountCents` for a partial fill.
-   If the executor may record several partial fills, the interface needs to change.
-6. **Reverts on malformed input** (Part 2, item 10).
-   Please confirm you are happy to revert instead of emitting a rejection for those cases.
+| Day | UTC day number, `block.timestamp / 1 days`, as in `lossTodayCents()`. |
+| Gas | Arc testnet pays gas in USDC; `PolicyClient` never sends `maxFeePerGas` below 20 gwei. |
