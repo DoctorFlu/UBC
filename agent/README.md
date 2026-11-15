@@ -29,7 +29,7 @@ Grok's servers call the MCP server over the public internet, so a server on a la
 2. In a second terminal, run `npm run dev:tunnel`.
    It starts a Cloudflare quick tunnel, waits until the public URL answers `/health`, and prints the values for the connector.
    If `cloudflared` is missing it says how to install it (`brew install cloudflared` on macOS).
-3. In the Grok Bot desktop app, open **Connect apps**, choose **Add a custom connector**, and enter:
+3. In Grok Bot (the web client at grok.com/bot or the desktop app), open **Connect apps**, choose **Add a custom connector**, and enter:
    - **Name**: `Mandate`
    - **Type**: `Remote HTTPS`
    - **Server URL**: the printed URL, ending in `/mcp`
@@ -98,14 +98,16 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 | `MCP_HOST` | `127.0.0.1` | keep it when the tunnel runs on the same machine |
 | `MCP_ALLOWED_ORIGINS` | empty | browser clients other than localhost (comma-separated hostnames) |
 | `MCP_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
-| `ARC_RPC_URL` | unset | policy reads and trades |
+| `ARC_RPC_URL` | `https://rpc.testnet.arc.io` | policy reads and trades |
 | `POLICY_ADDRESS` | unset | policy reads and trades |
-| `AGENT_PRIVATE_KEY` | unset | trades and signal payments |
-| `CONSOLE_URL`, `CONSOLE_SERVICE_TOKEN` | unset | holdings and change requests |
-| `SIGNALS_URL` | unset | buying signals |
+| `AGENT_PRIVATE_KEY` | unset | trades |
+| `CONSOLE_URL` | `http://localhost:3000` | holdings and change requests |
+| `CONSOLE_SERVICE_TOKEN` | unset | holdings and change requests |
+| `SIGNALS_URL` | `http://localhost:4021` | buying signals |
 
 Only `MCP_AUTH_TOKEN` is always required.
-Everything else is required only when a registered tool lists it in `requires`, so a partly configured server still starts and `get_setup_state` tells the owner what is missing.
+`POLICY_ADDRESS`, `AGENT_PRIVATE_KEY` and `CONSOLE_SERVICE_TOKEN` are required only when a registered tool lists them in `requires`, so a partly configured server still starts and `get_setup_state` tells the owner what is missing.
+The repo-wide list is in [docs/configuration.md](../docs/configuration.md).
 
 ## Layout
 
