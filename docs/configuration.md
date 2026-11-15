@@ -13,6 +13,10 @@ Scripts that create secrets write them straight into `.env` without printing the
 | `ARC_RPC_URL` | no | Arc testnet RPC endpoint. Defaults to `https://rpc.testnet.arc.io`. |
 | `POLICY_ADDRESS` | no | Deployed Policy contract. When empty, the local devchain deployment is used. |
 | `POLICY_DEPLOY_BLOCK` | no | Block the Policy contract was deployed in, so event scans start there instead of block 0. |
+| `POLICY_DEPLOYMENT_FILE` | no | Local deployment file to use when `POLICY_ADDRESS` is empty. Defaults to `devchain/deployments/local.json`, which `npm run dev:chain` writes. Tests that run their own chain point every process at their own file. |
+
+Switching the console, the agent and the scripts from the local devchain to Arc testnet is configuration only: set `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and, if you use a provider, `ARC_RPC_URL`.
+The browser never receives `ARC_RPC_URL`, because it may carry a provider key; it uses Arc's public RPC.
 
 ## Agent (MCP server)
 
@@ -33,15 +37,22 @@ See [agent/README.md](../agent/README.md).
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `CONSOLE_URL` | no | Address of the console backend. Defaults to `http://localhost:3000`. |
-| `CONSOLE_SERVICE_TOKEN` | for console tools | Shared secret between the console backend and the MCP server. |
+| `CONSOLE_URL` | no | Public address of the console. The MCP server calls it, and the console builds the pairing link from it. Defaults to `http://localhost:3000`. |
+| `CONSOLE_SERVICE_TOKEN` | for console tools | Shared secret between the console backend and the MCP server, sent as a bearer token and compared in constant time. Without it every `/api/agent/v1` route answers 503. |
+| `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (events, contexts, holdings, pairing, change requests). Defaults to `dashboard/.data`, which is git-ignored. Deleting it is safe: the console rebuilds the onchain part from the chain. |
+| `CONSOLE_EVENT_SOURCE` | no | `rpc` (default) polls the chain for Policy events. `stream` takes the QuickNode Stream webhook as the primary source and keeps a slow RPC poll to fill gaps. |
+| `CONSOLE_POLL_INTERVAL_MS` | no | How often the RPC poller asks for new blocks. Defaults to 250 ms on the local devchain and 1 s on Arc testnet. |
+| `MCP_PUBLIC_URL` | no | Public address of the MCP server, shown on the console's Setup page so the owner can add it to Grok Bot. |
+| `NEXT_PUBLIC_DEV_SIGNER` | no | `1` adds a test-only owner signer (anvil account 0, a public key) for end-to-end tests and local demos. Never set it in a deployed build. |
+
+The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
 
 ## QuickNode Streams
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `QUICKNODE_API_KEY` | for Streams | API key used to create and manage the Stream. |
-| `QUICKNODE_STREAM_SECURITY_TOKEN` | for Streams | Token QuickNode signs webhook deliveries with. |
+| `QUICKNODE_API_KEY` | for Streams | API key used to create and manage the Stream. The console does not use it. |
+| `QUICKNODE_STREAM_SECURITY_TOKEN` | for Streams | Token QuickNode signs webhook deliveries with. The console's webhook at `/api/webhooks/quicknode` verifies every delivery with it and refuses all deliveries while it is unset. |
 
 ## x402 signal API (Circle Nanopayments on Arc testnet)
 

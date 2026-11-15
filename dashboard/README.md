@@ -3,13 +3,16 @@
 The owner's console for Mandate: set the mandate, watch intents, approve or reject held ones, pause the agent, and read the hedge, payments and audit trail.
 It also serves a public, wallet-free scorecard at `/agent/[address]`.
 
-This package is the frame only.
-Every view renders typed mock data from `src/mock`, and later issues replace that data with real sources.
+It reads the Policy contract's events into a durable store, pushes every change to the browser over server-sent events, and serves the agent API the MCP server calls (`shared/src/console-api.ts`).
+The owner signs the mandate, approvals, rejections and the kill switch with their own wallet; the console never holds a key.
+
+Views not yet backed by a real source (the hedge plan and payoff, payments, the backtest) show fixtures marked "Sample data" on screen.
 
 ## Stack
 
 - Next.js 16 (App Router, Turbopack), React 19, TypeScript in strict mode.
-- It runs as a long-lived Node server (`next start`), not a static export, because later issues add webhook and server-sent events routes.
+- It runs as a long-lived Node server (`next start`), not a static export: it polls the chain, receives the QuickNode Stream webhook and holds server-sent event connections.
+- SQLite through Node's built-in `node:sqlite` for the console's store (events, decision contexts, holdings, pairing, change requests).
 - wagmi and viem with the injected connector, on Arc testnet or a local anvil chain.
 - CSS Modules on top of one token file, `src/styles/tokens.css`.
   There is no CSS framework and no component library.
@@ -22,10 +25,11 @@ Run these from the repository root.
 
 ```sh
 npm install
-npm run dev -w @mandate/dashboard        # http://localhost:3000
+npm run dev:chain                        # terminal 1: anvil with a Policy contract (see devchain/README.md)
+npm run dev -w @mandate/dashboard        # terminal 2: http://localhost:3000
 npm run check                            # lint, format, typecheck and unit tests for every workspace
 npx playwright install chromium          # once, before the first e2e run
-npm run e2e                              # Playwright smoke test against next dev
+npm run e2e                              # smoke suite, then the live owner flow, each on its own chain
 npm run screenshots                      # production build, then every route into docs/screenshots
 ```
 
@@ -34,15 +38,24 @@ The dev server's hot-reload socket only accepts the host it was started on.
 
 Never run `next build` (or `npm run screenshots`) while `next dev` is running from this folder, because both write to `.next`.
 
+### End-to-end tests
+
+The tests never touch Arc or your own data.
+Each suite starts anvil with the production Policy contract and its own console data folder under `.data/e2e-<suite>/`:
+
+- `smoke` (port 3100, chain 8645) seeds a demo history with every verdict, plays the MCP server once (announces the agent and links a decision context), then checks every route in both themes at 390 px and 1440 px.
+- `live` (port 3102, chain 8646) starts from an empty contract and runs the owner's loop: sign the first mandate, see a proposal within 2 seconds without a refresh, approve, reject, see a fill, pause, watch the contract refuse the next proposal, and restart the console to check it rebuilds identical state.
+- `screenshots` uses the smoke seed on a production build.
+
+Override the ports with `E2E_PORT`, `E2E_CHAIN_PORT`, `E2E_LIVE_PORT` and `E2E_LIVE_CHAIN_PORT` when they are taken.
+
 ## Environment
 
-| Variable                 | Values                         | Effect                                                                     |
-| ------------------------ | ------------------------------ | -------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_CHAIN`      | `arc-testnet` (default), `local` | Arc testnet, or anvil at `http://127.0.0.1:8545` with the same chain id. |
-| `NEXT_PUBLIC_DEV_SIGNER` | unset (default), `1`           | Adds a test-only signer that connects as anvil account #0.                 |
+Every variable the console reads is in [docs/configuration.md](../docs/configuration.md).
 
-Both chains use chain id 5042002 and native USDC with 18 decimals.
-The chain config lives in `src/lib/chain.ts` and moves to `@mandate/shared` once that package lands.
+The chain is decided at runtime, not at build time.
+With `POLICY_ADDRESS` set the console follows that contract on Arc testnet; otherwise it follows the local devchain's deployment file.
+Both chains use chain id 5042002 and native USDC with 18 decimals, and the browser's wallet follows whatever the server reports.
 
 ### Dev signer
 
@@ -66,9 +79,12 @@ WalletConnect is not wired up, because it needs a project id.
 ```text
 src/
   app/
-    (console)/            owner views, inside the shell and the wallet provider
+    (console)/            owner views, inside the shell, the live snapshot and the wallet provider
       <view>/page.tsx     one route folder per view
     (public)/agent/[address]/   the public scorecard, no wallet
+    api/agent/v1/         the agent API (bearer token), see shared/src/console-api.ts
+    api/console/          snapshot, server-sent events and owner-signed offchain writes
+    api/webhooks/         the QuickNode Stream webhook
     dev/components/       the component gallery
   features/<view>/        one folder per view: <View>View.tsx, <view>.module.css, index.ts
   components/
@@ -76,16 +92,19 @@ src/
     domain/               small pieces that know the domain (market name, approval actions)
     shell/                the console frame: sidebar, status strip, wallet, isolator
     states/               view-level loading and error frames
-  lib/                    formatters, hold-to-confirm logic, chain, wallet, domain types
-  mock/                   every piece of mock data, typed
+  lib/                    formatters, hold-to-confirm logic, network, wallet
+    live/                 the snapshot type, the live provider, and read-only derivations
+    owner/                owner transactions and owner-signed requests
+  server/                 the console backend: ingest, store, agent and owner routes
+  fixtures/               typed fixtures for ?state= previews, the gallery and tests
   styles/tokens.css       color, type, spacing, radius and motion tokens for both themes
 ```
 
 ### Adding a view
 
-1. Create `src/features/<view>/` with a `<View>View.tsx` that takes its data as props, a `<view>.module.css`, and an `index.ts` that exports the view.
+1. Create `src/features/<view>/` with a client `<View>View.tsx` that reads `useSnapshot()` and accepts an optional `preview` snapshot, a `<view>.module.css`, and an `index.ts` that exports the view.
 2. Create `src/app/(console)/<view>/page.tsx`.
-   It reads the data (from `@/mock` for now), handles `?state=loading|empty|error` with `previewState`, `ViewSkeleton` and `ViewError`, and renders the view.
+   It handles `?state=loading|empty|error` with `previewState`, `ViewSkeleton` and `ViewError`, passes `emptyFixtureSnapshot` as `preview` for `empty`, and otherwise renders the view on live data.
 3. Add the route to `src/lib/nav.ts` and to `e2e/routes.ts`.
 4. Build from `@/components/ui`.
    Views compose primitives and do not restyle them.
@@ -93,8 +112,8 @@ src/
 5. Money is integer cents everywhere.
    Format it with `src/lib/format.ts` or the `Money` component, never with floating point.
 
-Only `page.tsx` files import `@/mock`.
-When real data lands, the page swaps its source and the view does not change.
+Every view handles the states the chain can be in: still reading history, no Policy contract configured, the chain unreachable, no mandate yet, nothing to show yet, and a wallet that is not the owner.
+Fixtures only ever appear in previews, the gallery, tests, and blocks marked "Sample data".
 
 ## Design
 
