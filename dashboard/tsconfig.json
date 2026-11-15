@@ -16,6 +16,7 @@
     "next-env.d.ts",
     "src",
     "e2e",
+    "test",
     "next.config.ts",
     "playwright.config.ts",
     ".next/types/**/*.ts",

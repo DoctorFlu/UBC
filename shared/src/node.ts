@@ -19,7 +19,10 @@ export const LOCAL_DEPLOYMENT_PATH = fileURLToPath(
  * The local deployment file to read and write: `POLICY_DEPLOYMENT_FILE` when set (tests that run their
  * own chain point every process at their own file), otherwise `LOCAL_DEPLOYMENT_PATH`.
  */
-export function localDeploymentPath(env: NodeJS.ProcessEnv = process.env): string {
+/** Environment variables to read: `process.env` or any plain map of them (tests pass their own). */
+export type EnvVars = Readonly<Record<string, string | undefined>>;
+
+export function localDeploymentPath(env: EnvVars = process.env): string {
   return env.POLICY_DEPLOYMENT_FILE?.trim() || LOCAL_DEPLOYMENT_PATH;
 }
 
@@ -44,7 +47,7 @@ export class DeploymentNotFoundError extends Error {
  * 2. the local devchain deployment file written by `npm run dev:chain` (see `localDeploymentPath`).
  */
 export function resolvePolicyDeployment(
-  options: { env?: NodeJS.ProcessEnv; localPath?: string } = {},
+  options: { env?: EnvVars; localPath?: string } = {},
 ): ResolvedDeployment {
   const env = options.env ?? process.env;
   const localPath = options.localPath ?? localDeploymentPath(env);
