@@ -20,14 +20,49 @@ contract PolicyTest is Test {
 
     function setUp() public {
         policy = new Policy(agent, executor);
-        // $200 budget, $100 max per trade,
-        // sports + economics allowed, ask the user above $50.
-        policy.setRules(20_000, 10_000, (1 << SPORTS) | (1 << ECONOMICS), 5_000);
+        // $200 budget, $100 max per trade, sports + economics allowed,
+        // ask the user above $50, stop after $40 lost in a day.
+        policy.setPolicy(_demoPolicy());
+    }
+
+    function _demoPolicy() internal pure returns (Policy.PolicyRules memory) {
+        return Policy.PolicyRules({
+            budgetCents: 20_000,
+            maxTradeCents: 10_000,
+            allowedCategories: (1 << SPORTS) | (1 << ECONOMICS),
+            approvalAboveCents: 5_000,
+            dailyLossCents: 4_000,
+            paused: false
+        });
     }
 
     function _propose(uint8 category, uint256 amount) internal returns (uint256) {
         vm.prank(agent);
         return policy.proposeTrade("MKT-TEST", category, "YES", true, amount, 55);
+    }
+
+    function test_setPolicyStoresEveryField() public view {
+        (
+            uint256 budget,
+            uint256 maxTrade,
+            uint256 categories,
+            uint256 approvalAbove,
+            uint256 dailyLoss,
+            bool paused
+        ) = policy.policy();
+        assertEq(budget, 20_000);
+        assertEq(maxTrade, 10_000);
+        assertEq(categories, (1 << SPORTS) | (1 << ECONOMICS));
+        assertEq(approvalAbove, 5_000);
+        assertEq(dailyLoss, 4_000);
+        assertFalse(paused);
+    }
+
+    function test_onlyUserCanSetPolicy() public {
+        Policy.PolicyRules memory p = _demoPolicy();
+        vm.prank(agent);
+        vm.expectRevert(Policy.NotUser.selector);
+        policy.setPolicy(p);
     }
 
     function test_smallTradeIsApprovedAutomatically() public {
@@ -85,6 +120,40 @@ contract PolicyTest is Test {
         vm.expectEmit(true, false, false, true);
         emit IntentRejected(0, "agent paused");
         _propose(SPORTS, 1_000);
+    }
+
+    function test_dailyLossLimitBlocksTrading() public {
+        uint256 id = _propose(SPORTS, 4_000);
+        vm.prank(executor);
+        policy.recordResult(id, true, 4_000, -4_000); // lost the whole $40 limit
+        assertEq(policy.lossTodayCents(), 4_000);
+
+        vm.expectEmit(true, false, false, true);
+        emit IntentRejected(1, "daily loss limit reached");
+        _propose(SPORTS, 1_000);
+    }
+
+    function test_dailyLossResetsNextDay() public {
+        uint256 id = _propose(SPORTS, 4_000);
+        vm.prank(executor);
+        policy.recordResult(id, true, 4_000, -4_000);
+
+        vm.warp(block.timestamp + 1 days);
+        assertEq(policy.lossTodayCents(), 0);
+        uint256 next = _propose(SPORTS, 1_000);
+        assertEq(uint8(policy.getIntent(next).status), uint8(Policy.Status.Approved));
+    }
+
+    function test_dailyLossLimitOffWhenZero() public {
+        Policy.PolicyRules memory p = _demoPolicy();
+        p.dailyLossCents = 0;
+        policy.setPolicy(p);
+
+        uint256 id = _propose(SPORTS, 4_000);
+        vm.prank(executor);
+        policy.recordResult(id, true, 4_000, -9_000);
+        uint256 next = _propose(SPORTS, 1_000);
+        assertEq(uint8(policy.getIntent(next).status), uint8(Policy.Status.Approved));
     }
 
     function test_onlyAgentCanPropose() public {
