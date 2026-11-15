@@ -3,9 +3,9 @@ import { ARC_TESTNET } from "@mandate/shared";
 import type { FacilitatorClient, RoutesConfig } from "@x402/core/server";
 import type { Network } from "@x402/core/types";
 import { paymentMiddleware, x402ResourceServer } from "@x402/hono";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { parseUnits, type Address } from "viem";
-import type { PaidRoute } from "./paid-route";
+import type { PaidRoute, QueryParameter } from "./paid-route";
 import { helloRoute } from "./routes/hello";
 
 export interface SignalsAppOptions {
@@ -42,6 +42,10 @@ export interface ResourceCatalog {
     settlement: "GatewayWalletBatched";
     mimeType: "application/json";
     description: string;
+    /** Query parameters the route takes, when it takes any. */
+    query?: readonly QueryParameter[];
+    /** JSON Schema of the paid response, when the route publishes one. */
+    responseSchema?: unknown;
     exampleResponse: unknown;
   }[];
 }
@@ -50,6 +54,7 @@ export interface ResourceCatalog {
  * Builds the signals HTTP app.
  * `GET /health` and `GET /v1/resources` are free.
  * Every paid route sits behind the x402 middleware with Circle Gateway batched settlement.
+ * A route's `precheck` runs before that middleware, so its refusals are free.
  */
 export function createSignalsApp(options: SignalsAppOptions): Hono {
   const network = options.network ?? ARC_TESTNET.network;
@@ -95,11 +100,26 @@ export function createSignalsApp(options: SignalsAppOptions): Hono {
         settlement: "GatewayWalletBatched",
         mimeType: "application/json",
         description: route.description,
+        ...(route.query === undefined ? {} : { query: route.query }),
+        ...(route.responseSchema === undefined ? {} : { responseSchema: route.responseSchema }),
         exampleResponse: route.exampleResponse,
       })),
     };
     return c.json(catalog);
   });
+
+  // Free refusals first: a request the seller cannot serve never gets a 402, so the buyer never signs.
+  for (const route of routes) {
+    const { precheck } = route;
+    if (precheck === undefined) continue;
+    const beforePayment: MiddlewareHandler = async (c, next) => {
+      const refusal = await precheck(c);
+      if (refusal !== undefined) return refusal;
+      await next();
+      return undefined;
+    };
+    app.use(route.path, beforePayment);
+  }
 
   app.use(paymentMiddleware(routesConfig, resourceServer));
 
