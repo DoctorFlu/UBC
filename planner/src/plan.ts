@@ -29,13 +29,16 @@
  */
 import type { LadderRung } from "@mandate/gemini";
 import { planIdFor } from "./id";
+import { orderBySignal, rateRung, readSignal, shortId, type SignalContext } from "./signal";
 import type {
   HedgeInput,
   HedgePlan,
   PayoffPoint,
   PlannedOrder,
   PlannedRung,
+  PlanSignalUse,
   PlanWarning,
+  SignalRungRating,
   UncoveredSlice,
   WarningCode,
 } from "./types";
@@ -61,6 +64,8 @@ interface DesignedRung {
   designedHundredths: number;
 }
 
+type Rating = Omit<SignalRungRating, "boughtHundredths">;
+
 interface Context {
   input: HedgeInput;
   asset: string;
@@ -72,6 +77,10 @@ interface Context {
   rungs: PlannedRung[];
   warnings: PlanWarning[];
   uncovered: UncoveredSlice[];
+  /** The paid signal, when one was given. */
+  signal: SignalContext | null;
+  /** The signal's rating of each designed rung, highest strike first. */
+  ratings: Rating[];
 }
 
 export function planHedge(input: HedgeInput): HedgePlan {
@@ -90,6 +99,7 @@ export function planHedge(input: HedgeInput): HedgePlan {
   for (const [symbol, depth] of Object.entries(input.depthHundredths ?? {})) {
     requireInteger(depth, `depthHundredths[${symbol}]`);
   }
+  const signal = input.signal === undefined ? null : readSignal(input.signal, input.ladder);
 
   const ctx: Context = {
     input,
@@ -102,7 +112,10 @@ export function planHedge(input: HedgeInput): HedgePlan {
     rungs: [],
     warnings: [],
     uncovered: [],
+    signal,
+    ratings: [],
   };
+  if (signal !== null) warnIfIgnored(ctx, signal);
 
   if (!input.limits.categoryAllowed) {
     warn(
@@ -132,6 +145,21 @@ export function planHedge(input: HedgeInput): HedgePlan {
   const designed = design(ctx, descending, ceilingCents, floorCents);
   buy(ctx, designed, slippage);
   return finalize(ctx);
+}
+
+const IGNORED_BECAUSE: Record<NonNullable<PlanSignalUse["ignoredBecause"]>, string> = {
+  asset_mismatch: "is for a different asset",
+  event_mismatch: "is for a different ladder",
+  no_matching_strikes: "has none of this ladder's strikes",
+};
+
+function warnIfIgnored(ctx: Context, signal: SignalContext): void {
+  if (signal.ignoredBecause === null) return;
+  warn(
+    ctx,
+    "signal_ignored",
+    `The paid signal (receipt ${shortId(signal.paid.receiptId)}) ${IGNORED_BECAUSE[signal.ignoredBecause]}, so the plan does not use it.`,
+  );
 }
 
 function resolveFloor(input: HedgeInput, spotCents: number): number {
@@ -237,8 +265,21 @@ function design(
   return designed;
 }
 
-function buy(ctx: Context, designed: DesignedRung[], slippage: number): void {
+function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
   const { input } = ctx;
+  // With a usable signal, rungs are bought cheapest first, so a spend cap that cannot cover every
+  // rung cuts the expensive ones. Without one, nearest spot first. Which strikes the staircase uses
+  // and how many contracts each needs do not change.
+  const signal = ctx.signal?.ignoredBecause === null ? ctx.signal : null;
+  const ratingOf = new Map<string, Rating>();
+  if (signal !== null) {
+    ctx.ratings = staircase.map((d) => rateRung(signal, d.rung, slippage));
+    for (const rating of ctx.ratings) ratingOf.set(rating.instrumentSymbol, rating);
+  }
+  const designed =
+    signal === null
+      ? staircase
+      : orderBySignal(staircase, (d) => ratingOf.get(d.rung.instrumentSymbol)?.rating ?? "unrated");
   const budgetIsTighter = input.limits.remainingBudgetCents < input.maxCostCents;
   const capCode: WarningCode = budgetIsTighter ? "budget_exhausted" : "cost_cap_reached";
   const skipped = new Map<WarningCode, number[]>();
@@ -378,12 +419,29 @@ function buy(ctx: Context, designed: DesignedRung[], slippage: number): void {
     const what = budgetIsTighter
       ? `the remaining policy budget of ${formatUsd(input.limits.remainingBudgetCents)}`
       : `the cost cap of ${formatUsd(input.maxCostCents)}`;
+    const kept =
+      signal === null ? "rungs nearest spot were kept" : "the rungs the paid signal rates cheapest were kept";
     warn(
       ctx,
       capCode,
-      `To stay within ${what}, rungs nearest spot were kept and the rest cut: ${capped.join("; ")}.`,
+      `To stay within ${what}, ${kept} and the rest cut: ${capped.join("; ")}.`,
       strikesOf(capCode),
     );
+  }
+  if (signal !== null) {
+    // Report rungs in staircase order, highest strike first, whatever order they were bought in.
+    ctx.rungs.sort((a, b) => b.strikeCents - a.strikeCents);
+    const expensive = ctx.rungs
+      .filter((r) => ratingOf.get(r.instrumentSymbol)?.rating === "expensive")
+      .map((r) => r.strikeCents);
+    if (expensive.length > 0) {
+      warn(
+        ctx,
+        "signal_expensive",
+        `The paid signal rates protection at ${list(expensive)} as expensive (at least ${formatBand(signal.fairBandBps)} a contract above its model value); the plan still buys it because it is part of the protection asked for.`,
+        expensive,
+      );
+    }
   }
   if (split.length > 0) {
     warn(
@@ -487,7 +545,10 @@ function finalize(ctx: Context): HedgePlan {
     ceilingCents,
     floorCents,
     orders: orders.map((o) => [o.instrumentSymbol, o.quantityHundredths, o.limitPriceCents]),
+    // Only plans given a signal carry this key, so every plan id without one is unchanged.
+    ...(ctx.signal === null ? {} : { signal: [ctx.signal.paid.receiptId, ctx.signal.paid.signal.signalId] }),
   });
+  const signal = ctx.signal === null ? null : signalUse(ctx, ctx.signal, orders);
 
   return {
     planId: planIdFor(canonical),
@@ -516,7 +577,40 @@ function finalize(ctx: Context): HedgePlan {
     breakEven,
     warnings: ctx.warnings,
     uncovered: ctx.uncovered,
+    ...(signal === null ? {} : { signal }),
   };
+}
+
+function signalUse(ctx: Context, signal: SignalContext, orders: readonly PlannedOrder[]): PlanSignalUse {
+  const used = signal.ignoredBecause === null;
+  const bought = new Map(ctx.rungs.map((r) => [r.instrumentSymbol, r.quantityHundredths]));
+  const rungs = ctx.ratings.map((rating) => ({
+    ...rating,
+    boughtHundredths: bought.get(rating.instrumentSymbol) ?? 0,
+  }));
+  // The same inputs without the signal: the plan says plainly whether the signal changed anything.
+  const baseline = used ? planHedge({ ...ctx.input, signal: undefined }).orders : orders;
+  const key = (list: readonly PlannedOrder[]) =>
+    JSON.stringify(list.map((o) => [o.instrumentSymbol, o.quantityHundredths, o.limitPriceCents]));
+  return {
+    receiptId: signal.paid.receiptId,
+    signalId: signal.paid.signal.signalId,
+    used,
+    ignoredBecause: signal.ignoredBecause,
+    buyOrder: used ? "signal" : "nearest_spot",
+    changedOrders: key(baseline) !== key(orders),
+    rungs,
+    expensiveBoughtStrikesCents: rungs
+      .filter((r) => r.rating === "expensive" && r.boughtHundredths > 0)
+      .map((r) => r.strikeCents),
+  };
+}
+
+/** "2 cents", "1 cent", "1.50 cents" from basis points of a dollar. */
+function formatBand(bps: number): string {
+  if (bps === 100) return "1 cent";
+  if (bps % 100 === 0) return `${(bps / 100).toString()} cents`;
+  return `${Math.floor(bps / 100).toString()}.${(bps % 100).toString().padStart(2, "0")} cents`;
 }
 
 /**
