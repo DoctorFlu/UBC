@@ -22,7 +22,11 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "check": "npm run lint && npm run format:check && npm run typecheck && npm run test",
-    "plan": "tsx planner/scripts/plan.ts"
+    "plan": "tsx planner/scripts/plan.ts",
+    "signals:start": "npm run start -w @mandate/signals",
+    "x402:keygen": "npm run x402:keygen -w @mandate/agent",
+    "x402:hello": "npm run x402:hello -w @mandate/agent --",
+    "x402:status": "npm run x402:status -w @mandate/agent"
   },
   "overrides": {
     "minimatch": "^11.0.8"
