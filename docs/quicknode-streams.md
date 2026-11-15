@@ -1,7 +1,7 @@
 # QuickNode Streams on Arc testnet (spike #5)
 
 This spike answers whether a QuickNode Stream can be the console's live data source on Arc testnet, and prepares everything so the Stream can be created by script the moment an API key exists.
-Nobody on the team has a QuickNode account yet, so nothing here was created on QuickNode.
+The team now has a QuickNode account on the Build plan (80M API credits per month; overage must never be incurred), but no Stream has been created or activated yet.
 Research date: 2026-11-15.
 
 Every claim is tagged:
@@ -14,7 +14,9 @@ Every claim is tagged:
 
 Arc testnet is supported by Streams today, as network `arc-testnet` with dataset `logs`, and Arc mainnet is supported as `arc-mainnet`.
 A JavaScript filter keeps only the Policy contract's logs and a webhook destination delivers them, signed with HMAC-SHA256 over `nonce + timestamp + body`.
-The Free trial includes Streams with one active Stream and one webhook destination, but at Arc's block rate a continuously running Stream spends the trial's 10M credits in about 3 to 4 days, so the Stream should stay paused outside development and demo windows.
+Streams bill 20 credits per Arc block processed whatever the filter returns, so an active Stream spends about 3.46M credits per day.
+Running nonstop from 2026-11-15 to 2026-11-22 costs about 24.2M credits, 30% of the Build plan's 80M, but a Stream left running for a whole month would exceed 80M and incur overage (see [Credit budget](#credit-budget-build-plan)).
+The Stream should start at the chain tip and stay paused whenever the console is not running.
 No fallback is needed.
 
 ## 1. Is Arc testnet supported?
@@ -251,7 +253,7 @@ Unverified; steps 3 and 4 make either behavior safe.
 - **Start block.** Omit `start_range` to start at the latest block; set it to backfill from that block.
   Without `end_range` (or with `-1`), a backfilling Stream continues into live delivery with no handoff.
   Verified in docs: https://api.quicknode.com/streams/rest/openapi.json and https://www.quicknode.com/docs/streams/backfilling
-  Starting at the Policy deploy block makes the Stream rebuild full history by itself.
+  Starting at the Policy deploy block makes the Stream rebuild full history by itself, at 20 credits per block behind the tip, so the script starts at the tip by default and refuses a start block more than 10,000 blocks back without `--allow-backfill`.
 - **Batching.** `dataset_batch_size` blocks per filter run and delivery; with `elastic_batch_enabled`, whatever is ready at the tip is delivered without waiting for the batch to fill.
   Tip Streams on networks with sub-second blocks must use a batch size of at least 5, or the API returns 422.
   Verified in docs: https://www.quicknode.com/docs/streams/rest-api#batch-size-and-elastic-batch
@@ -304,7 +306,6 @@ Our complete create request (from `npm run stream -w @mandate/streams -- upsert 
   "filter_function": "<base64 of streams/filter.js with POLICY_ADDRESSES filled in>",
   "filter_language": "javascript",
   "region": "usa_east",
-  "start_range": 72471363,
   "dataset_batch_size": 5,
   "elastic_batch_enabled": true,
   "fix_block_reorgs": 0,
@@ -325,7 +326,7 @@ Our complete create request (from `npm run stream -w @mandate/streams -- upsert 
 ```
 
 It is sent with headers `x-api-key: <QUICKNODE_API_KEY>`, `content-type: application/json` and `idempotency-key: mandate-policy-logs-arc-testnet`.
-`start_range` is present only when `QUICKNODE_STREAM_START_BLOCK` is set.
+`start_range` is absent, so the Stream starts at the latest block; it is added only when `QUICKNODE_STREAM_START_BLOCK` is set, after the script prices the backfill.
 The Stream is created paused; `activate` starts it.
 
 ### Plans
@@ -352,9 +353,76 @@ Verified in docs (calculator data in https://www.quicknode.com/docs/streams/bill
 | 0.697 s (measured) | about 124,000 | about 2.5M | about 4 days | about 74M |
 | 0.5 s (QuickNode calculator) | 172,800 | about 3.5M | about 2.9 days | about 104M |
 
-A Stream running nonstop exhausts the Free trial in days and roughly fills the Build plan in a month.
-Keep it paused outside development and demo windows, start it a day before judging, or move to Build for the event.
-A backfill from the Policy deploy block costs 20 credits per block since deployment, so deploy shortly before the first backfill.
+A Stream running nonstop exhausts the Free trial in days and exceeds the Build plan within a month; the budget for this event is worked out in the next section.
+
+## Credit budget (Build plan)
+
+The account is on Build: 80M API credits per month, then $0.62 per 1M credits of overage, which we must never incur.
+Verified in docs: https://www.quicknode.com/pricing.md
+
+### How Streams are billed
+
+- **Per block processed.** A Stream's cost is blocks processed times a multiplier set by network and dataset; tip streaming is "Monthly Blocks × Multiplier".
+  Verified in docs: https://www.quicknode.com/docs/streams/billing
+- **Not per payload.** The number or size of deliveries does not change the cost; only blocks count.
+  Verified in docs (same page).
+  QuickNode Webhooks, a different product, bills 30 credits per delivered payload instead: https://www.quicknode.com/pricing.md
+- **Per dataset.** On Arc, `logs`, `block`, `transactions` and `receipts` cost 20 credits per block and `block_with_receipts` costs 40, so `logs` is already the cheapest dataset that carries our events.
+  Verified in docs (calculator data in https://www.quicknode.com/docs/streams/billing).
+- **A null filter still costs.** "API credits are consumed regardless of the return value"; filtering saves bandwidth, not credits, and the heartbeat (empty batches) therefore costs nothing extra.
+  Verified in docs: https://www.quicknode.com/docs/streams/filters#how-filters-work-with-billing
+- **Failed deliveries are not charged again.** Retries are free and a block is counted once when delivery succeeds.
+  Verified in docs: https://www.quicknode.com/docs/streams/billing (FAQ).
+  The same FAQ says "you only pay for blocks that are successfully delivered", which conflicts with the filters page for blocks the filter skips; budget on the filters page (every processed block is paid).
+- **Paused costs nothing.** A paused Stream stops consuming credits; resuming "from the latest block" skips the paused range, while resuming where it left off processes (and pays for) the gap.
+  Verified in docs: https://www.quicknode.com/docs/streams/billing (FAQ).
+  The REST `activate` endpoint resumes where it left off; resuming from the latest block is a dashboard option.
+  Verified in docs: https://www.quicknode.com/docs/streams/rest-api/activate-stream
+- **Backfill costs the same per block.** A historical range costs the same multiplier per block ("Current Block Height × Multiplier" from genesis); every 10,000 Arc blocks (about 1.4 hours of chain) cost 200,000 credits, and a start at block 1 would cost about 1.45 billion.
+  Verified in docs: https://www.quicknode.com/docs/streams/billing and https://www.quicknode.com/docs/streams/backfilling
+- **RPC shares the pool.** Streams and RPC requests draw from the same API credit balance; RPC is billed per request at per-method rates.
+  Verified in docs: https://www.quicknode.com/docs/streams/billing (FAQ).
+  Method rates are listed at https://www.quicknode.com/api-credits and returned by `GET /v0/api-credits/{chain}` (https://www.quicknode.com/docs/admin-api/api-credits/v0-api-credits-chain).
+  The #14 poller should use the public endpoint `https://rpc.quicknode.testnet.arc.io`, which takes no API key, so its requests cannot be attributed to our account.
+  Verified live (it answers without a key); do not point the poller at an endpoint on our account without pricing its `eth_getLogs` rate first.
+
+### Arithmetic for this event
+
+QuickNode's calculator assumes one Arc block every 0.5 s; my measured average was 0.697 s, so the 0.5 s figures are the conservative ceiling.
+
+| | 0.5 s blocks (budget basis) | 0.697 s blocks (measured) |
+| --- | --- | --- |
+| Blocks per day | 86,400 / 0.5 = 172,800 | about 123,960 |
+| Credits per day (× 20) | 3,456,000 | about 2,479,000 |
+| Credits per hour | 144,000 | about 103,000 |
+| 2026-11-15 00:00Z to 2026-11-22 00:00Z (7 days) | 24,192,000 (30.2% of 80M) | about 17.4M (21.7%) |
+| Days of nonstop streaming that 80M covers | 23.1 | 32.3 |
+| 30 days nonstop | 103,680,000 (overage of 23.68M, about $14.68) | about 74.4M |
+
+Running nonstop from now until 2026-11-22 therefore fits with about 55.8M credits to spare, provided the period's existing usage (RPC included) is small.
+The risk is forgetting to pause afterwards: at the budget rate a Stream left running crosses 80M about 23 days into a billing period.
+These numbers are encoded and tested in `streams/src/budget.ts` and `streams/test/budget.test.ts`.
+
+### Cheapest configuration (what the script does)
+
+- Dataset `logs` (20 per block, the minimum on Arc for our events); one Stream for all Policy addresses, since every extra Stream on the same chain pays for the same blocks again (https://www.quicknode.com/docs/streams/billing).
+- No `start_range`, so the Stream starts at the latest block; history before activation comes from the RPC backfill in #14.
+  The script prices any `QUICKNODE_STREAM_START_BLOCK` against the live tip and refuses more than 10,000 blocks of backfill without `--allow-backfill`.
+- Created paused; `upsert` and `activate` refuse to run without `--yes-i-checked-the-budget` (or `QUICKNODE_STREAM_BUDGET_CONFIRMED=yes`).
+- `pause` is the off switch: run it whenever the console is not running, and before ending any session.
+- Batch settings stay as they are (batch size 5, elastic batching); they do not change the per-block cost.
+- No compression, no reorg handling and no `keep_distance_from_tip`, as before; none of them changes the cost either, and Arc has deterministic finality.
+
+### Checking the credits left
+
+- `npm run stream -w @mandate/streams -- status` prints the Stream's state and cursor and calls `GET https://api.quicknode.com/v0/usage/rpc`, which returns `credits_used`, `credits_remaining`, `limit` and `overages` for the current period (all products, Streams included per the shared-pool FAQ), then how many days of streaming the remainder covers.
+  Verified in docs: https://www.quicknode.com/docs/admin-api/usage/v0-usage-rpc and https://www.quicknode.com/docs/admin-api (the Admin API is available on paid plans; the key's role must allow it).
+  Unverified live: the agent session that wrote this was not permitted to read the key, so the response has not been seen; the script reports and falls back cleanly on 401 or 403.
+- The dashboard shows the same: the Billing page for credit history, the Stream page and the Usage panel for blocks processed (https://www.quicknode.com/docs/streams/filters#how-filters-work-with-billing).
+- Per-Stream credit summaries (`/v0/usage/streams/summary`, `/v0/usage/credits/summary`) are Enterprise-only.
+  Verified in docs: https://www.quicknode.com/docs/admin-api/observability/v0-usage-streams-summary
+- Whether `POST /streams/test_filter` costs credits is not documented; it runs one block, so at most about 20 credits if it is billed like a Stream.
+  Unverified.
 
 ## 7. Local development
 
@@ -393,7 +461,8 @@ For completeness:
 | --- | --- |
 | `streams/filter.js` | The filter, uploaded as written apart from the two parameter lines |
 | `streams/stream.config.ts` | Create and update request bodies with every fixed choice explained |
-| `streams/scripts/quicknode-stream.ts` | `upsert`, `show`, `activate`, `pause`, `delete --yes`, `test-filter --block <n>`, each with `--dry-run` |
+| `streams/scripts/quicknode-stream.ts` | `status`, `upsert`, `activate`, `pause` (the off switch), `delete --yes`, `test-filter --block <n>`, each with `--dry-run`; `upsert` and `activate` need the budget confirmation |
+| `streams/src/budget.ts` | Credit arithmetic used by the script and tests |
 | `streams/src/signature.ts` | `verifyQuickNodeSignature` and `computeQuickNodeSignature` |
 | `streams/src/payload.ts` | `parseStreamBatch` and `parseStreamPayload`, zod-validated, returning logs in viem's `getLogs` shape |
 | `streams/src/filter-source.ts` | Renders and base64-encodes the filter |
@@ -408,7 +477,7 @@ A test asserts it equals viem's `formatLog` output for the same RPC logs and tha
 - **#5** assumed testnet support was in doubt.
   It is supported, so the fallback branch of "Done when" does not apply.
 - **#19** expects a Stream "filtered to the Policy contract address, delivered to our webhook"; that works as planned, with three additions.
-  The batch size must be at least 5 on Arc, the Free trial's credits last only days of continuous streaming, and the Free plan allows one active Stream and no compression or reorg handling.
+  The batch size must be at least 5 on Arc, a nonstop Stream spends about 3.46M credits per day (over the Build plan's 80M within a month), and the Stream must therefore be paused whenever the console is not running.
 - **#19** keeps the RPC poller as a gap-filling fallback.
   Because delivery is sequential and the Stream pauses rather than skips on failure, there are no gaps while it runs; the poller is still needed for the local devchain, for the time before the Stream is activated, and while it is paused to save credits.
   The heartbeat batches tell the console which source is live.
@@ -418,26 +487,31 @@ A test asserts it equals viem's `formatLog` output for the same RPC logs and tha
 
 ## What a person must do
 
-1. Create a QuickNode account on the Free trial at https://www.quicknode.com/signup (no card); accepting the terms is a human step.
-2. In the dashboard, open **API Keys**, click **Add API Key**, enable the **Streams** application, choose the **Admin** role, and copy the key into the repo root `.env` as `QUICKNODE_API_KEY`.
-   Never paste it into chat or commit it.
+1. Done: the account exists on the Build plan.
+2. Done: `QUICKNODE_API_KEY` is in the main clone's `.env`.
+   It must have the **Streams** application enabled and a role that allows the Admin API usage endpoint, or `status` cannot show credits.
+   Never paste it into chat, print it or commit it; the script reads it from the env file (`--env-file <path>` points at another one).
 3. Generate the webhook secret locally with `openssl rand -hex 32` and put it in `.env` as `QUICKNODE_STREAM_SECURITY_TOKEN`.
    The script sends it as the destination's `security_token`, so QuickNode and the webhook route share it without copying anything back from the dashboard.
    If the Stream is ever created in the dashboard instead, copy the token from the Stream's **Settings** tab into the same variable.
 4. Add the remaining values to `.env`:
    - `POLICY_ADDRESS`: the deployed Policy contract on Arc testnet,
    - `QUICKNODE_STREAM_WEBHOOK_URL`: the public HTTPS URL of the webhook route (an ngrok URL during development),
-   - optionally `QUICKNODE_STREAM_START_BLOCK` (the Policy deploy block, to backfill history) and `QUICKNODE_STREAM_TOPICS` (comma-separated topic0 values).
-5. Check the filter against a block that contains a Policy event: `npm run stream -w @mandate/streams -- test-filter --block <n>`.
-6. Create the Stream paused with `npm run stream -w @mandate/streams -- upsert`, start the webhook receiver, then `... -- activate`; use `... -- show` for status and cursor and `... -- pause` whenever nobody is watching, to save credits.
-7. Save the first real delivery (headers and raw body) as a fixture and confirm the three open points: whether a filtered body is the bare return value, whether retries are re-signed, and the observed delivery latency.
+   - optionally `QUICKNODE_STREAM_TOPICS` (comma-separated topic0 values),
+   - leave `QUICKNODE_STREAM_START_BLOCK` unset so the Stream starts at the tip (cheapest).
+5. Run `npm run stream -w @mandate/streams -- status` and read the credits used and remaining for the period, and the period's end date.
+   Confirm the planned streaming hours times 144,000 credits fit with a wide margin.
+6. Check the filter against a block that contains a Policy event: `... -- test-filter --block <n>`.
+7. Create the Stream paused with `... -- upsert --yes-i-checked-the-budget`, start the webhook receiver, then `... -- activate --yes-i-checked-the-budget`.
+8. Run `... -- pause` (the off switch) whenever the console is not running, and run `status` daily to watch the remaining credits; if `status` ever shows overages above zero, pause immediately.
+9. Save the first real delivery (headers and raw body) as a fixture and confirm the three open points: whether a filtered body is the bare return value, whether retries are re-signed, and the observed delivery latency.
 
 `.env.example` should list these variables; this branch does not change it because the file was not readable from the agent session that wrote this spike.
 
 ## README paragraph for the bounty
 
 > **QuickNode Streams.**
-> The console's live feed comes from a QuickNode Stream on **Arc Testnet** (`arc-testnet`, chain id 5042002) using the **Logs** dataset (`logs`), starting at the Policy contract's deploy block so one Stream backfills history and then follows the chain tip.
+> The console's live feed comes from a QuickNode Stream on **Arc Testnet** (`arc-testnet`, chain id 5042002) using the **Logs** dataset (`logs`), following the chain tip while the console runs.
 > A JavaScript **filter** ([`streams/filter.js`](streams/filter.js)) runs on QuickNode's side for every batch of 5 blocks, keeps only the event logs emitted by our Policy contract, and returns them as a compact envelope with the batch's block range.
 > The **destination** is a webhook on our dashboard server, which verifies each delivery's `X-QN-Signature` (HMAC-SHA256 over nonce, timestamp and body), rejects stale timestamps, decodes the Policy events, stores them idempotently by transaction hash and log index, and pushes them to the browser over server-sent events.
 > The Stream is created and updated by [`streams/scripts/quicknode-stream.ts`](streams/scripts/quicknode-stream.ts) through the Streams REST API, and the full design is in [`docs/quicknode-streams.md`](docs/quicknode-streams.md).
