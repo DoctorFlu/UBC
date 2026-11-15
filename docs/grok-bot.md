@@ -1,19 +1,20 @@
 # Grok Bot integration notes
 
 Status: documentation read on 2026-11-15 from docs.x.ai.
-The hands-on connection test is still open (issue #4) because it needs the Grok Bot desktop app.
+The web client at grok.com/bot was checked by hand the same day.
+The hands-on connection test is still open (issue #4) until the MCP server from issue #9 is running.
 
 ## What Grok Bot is
 
 Grok Bot is xAI's agent product: Bots that work on a shared cloud computer and keep running while your laptop is closed.
-It is used through a desktop app (macOS, Windows, Linux) and a mobile app.
-There is no web client.
+It is used through a web client at `https://grok.com/bot/<bot-id>`, a desktop app (macOS, Windows, Linux) and a mobile app.
+The documentation only describes the desktop and mobile apps, but the web client exists and has the same settings: **Connect Apps**, **Skills**, **Automations** and **Bots**.
 Premium, Super and Ultra plans on The X Subscription include it.
 Source: https://docs.x.ai/grok-bot/get-started.md and https://docs.x.ai/x-subscription/grok-bot.md
 
 ## How it connects to our MCP server
 
-In the desktop app, open **Connect apps** and choose **Add a custom connector** at the bottom.
+In the web client or the desktop app, open **Connect apps** and choose **Add a custom connector** at the bottom of the list.
 The dialog takes:
 
 - **Name**: any label, for example `Mandate`.
