@@ -29,8 +29,12 @@ export interface ConsoleConfig {
   mcpPublicUrl: string | null;
 }
 
-/** The default data directory: `dashboard/.data`, git-ignored. */
-export const DEFAULT_DATA_DIR = resolve(process.cwd(), ".data");
+/**
+ * The default data directory: `dashboard/.data`, git-ignored. `turbopackIgnore` keeps the bundler from
+ * tracing the folder as a dependency: under `next dev`, every SQLite write in it would otherwise
+ * trigger a rebuild and reload every open page.
+ */
+export const DEFAULT_DATA_DIR = resolve(/* turbopackIgnore: true */ process.cwd(), ".data");
 
 function positiveInt(name: string, value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === "") return fallback;
