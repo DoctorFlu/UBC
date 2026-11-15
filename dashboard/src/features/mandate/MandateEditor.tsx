@@ -76,7 +76,9 @@ export function MandateEditor({ rules, version }: MandateEditorProps) {
   const blocked = ownerBlockedReason(access);
   const base = rules ?? FIRST_MANDATE;
   const [draft, setDraft] = useState(() => draftFrom(base));
-  const [reviewing, setReviewing] = useState(false);
+  // The review dialog's title, fixed when it opens: signing a first mandate must not retitle the
+  // dialog to "new mandate" the moment the contract's event lands.
+  const [reviewing, setReviewing] = useState<string | null>(null);
   // When new rules land (signed here or elsewhere), an untouched draft follows them.
   const [baseline, setBaseline] = useState(base);
   if (baseline !== base && JSON.stringify(baseline) !== JSON.stringify(base)) {
@@ -135,7 +137,9 @@ export function MandateEditor({ rules, version }: MandateEditorProps) {
           className={styles.form}
           onSubmit={(event) => {
             event.preventDefault();
-            if (next && changes.length > 0) setReviewing(true);
+            if (next && changes.length > 0) {
+              setReviewing(rules ? "Review the new mandate" : "Review the first mandate");
+            }
           }}
         >
           <div className={styles.amounts}>
@@ -241,10 +245,10 @@ export function MandateEditor({ rules, version }: MandateEditorProps) {
 
       {next ? (
         <PolicyReview
-          open={reviewing}
-          onClose={() => setReviewing(false)}
+          open={reviewing !== null}
+          onClose={() => setReviewing(null)}
           next={next}
-          title={rules ? "Review the new mandate" : "Review the first mandate"}
+          title={reviewing ?? "Review the new mandate"}
         />
       ) : null}
     </div>
