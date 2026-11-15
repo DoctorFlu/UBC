@@ -47,7 +47,20 @@ describe.each(["legacy", "auto"] as const)("MCP round trip (%s era negotiation)"
     expect(listed.map((tool) => tool.name).sort()).toEqual(tools.map((tool) => tool.name).sort());
     const listedPing = listed.find((tool) => tool.name === "ping");
     expect(listedPing?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
-    expect(listedPing?.outputSchema).toMatchObject({ type: "object" });
+    // Output schemas are left out of the list by default: they are most of its size.
+    expect(listedPing?.outputSchema).toBeUndefined();
+    expect(listedPing?.inputSchema).toMatchObject({ type: "object" });
+  });
+
+  it("advertises output schemas when asked to", async () => {
+    const server = testServer({ env: { MCP_ADVERTISE_OUTPUT_SCHEMAS: "true" } });
+    const { tools: listed } = await (await connect(server, { era })).listTools();
+    for (const tool of listed) expect(tool.outputSchema).toMatchObject({ type: "object" });
+  });
+
+  it("keeps the whole tool list small enough for a chat agent to carry in every conversation", async () => {
+    const { tools: listed } = await (await connect(testServer(), { era })).listTools();
+    expect(JSON.stringify(listed).length).toBeLessThan(24_000);
   });
 
   it("calls ping and returns structured content plus a text summary", async () => {
