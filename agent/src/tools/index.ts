@@ -1,7 +1,19 @@
 import type { Tool } from "../mcp/tool";
 import { buySignal } from "./buy-signal";
+import { executePlan } from "./execute-plan";
+import { getActivity } from "./get-activity";
+import { getIntent } from "./get-intent";
+import { getLadder } from "./get-ladder";
+import { getPolicy } from "./get-policy";
+import { getPortfolio } from "./get-portfolio";
 import { getSetupState } from "./get-setup-state";
+import { listMarkets } from "./list-markets";
 import { ping } from "./ping";
+import { planHedge } from "./plan-hedge";
+import { proposeTrade } from "./propose-trade";
+import { requestPairing } from "./request-pairing";
+import { requestPolicyChange } from "./request-policy-change";
+import { simulateTrade } from "./simulate-trade";
 import { whoami } from "./whoami";
 
 /**
@@ -13,7 +25,19 @@ import { whoami } from "./whoami";
 // prettier-ignore
 export const tools: readonly Tool[] = [
   buySignal,
+  executePlan,
+  getActivity,
+  getIntent,
+  getLadder,
+  getPolicy,
+  getPortfolio,
   getSetupState,
+  listMarkets,
   ping,
+  planHedge,
+  proposeTrade,
+  requestPairing,
+  requestPolicyChange,
+  simulateTrade,
   whoami,
 ];

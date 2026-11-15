@@ -5,6 +5,8 @@
  *
  * The URL defaults to the local server; pass the tunnel URL to test through Cloudflare.
  * Set MCP_ERA=auto to negotiate the 2026-07-28 protocol instead of the 2025 initialize handshake.
+ *
+ * It calls only read-only tools. `npm run mcp:e2e` runs the whole trading flow on a local chain.
  */
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { loadEnvFile, resolveEnvFile } from "../src/env-file";
@@ -60,7 +62,8 @@ async function main(): Promise<void> {
   const { tools } = await client.listTools();
   process.stdout.write(`Tools: ${tools.map((tool) => tool.name).join(", ")}\n`);
 
-  for (const name of ["ping", "whoami", "get_setup_state"]) {
+  // Read-only tools only: a smoke run against a live server must never propose a trade.
+  for (const name of ["ping", "whoami", "get_setup_state", "get_policy", "get_portfolio", "get_activity"]) {
     const result = await client.callTool({ name, arguments: {} });
     if (result.isError === true) fail(`${name}: ${summaryOf(result)}`);
     process.stdout.write(

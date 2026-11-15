@@ -92,14 +92,19 @@ describe("routing and limits", () => {
     expect(await response.json()).toMatchObject({ error: { code: -32700 } });
   });
 
-  it("rate limits per token with 429 and Retry-After", async () => {
+  it("rate limits tool calls per token with 429 and Retry-After", async () => {
     const server = testServer({ limits: { rateLimit: { capacity: 3, refillPerSecond: 0.01 } } });
+    const call = { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "ping", arguments: {} } };
     const statuses: number[] = [];
     for (let i = 0; i < 5; i += 1) {
-      statuses.push((await post(server, initializeRequest, authHeader())).status);
+      statuses.push((await post(server, call, authHeader())).status);
     }
     expect(statuses).toEqual([200, 200, 200, 429, 429]);
-    const limited = await post(server, initializeRequest, authHeader());
+    const limited = await post(server, call, authHeader());
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    // The handshake a stateless client repeats before every call costs nothing.
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post(server, initializeRequest, authHeader())).status).toBe(200);
+    }
   });
 });

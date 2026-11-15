@@ -18,6 +18,7 @@ export const ENV_KEYS = [
   "MCP_LOG_LEVEL",
   "ARC_RPC_URL",
   "POLICY_ADDRESS",
+  "POLICY_DEPLOY_BLOCK",
   "AGENT_PRIVATE_KEY",
   "CONSOLE_URL",
   "CONSOLE_SERVICE_TOKEN",
@@ -51,7 +52,7 @@ export interface Limits {
   readonly maxBodyBytes: number;
   /** Default time budget for one tool call, in milliseconds. */
   readonly toolTimeoutMs: number;
-  /** Token bucket per bearer token: burst size and steady refill rate. */
+  /** Token bucket of tool calls per bearer token: burst size and steady refill rate. */
   readonly rateLimit: { readonly capacity: number; readonly refillPerSecond: number };
 }
 
@@ -66,6 +67,8 @@ export interface Config {
   /** Arc RPC endpoint. Wrapped because hosted endpoints embed an API key in the path. */
   readonly arcRpcUrl: Secret;
   readonly policyAddress: Address | undefined;
+  /** Block the Policy contract was deployed in, where event scans start. Unset: a recent window. */
+  readonly policyDeployBlock: bigint | undefined;
   readonly agentPrivateKey: Secret<Hex> | undefined;
   /** Public address derived from `agentPrivateKey` at startup. */
   readonly agentAddress: Address | undefined;
@@ -114,6 +117,10 @@ const EnvSchema = z.object({
     .string()
     .regex(/^0x[0-9a-fA-F]{40}$/, { message: "must be a 0x-prefixed 20-byte address" })
     .transform((value) => value as Address)
+    .optional(),
+  POLICY_DEPLOY_BLOCK: z
+    .string()
+    .regex(/^\d{1,15}$/, { message: "must be a block number" })
     .optional(),
   AGENT_PRIVATE_KEY: z
     .string()
@@ -175,6 +182,7 @@ export function parseConfig(
     allowedOrigins: vars.MCP_ALLOWED_ORIGINS,
     arcRpcUrl: new Secret(vars.ARC_RPC_URL),
     policyAddress: vars.POLICY_ADDRESS,
+    policyDeployBlock: vars.POLICY_DEPLOY_BLOCK === undefined ? undefined : BigInt(vars.POLICY_DEPLOY_BLOCK),
     agentPrivateKey: vars.AGENT_PRIVATE_KEY === undefined ? undefined : new Secret(vars.AGENT_PRIVATE_KEY),
     agentAddress,
     consoleUrl: vars.CONSOLE_URL,

@@ -14,9 +14,20 @@ npm run dev:mcp       # starts the server on http://127.0.0.1:8787/mcp and resta
 ```
 
 `npm run start:mcp` runs the server without the file watcher.
-In another terminal, `npm run mcp:smoke` connects with the official MCP SDK client, lists the tools and calls each one, the same way Grok Bot does.
+In another terminal, `npm run mcp:smoke` connects with the official MCP SDK client, lists the tools and calls the read-only ones, the same way Grok Bot does.
 Pass a URL to test a remote server, for example `npm run mcp:smoke -- https://<name>.trycloudflare.com`.
 Set `MCP_ERA=auto` to negotiate the 2026-07-28 protocol instead of the 2025 `initialize` handshake.
+
+### End-to-end run
+
+`npm run mcp:e2e` runs the whole agent flow against a real chain in one command, with nothing to configure and no `.env` read.
+For each Policy contract it starts anvil with a fresh deployment and the demo rules, an in-memory console backend (`testing/fake-console.ts`), and the real server as a child process, each on a free port.
+It then drives the server over HTTP with the official MCP SDK client, opening a new session for every call as Grok Bot does, against live public Gemini market data.
+The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts, `get_intent`, `get_activity` and `request_policy_change`.
+It also checks that no key or token reaches the server's logs.
+Pass `-- --contract production` or `-- --contract reference` to run one contract; the default runs both.
+On the reference contract, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain.
+It needs Foundry (`forge` and `anvil`) and network access to Gemini's public API.
 
 The server reads `.env` from the repo root, or the file named by `ENV_FILE`.
 Variables already set in the environment win over the file.
@@ -82,7 +93,8 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
   Localhost origins are allowed, and `MCP_ALLOWED_ORIGINS` adds more hostnames.
   Non-browser clients such as Grok's servers send no `Origin` and are unaffected.
 - **Limits.** Bodies over 256 KiB get `413`.
-  Each token has an in-memory token bucket (burst 60, 1 request per second sustained), and failed authentication attempts share a stricter bucket; both answer `429` with `Retry-After`.
+  Each token has an in-memory token bucket of tool calls (burst 60, 1 call per second sustained), and failed authentication attempts share a stricter bucket; both answer `429` with `Retry-After`.
+  Only `tools/call` requests count, because a stateless client spends three or four protocol requests on the handshake before every call.
   Each tool call has a time budget (20 s by default, `timeoutMs` per tool), after which its abort signal fires and the call returns `TIMEOUT`.
 - **Secrets.** Tokens, the agent key and the RPC URL (hosted RPC URLs embed an API key) are wrapped in `Secret`, which renders as `[redacted]` in `String()`, templates, `JSON.stringify` and `util.inspect`.
   Read the value only with `.reveal()` at the point of use.
@@ -101,8 +113,9 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 | `ARC_RPC_URL` | `https://rpc.testnet.arc.io` | policy reads and trades |
 | `POLICY_ADDRESS` | unset | policy reads and trades |
 | `AGENT_PRIVATE_KEY` | unset | trades |
-| `CONSOLE_URL` | `http://localhost:3000` | holdings and change requests |
-| `CONSOLE_SERVICE_TOKEN` | unset | holdings and change requests |
+| `POLICY_DEPLOY_BLOCK` | unset | rejection reasons in `get_intent` and `get_activity` (scans the last 200,000 blocks when unset) |
+| `CONSOLE_URL` | `http://localhost:3000` | holdings, pairing, plans, decision contexts and change requests |
+| `CONSOLE_SERVICE_TOKEN` | unset | holdings, pairing, plans, decision contexts and change requests |
 | `SIGNALS_URL` | `http://localhost:4021` | buying signals |
 | `X402_BUYER_PRIVATE_KEY` | unset | buying signals (pays from its Circle Gateway balance) |
 | `SIGNAL_DAILY_BUDGET_USDC` | `0.02` | buying signals: most spent per UTC day |
@@ -112,6 +125,47 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 Only `MCP_AUTH_TOKEN` is always required.
 `POLICY_ADDRESS`, `AGENT_PRIVATE_KEY` and `CONSOLE_SERVICE_TOKEN` are required only when a registered tool lists them in `requires`, so a partly configured server still starts and `get_setup_state` tells the owner what is missing.
 The repo-wide list is in [docs/configuration.md](../docs/configuration.md).
+
+## Tools
+
+Grok Bot is told the order of work in `src/instructions.ts`; every result carries a `nextAction` that names who acts next.
+
+| Tool | What it does |
+| --- | --- |
+| `get_setup_state` | Each setup step with the actor who must do it and a hint: key, contract, console link, chain, agent role, gas, rules, pause switch, pairing, holdings. |
+| `request_pairing` | Asks the console to pair this agent and returns the claim link for the owner. |
+| `get_policy` | The owner's rules, today's usage and the headroom left, plus which contract extensions exist. |
+| `get_portfolio` | The holdings the owner entered in the console, valued at Gemini spot. |
+| `list_markets` | Open Gemini events in the categories the mandate allows, by volume. |
+| `get_ladder` | One asset's strike ladder for a horizon, the rungs nearest spot first. |
+| `plan_hedge` | A hedge plan of NO buys for a holding and a drop, with payoffs and the verdict each order is expected to get; the plan is kept in the server and posted to the console. |
+| `simulate_trade` | The verdict a trade would get, from the contract's `previewTrade` when it has one and the server's copy of the rules otherwise, naming the rule. |
+| `propose_trade` | Proposes one trade with its decision context; the contract approves, rejects with a reason, or holds it for the owner. Safe to retry. |
+| `execute_plan` | Proposes a plan's orders in order, stops at the first rejection, and reports each rung. Safe to retry and resumable. |
+| `get_intent` | One intent's status, reason, fill and decision context, checked against its hash. |
+| `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged. |
+| `buy_signal` | Pays the signal API a fraction of a cent for a per-strike cheap, fair or expensive verdict, inside a daily budget; returns a `receiptId` that `plan_hedge` accepts. |
+| `request_policy_change` | Files a rule change with a reason for the owner to decide in the console; it can never touch the pause switch. |
+| `ping`, `whoami` | Liveness and the agent's address. |
+
+Amounts are integer cents, prices are 1 to 99 cents, `market` is a Gemini instrument symbol, and hedges buy NO.
+The category of a market is derived from Gemini, never taken from the agent.
+
+The agent key can only propose: no code path calls an owner or executor function, and `test/no-owner-calls.test.ts` proves it structurally.
+
+### Where state lives
+
+Grok Bot opens a fresh MCP session for every call, so state that spans calls lives in the server process.
+Plans stay executable for 30 minutes and are kept for 6 hours.
+Identical proposals within 10 minutes return the first result instead of trading twice.
+Both are lost on restart; the console keeps the plans and decision contexts it received.
+
+### Decision contexts
+
+Every proposal carries a decision-context document (the request, the reasons, the market data and the plan it came from), stored in the console under its keccak256 hash.
+When the contract has the 7-argument `proposeTrade`, the hash is also recorded onchain and the result says `contextHashRecorded: true`.
+On the production contract the result says `contextHashRecorded: false` and the document lives only offchain.
+If the console is down, documents wait in an in-process outbox and are sent with later proposals.
 
 ## Buying signals
 
@@ -143,15 +197,23 @@ src/
   secret.ts          Secret wrapper
   logger.ts          JSON-lines logger with redaction
   context.ts         AppContext and ToolContext (config, logger, clock, services)
-  services.ts        service interfaces later issues implement
+  services.ts        service interfaces and createServices
   instructions.ts    the operating brief sent at initialize
   capabilities.ts    which features the configuration supports
   http/              Hono app, bearer auth, rate limiter
   mcp/               tool framework, verdict envelope, untrusted text, MCP endpoint
   tools/             one file per tool, plus index.ts, the registry
+  chain/             the agent's view of the Policy contract and the event index
+  console/           HTTP client for the console's agent API
+  markets/           Gemini market data and symbol resolution
+  planning/          the hedge planner
+  trading/           proposals and decision contexts
+  state/             in-process plan store and proposal ledger
+  support/           failure mapping, rule explanations, formatting
   x402/              x402 buyer, signal payments, spend ledger, purchased-signal store
-scripts/             mcp:token, dev:tunnel, mcp:smoke, x402:*, signal:e2e
-test/                Vitest, offline
+scripts/             mcp:token, dev:tunnel, mcp:smoke, mcp:e2e, x402:*, signal:e2e
+testing/             in-memory console backend for tests and mcp:e2e
+test/                Vitest, offline except chain.test.ts, which starts anvil
 ```
 
 ## Add a tool
@@ -214,3 +276,4 @@ As a second line of defence, fields with sensitive names, 32-byte hex strings an
 
 `npm test` from the repo root runs the suite offline.
 It covers auth, health, routing and limits, a full MCP round trip with the SDK client in both protocol eras, tool failures and timeouts, the verdict and untrusted-text helpers, secret redaction, config validation, and the token script on a temporary `.env`.
+Each tool has contract tests against fake services in `test/tools/`, `test/mcp-tools.test.ts` runs the whole flow over MCP with a new session per call, and `test/chain.test.ts` proposes on both contracts on a local anvil.
