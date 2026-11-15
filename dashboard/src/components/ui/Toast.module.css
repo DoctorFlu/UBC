@@ -1,0 +1,114 @@
+.region {
+  position: fixed;
+  z-index: 50;
+  inset-block-end: max(var(--space-4), env(safe-area-inset-bottom));
+  inset-inline-end: var(--space-4);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-2);
+  width: min(24rem, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+}
+
+.toast {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  box-shadow: var(--shadow-float);
+  pointer-events: auto;
+  transition-property: opacity, translate;
+  transition-duration: var(--duration-slow);
+  transition-timing-function: var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    @starting-style {
+      translate: 0 0.75rem;
+    }
+  }
+}
+
+.lamp {
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-top: 0.4375rem;
+  border-radius: var(--radius-round);
+  background: var(--toast-lamp, var(--color-text-subtle));
+}
+
+.success {
+  --toast-lamp: var(--color-approved-lamp);
+}
+
+.held {
+  --toast-lamp: var(--color-held-lamp);
+}
+
+.danger {
+  --toast-lamp: var(--color-rejected-lamp);
+}
+
+.info {
+  --toast-lamp: var(--color-filled-lamp);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 0;
+  padding-block: var(--space-0-5);
+}
+
+.title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.description {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.close svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (hover: hover) {
+  .close:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+}
+
+@media (width < 40rem) {
+  .region {
+    inset-inline: var(--space-4);
+    width: auto;
+  }
+}

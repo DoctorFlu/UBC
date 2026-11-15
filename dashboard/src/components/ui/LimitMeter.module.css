@@ -1,0 +1,139 @@
+/*
+ * A rated circuit: the load against its rating, on a graduated rail. The fill is ink while the
+ * load is comfortable, amber from 80%, red at the rating.
+ */
+.meter {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  min-width: 0;
+}
+
+.reading {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.reading strong {
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+}
+
+.rail {
+  grid-column: 1 / -1;
+  position: relative;
+  height: 1.125rem;
+}
+
+.track {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-rule);
+}
+
+.fill {
+  height: 100%;
+  width: var(--load);
+  background: var(--meter-fill);
+  transition: width var(--duration-slow) var(--ease-out);
+}
+
+/* Graduations every 10%, a longer mark at 50% and at the rating. */
+.ticks {
+  position: absolute;
+  inset: 0.625rem 0 0;
+  height: 0.25rem;
+  background: repeating-linear-gradient(
+    to right,
+    var(--color-rule-strong) 0 1px,
+    transparent 1px calc(10% - 0.1px)
+  );
+  border-right: 1px solid var(--color-rule-strong);
+}
+
+.ticks::before,
+.ticks::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 0.5rem;
+  background: var(--color-text-subtle);
+}
+
+.ticks::before {
+  left: 50%;
+}
+
+.ticks::after {
+  right: -1px;
+}
+
+.foot {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.ok {
+  --meter-fill: var(--color-ink);
+}
+
+.warn {
+  --meter-fill: var(--color-held-lamp);
+}
+
+.over {
+  --meter-fill: var(--color-rejected-lamp);
+}
+
+.warn .foot .state {
+  color: var(--color-held-text);
+  font-weight: var(--weight-semibold);
+}
+
+.over .foot .state {
+  color: var(--color-rejected-text);
+  font-weight: var(--weight-semibold);
+}
+
+.compact .rail {
+  height: 0.75rem;
+}
+
+.compact .track {
+  height: 0.375rem;
+}
+
+.compact .ticks {
+  top: 0.4375rem;
+  height: 0.1875rem;
+}
+
+.compact .ticks::before,
+.compact .ticks::after {
+  height: 0.3125rem;
+}
+
+@media (forced-colors: active) {
+  .fill {
+    background: CanvasText;
+  }
+}

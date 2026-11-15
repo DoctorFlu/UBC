@@ -1,0 +1,177 @@
+/* The wrapper is the container the table adapts to, so it stacks inside narrow cards too. */
+.wrap {
+  container-type: inline-size;
+  overflow-x: auto;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+
+.wrap:focus-visible {
+  outline-offset: -2px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+}
+
+.caption {
+  padding: 0 var(--space-5) var(--space-3);
+  text-align: start;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-rule-strong);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.th:first-child,
+.td:first-child {
+  padding-inline-start: var(--space-5);
+}
+
+.th:last-child,
+.td:last-child {
+  padding-inline-end: var(--space-5);
+}
+
+.row:last-child .td {
+  border-bottom: 0;
+}
+
+.end {
+  text-align: end;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* Held rows take focus with a warm ground; settled rows recede. */
+.attention .td {
+  background: color-mix(in srgb, var(--color-held-soft) 60%, var(--color-surface));
+}
+
+.muted .td {
+  color: var(--color-text-muted);
+}
+
+@media (hover: hover) {
+  .row:not(.attention):hover .td {
+    background: var(--color-surface-sunken);
+  }
+}
+
+.empty {
+  padding: var(--space-4) var(--space-5);
+}
+
+/* Narrow containers: each row becomes a stacked record with its column labels inline. */
+/* The column that names the record keeps room to read; the others give way first. */
+.primary {
+  min-width: 12rem;
+}
+
+@container (width < 36rem) {
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .table .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--color-rule);
+  }
+
+  .table .row:last-child {
+    border-bottom: 0;
+  }
+
+  .table .td,
+  .table .td:first-child,
+  .table .td:last-child {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: 0;
+    border: 0;
+    text-align: end;
+  }
+
+  .table .td::before {
+    content: attr(data-label);
+    flex: none;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    text-align: start;
+  }
+
+  /* The primary cell leads the record: first, full width, no label. */
+  .table .td.primary {
+    display: block;
+    order: -1;
+    text-align: start;
+    font-weight: var(--weight-medium);
+  }
+
+  .table .td.primary::before {
+    content: none;
+  }
+
+  .table .td.actions {
+    display: block;
+    padding-top: var(--space-1);
+    text-align: start;
+  }
+
+  .table .td.actions::before {
+    content: none;
+  }
+
+  .table .td.actions:empty {
+    display: none;
+  }
+
+  .attention {
+    background: color-mix(in srgb, var(--color-held-soft) 60%, var(--color-surface));
+  }
+
+  .attention .td,
+  .row:hover .td {
+    background: transparent;
+  }
+
+  .caption {
+    padding-inline: var(--space-4);
+  }
+}

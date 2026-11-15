@@ -1,0 +1,75 @@
+/* A small square icon button: copy (the Copy and Copied icons cross-fade) or an icon link. */
+.iconButton {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  transition-property: background-color, color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+/* Extend the tap target without growing the visual. */
+.iconButton::after {
+  content: "";
+  position: absolute;
+  inset: -0.375rem -0.125rem;
+}
+
+@media (hover: hover) {
+  .iconButton:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+}
+
+.iconButton svg {
+  grid-area: 1 / 1;
+  width: 0.9375rem;
+  height: 0.9375rem;
+}
+
+/* Copy and Copied icons share one cell and cross-fade. */
+.iconButton .copied,
+.iconButton .copy {
+  transition-property: opacity, scale, filter;
+  transition-duration: var(--duration-slow);
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.iconButton .copied {
+  opacity: 0;
+  color: var(--color-approved-text);
+}
+
+.iconButton[data-copied] .copy {
+  opacity: 0;
+}
+
+.iconButton[data-copied] .copied {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .iconButton .copied {
+    scale: 0.25;
+    filter: blur(4px);
+  }
+
+  .iconButton[data-copied] .copy {
+    scale: 0.25;
+    filter: blur(4px);
+  }
+
+  .iconButton[data-copied] .copied {
+    scale: 1;
+    filter: blur(0);
+  }
+}

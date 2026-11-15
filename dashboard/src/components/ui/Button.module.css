@@ -1,0 +1,140 @@
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 2.5rem;
+  padding-inline: var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  user-select: none;
+  transition-property: background-color, border-color, color, scale;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+.button > svg {
+  flex: none;
+  width: 1.125em;
+  height: 1.125em;
+}
+
+/* Optical alignment: an icon on the leading side gets 2px less padding. */
+.button:has(> svg:first-child) {
+  padding-inline-start: calc(var(--space-4) - 2px);
+}
+
+.sm {
+  min-height: 2rem;
+  padding-inline: var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.sm:has(> svg:first-child) {
+  padding-inline-start: calc(var(--space-3) - 2px);
+}
+
+.lg {
+  min-height: 3rem;
+  padding-inline: var(--space-5);
+  font-size: var(--text-base);
+}
+
+.block {
+  width: 100%;
+}
+
+.iconOnly {
+  padding-inline: 0;
+  aspect-ratio: 1;
+}
+
+.iconOnly:has(> svg:first-child) {
+  padding-inline: 0;
+}
+
+.primary {
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+}
+
+.secondary {
+  background: var(--color-surface-raised);
+  border-color: var(--color-rule-strong);
+  color: var(--color-text);
+  box-shadow: var(--shadow-raised);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.danger {
+  background: var(--color-danger-solid);
+  color: var(--color-on-danger);
+}
+
+.dangerOutline {
+  background: var(--color-surface-raised);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+@media (hover: hover) {
+  .primary:not(:disabled):hover {
+    background: var(--color-ink-hover);
+  }
+
+  .secondary:not(:disabled):hover,
+  .ghost:not(:disabled):hover {
+    background: var(--color-surface-hover);
+  }
+
+  .danger:not(:disabled):hover {
+    background: var(--color-danger-solid-hover);
+  }
+
+  .dangerOutline:not(:disabled):hover {
+    background: var(--color-danger-soft);
+  }
+}
+
+.button:disabled,
+.button[aria-disabled="true"] {
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .button:not(:disabled):not([aria-disabled="true"]):active {
+    scale: 0.96;
+  }
+}
+
+/* Touch screens get a full tap target. */
+@media (pointer: coarse) {
+  .button {
+    min-height: var(--tap-target);
+  }
+
+  .sm {
+    min-height: 2.5rem;
+  }
+}
+
+.spinner {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
+  }
+}

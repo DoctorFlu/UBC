@@ -1,0 +1,105 @@
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.list {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--color-rule);
+  overscroll-behavior-x: contain;
+}
+
+.inset {
+  gap: 0;
+}
+
+.inset .list {
+  padding-inline: var(--space-3);
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 2.5rem;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  transition: color var(--duration-fast) ease-out;
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius-xs);
+}
+
+/* The selected tab sits on a 2px ink rule; selection also changes the text color, not color alone. */
+.tab[aria-selected="true"] {
+  color: var(--color-text);
+}
+
+.tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto var(--space-2) -1px;
+  height: 2px;
+  background: var(--color-ink);
+}
+
+@media (hover: hover) {
+  .tab:hover {
+    color: var(--color-text);
+  }
+}
+
+.count {
+  min-width: 1.25rem;
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-round);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.tab[aria-selected="true"] .count {
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+}
+
+.panel:focus-visible {
+  outline-offset: 4px;
+  border-radius: var(--radius-xs);
+}
+
+/* Narrow containers (a phone card): tighter tabs so a short set fits without scrolling. */
+@container (width < 30rem) {
+  .inset .list {
+    padding-inline: var(--space-1);
+  }
+
+  .tab {
+    gap: var(--space-1-5);
+    padding: 0 var(--space-2);
+  }
+}
+
+@media (pointer: coarse) {
+  .tab {
+    min-height: var(--tap-target);
+  }
+}
