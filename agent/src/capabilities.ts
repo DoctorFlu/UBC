@@ -2,23 +2,19 @@ import { isConfigured, type Config } from "./config";
 
 /** Which groups of features the current configuration can support. */
 export interface Capabilities {
-  /** Read the Policy contract: needs the RPC URL and the policy address. */
+  /** Read the Policy contract: needs the policy address (the RPC URL has a default). */
   readonly readPolicy: boolean;
   /** Submit trade intents: needs policy reads plus the agent key. */
   readonly proposeTrades: boolean;
-  /** Read holdings and send change requests to the console: needs its URL and service token. */
+  /** Read holdings and send change requests to the console: needs the console service token. */
   readonly console: boolean;
-  /** Buy signals: needs the signal API URL and the agent key that pays. */
-  readonly buySignals: boolean;
 }
 
 export function capabilitiesOf(config: Config): Capabilities {
-  const readPolicy = isConfigured(config, "ARC_RPC_URL") && isConfigured(config, "POLICY_ADDRESS");
-  const hasKey = isConfigured(config, "AGENT_PRIVATE_KEY");
+  const readPolicy = isConfigured(config, "POLICY_ADDRESS");
   return {
     readPolicy,
-    proposeTrades: readPolicy && hasKey,
-    console: isConfigured(config, "CONSOLE_URL") && isConfigured(config, "CONSOLE_SERVICE_TOKEN"),
-    buySignals: isConfigured(config, "SIGNALS_URL") && hasKey,
+    proposeTrades: readPolicy && isConfigured(config, "AGENT_PRIVATE_KEY"),
+    console: isConfigured(config, "CONSOLE_SERVICE_TOKEN"),
   };
 }

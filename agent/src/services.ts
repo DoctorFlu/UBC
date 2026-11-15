@@ -33,9 +33,9 @@ export interface ConsoleClient {
   readonly baseUrl: string;
 }
 
-/** Pays for signals from the agent's Gateway balance and enforces the daily tool budget (issue #21). */
+/** Pays for signals through the x402 buyer in `src/x402` and enforces the daily tool budget (issue #21). */
 export interface PaymentsClient {
-  /** Address that pays, which is the agent's own address. */
+  /** Address of the wallet that pays for signals. */
   readonly payer: Address;
 }
 

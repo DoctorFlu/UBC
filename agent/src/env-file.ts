@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-
-/** The monorepo root, where the shared `.env` lives. */
-export const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
+import { DEFAULT_ENV_FILE } from "@mandate/shared";
 
 /**
  * Path of the `.env` file: `ENV_FILE` if set (relative paths resolve against the directory the
@@ -11,7 +9,7 @@ export const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
  */
 export function resolveEnvFile(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env["ENV_FILE"]?.trim();
-  if (configured === undefined || configured === "") return path.join(REPO_ROOT, ".env");
+  if (configured === undefined || configured === "") return DEFAULT_ENV_FILE;
   // npm runs workspace scripts inside the package directory; INIT_CWD is where the user ran npm.
   return path.resolve(env["INIT_CWD"] ?? process.cwd(), configured);
 }

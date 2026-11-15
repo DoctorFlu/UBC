@@ -1,5 +1,6 @@
 import { privateKeyToAccount } from "viem/accounts";
 import * as z from "zod";
+import { ARC_TESTNET } from "@mandate/shared";
 import { Secret } from "./secret";
 
 /** Every environment variable the MCP server reads. */
@@ -20,19 +21,17 @@ export const ENV_KEYS = [
 export type EnvKey = (typeof ENV_KEYS)[number];
 
 /**
- * Variables a tool may declare in `requires`. When a registered tool requires one, the server
- * refuses to start without it. Everything else is optional so a partly configured server still
- * starts and `get_setup_state` can tell the owner what is missing.
+ * Variables without a default, which a tool may declare in `requires`. When a registered tool
+ * requires one, the server refuses to start without it. Otherwise they stay optional so a partly
+ * configured server still starts and `get_setup_state` can tell the owner what is missing.
  */
 export type OptionalEnvKey = Extract<
   EnvKey,
-  | "ARC_RPC_URL"
-  | "POLICY_ADDRESS"
-  | "AGENT_PRIVATE_KEY"
-  | "CONSOLE_URL"
-  | "CONSOLE_SERVICE_TOKEN"
-  | "SIGNALS_URL"
+  "POLICY_ADDRESS" | "AGENT_PRIVATE_KEY" | "CONSOLE_SERVICE_TOKEN"
 >;
+
+export const DEFAULT_CONSOLE_URL = "http://localhost:3000";
+export const DEFAULT_SIGNALS_URL = "http://localhost:4021";
 
 export const MIN_AUTH_TOKEN_LENGTH = 32;
 
@@ -58,14 +57,14 @@ export interface Config {
   /** Extra hostnames allowed in a browser `Origin` header, on top of localhost. */
   readonly allowedOrigins: readonly string[];
   /** Arc RPC endpoint. Wrapped because hosted endpoints embed an API key in the path. */
-  readonly arcRpcUrl: Secret | undefined;
+  readonly arcRpcUrl: Secret;
   readonly policyAddress: Address | undefined;
   readonly agentPrivateKey: Secret<Hex> | undefined;
   /** Public address derived from `agentPrivateKey` at startup. */
   readonly agentAddress: Address | undefined;
-  readonly consoleUrl: string | undefined;
+  readonly consoleUrl: string;
   readonly consoleServiceToken: Secret | undefined;
-  readonly signalsUrl: string | undefined;
+  readonly signalsUrl: string;
   readonly limits: Limits;
 }
 
@@ -101,7 +100,7 @@ const EnvSchema = z.object({
     )
     .default([]),
   MCP_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  ARC_RPC_URL: url("the Arc RPC").optional(),
+  ARC_RPC_URL: url("the Arc RPC").default(ARC_TESTNET.rpcUrl),
   POLICY_ADDRESS: z
     .string()
     .regex(/^0x[0-9a-fA-F]{40}$/, { message: "must be a 0x-prefixed 20-byte address" })
@@ -112,9 +111,9 @@ const EnvSchema = z.object({
     .regex(/^0x[0-9a-fA-F]{64}$/, { message: "must be a 0x-prefixed 32-byte hex private key" })
     .transform((value) => value as Hex)
     .optional(),
-  CONSOLE_URL: url("the console").optional(),
+  CONSOLE_URL: url("the console").default(DEFAULT_CONSOLE_URL),
   CONSOLE_SERVICE_TOKEN: z.string().min(16, { message: "must be at least 16 characters" }).optional(),
-  SIGNALS_URL: url("the signal API").optional(),
+  SIGNALS_URL: url("the signal API").default(DEFAULT_SIGNALS_URL),
 });
 
 export class ConfigError extends Error {
@@ -162,7 +161,7 @@ export function parseConfig(
     logLevel: vars.MCP_LOG_LEVEL,
     authToken: new Secret(vars.MCP_AUTH_TOKEN),
     allowedOrigins: vars.MCP_ALLOWED_ORIGINS,
-    arcRpcUrl: vars.ARC_RPC_URL === undefined ? undefined : new Secret(vars.ARC_RPC_URL),
+    arcRpcUrl: new Secret(vars.ARC_RPC_URL),
     policyAddress: vars.POLICY_ADDRESS,
     agentPrivateKey: vars.AGENT_PRIVATE_KEY === undefined ? undefined : new Secret(vars.AGENT_PRIVATE_KEY),
     agentAddress,
@@ -177,23 +176,16 @@ export function parseConfig(
 /** Whether an optional variable was provided. */
 export function isConfigured(config: Config, key: OptionalEnvKey): boolean {
   switch (key) {
-    case "ARC_RPC_URL":
-      return config.arcRpcUrl !== undefined;
     case "POLICY_ADDRESS":
       return config.policyAddress !== undefined;
     case "AGENT_PRIVATE_KEY":
       return config.agentPrivateKey !== undefined;
-    case "CONSOLE_URL":
-      return config.consoleUrl !== undefined;
     case "CONSOLE_SERVICE_TOKEN":
       return config.consoleServiceToken !== undefined;
-    case "SIGNALS_URL":
-      return config.signalsUrl !== undefined;
   }
 }
 
 /** The host part of the RPC URL, safe to show: hosted endpoints keep their API key in the path. */
-export function rpcHost(config: Config): string | undefined {
-  const raw = config.arcRpcUrl?.reveal();
-  return raw === undefined ? undefined : new URL(raw).host;
+export function rpcHost(config: Config): string {
+  return new URL(config.arcRpcUrl.reveal()).host;
 }

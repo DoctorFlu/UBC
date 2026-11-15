@@ -17,12 +17,6 @@ type SetupStep = z.infer<typeof SetupStepSchema>;
 export function setupSteps(config: Config): SetupStep[] {
   return [
     {
-      key: "chain_rpc",
-      done: isConfigured(config, "ARC_RPC_URL"),
-      actor: "owner",
-      hint: "Set ARC_RPC_URL in the server's .env file; the public Arc testnet RPC works.",
-    },
-    {
       key: "agent_key",
       done: isConfigured(config, "AGENT_PRIVATE_KEY"),
       actor: "owner",
@@ -36,9 +30,9 @@ export function setupSteps(config: Config): SetupStep[] {
     },
     {
       key: "console_link",
-      done: isConfigured(config, "CONSOLE_URL") && isConfigured(config, "CONSOLE_SERVICE_TOKEN"),
+      done: isConfigured(config, "CONSOLE_SERVICE_TOKEN"),
       actor: "owner",
-      hint: "Set CONSOLE_URL and CONSOLE_SERVICE_TOKEN in the server's .env file so the agent can read the holdings entered in the console.",
+      hint: "Set CONSOLE_SERVICE_TOKEN (and CONSOLE_URL if the console is not on localhost:3000) in the server's .env file so the agent can read the holdings entered in the console.",
     },
   ];
 }

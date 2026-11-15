@@ -30,27 +30,24 @@ describe("get_setup_state", () => {
     const { structured, summary } = await getSetupState.run({}, fakeContext());
     expect(structured).toMatchObject({ ready: false });
     expect(structured["steps"]).toEqual([
-      expect.objectContaining({ key: "chain_rpc", done: false, actor: "owner" }),
       expect.objectContaining({ key: "agent_key", done: false, actor: "owner" }),
       expect.objectContaining({ key: "policy_contract", done: false, actor: "owner" }),
       expect.objectContaining({ key: "console_link", done: false, actor: "owner" }),
     ]);
-    expect(summary).toMatch(/^0 of 4 setup steps done\. Next, owner: Set ARC_RPC_URL/);
+    expect(summary).toMatch(/^0 of 3 setup steps done\. Next, owner: Set AGENT_PRIVATE_KEY/);
   });
 
   it("reports ready when everything is configured", async () => {
     const { structured, summary } = await getSetupState.run(
       {},
       fakeContext({
-        ARC_RPC_URL: "https://rpc.testnet.arc.network",
         AGENT_PRIVATE_KEY: TEST_PRIVATE_KEY,
         POLICY_ADDRESS: TEST_POLICY,
-        CONSOLE_URL: "http://localhost:3000",
         CONSOLE_SERVICE_TOKEN: "console-service-token-123",
       }),
     );
     expect(structured["ready"]).toBe(true);
-    expect(summary).toBe("Setup is complete (4 of 4 steps done).");
+    expect(summary).toBe("Setup is complete (3 of 3 steps done).");
   });
 
   it("never suggests pasting a key into chat", async () => {
@@ -61,6 +58,11 @@ describe("get_setup_state", () => {
 });
 
 describe("whoami", () => {
+  it("reports the public Arc testnet RPC host when ARC_RPC_URL is not set", async () => {
+    const { structured } = await whoami.run({}, fakeContext());
+    expect(structured["chain"]).toEqual({ rpcHost: "rpc.testnet.arc.io" });
+  });
+
   it("derives capabilities from the configuration", async () => {
     const { structured } = await whoami.run(
       {},
@@ -74,7 +76,7 @@ describe("whoami", () => {
       agentAddress: TEST_ADDRESS,
       chain: { rpcHost: "rpc.testnet.arc.network" },
       policyAddress: TEST_POLICY,
-      capabilities: { readPolicy: true, proposeTrades: true, console: false, buySignals: false },
+      capabilities: { readPolicy: true, proposeTrades: true, console: false },
     });
   });
 

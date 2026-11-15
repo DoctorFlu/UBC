@@ -9,19 +9,18 @@ export const whoami = defineTool({
   name: "whoami",
   title: "Show this agent's identity",
   description:
-    "Returns this agent's public address on Arc, the chain RPC host and Policy contract it is configured for, and which capabilities are set up. Never returns keys.",
+    "Returns this agent's public address on Arc, the RPC host and Policy contract it is configured for, and which capabilities are set up. Never returns keys.",
   inputSchema: z.object({}),
   outputSchema: z.object({
     agentAddress: AddressSchema.nullable().describe(
       "The agent's public Arc address, or null if no agent key is set",
     ),
-    chain: z.object({ rpcHost: z.string().nullable() }),
+    chain: z.object({ rpcHost: z.string().describe("Host of the Arc RPC endpoint the server uses") }),
     policyAddress: AddressSchema.nullable(),
     capabilities: z.object({
       readPolicy: z.boolean(),
       proposeTrades: z.boolean(),
       console: z.boolean(),
-      buySignals: z.boolean(),
     }),
   }),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -34,7 +33,7 @@ export const whoami = defineTool({
     return {
       structured: {
         agentAddress: address,
-        chain: { rpcHost: rpcHost(config) ?? null },
+        chain: { rpcHost: rpcHost(config) },
         policyAddress: config.policyAddress ?? null,
         capabilities,
       },
