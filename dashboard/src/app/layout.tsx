@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { InlineScript } from "@/components/shell/InlineScript";
 import { ToastProvider } from "@/components/ui/Toast";
 import { themeBootScript } from "@/lib/theme";
 
@@ -29,9 +30,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     // server and client attributes can differ on purpose; that is the only suppressed mismatch.
     <html lang="en" className={`${monaSans.variable} ${martianMono.variable}`} suppressHydrationWarning>
       <head>
-        {/* A plain inline script runs before first paint. next/script with inline children makes React
-            render a <script> on the client, which it never executes and warns about. */}
-        <script id="theme-boot" dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+        {/* Runs before first paint. Not next/script: with inline children it makes React render a
+            <script> on the client, which React never executes and warns about. */}
+        <InlineScript id="theme-boot" html={themeBootScript} />
       </head>
       <body>
         <ToastProvider>{children}</ToastProvider>
