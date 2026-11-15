@@ -7,6 +7,8 @@ import { getSetupState } from "./get-setup-state";
 import { listMarkets } from "./list-markets";
 import { ping } from "./ping";
 import { planHedge } from "./plan-hedge";
+import { requestPairing } from "./request-pairing";
+import { simulateTrade } from "./simulate-trade";
 import { whoami } from "./whoami";
 
 /**
@@ -25,5 +27,7 @@ export const tools: readonly Tool[] = [
   listMarkets,
   ping,
   planHedge,
+  requestPairing,
+  simulateTrade,
   whoami,
 ];
