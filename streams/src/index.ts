@@ -9,3 +9,15 @@ export { FILTER_SCHEMA, StreamPayloadError, parseStreamBatch, parseStreamPayload
 export type { ArcLog, Hex, StreamBatch, StreamBatchInfo } from "./payload";
 export { FILTER_PATH, encodeFilter, readFilterTemplate, renderFilter } from "./filter-source";
 export type { FilterParameters } from "./filter-source";
+export {
+  ARC_BLOCK_TIME_SECONDS,
+  BUILD_PLAN_MONTHLY_CREDITS,
+  LOGS_CREDITS_PER_BLOCK,
+  MAX_UNCONFIRMED_BACKFILL_BLOCKS,
+  blocksPerDay,
+  creditsBetween,
+  creditsForBlocks,
+  creditsPerDay,
+  estimateBackfill,
+} from "./budget";
+export type { BackfillEstimate } from "./budget";
