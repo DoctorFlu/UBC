@@ -67,11 +67,17 @@ export interface ContractInfo {
   recordsContextHash: boolean | null;
 }
 
-/** The agent's sealed reason for one intent, checked against the hash the contract recorded. */
+/**
+ * Where the hash an intent's reason is checked against comes from: its `IntentProposed` event
+ * ("onchain"), or the agent's link through the agent API on contracts that record none ("offchain").
+ */
+export type SealedSource = "onchain" | "offchain";
+
+/** The agent's sealed reason for one intent, checked with `verifyContext` against the hash from `source`. */
 export type SealedReason =
-  | { status: "verified"; hash: Hex; document: DecisionContext; storedAt: string }
-  | { status: "tampered"; hash: Hex; storedAt: string }
-  | { status: "not_stored"; hash: Hex };
+  | { status: "verified"; source: SealedSource; hash: Hex; document: DecisionContext; storedAt: string }
+  | { status: "tampered"; source: SealedSource; hash: Hex; storedAt: string }
+  | { status: "not_stored"; source: SealedSource; hash: Hex };
 
 export interface ChainView {
   /** Newest block read, with its timestamp in unix seconds: "today" follows the chain's clock. */
@@ -92,7 +98,7 @@ export interface ChainView {
   policyVersion: number;
   /** The `PolicyUpdated` event of the rules in force. */
   policySetBy: { blockNumber: number; timestamp: number; txHash: Hex } | null;
-  /** Sealed reasons by intent id, for intents whose proposal recorded a non-zero context hash. */
+  /** Sealed reasons by intent id, for intents with a context hash onchain or linked offchain. */
   sealed: Record<number, SealedReason>;
 }
 

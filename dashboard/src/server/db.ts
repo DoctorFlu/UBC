@@ -13,7 +13,7 @@ import type { DatabaseSync } from "node:sqlite";
  * - a cache of Policy contract events, keyed by deployment, transaction hash and log index, so
  *   repeated deliveries are ignored and a restart resumes instead of rescanning the chain;
  * - the offchain records the console is the system of record for: holdings, decision contexts, hedge
- *   plans, policy change requests and agent pairing.
+ *   plans, policy change requests, agent pairing and intent-to-context links.
  */
 export type Database = DatabaseSync;
 
@@ -88,6 +88,17 @@ const MIGRATIONS: readonly string[] = [
     announced_at   TEXT NOT NULL,
     confirmed_at   TEXT,
     confirmed_by   TEXT
+  ) STRICT;
+  `,
+  // 2: which decision context explains which intent, for contracts that record no contextHash onchain.
+  `
+  CREATE TABLE intent_context_links (
+    deployment_id TEXT    NOT NULL,
+    intent_id     INTEGER NOT NULL,
+    hash          TEXT    NOT NULL,
+    tx_hash       TEXT    NOT NULL,
+    linked_at     TEXT    NOT NULL,
+    PRIMARY KEY (deployment_id, intent_id)
   ) STRICT;
   `,
 ];

@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   type Intent,
+  type IntentView,
   type PolicyEvent,
   type PolicyViewState,
   type Roles,
@@ -12,9 +13,6 @@ import {
   decodePolicyLogs,
   emptyPolicyViewState,
   intentsMissingDetails,
-  listIntents,
-  lossTodayCents,
-  mergeIntentDetails,
   reduceEvents,
   toSafeNumber,
   verifyContext,
@@ -31,8 +29,11 @@ import type {
   ContractKind,
   FeedHealth,
   FeedStatus,
+  PairingView,
   SealedReason,
+  SealedSource,
 } from "@/lib/live/types";
+import { buildChainView } from "@/lib/live/chain-view";
 import { OWNER_REQUEST_MAX_AGE_MS } from "@/lib/owner-request";
 
 import type { ConsoleConfig } from "./config";
@@ -41,7 +42,7 @@ import { type ChainClient, LogScanner, blockTimestamps, findDeployBlock } from "
 import { UNCONFIGURED_NETWORK, deploymentFileStamp, resolveDeployment } from "./ingest/deployment";
 import { StreamReceiver } from "./ingest/stream";
 import { EventStore, type IngestSource } from "./store/events";
-import { OffchainStore } from "./store/offchain";
+import { OffchainStore, type StoredIntentContextLink, type StoredPairing } from "./store/offchain";
 
 export interface Logger {
   info: (message: string) => void;
@@ -519,17 +520,7 @@ export class ConsoleService {
       offchain: {
         holdings: holdings.holdings,
         holdingsUpdatedAt: holdings.updatedAt,
-        pairing: pairing
-          ? {
-              agentAddress: pairing.agentAddress,
-              agentName: pairing.agentName,
-              serverVersion: pairing.serverVersion,
-              status: pairing.status,
-              announcedAt: pairing.announcedAt,
-              confirmedAt: pairing.confirmedAt,
-              isContractAgent: this.roles ? isAddressEqual(this.roles.agent, pairing.agentAddress) : false,
-            }
-          : null,
+        pairing: pairing ? this.toPairingView(pairing) : null,
         changeRequests: this.offchain.changeRequests(),
         latestPlan: plan ? { planId: plan.planId, asset: plan.asset, storedAt: plan.storedAt } : null,
       },
@@ -538,67 +529,72 @@ export class ConsoleService {
     return this.snapshotCache;
   }
 
-  private chainView(head: { blockNumber: number; timestamp: number }): ChainView {
-    const state = this.state;
-    const intents = listIntents(state).map((intent) => {
-      const stored = this.details.get(intent.id);
-      return stored && (intent.market === null || intent.category === null)
-        ? mergeIntentDetails(intent, stored)
-        : intent;
-    });
-    const policyEvents = state.events.filter((event) => event.type === "PolicyUpdated");
-    const lastPolicy = policyEvents.at(-1);
+  /** The pairing an agent announced from this address, as the console shows it, or null. */
+  pairingView(agentAddress: string): PairingView | null {
+    const pairing = this.offchain.pairing(agentAddress);
+    return pairing ? this.toPairingView(pairing) : null;
+  }
+
+  private toPairingView(pairing: StoredPairing): PairingView {
     return {
-      head,
-      rules: state.rules,
-      paused: state.paused,
-      committedCents: state.committedCents,
-      lossTodayCents: lossTodayCents(state, head.timestamp),
-      realizedPnlCents: state.realizedPnlCents,
-      rejectionsByReason: state.rejectionsByReason,
-      counts: state.counts,
-      intents,
-      events: state.events,
-      policyVersion: policyEvents.length,
-      policySetBy: lastPolicy
-        ? {
-            blockNumber: lastPolicy.blockNumber,
-            timestamp: lastPolicy.blockTimestamp,
-            txHash: lastPolicy.transactionHash,
-          }
-        : null,
-      sealed: this.sealedReasons(intents),
+      agentAddress: pairing.agentAddress,
+      agentName: pairing.agentName,
+      serverVersion: pairing.serverVersion,
+      status: pairing.status,
+      announcedAt: pairing.announcedAt,
+      confirmedAt: pairing.confirmedAt,
+      isContractAgent: this.roles ? isAddressEqual(this.roles.agent, pairing.agentAddress) : false,
     };
   }
 
-  /** Checks each recorded context hash against the document stored for it. */
-  private sealedReasons(
-    intents: readonly { id: number; contextHash: Hex | null }[],
-  ): Record<number, SealedReason> {
+  private chainView(head: { blockNumber: number; timestamp: number }): ChainView {
+    const view = buildChainView(this.state, head, this.details);
+    return { ...view, sealed: this.sealedReasons(view.intents) };
+  }
+
+  /**
+   * Resolves each intent's sealed reason: the `contextHash` its `IntentProposed` event carried when the
+   * contract records one, otherwise the agent's offchain link (PUT intents/:id/context) when its
+   * transaction is the intent's proposal. Either way the stored document is checked with `verifyContext`.
+   */
+  private sealedReasons(intents: readonly IntentView[]): Record<number, SealedReason> {
+    const session = this.session;
+    const links = session
+      ? this.offchain.intentContextLinks(session.id)
+      : new Map<number, StoredIntentContextLink>();
+    const claims: { id: number; hash: Hex; source: SealedSource }[] = [];
+    for (const intent of intents) {
+      if (intent.contextHash !== null && intent.contextHash.toLowerCase() !== ZERO_HASH) {
+        claims.push({ id: intent.id, hash: intent.contextHash, source: "onchain" });
+        continue;
+      }
+      const link = links.get(intent.id);
+      if (link && link.txHash.toLowerCase() === intent.proposedTxHash.toLowerCase()) {
+        claims.push({ id: intent.id, hash: link.hash, source: "offchain" });
+      }
+    }
+    const stored = this.offchain.contexts(claims.map((claim) => claim.hash));
     const sealed: Record<number, SealedReason> = {};
-    const withHash = intents.filter(
-      (intent): intent is { id: number; contextHash: Hex } =>
-        intent.contextHash !== null && intent.contextHash.toLowerCase() !== ZERO_HASH,
-    );
-    const stored = this.offchain.contexts(withHash.map((intent) => intent.contextHash));
-    for (const intent of withHash) {
-      const context = stored.get(intent.contextHash.toLowerCase());
+    for (const { id, hash, source } of claims) {
+      const context = stored.get(hash.toLowerCase());
       if (!context) {
-        sealed[intent.id] = { status: "not_stored", hash: intent.contextHash };
+        sealed[id] = { status: "not_stored", source, hash };
         continue;
       }
       const document = decisionContextSchema.safeParse(context.document);
-      sealed[intent.id] =
-        document.success && verifyContext(document.data, intent.contextHash)
-          ? {
-              status: "verified",
-              hash: intent.contextHash,
-              document: document.data,
-              storedAt: context.storedAt,
-            }
-          : { status: "tampered", hash: intent.contextHash, storedAt: context.storedAt };
+      sealed[id] =
+        document.success && verifyContext(document.data, hash)
+          ? { status: "verified", source, hash, document: document.data, storedAt: context.storedAt }
+          : { status: "tampered", source, hash, storedAt: context.storedAt };
     }
     return sealed;
+  }
+
+  // ---------------------------------------------------------------- intent context links
+
+  /** The live deployment's id, for records that belong to one deployment; null while there is none. */
+  get deploymentId(): string | null {
+    return this.session?.id ?? null;
   }
 }
 

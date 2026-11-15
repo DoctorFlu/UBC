@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { planHedge } from "@mandate/planner";
 import {
   CONSOLE_AGENT_ROUTES,
+  Category,
   type DecisionContext,
   consoleErrorSchema,
   contextResponseSchema,
   hashContext,
   holdingsResponseSchema,
+  intentContextResponseSchema,
   pairingResponseSchema,
   planResponseSchema,
   policyChangeRequestSchema,
@@ -19,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { GET as holdingsRoute } from "@/app/api/agent/v1/holdings/route";
 
-import { type TestChain, startTestChain } from "../../../test/support/devchain";
+import { BTC_ABOVE_66K, type TestChain, startTestChain } from "../../../test/support/devchain";
 import type { ConsoleConfig } from "../config";
 import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
@@ -27,11 +29,13 @@ import { openDatabase } from "../db";
 import {
   getContext,
   getHoldings,
+  getIntentContext,
   getPairing,
   getPolicyChangeRequest,
   postPlan,
   postPolicyChangeRequest,
   putContext,
+  putIntentContext,
   putPairing,
 } from "./agent-api";
 
@@ -436,6 +440,128 @@ describe("agent API: pairing", () => {
       ),
       422,
       "invalid_body",
+    );
+  });
+});
+
+describe("agent API: intent to context links", () => {
+  let chain: TestChain;
+  let service: ConsoleService;
+
+  beforeAll(async () => {
+    // The production contract records no contextHash onchain: the link is the only way to seal a reason.
+    chain = await startTestChain({ contract: "production" });
+    service = makeService({ env: chain.env });
+    service.start();
+    if (!(await service.whenSynced(15_000))) throw new Error("the console did not sync");
+  }, 60_000);
+
+  afterAll(async () => {
+    await service.stop();
+    await chain.stop();
+  });
+
+  const propose = () =>
+    chain.agent.proposeTrade({
+      market: BTC_ABOVE_66K,
+      category: Category.Crypto,
+      outcome: "NO",
+      isBuy: true,
+      amountCents: 1_000,
+      limitPrice: 31,
+    });
+  const link = (intentId: number | string, body: unknown) =>
+    putIntentContext(call("PUT", CONSOLE_AGENT_ROUTES.intentContext(intentId), body), service, {
+      intentId: String(intentId),
+    });
+  const sealedOf = async (intentId: number) => {
+    await expect
+      .poll(() => service.snapshot().chain?.intents.some((intent) => intent.id === intentId))
+      .toBe(true);
+    return service.snapshot().chain?.sealed[intentId];
+  };
+
+  it("links an intent once, idempotently, and shows the reason as recorded offchain and verified", async () => {
+    const proposal = await propose();
+    const hash = hashContext(context);
+    await putContext(call("PUT", CONSOLE_AGENT_ROUTES.context(hash), { document: context }), service, {
+      hash,
+    });
+
+    const created = await link(proposal.intentId, { hash, txHash: proposal.txHash });
+    expect(created.status).toBe(201);
+    expect(intentContextResponseSchema.parse(await created.json())).toMatchObject({
+      intentId: proposal.intentId,
+      hash,
+      txHash: proposal.txHash,
+    });
+    const again = await link(proposal.intentId, { hash, txHash: proposal.txHash });
+    expect(again.status).toBe(200);
+
+    const read = await getIntentContext(
+      call("GET", CONSOLE_AGENT_ROUTES.intentContext(proposal.intentId)),
+      service,
+      { intentId: String(proposal.intentId) },
+    );
+    expect(intentContextResponseSchema.parse(await read.json()).hash).toBe(hash);
+    expect(await sealedOf(proposal.intentId)).toMatchObject({ status: "verified", source: "offchain", hash });
+  });
+
+  it("refuses a different hash for a linked intent with 409 conflict", async () => {
+    const proposal = await propose();
+    const hash = hashContext(context);
+    expect((await link(proposal.intentId, { hash, txHash: proposal.txHash })).status).toBe(201);
+    await expectError(
+      await link(proposal.intentId, { hash: `0x${"ef".repeat(32)}`, txHash: proposal.txHash }),
+      409,
+      "conflict",
+    );
+  });
+
+  it("says not stored when the linked document is missing, and ignores a link to another transaction", async () => {
+    const missing = await propose();
+    const unknownHash = `0x${"ab".repeat(32)}`;
+    await link(missing.intentId, { hash: unknownHash, txHash: missing.txHash });
+    expect(await sealedOf(missing.intentId)).toMatchObject({ status: "not_stored", source: "offchain" });
+
+    const elsewhere = await propose();
+    await link(elsewhere.intentId, { hash: hashContext(context), txHash: missing.txHash });
+    expect(await sealedOf(elsewhere.intentId)).toBeUndefined();
+  });
+
+  it("answers 404, 422 and 401 where it should", async () => {
+    await expectError(
+      await getIntentContext(call("GET", CONSOLE_AGENT_ROUTES.intentContext(9_999)), service, {
+        intentId: "9999",
+      }),
+      404,
+      "not_found",
+    );
+    const tx = `0x${"12".repeat(32)}`;
+    const hash = `0x${"34".repeat(32)}`;
+    await expectError(await link("-1", { hash, txHash: tx }), 422, "invalid_parameter");
+    await expectError(await link("01", { hash, txHash: tx }), 422, "invalid_parameter");
+    await expectError(await link(0, { hash }), 422, "invalid_body");
+    await expectError(await link(0, { hash, txHash: tx, extra: 1 }), 422, "invalid_body");
+    const unsigned = await putIntentContext(
+      call("PUT", CONSOLE_AGENT_ROUTES.intentContext(0), { hash, txHash: tx }, null),
+      service,
+      { intentId: "0" },
+    );
+    await expectError(unsigned, 401, "unauthorized");
+  });
+
+  it("answers 503 before the console follows a contract", async () => {
+    const idle = makeService();
+    const tx = `0x${"12".repeat(32)}`;
+    await expectError(
+      await putIntentContext(
+        call("PUT", CONSOLE_AGENT_ROUTES.intentContext(0), { hash: tx, txHash: tx }),
+        idle,
+        { intentId: "0" },
+      ),
+      503,
+      "chain_unavailable",
     );
   });
 });

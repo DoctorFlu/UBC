@@ -34,6 +34,28 @@ export interface StoredPlan {
   storedAt: string;
 }
 
+export interface StoredIntentContextLink {
+  intentId: number;
+  hash: Hex;
+  txHash: Hex;
+  linkedAt: string;
+}
+
+export type LinkResult =
+  | { ok: true; link: StoredIntentContextLink; created: boolean }
+  | { ok: false; existing: StoredIntentContextLink };
+
+interface LinkRow {
+  intent_id: number;
+  hash: Hex;
+  tx_hash: Hex;
+  linked_at: string;
+}
+
+function linkFromRow(row: LinkRow): StoredIntentContextLink {
+  return { intentId: row.intent_id, hash: row.hash, txHash: row.tx_hash, linkedAt: row.linked_at };
+}
+
 export type PairingStatus = "pending" | "confirmed";
 
 export interface StoredPairing {
@@ -119,6 +141,41 @@ export class OffchainStore {
       if (context) found.set(hash, context);
     }
     return found;
+  }
+
+  // ---------------------------------------------------------------- intent to context links
+
+  /**
+   * Links an intent of one deployment to its decision-context hash. The same link again is a no-op;
+   * a different hash for a linked intent is refused, so a link can never be rewritten after the fact.
+   */
+  linkIntentContext(deploymentId: string, intentId: number, hash: Hex, txHash: Hex): LinkResult {
+    const key = hash.toLowerCase() as Hex;
+    const tx = txHash.toLowerCase() as Hex;
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO intent_context_links (deployment_id, intent_id, hash, tx_hash, linked_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(deploymentId, intentId, key, tx, this.now().toISOString());
+    const link = this.intentContextLink(deploymentId, intentId);
+    if (!link) throw new Error(`intent context link ${String(intentId)} vanished after insert`);
+    if (link.hash !== key || link.txHash !== tx) return { ok: false, existing: link };
+    return { ok: true, link, created: Number(result.changes) > 0 };
+  }
+
+  intentContextLink(deploymentId: string, intentId: number): StoredIntentContextLink | null {
+    const row = this.db
+      .prepare("SELECT * FROM intent_context_links WHERE deployment_id = ? AND intent_id = ?")
+      .get(deploymentId, intentId) as LinkRow | undefined;
+    return row ? linkFromRow(row) : null;
+  }
+
+  intentContextLinks(deploymentId: string): Map<number, StoredIntentContextLink> {
+    const rows = this.db
+      .prepare("SELECT * FROM intent_context_links WHERE deployment_id = ?")
+      .all(deploymentId) as unknown as LinkRow[];
+    return new Map(rows.map((row) => [row.intent_id, linkFromRow(row)]));
   }
 
   // ---------------------------------------------------------------- hedge plans

@@ -6,12 +6,14 @@ import {
   decisionContextSchema,
   hashContext,
   holdingsResponseSchema,
+  intentContextResponseSchema,
   pairingResponseSchema,
   planResponseSchema,
   policyChangeRequestSchema,
   postPlanRequestSchema,
   postPolicyChangeRequestSchema,
   putContextRequestSchema,
+  putIntentContextRequestSchema,
   putPairingRequestSchema,
   verifyContext,
 } from "@mandate/shared";
@@ -151,6 +153,62 @@ export const getPolicyChangeRequest = agentRoute((_request, service, params) => 
     );
   }
   return Promise.resolve(json(policyChangeRequestSchema.parse(found)));
+});
+
+// ------------------------------------------------------------------ intent to context links
+
+function intentIdParam(value: string | undefined): number | null {
+  if (value === undefined || !/^(0|[1-9]\d{0,15})$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+/**
+ * Links an intent to the decision context that explains it, for contracts that record no
+ * `contextHash` onchain. Links belong to the live deployment, so a reset chain starts with none.
+ */
+export const putIntentContext = agentRoute(async (request, service, params) => {
+  const intentId = intentIdParam(params.intentId);
+  if (intentId === null) {
+    return apiError(422, "invalid_parameter", "The intent id must be a whole number, starting at 0.");
+  }
+  const body = await readBody(request, putIntentContextRequestSchema);
+  if (!body.ok) return body.response;
+  const deploymentId = service.deploymentId;
+  if (!deploymentId) {
+    return apiError(
+      503,
+      "chain_unavailable",
+      "The console is not following a Policy contract yet. Try again shortly.",
+    );
+  }
+  const result = service.offchain.linkIntentContext(deploymentId, intentId, body.data.hash, body.data.txHash);
+  if (!result.ok) {
+    return apiError(
+      409,
+      "conflict",
+      `Intent ${String(intentId)} is already linked to context ${result.existing.hash} from transaction ${result.existing.txHash}.`,
+    );
+  }
+  if (result.created) service.changed();
+  return json(intentContextResponseSchema.parse(result.link), result.created ? 201 : 200);
+});
+
+export const getIntentContext = agentRoute((_request, service, params) => {
+  const intentId = intentIdParam(params.intentId);
+  if (intentId === null) {
+    return Promise.resolve(
+      apiError(422, "invalid_parameter", "The intent id must be a whole number, starting at 0."),
+    );
+  }
+  const deploymentId = service.deploymentId;
+  const link = deploymentId ? service.offchain.intentContextLink(deploymentId, intentId) : null;
+  if (!link) {
+    return Promise.resolve(
+      apiError(404, "not_found", `Intent ${String(intentId)} has no linked decision context.`),
+    );
+  }
+  return Promise.resolve(json(intentContextResponseSchema.parse(link)));
 });
 
 // ------------------------------------------------------------------ pairing
