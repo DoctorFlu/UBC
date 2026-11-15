@@ -7,7 +7,8 @@
  *   --sell     propose a sell instead of a buy
  *   --amount   dollars, for example 10 or 22.50 (default 10)
  *   --price    limit price in cents, 1 to 99 (default 65)
- *   --preview  only ask the contract what it would decide, without sending a transaction
+ *   --preview  only report what the contract would decide, without sending a transaction (uses the
+ *              contract's previewTrade when it has one, otherwise the offchain evaluator)
  *
  * Uses the devchain agent account, or AGENT_PRIVATE_KEY when POLICY_ADDRESS points at Arc testnet.
  */
@@ -97,10 +98,18 @@ async function main(): Promise<void> {
   );
 
   if (values.preview) {
-    console.log(describe(await client.previewTrade(intent)));
+    const preview = await client.previewTrade(intent);
+    const source =
+      preview.source === "contract"
+        ? "from the contract's previewTrade"
+        : "simulated offchain: this contract has no previewTrade";
+    console.log(`${describe(preview)} [${source}]`);
   } else {
     const result = await client.proposeTrade(intent);
     console.log(`Intent #${result.intentId}: ${describe(result)}`);
+    if (!result.contextHashRecorded) {
+      console.log("This contract has no contextHash overload, so no decision context hash was recorded.");
+    }
     console.log(`Transaction ${result.txHash} in block ${result.blockNumber}`);
     const link = chainExplorerTxUrl(deployment.chain, result.txHash);
     if (link) console.log(link);

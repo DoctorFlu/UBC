@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -35,13 +36,38 @@ export function foundryBinary(tool: "anvil" | "forge"): string {
   }
 }
 
-/** Compiles `contracts/` with forge into `out/`. Forge caches, so repeated calls are fast. */
-export function buildContracts(): void {
-  const result = spawnSync(foundryBinary("forge"), ["build", "--root", DEVCHAIN_DIR], {
-    cwd: DEVCHAIN_DIR,
-    encoding: "utf8",
-  });
+/** The repo's production contracts project (`/contracts`), compiled read only. */
+export const CONTRACTS_DIR = fileURLToPath(new URL("../../contracts", import.meta.url));
+
+/** Where the production `Policy.sol` build goes. Kept under devchain so nothing is written in `/contracts`. */
+export const PRODUCTION_OUT_DIR = join(DEVCHAIN_DIR, "out", "production");
+const PRODUCTION_CACHE_DIR = join(DEVCHAIN_DIR, "cache", "production");
+
+function forge(args: string[], cwd: string): void {
+  const result = spawnSync(foundryBinary("forge"), ["build", ...args], { cwd, encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(`forge build failed:\n${result.stderr || result.stdout}`);
   }
+}
+
+/**
+ * Compiles both Policy contracts. Forge caches, so repeated calls are fast.
+ * - The devchain reference (`devchain/contracts/PolicyReference.sol`) into `devchain/out/`.
+ * - The production contract (`contracts/src/Policy.sol`) as is, with its own `foundry.toml`, into
+ *   `devchain/out/production/`.
+ */
+export function buildContracts(): void {
+  forge(["--root", DEVCHAIN_DIR], DEVCHAIN_DIR);
+  forge(
+    [
+      join("src", "Policy.sol"),
+      "--root",
+      CONTRACTS_DIR,
+      "--out",
+      PRODUCTION_OUT_DIR,
+      "--cache-path",
+      PRODUCTION_CACHE_DIR,
+    ],
+    CONTRACTS_DIR,
+  );
 }

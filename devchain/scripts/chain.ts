@@ -1,8 +1,14 @@
 /**
- * `npm run dev:chain`: starts anvil with Arc testnet's chain id, deploys the reference Policy contract,
- * seeds the demo policy and writes devchain/deployments/local.json. Runs until Ctrl+C.
+ * `npm run dev:chain [-- --contract production|reference]`: starts anvil with Arc testnet's chain id,
+ * deploys a Policy contract, seeds the demo rules and writes devchain/deployments/local.json.
+ * Runs until Ctrl+C.
+ *
+ *   --contract production  `contracts/src/Policy.sol` as is (default): what will run on Arc.
+ *   --contract reference   `devchain/contracts/PolicyReference.sol`: the same rules plus the requested
+ *                          extensions (IntentProposed, contextHash, previewTrade).
  */
 import { existsSync, unlinkSync } from "node:fs";
+import { parseArgs } from "node:util";
 import { categoryLabel, categoriesFromMask, formatCents } from "@mandate/shared";
 import { LOCAL_DEPLOYMENT_PATH } from "@mandate/shared/node";
 import {
@@ -11,34 +17,50 @@ import {
   deploymentRecord,
   deployPolicy,
   devPolicyClient,
+  isPolicyContractKind,
+  POLICY_CONTRACTS,
   startAnvil,
   writeDeploymentFile,
 } from "../src";
 
+const { values } = parseArgs({
+  options: { contract: { type: "string", default: process.env.DEVCHAIN_CONTRACT ?? "production" } },
+});
+const contract = values.contract;
+if (!isPolicyContractKind(contract)) {
+  console.error(`--contract must be one of ${POLICY_CONTRACTS.join(", ")}, got "${contract}"`);
+  process.exit(1);
+}
 const port = Number(process.env.DEVCHAIN_PORT ?? 8545);
 
-console.log("Compiling contracts/PolicyReference.sol with forge...");
+console.log("Compiling contracts/src/Policy.sol and devchain/contracts/PolicyReference.sol with forge...");
 buildContracts();
 
 console.log(`Starting anvil on 127.0.0.1:${port}...`);
 const anvil = await startAnvil({ port });
 
-const deployment = await deployPolicy({ rpcUrl: anvil.rpcUrl });
-const owner = devPolicyClient(anvil.rpcUrl, deployment.address, "owner");
-await owner.setPolicy(DEMO_POLICY);
+const deployment = await deployPolicy({ rpcUrl: anvil.rpcUrl, contract });
+const user = devPolicyClient(anvil.rpcUrl, deployment.address, "user");
+await user.setPolicy(DEMO_POLICY);
+const capabilities = await user.getCapabilities();
 const record = writeDeploymentFile(deploymentRecord(anvil.rpcUrl, deployment));
 
 const categories = categoriesFromMask(DEMO_POLICY.allowedCategories).map(categoryLabel).join(", ");
+const extensions =
+  capabilities.previewTrade || capabilities.proposeWithContext
+    ? "IntentProposed, contextHash, previewTrade"
+    : "none (base features only)";
 console.log(`
 Mandate devchain is running (development only).
   RPC        ${record.rpcUrl} (chain id ${record.chainId})
   Policy     ${record.address} (block ${record.blockNumber})
-  Owner      ${record.owner}  (anvil account 0)
+  Contract   ${record.contract}, extensions: ${extensions}
+  User       ${record.user}  (anvil account 0)
   Agent      ${record.agent}  (anvil account 1)
   Executor   ${record.executor}  (anvil account 2)
   Written to ${LOCAL_DEPLOYMENT_PATH}
 
-Demo policy: budget ${formatCents(DEMO_POLICY.budgetCents)}, max trade ${formatCents(DEMO_POLICY.maxTradeCents)}, \
+Demo rules: budget ${formatCents(DEMO_POLICY.budgetCents)}, max trade ${formatCents(DEMO_POLICY.maxTradeCents)}, \
 categories ${categories}, approval above ${formatCents(DEMO_POLICY.approvalAboveCents)}, \
 daily loss ${formatCents(DEMO_POLICY.dailyLossCents)}.
 

@@ -18,19 +18,19 @@ import {
   deploymentFileSchema,
   PolicyClient,
   type DeploymentFile,
-  type Policy,
+  type PolicyRules,
 } from "@mandate/shared";
 import { LOCAL_DEPLOYMENT_PATH } from "@mandate/shared/node";
 import { devAccount, type DevRole } from "./accounts";
-import { DEVCHAIN_DIR } from "./foundry";
+import { DEVCHAIN_DIR, PRODUCTION_OUT_DIR } from "./foundry";
 
 /**
- * Demo policy, chosen so demo trades land on both sides of every limit:
+ * Demo rules, chosen so demo trades land on both sides of every limit:
  * - $10 Crypto buy: approved.        $22 Crypto buy: waits for approval (over $20).
  * - $30 Crypto buy: over max trade.  Any Sports buy: category not allowed.
  * - Budget $200: about eight $25 buys. Daily loss $40: two losing $20 trades stop trading for the day.
  */
-export const DEMO_POLICY: Policy = {
+export const DEMO_POLICY: PolicyRules = {
   budgetCents: 20_000,
   maxTradeCents: 2_500,
   allowedCategories: categoryMask([Category.Crypto]),
@@ -39,14 +39,30 @@ export const DEMO_POLICY: Policy = {
   paused: false,
 };
 
+/**
+ * Which Policy contract to deploy:
+ * - `production`: `contracts/src/Policy.sol` compiled as is (base features only).
+ * - `reference`: `devchain/contracts/PolicyReference.sol`, the same rules plus the requested extensions
+ *   (`IntentProposed`, the `contextHash` overload of `proposeTrade`, and `previewTrade`).
+ */
+export const POLICY_CONTRACTS = ["production", "reference"] as const;
+export type PolicyContractKind = (typeof POLICY_CONTRACTS)[number];
+
+export function isPolicyContractKind(value: string): value is PolicyContractKind {
+  return (POLICY_CONTRACTS as readonly string[]).includes(value);
+}
+
 export interface PolicyArtifact {
   abi: Abi;
   bytecode: Hex;
 }
 
 /** Reads the forge build output. Run `buildContracts()` first. */
-export function loadPolicyArtifact(): PolicyArtifact {
-  const path = join(DEVCHAIN_DIR, "out", "PolicyReference.sol", "PolicyReference.json");
+export function loadPolicyArtifact(kind: PolicyContractKind): PolicyArtifact {
+  const path =
+    kind === "production"
+      ? join(PRODUCTION_OUT_DIR, "Policy.sol", "Policy.json")
+      : join(DEVCHAIN_DIR, "out", "PolicyReference.sol", "PolicyReference.json");
   const json = JSON.parse(readFileSync(path, "utf8")) as { abi: Abi; bytecode: { object: Hex } };
   return { abi: json.abi, bytecode: json.bytecode.object };
 }
@@ -59,23 +75,25 @@ function chainFor(rpcUrl: string) {
 }
 
 export interface Deployment {
+  contract: PolicyContractKind;
   address: Address;
   blockNumber: bigint;
 }
 
-/** Deploys PolicyReference from `owner` with the given agent and executor. */
+/** Deploys a Policy contract from `user` (the deployer becomes the contract's immutable `user`). */
 export async function deployPolicy(options: {
   rpcUrl: string;
-  owner?: Account;
+  contract: PolicyContractKind;
+  user?: Account;
   agent?: Address;
   executor?: Address;
 }): Promise<Deployment> {
-  const owner = options.owner ?? devAccount("owner");
+  const user = options.user ?? devAccount("user");
   const chain = chainFor(options.rpcUrl);
   const transport = http(options.rpcUrl);
   const publicClient = createPublicClient({ chain, transport, pollingInterval: DEVCHAIN_POLLING_MS });
-  const wallet = createWalletClient({ chain, transport, account: owner });
-  const { abi, bytecode } = loadPolicyArtifact();
+  const wallet = createWalletClient({ chain, transport, account: user });
+  const { abi, bytecode } = loadPolicyArtifact(options.contract);
   const hash = await wallet.deployContract({
     abi,
     bytecode,
@@ -83,9 +101,13 @@ export async function deployPolicy(options: {
   });
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (receipt.status !== "success" || !receipt.contractAddress) {
-    throw new Error(`PolicyReference deployment failed in transaction ${hash}`);
+    throw new Error(`Policy (${options.contract}) deployment failed in transaction ${hash}`);
   }
-  return { address: getAddress(receipt.contractAddress), blockNumber: receipt.blockNumber };
+  return {
+    contract: options.contract,
+    address: getAddress(receipt.contractAddress),
+    blockNumber: receipt.blockNumber,
+  };
 }
 
 /** A `PolicyClient` acting as one of the devchain roles. */
@@ -114,10 +136,11 @@ export function writeDeploymentFile(
 export function deploymentRecord(rpcUrl: string, deployment: Deployment): DeploymentFile {
   return {
     chainId: ARC_TESTNET_CHAIN_ID,
+    contract: deployment.contract,
     rpcUrl,
     address: deployment.address,
     blockNumber: Number(deployment.blockNumber),
-    owner: devAccount("owner").address,
+    user: devAccount("user").address,
     agent: devAccount("agent").address,
     executor: devAccount("executor").address,
     deployedAt: new Date().toISOString(),

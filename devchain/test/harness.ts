@@ -1,6 +1,20 @@
 import { createPublicClient, createTestClient, http, type Address } from "viem";
-import { devchain, type PolicyClient } from "@mandate/shared";
-import { deployPolicy, devPolicyClient, startAnvil, type AnvilInstance } from "../src";
+import {
+  devchain,
+  intentsMissingDetails,
+  listIntents,
+  mergeIntentDetails,
+  type PolicyClient,
+  type PolicyViewState,
+} from "@mandate/shared";
+import {
+  deployPolicy,
+  devPolicyClient,
+  startAnvil,
+  type AnvilInstance,
+  type DevRole,
+  type PolicyContractKind,
+} from "../src";
 
 /** Noon UTC, so a test run never straddles a UTC day boundary by accident. */
 export const GENESIS_TIMESTAMP = Date.UTC(2026, 10, 16, 12, 0, 0) / 1000;
@@ -34,27 +48,58 @@ export async function startTestAnvil(): Promise<TestAnvil> {
 }
 
 export interface TestPolicy {
+  contract: PolicyContractKind;
   address: Address;
   deployBlock: bigint;
-  owner: PolicyClient;
+  user: PolicyClient;
   agent: PolicyClient;
   executor: PolicyClient;
   outsider: PolicyClient;
 }
 
-/** Deploys a fresh PolicyReference and returns a client per role (outsider has no role). */
-export async function deployTestPolicy(anvil: TestAnvil): Promise<TestPolicy> {
-  const deployment = await deployPolicy({ rpcUrl: anvil.rpcUrl });
-  const client = (role: "owner" | "agent" | "executor" | "outsider") =>
-    devPolicyClient(anvil.rpcUrl, deployment.address, role);
+/** Deploys a fresh Policy contract of the given kind and returns a client per role (outsider has no role). */
+export async function deployTestPolicy(anvil: TestAnvil, contract: PolicyContractKind): Promise<TestPolicy> {
+  const deployment = await deployPolicy({ rpcUrl: anvil.rpcUrl, contract });
+  const client = (role: DevRole) => devPolicyClient(anvil.rpcUrl, deployment.address, role);
   return {
+    contract,
     address: deployment.address,
     deployBlock: deployment.blockNumber,
-    owner: client("owner"),
+    user: client("user"),
     agent: client("agent"),
     executor: client("executor"),
     outsider: client("outsider"),
   };
+}
+
+/**
+ * Intents as the event reducer sees them, completed the way production code must: details the log did
+ * not carry (no `IntentProposed` on the production contract) are filled from `getIntent`. The result has
+ * the same shape as `PolicyClient.getIntents()`, so the two can be compared directly.
+ */
+export async function intentsFromEvents(
+  state: PolicyViewState,
+  reader: PolicyClient,
+): Promise<Record<string, unknown>[]> {
+  const stored = new Map((await reader.getIntents(intentsMissingDetails(state))).map((i) => [i.id, i]));
+  return listIntents(state).map((view) => {
+    const fromChain = stored.get(view.id);
+    const v = fromChain ? mergeIntentDetails(view, fromChain) : view;
+    return {
+      id: v.id,
+      market: v.market,
+      category: v.category,
+      outcome: v.outcome,
+      isBuy: v.isBuy,
+      amountCents: v.amountCents,
+      limitPrice: v.limitPrice,
+      status: v.status,
+      proposedAt: v.proposedAt,
+      // The contract stores zeros until a result is recorded; the reducer uses null for "no result yet".
+      filledCents: v.filledCents ?? 0,
+      pnlCents: v.pnlCents ?? 0,
+    };
+  });
 }
 
 /** Small deterministic PRNG (mulberry32) so failures reproduce from the seed. */
