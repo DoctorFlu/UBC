@@ -398,6 +398,7 @@ export function harness(
     policy?: FakePolicy | null;
     console?: boolean;
     holdings?: { asset: string; quantity: string; note?: string }[];
+    payments?: Services["payments"];
   } = {},
 ): Harness {
   const env = {
@@ -429,6 +430,7 @@ export function harness(
     markets,
     planner: createHedgePlanner(),
     console: consoleClient,
+    payments: options.payments,
   };
   const app = createAppContext(config, silentLogger, { clock: fixedClock, ...services });
   return {
