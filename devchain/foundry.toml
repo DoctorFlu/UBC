@@ -1,0 +1,9 @@
+# Local reference contract only. The production contract has its own Foundry project in /contracts.
+[profile.default]
+src = "contracts"
+out = "out"
+cache_path = "cache"
+libs = []
+solc_version = "0.8.30"
+optimizer = true
+optimizer_runs = 200
