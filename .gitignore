@@ -13,6 +13,11 @@ dist/
 out/
 *.tsbuildinfo
 coverage/
+next-env.d.ts
+playwright-report/
+test-results/
+blob-report/
+.impeccable/*.cache.json
 
 # foundry
 contracts/out/

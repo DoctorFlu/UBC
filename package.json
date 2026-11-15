@@ -14,7 +14,8 @@
     "agent",
     "signals",
     "devchain",
-    "streams"
+    "streams",
+    "dashboard"
   ],
   "scripts": {
     "lint": "eslint .",
@@ -32,15 +33,19 @@
     "start:mcp": "npm run start:mcp -w @mandate/agent --",
     "dev:tunnel": "npm run dev:tunnel -w @mandate/agent --",
     "mcp:token": "npm run mcp:token -w @mandate/agent --",
-    "mcp:smoke": "npm run mcp:smoke -w @mandate/agent --"
+    "mcp:smoke": "npm run mcp:smoke -w @mandate/agent --",
+    "e2e": "npm run e2e -w @mandate/dashboard",
+    "screenshots": "npm run screenshots -w @mandate/dashboard"
   },
   "overrides": {
     "minimatch": "^11.0.8"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^16.4.6",
     "@types/node": "^24.0.0",
     "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.14.0",
     "prettier": "^3.10.1",
     "tsx": "^4.23.15",

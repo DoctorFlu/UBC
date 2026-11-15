@@ -4,6 +4,10 @@ dist
 out
 cache
 coverage
+next-env.d.ts
+playwright-report
+test-results
+blob-report
 contracts
 package-lock.json
 *.md
