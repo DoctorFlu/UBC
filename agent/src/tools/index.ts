@@ -1,6 +1,12 @@
 import type { Tool } from "../mcp/tool";
+import { getActivity } from "./get-activity";
+import { getLadder } from "./get-ladder";
+import { getPolicy } from "./get-policy";
+import { getPortfolio } from "./get-portfolio";
 import { getSetupState } from "./get-setup-state";
+import { listMarkets } from "./list-markets";
 import { ping } from "./ping";
+import { planHedge } from "./plan-hedge";
 import { whoami } from "./whoami";
 
 /**
@@ -11,7 +17,13 @@ import { whoami } from "./whoami";
  */
 // prettier-ignore
 export const tools: readonly Tool[] = [
+  getActivity,
+  getLadder,
+  getPolicy,
+  getPortfolio,
   getSetupState,
+  listMarkets,
   ping,
+  planHedge,
   whoami,
 ];
