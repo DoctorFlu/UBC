@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   CONSOLE_AGENT_ROUTES,
   holdingSchema,
+  intentContextResponseSchema,
   pairingResponseSchema,
   postPolicyChangeRequestSchema,
   proposedRulesSchema,
   putContextRequestSchema,
+  putIntentContextRequestSchema,
 } from "../src/console-api";
 
 const AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
@@ -15,6 +17,19 @@ describe("console agent API contract", () => {
     expect(CONSOLE_AGENT_ROUTES.holdings).toBe("/api/agent/v1/holdings");
     expect(CONSOLE_AGENT_ROUTES.context("0xabc")).toBe("/api/agent/v1/contexts/0xabc");
     expect(CONSOLE_AGENT_ROUTES.policyChangeRequest("r1")).toBe("/api/agent/v1/policy-change-requests/r1");
+    expect(CONSOLE_AGENT_ROUTES.intentContext(7)).toBe("/api/agent/v1/intents/7/context");
+  });
+
+  it("links an intent to a context hash with a strict body", () => {
+    const hash = `0x${"ab".repeat(32)}`;
+    const txHash = `0x${"cd".repeat(32)}`;
+    expect(putIntentContextRequestSchema.safeParse({ hash, txHash }).success).toBe(true);
+    expect(putIntentContextRequestSchema.safeParse({ hash }).success).toBe(false);
+    expect(putIntentContextRequestSchema.safeParse({ hash, txHash, intentId: 1 }).success).toBe(false);
+    expect(putIntentContextRequestSchema.safeParse({ hash: "0x12", txHash }).success).toBe(false);
+    const link = { intentId: 0, hash, txHash, linkedAt: "2026-11-15T13:24:41.000Z" };
+    expect(intentContextResponseSchema.safeParse(link).success).toBe(true);
+    expect(intentContextResponseSchema.safeParse({ ...link, intentId: -1 }).success).toBe(false);
   });
 
   it("accepts decimal-string quantities and refuses floats, exponents and too many decimals", () => {
