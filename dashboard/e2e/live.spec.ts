@@ -34,6 +34,8 @@ test.use({ baseURL, viewport: { width: 1440, height: 900 } });
 let chain: TestChain;
 let server: ChildProcess | null = null;
 const paths = suitePaths("live");
+/** Every page the tests below open; `/activity/0` compiles the detail route even before intent 0 exists. */
+const LIVE_ROUTES = ["/", "/activity", "/activity/0", "/mandate"];
 
 async function startConsole(): Promise<void> {
   server = spawn("npx", ["next", "dev", "--port", PORT.toString()], {
@@ -54,6 +56,12 @@ async function startConsole(): Promise<void> {
     },
   });
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
+  // `next dev` compiles a route on its first request and then tells open pages to reload, which can
+  // abort a navigation the test is making. Compiling the routes the tests visit first removes that race.
+  for (const path of LIVE_ROUTES) {
+    const response = await fetch(new URL(path, baseURL));
+    await response.arrayBuffer();
+  }
 }
 
 async function stopConsole(): Promise<void> {
@@ -77,6 +85,15 @@ function row(page: Page, intentId: number) {
     .filter({ visible: true });
 }
 
+/**
+ * Opens a page and waits until the dev signer is connected, which happens only after React hydrates:
+ * an owner action pressed earlier would hit server HTML that does nothing yet.
+ */
+async function open(page: Page, path: string): Promise<void> {
+  await page.goto(path);
+  await expect(page.getByTestId("owner-address").filter({ visible: true })).toBeVisible();
+}
+
 function toast(page: Page) {
   return page.getByRole("region", { name: "Notifications" });
 }
@@ -94,15 +111,15 @@ test.afterAll(async () => {
 });
 
 test("before the first mandate, the console says so", async ({ page }) => {
-  await page.goto("/");
+  await open(page, "/");
   await expect(page.locator("main").getByText("No mandate yet", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Set the mandate" })).toBeVisible();
-  await page.goto("/activity");
+  await open(page, "/activity");
   await expect(page.getByText("No intents yet").first()).toBeVisible();
 });
 
 test("the owner signs the first mandate", async ({ page }) => {
-  await page.goto("/mandate");
+  await open(page, "/mandate");
   await expect(page.getByRole("heading", { name: "Set the first mandate" })).toBeVisible();
   await page.getByRole("button", { name: "Review and sign" }).click();
   const review = page.getByRole("dialog", { name: "Review the first mandate" });
@@ -116,7 +133,7 @@ test("the owner signs the first mandate", async ({ page }) => {
 });
 
 test("a proposal shows up within 2 seconds, without a refresh", async ({ page }) => {
-  await page.goto("/activity");
+  await open(page, "/activity");
   await expect(page.getByRole("heading", { level: 1, name: "Activity" })).toBeVisible();
   const proposed = await chain.agent.proposeTrade(noBuy(BTC_65K, 1_000, 31));
   expect(proposed).toMatchObject({ intentId: 0, verdict: "approved" });
@@ -127,7 +144,7 @@ test("a proposal shows up within 2 seconds, without a refresh", async ({ page })
 });
 
 test("the owner approves one held intent and rejects another", async ({ page }) => {
-  await page.goto("/activity");
+  await open(page, "/activity");
   await chain.agent.proposeTrade(noBuy(BTC_65K, 2_200, 31));
   await chain.agent.proposeTrade(noBuy(BTC_64K, 2_400, 24));
   await expect(row(page, 1)).toContainText("Waiting");
@@ -147,14 +164,14 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
 });
 
 test("a fill the executor records appears on the intent", async ({ page }) => {
-  await page.goto("/activity/1");
+  await open(page, "/activity/1");
   await expect(page.getByRole("heading", { level: 1, name: "Intent #1" })).toBeVisible();
   await chain.executor.recordResult({ intentId: 1, filled: true, filledCents: 2_200, pnlCents: 0 });
   await expect(page.locator("main").getByText("Executed").first()).toBeVisible();
 });
 
 test("a rule that blocks an intent says so on the overview", async ({ page }) => {
-  await page.goto("/");
+  await open(page, "/");
   await expect(page.getByText("Nothing blocked today").first()).toBeVisible();
   const blocked = await chain.agent.proposeTrade(noBuy(BTC_65K, 3_000, 31));
   expect(blocked).toMatchObject({ intentId: 3, verdict: "rejected", reason: "over max trade size" });
@@ -162,7 +179,7 @@ test("a rule that blocks an intent says so on the overview", async ({ page }) =>
 });
 
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
-  await page.goto("/");
+  await open(page, "/");
   const isolator = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });
   await isolator.focus();
   await page.keyboard.press("Enter");
@@ -172,7 +189,7 @@ test("the kill switch pauses the agent and the contract refuses its next proposa
 
   const refused = await chain.agent.proposeTrade(noBuy(BTC_65K, 500, 31));
   expect(refused).toMatchObject({ intentId: 4, verdict: "rejected", reason: "agent paused" });
-  await page.goto("/activity");
+  await open(page, "/activity");
   await expect(row(page, 4)).toContainText("agent paused");
 });
 
@@ -186,7 +203,7 @@ test("the agent's reason, linked offchain, is checked against the intent", async
     first.proposedTxHash,
     decisionContext("Cheapest protection for the first $1,000 drop."),
   );
-  await page.goto("/activity/0");
+  await open(page, "/activity/0");
   const sealed = page.getByTestId("sealed-reason");
   await expect(page.getByText("Recorded offchain", { exact: true })).toBeVisible();
   await expect(sealed).toContainText("Verified");
@@ -203,7 +220,7 @@ test("a restarted console rebuilds exactly the same state", async ({ page }) => 
   );
   expect(durableState(after)).toEqual(durableState(before));
 
-  await page.goto("/activity");
+  await open(page, "/activity");
   for (const id of [0, 1, 2, 3, 4]) await expect(row(page, id)).toBeVisible();
   await expect(page.getByTestId("paused-banner")).toBeVisible();
 });
