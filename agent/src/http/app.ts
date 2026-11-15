@@ -21,10 +21,22 @@ function jsonRpcError(c: Context, status: ContentfulStatusCode, code: number, me
   return c.json({ jsonrpc: "2.0", error: { code, message }, id: null }, status, headers);
 }
 
+/** How many JSON-RPC `tools/call` requests a body holds (a single message or a batch). */
+function toolCallCount(body: unknown): number {
+  const messages: unknown[] = Array.isArray(body) ? body : [body];
+  return messages.filter(
+    (message) =>
+      typeof message === "object" &&
+      message !== null &&
+      (message as { method?: unknown }).method === "tools/call",
+  ).length;
+}
+
 /**
  * The HTTP surface:
  * - `GET /health`: no auth, status and version only.
- * - `POST /mcp`: Origin check, bearer auth, rate limit, body limit, then the MCP endpoint.
+ * - `POST /mcp`: Origin check, bearer auth, body limit, a rate limit on tool calls, then the MCP
+ *   endpoint.
  *   Other methods on `/mcp` get 405 because the server is stateless and never streams.
  * - Everything else: 404.
  */
@@ -79,14 +91,6 @@ export function createHttpApp(app: AppContext, endpoint: McpEndpoint): Hono<Http
       return c.json({ error: "unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
     },
     async (c, next) => {
-      const retryAfter = limiter.take(tokenKey);
-      if (retryAfter > 0) {
-        logger.warn("http.rate_limited", { requestId: c.get("requestId"), retryAfter });
-        return jsonRpcError(c, 429, -32000, "Too many requests", { "Retry-After": String(retryAfter) });
-      }
-      await next();
-    },
-    async (c, next) => {
       if (c.req.method !== "POST") {
         return jsonRpcError(c, 405, -32000, "Method not allowed.", { Allow: "POST" });
       }
@@ -102,6 +106,16 @@ export function createHttpApp(app: AppContext, endpoint: McpEndpoint): Hono<Http
         body = JSON.parse(await c.req.text());
       } catch {
         return jsonRpcError(c, 400, -32700, "Parse error");
+      }
+      // The rate limit counts tool calls, the requests that do work. A stateless client such as
+      // Grok Bot spends three or four protocol requests (initialize, notifications, a GET probe)
+      // on every call; charging those would cut its real budget to a quarter.
+      for (let calls = toolCallCount(body); calls > 0; calls -= 1) {
+        const retryAfter = limiter.take(tokenKey);
+        if (retryAfter > 0) {
+          logger.warn("http.rate_limited", { requestId: c.get("requestId"), retryAfter });
+          return jsonRpcError(c, 429, -32000, "Too many requests", { "Retry-After": String(retryAfter) });
+        }
       }
       const request = c.req.raw;
       return runInRequestScope({ requestId: c.get("requestId"), signal: request.signal }, () =>
