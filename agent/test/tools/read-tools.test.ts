@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { GeminiError } from "@mandate/gemini";
 import { Category, categoryMask } from "@mandate/shared";
 import { ConsoleClientError } from "../../src/console/client";
+import type { Services } from "../../src/services";
+import { executePlan } from "../../src/tools/execute-plan";
 import { getActivity } from "../../src/tools/get-activity";
 import { getLadder, rungsNearSpot } from "../../src/tools/get-ladder";
 import { getPolicy } from "../../src/tools/get-policy";
@@ -251,6 +253,52 @@ describe("plan_hedge", () => {
     expect(h.ctx.plans.get(plan["planId"] as string, h.ctx.clock.now())).toBeDefined();
     expect(summary).toContain(`Plan ${plan["planId"] as string}`);
     expect(structured["nextAction"]).toMatchObject({ actor: "owner" });
+  });
+
+  it("refuses a receipt id it has no signal for instead of planning without it", async () => {
+    const payments = { purchasedSignal: () => undefined } as unknown as NonNullable<Services["payments"]>;
+    await expect(
+      planHedge.run({ ...args, signalReceiptId: "0xmissing" }, harness({ payments }).ctx),
+    ).rejects.toThrow(/No purchased signal has this receiptId/);
+    await expect(planHedge.run({ ...args, signalReceiptId: "0xmissing" }, harness().ctx)).rejects.toThrow(
+      /No purchased signal has this receiptId/,
+    );
+  });
+
+  it("plans with a purchased signal, reports how it was used, and cites it on every order", async () => {
+    const plain = (await planHedge.run(args, harness().ctx)).structured["plan"] as Row;
+    expect(plain["signal"]).toBeNull();
+    const strikes = (plain["orders"] as Row[]).map((order) => ({
+      strikeCents: order["strikeCents"] as number,
+      modelYesBps: 5_000,
+    }));
+    const receiptId = "0xreceipt";
+    const purchase = {
+      receiptId,
+      signal: {
+        signalId: "sig_1",
+        asset: "BTC",
+        eventTicker: plain["eventTicker"] as string,
+        model: { fairBandBps: 200 },
+        strikes,
+      },
+    };
+    const payments = {
+      purchasedSignal: (id: string) => (id === receiptId ? purchase : undefined),
+    } as unknown as NonNullable<Services["payments"]>;
+    const h = harness({ payments });
+    const { structured } = await planHedge.run({ ...args, signalReceiptId: receiptId }, h.ctx);
+    const plan = structured["plan"] as Row;
+    expect(plan["signal"]).toMatchObject({ receiptId, used: true, ignoredBecause: null });
+
+    const executed = await executePlan.run(
+      { planId: plan["planId"] as string, reason: "Owner agreed to the plan.", signalReceiptIds: [] },
+      h.ctx,
+    );
+    expect(executed.structured["status"]).not.toBe("unavailable");
+    const documents = [...h.console.state.contexts.values()];
+    expect(documents.length).toBeGreaterThan(0);
+    for (const stored of documents) expect(stored.document.signalReceiptIds).toEqual([receiptId]);
   });
 
   it("uses an explicit quantity over the console's holding", async () => {

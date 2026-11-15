@@ -2,6 +2,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import * as z from "zod";
 import { ARC_TESTNET } from "@mandate/shared";
 import { Secret } from "./secret";
+import {
+  PAYMENTS_ENV_KEYS,
+  paymentsConfigFrom,
+  paymentsEnvShape,
+  type PaymentsConfig,
+} from "./x402/payments-config";
 
 /** Every environment variable the MCP server reads. */
 export const ENV_KEYS = [
@@ -17,6 +23,7 @@ export const ENV_KEYS = [
   "CONSOLE_URL",
   "CONSOLE_SERVICE_TOKEN",
   "SIGNALS_URL",
+  ...PAYMENTS_ENV_KEYS,
 ] as const;
 
 export type EnvKey = (typeof ENV_KEYS)[number];
@@ -69,6 +76,8 @@ export interface Config {
   readonly consoleServiceToken: Secret | undefined;
   readonly signalsUrl: string;
   readonly limits: Limits;
+  /** Paying for signals: buyer key, daily budget, price cap, data directory. */
+  readonly payments: PaymentsConfig;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -121,6 +130,7 @@ const EnvSchema = z.object({
   CONSOLE_URL: url("the console").default(DEFAULT_CONSOLE_URL),
   CONSOLE_SERVICE_TOKEN: z.string().min(16, { message: "must be at least 16 characters" }).optional(),
   SIGNALS_URL: url("the signal API").default(DEFAULT_SIGNALS_URL),
+  ...paymentsEnvShape,
 });
 
 export class ConfigError extends Error {
@@ -161,6 +171,8 @@ export function parseConfig(
       throw new ConfigError(["AGENT_PRIVATE_KEY: is not a valid secp256k1 private key"]);
     }
   }
+  const payments = paymentsConfigFrom(vars);
+  if (!payments.ok) throw new ConfigError(payments.problems);
 
   return {
     port: vars.MCP_PORT,
@@ -178,6 +190,7 @@ export function parseConfig(
       vars.CONSOLE_SERVICE_TOKEN === undefined ? undefined : new Secret(vars.CONSOLE_SERVICE_TOKEN),
     signalsUrl: vars.SIGNALS_URL,
     limits,
+    payments: payments.config,
   };
 }
 

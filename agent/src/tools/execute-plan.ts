@@ -1,4 +1,5 @@
 import * as z from "zod";
+import type { HedgePlan } from "@mandate/planner";
 import { formatCents } from "@mandate/shared";
 import type { ToolContext } from "../context";
 import {
@@ -71,6 +72,16 @@ function executionView(stored: StoredPlan, recorded: boolean | null): Execution 
   };
 }
 
+/**
+ * Receipts every order of the plan cites: the signal the plan was built with, when it was actually
+ * used, plus any the agent names. The plan's own receipt is added by the server so the evidence
+ * chain (paid signal, plan, intent) does not depend on the agent remembering to repeat it.
+ */
+function citedReceipts(signal: HedgePlan["signal"], named: readonly string[]): string[] {
+  const receipts = signal?.used === true ? [signal.receiptId, ...named] : [...named];
+  return [...new Set(receipts)].slice(0, 10);
+}
+
 /** Submits the plan's orders from where it left off. Returns why it stopped early, if it did. */
 async function runOrders(
   ctx: ToolContext,
@@ -106,7 +117,7 @@ async function runOrders(
         planId: plan.planId,
         rungIndex,
         ladderSummary: stored.ladderSummary,
-        signalReceiptIds: input.signalReceiptIds,
+        signalReceiptIds: citedReceipts(plan.signal, input.signalReceiptIds),
         reason: input.reason,
       },
     );

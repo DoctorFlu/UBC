@@ -20,6 +20,7 @@ import type {
   Capabilities as ContractCapabilities,
   ContextResponse,
   DecisionContext,
+  HedgeSignalQuery,
   HoldingsResponse,
   Intent,
   IntentView,
@@ -43,6 +44,8 @@ import { createGeminiMarkets, type ResolvedMarket } from "./markets/gemini";
 import { createHedgePlanner } from "./planning/planner";
 import { ProposalLedger } from "./state/ledger";
 import { PlanStore } from "./state/plans";
+import { createSignalPayments, type BudgetState, type BuySignalOutcome } from "./x402/payments";
+import type { SignalPurchase } from "./x402/signal-store";
 
 /**
  * The agent's view of the onchain Policy contract (issues #10, #11, #32, #33).
@@ -124,10 +127,30 @@ export interface ConsoleClient {
   getPairing(signal?: AbortSignal): Promise<PairingResponse | null>;
 }
 
-/** Pays for signals through the x402 buyer in `src/x402` and enforces the daily tool budget (issue #21). */
+/**
+ * Pays for signals through the x402 buyer in `src/x402` and enforces the daily tool budget (issue #21).
+ * `SignalPayments` in `src/x402/payments.ts` implements it.
+ */
 export interface PaymentsClient {
   /** Address of the wallet that pays for signals. */
   readonly payer: Address;
+  /** Most the signal tool may spend per UTC day, in USDC base units. */
+  readonly dailyBudget: bigint;
+  /** Most one signal may cost, in USDC base units. */
+  readonly maxPrice: bigint;
+  /** Today's budget and spend. */
+  budget(at: Date): BudgetState;
+  /** Buys one hedge signal. Expected refusals (budget, price, seller, Gateway) are outcomes, not errors. */
+  buySignal(request: {
+    query: HedgeSignalQuery;
+    at: Date;
+    signal?: AbortSignal | undefined;
+  }): Promise<BuySignalOutcome>;
+  /**
+   * A signal bought earlier, by its receipt id (the payment nonce). Pass it to `planHedge` as
+   * `signal: { receiptId, signal }` to let the plan use it.
+   */
+  purchasedSignal(receiptId: string): SignalPurchase | undefined;
 }
 
 export interface Services {
@@ -149,7 +172,7 @@ export function createServices(config: Config): Services {
     markets: createGeminiMarkets(),
     planner: createHedgePlanner(),
     console: createConsoleClient(config),
-    payments: undefined,
+    payments: createSignalPayments(config),
     plans: new PlanStore(),
     ledger: new ProposalLedger(),
   };

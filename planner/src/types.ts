@@ -59,6 +59,73 @@ export interface HedgeInput {
   depthHundredths?: Readonly<Record<string, number>>;
   /** Cents added to each NO price to form the limit price (capped at 99). Default 0. */
   slippageCents?: number;
+  /**
+   * A paid hedge signal for this ladder. When given, the plan rates each rung's price against the
+   * signal's model, buys the cheapest rungs first when the spend cap cannot cover every rung, and
+   * flags expensive ones. Without it the plan is exactly what it would be otherwise.
+   */
+  signal?: PaidSignal | undefined;
+}
+
+/**
+ * A hedge signal bought from the signal API, with the receipt of its payment. The `signal` shape is
+ * the part of `HedgeSignal` (`@mandate/shared`) the planner reads, so a purchased signal document
+ * can be passed as it is.
+ */
+export interface PaidSignal {
+  /** x402 receipt id: the nonce of the payment authorization, which Gateway's transfer history is keyed by. */
+  receiptId: string;
+  signal: {
+    signalId: string;
+    asset: string;
+    eventTicker: string;
+    model: {
+      /** Edge, in basis points of a dollar, before a price counts as cheap or expensive. */
+      fairBandBps: number;
+    };
+    strikes: readonly {
+      strikeCents: number;
+      /** The model's probability, in basis points, that the asset finishes at or above the strike. */
+      modelYesBps: number;
+    }[];
+  };
+}
+
+/** How the signal rates a rung's limit price: `unrated` when the signal has no such strike or there is no price. */
+export type SignalRating = "cheap" | "fair" | "expensive" | "unrated";
+
+export interface SignalRungRating {
+  instrumentSymbol: string;
+  strikeCents: number;
+  /** The limit price the plan would pay, or null when the rung has no NO offer. */
+  limitPriceCents: number | null;
+  /** The signal's value of one NO contract, in basis points of a dollar (100 bps = 1 cent). */
+  modelNoBps: number | null;
+  /** `modelNoBps - limitPriceCents x 100`: positive means the plan pays less than the model value. */
+  edgeBps: number | null;
+  rating: SignalRating;
+  /** Contracts the plan buys at this strike. */
+  boughtHundredths: number;
+}
+
+/** Whether and how a paid signal shaped the plan. Present only when a signal was given. */
+export interface PlanSignalUse {
+  receiptId: string;
+  signalId: string;
+  /** False when the signal does not describe this ladder; the plan then ignores it. */
+  used: boolean;
+  ignoredBecause: "asset_mismatch" | "event_mismatch" | "no_matching_strikes" | null;
+  /**
+   * "signal": rungs were bought cheapest first (cheap, fair, unrated, then expensive), so a binding
+   * spend cap cuts the expensive ones. "nearest_spot": the default order, used when the signal is ignored.
+   */
+  buyOrder: "signal" | "nearest_spot";
+  /** True when the orders differ from the plan the same inputs give without the signal. */
+  changedOrders: boolean;
+  /** Each strike the staircase called for, highest first. */
+  rungs: SignalRungRating[];
+  /** Strikes bought although the signal rates them expensive. */
+  expensiveBoughtStrikesCents: number[];
 }
 
 /** One order as the agent will submit it. */
@@ -118,7 +185,9 @@ export type WarningCode =
   | "cost_cap_reached"
   | "budget_exhausted"
   | "trade_cap_too_small"
-  | "orders_split";
+  | "orders_split"
+  | "signal_ignored"
+  | "signal_expensive";
 
 export interface PlanWarning {
   code: WarningCode;
@@ -183,4 +252,6 @@ export interface HedgePlan {
   };
   warnings: PlanWarning[];
   uncovered: UncoveredSlice[];
+  /** How a paid signal was used. Absent when no signal was given. */
+  signal?: PlanSignalUse;
 }

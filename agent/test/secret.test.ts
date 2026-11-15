@@ -2,7 +2,7 @@ import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createLogger } from "../src/logger";
 import { Secret } from "../src/secret";
-import { TEST_PRIVATE_KEY, testConfig } from "./helpers";
+import { TEST_BUYER_ADDRESS, TEST_BUYER_KEY, TEST_PRIVATE_KEY, testConfig } from "./helpers";
 
 const VALUE = "super-secret-value-0123456789abcdef";
 
@@ -40,7 +40,9 @@ describe("Secret", () => {
       ARC_RPC_URL: "https://name.arc-testnet.example.pro/apikey123456/",
       CONSOLE_SERVICE_TOKEN: "console-service-token-123",
       CONSOLE_URL: "http://localhost:3000",
+      X402_BUYER_PRIVATE_KEY: TEST_BUYER_KEY,
     });
+    expect(config.payments.buyerAddress).toBe(TEST_BUYER_ADDRESS);
     for (const rendered of [
       JSON.stringify(config),
       inspect(config, { depth: 10, showHidden: true }),
@@ -48,6 +50,7 @@ describe("Secret", () => {
     ]) {
       expect(rendered).not.toContain(config.authToken.reveal());
       expect(rendered).not.toContain(TEST_PRIVATE_KEY.slice(2));
+      expect(rendered).not.toContain(TEST_BUYER_KEY.slice(2));
       expect(rendered).not.toContain("apikey123456");
       expect(rendered).not.toContain("console-service-token-123");
     }

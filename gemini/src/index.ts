@@ -18,17 +18,28 @@ export {
   ladderRungs,
   listingFromEvent,
   normalizeBook,
+  normalizeCandles,
   normalizeEvent,
   normalizeTicker,
   parseCryptoTicker,
   summarizeEvent,
 } from "./normalize";
 export { TokenBucket, type TokenBucketOptions } from "./rate-limiter";
-export { eventSchema, eventsResponseSchema, orderBookSchema, tickerSchema, type RawEvent } from "./schemas";
 export {
+  candlesSchema,
+  eventSchema,
+  eventsResponseSchema,
+  orderBookSchema,
+  tickerSchema,
+  type RawEvent,
+} from "./schemas";
+export {
+  CANDLE_TIME_FRAMES,
   KNOWN_ASSETS,
   LADDER_KINDS,
   type BookLevel,
+  type Candle,
+  type CandleTimeFrame,
   type ContractQuote,
   type EventSummary,
   type KnownAsset,

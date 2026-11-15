@@ -118,6 +118,33 @@ export class PaymentRejectedError extends Error {
   }
 }
 
+/** The request failed before any authorization was signed (for example the seller refused the unpaid request). */
+export class PaymentNotSentError extends Error {
+  constructor(
+    readonly url: string,
+    options?: ErrorOptions,
+  ) {
+    const cause = options?.cause instanceof Error ? `: ${options.cause.message}` : "";
+    super(`Nothing was paid for ${url}${cause}`, options);
+    this.name = "PaymentNotSentError";
+  }
+}
+
+/**
+ * An authorization was signed and sent, but no answer came back, so it is unknown whether Gateway
+ * settled it. Look it up later by `nonce` with `transferFor`.
+ */
+export class PaymentOutcomeUnknownError extends Error {
+  constructor(
+    readonly url: string,
+    readonly nonce: Hex,
+    options?: ErrorOptions,
+  ) {
+    super(`The paid request for ${url} failed without an answer; check Gateway transfer ${nonce}`, options);
+    this.name = "PaymentOutcomeUnknownError";
+  }
+}
+
 export class InsufficientWalletBalanceError extends Error {
   constructor(
     readonly address: Address,
@@ -253,13 +280,18 @@ export class X402Buyer {
       result = await this.calls.run(state, () => this.client.pay<T>(url, payOptions));
     } catch (error) {
       if (state.refused) throw state.refused;
-      // Signed but not served: the seller or Gateway turned the payment down (verify or settle failed).
-      if (state.authorization) {
-        const fromHeader = state.settlement?.success === false ? state.settlement.errorReason : undefined;
+      // Nothing was signed, so nothing can be charged: the 402 request itself failed.
+      if (!state.authorization) throw new PaymentNotSentError(url, { cause: error });
+      // Signed and answered but not served: the seller or Gateway turned the payment down
+      // (verify or settle failed, or the seller refused the paid retry).
+      const fromHeader = state.settlement?.success === false ? state.settlement.errorReason : undefined;
+      const answered = error instanceof Error && error.message.startsWith("Payment failed: ");
+      if (fromHeader !== undefined || answered) {
         const fromBody = error instanceof Error ? error.message.replace(/^Payment failed: /, "") : undefined;
         throw new PaymentRejectedError(url, fromHeader ?? fromBody ?? "unknown", { cause: error });
       }
-      throw error;
+      // Signed, but the paid request failed without an answer: it may or may not have been settled.
+      throw new PaymentOutcomeUnknownError(url, state.authorization.nonce as Hex, { cause: error });
     }
     const latencyMs = Math.round(performance.now() - started);
     const { requirements, authorization } = state;

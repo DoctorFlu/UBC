@@ -66,6 +66,15 @@ const PlanViewSchema = z.object({
     }),
   ),
   warnings: z.array(z.object({ code: z.string(), message: z.string() })),
+  signal: z
+    .object({
+      receiptId: z.string(),
+      used: z.boolean().describe("False when the signal does not describe this ladder and was ignored"),
+      ignoredBecause: z.string().nullable(),
+      changedOrders: z.boolean().describe("True when the signal changed which rungs are bought"),
+    })
+    .nullable()
+    .describe("How a paid signal shaped this plan, or null when none was given"),
   savedToConsole: z.boolean(),
   executableUntil: z.string().describe("After this, plan again: prices move"),
 });
@@ -128,6 +137,15 @@ export const planHedge = defineTool({
       .optional()
       .describe("A specific ladder, overriding horizon"),
     slippageCents: z.int().min(0).max(10).default(0).describe("Cents added to each NO price for the limit"),
+    signalReceiptId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        "receiptId from buy_signal for this same ladder. The plan then buys cheap rungs first and flags expensive ones, and every order cites the receipt",
+      ),
     requestText: z
       .string()
       .trim()
@@ -197,6 +215,16 @@ export const planHedge = defineTool({
         : { floorCents: input.floorCents }),
       ...(input.ceilingCents === undefined ? {} : { ceilingCents: input.ceilingCents }),
     };
+    // A receipt id that cannot be found is refused rather than quietly planned without the signal:
+    // the owner would otherwise believe a paid signal shaped a plan that never saw it.
+    const purchased =
+      input.signalReceiptId === undefined ? undefined : ctx.payments?.purchasedSignal(input.signalReceiptId);
+    if (input.signalReceiptId !== undefined && purchased === undefined) {
+      throw new ToolError(
+        "INVALID_INPUT",
+        "No purchased signal has this receiptId. Use the receiptId exactly as buy_signal returned it, or leave signalReceiptId out to plan without a signal.",
+      );
+    }
     let plan: HedgePlan;
     try {
       plan = ctx.planner.plan({
@@ -210,6 +238,7 @@ export const planHedge = defineTool({
           categoryAllowed: isCategoryAllowed(snapshot.rules.allowedCategories, Category.Crypto),
         },
         slippageCents: input.slippageCents,
+        ...(purchased === undefined ? {} : { signal: purchased }),
       });
     } catch (error) {
       return none(describeFailure(error, ctx));
@@ -325,6 +354,15 @@ export const planHedge = defineTool({
           ordersTruncated: truncated,
           payoff: samplePayoff(plan.payoff, MAX_PAYOFF_POINTS),
           warnings: plan.warnings.slice(0, MAX_WARNINGS).map((w) => ({ code: w.code, message: w.message })),
+          signal:
+            plan.signal === undefined
+              ? null
+              : {
+                  receiptId: plan.signal.receiptId,
+                  used: plan.signal.used,
+                  ignoredBecause: plan.signal.ignoredBecause,
+                  changedOrders: plan.signal.changedOrders,
+                },
           savedToConsole: stored.consoleStored,
           executableUntil: new Date(stored.createdAt.getTime() + PLAN_EXECUTABLE_FOR_MS).toISOString(),
         },
