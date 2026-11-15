@@ -32,9 +32,25 @@ Same command with Arc's RPC URL and a funded key. Put the deployed address in
 
 | Role | Can call |
 |---|---|
-| user (deployer) | `setRules`, `setPaused`, `approveIntent`, `rejectIntent`, `setAgent`, `setExecutor` |
+| user (deployer) | `setPolicy`, `setPaused`, `approveIntent`, `rejectIntent`, `setAgent`, `setExecutor` |
 | agent | `proposeTrade` |
 | executor | `recordResult` |
+
+## Rules
+
+`setPolicy` takes one `PolicyRules` struct. Every field is checked on-chain in `proposeTrade`.
+
+| # | Field | Rule | Rejection reason |
+|---|---|---|---|
+| 1 | `budgetCents` | Approved and executed buys may not exceed this total | `over budget` |
+| 2 | `maxTradeCents` | No single order above this | `over max trade size` |
+| 3 | `allowedCategories` | Bitmask, bit N set = category N allowed | `category not allowed` |
+| 4 | `approvalAboveCents` | Orders above this wait for the user (0 = never ask) | emits `IntentNeedsApproval` |
+| 5 | `dailyLossCents` | Stop once today's losses reach this (0 = off). Losses come from `recordResult` and reset at 00:00 UTC | `daily loss limit reached` |
+| 6 | `paused` | Kill switch, also settable alone with `setPaused` | `agent paused` |
+
+Read the current rules with `policy()`, the remaining budget with `remainingBudgetCents()`
+and today's losses with `lossTodayCents()`.
 
 ## Units
 

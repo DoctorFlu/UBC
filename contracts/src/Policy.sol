@@ -16,12 +16,15 @@ contract Policy {
         Failed          // executor tried and nothing filled
     }
 
-    struct Rules {
+    /// @dev Named PolicyRules because Solidity does not allow a struct called
+    ///      Policy inside contract Policy. The fields match the spec's `Policy` struct.
+    struct PolicyRules {
         uint256 budgetCents;        // rule 1: total the agent may deploy on buys
         uint256 maxTradeCents;      // rule 2: largest single order
         uint256 allowedCategories;  // rule 3: bitmask, bit N set = category N allowed
         uint256 approvalAboveCents; // rule 4: orders above this wait for the user (0 = never ask)
-        bool paused;                // kill switch
+        uint256 dailyLossCents;     // rule 5: stop trading once today's losses reach this (0 = off)
+        bool paused;                // rule 6: kill switch
     }
 
     struct Intent {
@@ -41,12 +44,23 @@ contract Policy {
     address public agent;
     address public executor;
 
-    Rules public rules;
+    PolicyRules public policy;
     uint256 public committedCents; // budget already used by approved or executed buys
+
+    // Rule 5 bookkeeping. Losses are summed per UTC day (block.timestamp / 1 days).
+    uint256 public lossDay;      // the day dayLossCents refers to
+    uint256 public dayLossCents; // losses recorded on lossDay
 
     Intent[] private intents;
 
-    event RulesUpdated(uint256 budgetCents, uint256 maxTradeCents, uint256 allowedCategories, uint256 approvalAboveCents);
+    event PolicyUpdated(
+        uint256 budgetCents,
+        uint256 maxTradeCents,
+        uint256 allowedCategories,
+        uint256 approvalAboveCents,
+        uint256 dailyLossCents,
+        bool paused
+    );
     event Paused(bool paused);
     event IntentApproved(uint256 indexed intentId, string market, string outcome, bool isBuy, uint256 amountCents, uint256 limitPrice);
     event IntentRejected(uint256 indexed intentId, string reason);
@@ -72,21 +86,17 @@ contract Policy {
 
     // ---------------------------------------------------------------- user
 
-    function setRules(
-        uint256 budgetCents,
-        uint256 maxTradeCents,
-        uint256 allowedCategories,
-        uint256 approvalAboveCents
-    ) external onlyUser {
-        rules.budgetCents = budgetCents;
-        rules.maxTradeCents = maxTradeCents;
-        rules.allowedCategories = allowedCategories;
-        rules.approvalAboveCents = approvalAboveCents;
-        emit RulesUpdated(budgetCents, maxTradeCents, allowedCategories, approvalAboveCents);
+    /// @notice Replace every rule at once, including the pause flag.
+    function setPolicy(PolicyRules calldata p) external onlyUser {
+        policy = p;
+        emit PolicyUpdated(
+            p.budgetCents, p.maxTradeCents, p.allowedCategories, p.approvalAboveCents, p.dailyLossCents, p.paused
+        );
+        emit Paused(p.paused);
     }
 
     function setPaused(bool paused_) external onlyUser {
-        rules.paused = paused_;
+        policy.paused = paused_;
         emit Paused(paused_);
     }
 
@@ -104,7 +114,7 @@ contract Policy {
         if (it.status != Status.NeedsApproval) revert WrongStatus(it.status);
 
         // The budget may have been used up while this intent was waiting.
-        if (it.isBuy && committedCents + it.amountCents > rules.budgetCents) {
+        if (it.isBuy && committedCents + it.amountCents > policy.budgetCents) {
             it.status = Status.Rejected;
             emit IntentRejected(intentId, "over budget");
             return;
@@ -157,7 +167,7 @@ contract Policy {
             return intentId;
         }
 
-        if (rules.approvalAboveCents != 0 && amountCents > rules.approvalAboveCents) {
+        if (policy.approvalAboveCents != 0 && amountCents > policy.approvalAboveCents) {
             it.status = Status.NeedsApproval;
             emit IntentNeedsApproval(intentId, amountCents);
             return intentId;
@@ -168,7 +178,8 @@ contract Policy {
 
     // ------------------------------------------------------------ executor
 
-    /// @notice Record what happened to an approved intent. Unfilled budget is released.
+    /// @notice Record what happened to an approved intent. Unfilled budget is released
+    ///         and a negative pnl counts toward today's loss (rule 5).
     function recordResult(uint256 intentId, bool filled, uint256 filledCents, int256 pnlCents) external {
         if (msg.sender != executor) revert NotExecutor();
         Intent storage it = intents[intentId];
@@ -177,6 +188,15 @@ contract Policy {
 
         uint256 used = filled ? filledCents : 0;
         if (it.isBuy) committedCents -= (it.amountCents - used);
+
+        if (pnlCents < 0) {
+            uint256 today = block.timestamp / 1 days;
+            if (today != lossDay) {
+                lossDay = today;
+                dayLossCents = 0;
+            }
+            dayLossCents += uint256(-pnlCents);
+        }
 
         it.status = filled ? Status.Executed : Status.Failed;
         it.filledCents = used;
@@ -195,17 +215,23 @@ contract Policy {
     }
 
     function remainingBudgetCents() external view returns (uint256) {
-        return rules.budgetCents > committedCents ? rules.budgetCents - committedCents : 0;
+        return policy.budgetCents > committedCents ? policy.budgetCents - committedCents : 0;
+    }
+
+    /// @notice Losses recorded so far today (UTC). Zero if the last loss was on an earlier day.
+    function lossTodayCents() public view returns (uint256) {
+        return block.timestamp / 1 days == lossDay ? dayLossCents : 0;
     }
 
     // ------------------------------------------------------------- internal
 
     function _violation(uint8 category, bool isBuy, uint256 amountCents) internal view returns (string memory) {
-        if (rules.paused) return "agent paused";
+        if (policy.paused) return "agent paused";
         if (amountCents == 0) return "zero amount";
-        if (amountCents > rules.maxTradeCents) return "over max trade size";
-        if (((rules.allowedCategories >> category) & 1) == 0) return "category not allowed";
-        if (isBuy && committedCents + amountCents > rules.budgetCents) return "over budget";
+        if (policy.dailyLossCents != 0 && lossTodayCents() >= policy.dailyLossCents) return "daily loss limit reached";
+        if (amountCents > policy.maxTradeCents) return "over max trade size";
+        if (((policy.allowedCategories >> category) & 1) == 0) return "category not allowed";
+        if (isBuy && committedCents + amountCents > policy.budgetCents) return "over budget";
         return "";
     }
 

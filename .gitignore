@@ -32,6 +32,3 @@ devchain/cache/
 .vscode/
 .idea/
 *.log
-
-contracts/out/
-contracts/cache/
