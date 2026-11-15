@@ -9,8 +9,9 @@ import { Dialog } from "@/components/ui/Dialog";
 import { HexValue } from "@/components/ui/HexValue";
 import { Skeleton } from "@/components/ui/States";
 import { useToast } from "@/components/ui/Toast";
-import { targetChain } from "@/lib/chain";
 import { shortenHex } from "@/lib/format";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useOwnerAccess } from "@/lib/owner/access";
 import { DEV_SIGNER_ID } from "@/lib/wallet/flags";
 import { useWalletState } from "@/lib/wallet/useWalletState";
 
@@ -18,10 +19,13 @@ import styles from "./Shell.module.css";
 
 /**
  * The owner's wallet, in each of its states: no wallet installed, not connected, wrong network
- * (one click to switch, or add, Arc testnet), and connected.
+ * (one click to switch to, or add, the console's network), and connected.
  */
 export function WalletButton({ block = false }: { block?: boolean }) {
   const state = useWalletState();
+  const network = useSnapshot().network;
+  const access = useOwnerAccess();
+  const notOwner = access.kind === "not-owner";
   const connectors = useConnectors();
   const { mutate: connect, isPending: connecting } = useConnect();
   const { mutate: switchChain, isPending: switching } = useSwitchChain();
@@ -82,11 +86,11 @@ export function WalletButton({ block = false }: { block?: boolean }) {
           icon={<TriangleAlert aria-hidden />}
           onClick={() =>
             switchChain(
-              { chainId: targetChain.id },
+              { chainId: network.chainId },
               {
                 onError: (error) =>
                   toast({
-                    title: `Could not switch to ${targetChain.name}`,
+                    title: `Could not switch to ${network.name}`,
                     description: error.message.split("\n")[0],
                     tone: "danger",
                   }),
@@ -96,7 +100,7 @@ export function WalletButton({ block = false }: { block?: boolean }) {
           loading={switching}
           block={block}
         >
-          Switch to {targetChain.name}
+          Switch to {network.name}
         </Button>
       );
       break;
@@ -108,10 +112,11 @@ export function WalletButton({ block = false }: { block?: boolean }) {
           onClick={() => setDetailsOpen(true)}
           data-testid="owner-address"
           data-address={state.address}
-          aria-label={`Owner wallet ${state.address}. Show details`}
+          data-owner={notOwner ? "false" : "true"}
+          aria-label={`${notOwner ? "Connected wallet, not the owner," : "Owner wallet"} ${state.address}. Show details`}
         >
-          <span className={styles.walletLamp} aria-hidden />
-          <span className={styles.walletRole}>Owner</span>
+          <span className={styles.walletLamp} data-owner={notOwner ? "false" : undefined} aria-hidden />
+          <span className={styles.walletRole}>{notOwner ? "Not owner" : "Owner"}</span>
           <span className={styles.walletAddress} translate="no">
             {shortenHex(state.address)}
           </span>
@@ -153,7 +158,13 @@ export function WalletButton({ block = false }: { block?: boolean }) {
               </dd>
               <dt>Network</dt>
               <dd>
-                {targetChain.name}, chain {targetChain.id}
+                {network.name}, chain {network.chainId}
+              </dd>
+              <dt>Role</dt>
+              <dd>
+                {notOwner
+                  ? "Not the owner. The Policy contract only accepts the owner's signature."
+                  : "Owner of the Policy contract"}
               </dd>
               <dt>Signer</dt>
               <dd>{state.isDevSigner ? "Dev signer (public anvil test key)" : "Browser wallet"}</dd>
@@ -174,7 +185,7 @@ export function WalletButton({ block = false }: { block?: boolean }) {
       >
         <p>
           Install a wallet that supports custom networks, such as MetaMask or Rabby, then reload this page.
-          The console adds {targetChain.name} to it for you.
+          The console adds {network.name} to it for you.
         </p>
       </Dialog>
     </>

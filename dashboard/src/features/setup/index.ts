@@ -1,1 +1,2 @@
-export { SetupView, type SetupData } from "./SetupView";
+export { SetupView } from "./SetupView";
+export { PairClaimView } from "./PairClaimView";

@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import type { ReactNode } from "react";
 
 import { ToastProvider } from "@/components/ui/Toast";
@@ -29,10 +28,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     // data-theme is set before paint by the boot script when the owner pinned a theme, so the
     // server and client attributes can differ on purpose; that is the only suppressed mismatch.
     <html lang="en" className={`${monaSans.variable} ${martianMono.variable}`} suppressHydrationWarning>
+      <head>
+        {/* A plain inline script runs before first paint. next/script with inline children makes React
+            render a <script> on the client, which it never executes and warns about. */}
+        <script id="theme-boot" dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body>
-        <Script id="theme-boot" strategy="beforeInteractive">
-          {themeBootScript}
-        </Script>
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

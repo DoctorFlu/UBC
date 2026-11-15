@@ -1,38 +1,58 @@
-import type { LiveSource } from "@/lib/domain";
+import type { FeedHealth, FeedSource } from "@/lib/live/types";
 import { cx } from "@/lib/cx";
 import { formatTimeUtc } from "@/lib/format";
 
 import styles from "./LiveIndicator.module.css";
 
-const sourceLabels: Record<LiveSource, { label: string; detail: string }> = {
-  stream: { label: "Live", detail: "QuickNode Stream" },
-  poller: { label: "Live", detail: "RPC poller" },
-  offline: { label: "Offline", detail: "No event source" },
+const sourceNames: Record<FeedSource, string> = { rpc: "RPC poller", stream: "QuickNode Stream" };
+
+const healthWords: Record<FeedHealth | "disconnected", string> = {
+  live: "Live",
+  starting: "Syncing",
+  lagging: "Lagging",
+  offline: "Offline",
+  unconfigured: "No contract",
+  disconnected: "Reconnecting",
 };
 
 export interface LiveIndicatorProps {
-  source: LiveSource;
-  /** ISO time of the newest event, shown in the tooltip. */
-  lastEventAt?: string | undefined;
+  source: FeedSource;
+  /** The feed's health, or "disconnected" when the browser lost the console's event stream. */
+  health: FeedHealth | "disconnected";
+  /** One sentence on what the feed is doing, for the tooltip and screen readers. */
+  detail: string;
+  /** ISO time of the newest event. */
+  lastEventAt?: string | null | undefined;
   /** Hide the source name, keep the lamp and the word (phone top bar). */
   compact?: boolean;
   className?: string;
 }
 
-/** Which data source is feeding the console right now: the Stream webhook, the RPC poller, or nothing. */
-export function LiveIndicator({ source, lastEventAt, compact = false, className }: LiveIndicatorProps) {
-  const { label, detail } = sourceLabels[source];
-  const title = lastEventAt ? `${detail}. Last event ${formatTimeUtc(lastEventAt)}.` : `${detail}.`;
+/** Where the console's events come from right now (the Stream webhook or the RPC poller) and whether it is healthy. */
+export function LiveIndicator({
+  source,
+  health,
+  detail,
+  lastEventAt,
+  compact = false,
+  className,
+}: LiveIndicatorProps) {
+  const sourceName = sourceNames[source];
+  const title = [detail, lastEventAt ? `Last event ${formatTimeUtc(lastEventAt)}.` : null]
+    .filter(Boolean)
+    .join(" ");
   return (
     <span
-      className={cx(styles.live, styles[source], compact && styles.compact, className)}
+      className={cx(styles.indicator, styles[health], compact && styles.compact, className)}
       title={title}
+      data-testid="live-indicator"
       data-source={source}
+      data-health={health}
     >
       <span className={styles.lamp} aria-hidden />
-      <span>{label}</span>
-      <span className={styles.detail}>{detail}</span>
-      {compact ? <span className="visually-hidden">, {detail}</span> : null}
+      <span>{healthWords[health]}</span>
+      <span className={styles.detail}>{sourceName}</span>
+      <span className="visually-hidden">. {detail}</span>
     </span>
   );
 }

@@ -1,34 +1,20 @@
-import { FlaskConical, MessageSquareDiff } from "lucide-react";
+"use client";
 
+import { FlaskConical } from "lucide-react";
+
+import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { Tabs } from "@/components/ui/Tabs";
-import type { Agent, ChangeRequest, Mandate } from "@/lib/domain";
-import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import { agentName, isoFromUnix } from "@/lib/live/derive";
+import type { ConsoleSnapshot } from "@/lib/live/types";
 
-import { ChangeRequestActions } from "./ChangeRequestActions";
+import { ChangeRequests } from "./ChangeRequests";
 import { MandateEditor } from "./MandateEditor";
-import styles from "./mandate.module.css";
-
-export interface MandateData {
-  agent: Agent;
-  mandate: Mandate;
-  changeRequests: readonly ChangeRequest[];
-}
-
-const fieldLabels: Record<ChangeRequest["field"], string> = {
-  totalBudgetCents: "total budget",
-  maxOrderCents: "max order size",
-  approvalThresholdCents: "approval threshold",
-  dailyLossLimitCents: "daily loss limit",
-};
-
-function requestSummary(agent: Agent, request: ChangeRequest) {
-  const verb = request.toCents > request.fromCents ? "raise" : "lower";
-  return `${agent.name} asks to ${verb} the ${fieldLabels[request.field]} from ${formatUsdCents(request.fromCents)} to ${formatUsdCents(request.toCents)}`;
-}
 
 function Backtest() {
   return (
@@ -41,66 +27,55 @@ function Backtest() {
   );
 }
 
-function ChangeRequests({ agent, requests }: { agent: Agent; requests: readonly ChangeRequest[] }) {
-  if (requests.length === 0) {
-    return (
-      <Card>
-        <EmptyState icon={<MessageSquareDiff strokeWidth={1.75} />} title="No change requests">
-          When {agent.name} hits a limit it thinks is wrong, it can ask you to change it. Requests wait here;
-          the mandate never changes without your signature.
-        </EmptyState>
-      </Card>
-    );
-  }
-  return (
-    <ul className={styles.requests}>
-      {requests.map((request) => {
-        const summary = requestSummary(agent, request);
-        return (
-          <li key={request.id}>
-            <Card tone="attention" title={`${summary}.`} headingLevel={3}>
-              <div className={styles.request}>
-                <blockquote className={styles.reason}>
-                  <p>{request.reason}</p>
-                  <footer>
-                    {agent.name}, {formatDateUtc(request.at)} at {formatTimeUtc(request.at)}
-                  </footer>
-                </blockquote>
-                <ChangeRequestActions summary={summary} />
-              </div>
-            </Card>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+/** The rules in force, the editor that signs new ones, and the agent's requests to change them. */
+export function MandateView({ preview }: { preview?: ConsoleSnapshot }) {
+  const live = useSnapshot();
+  const snapshot = preview ?? live;
+  const chain = snapshot.chain;
+  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Mandate" />;
+  const pending = snapshot.offchain.changeRequests.filter((request) => request.status === "pending").length;
+  const setBy = chain.policySetBy;
 
-export function MandateView({ agent, mandate, changeRequests }: MandateData) {
   return (
     <div>
       <PageHeader
         title="Mandate"
         description="The rules the Policy contract checks on every intent. Nothing here changes until you sign it."
         meta={
-          <>
-            <span>
-              Version {mandate.version}, set {formatDateUtc(mandate.updatedAt)}
-            </span>
-            <HexValue label="Signed in" value={mandate.updateTx} kind="tx" />
-          </>
+          setBy ? (
+            <>
+              <span>
+                Version {chain.policyVersion}, set {formatDateUtc(isoFromUnix(setBy.timestamp))} at{" "}
+                {formatTimeUtc(isoFromUnix(setBy.timestamp))}
+              </span>
+              <HexValue label="Signed in" value={setBy.txHash} kind="tx" />
+            </>
+          ) : (
+            <span>No mandate signed yet</span>
+          )
         }
       />
       <Tabs
         label="Mandate sections"
+        defaultTab={pending > 0 ? "requests" : "rules"}
         tabs={[
-          { id: "rules", label: "Rules", content: <MandateEditor mandate={mandate} /> },
+          {
+            id: "rules",
+            label: "Rules",
+            content: <MandateEditor rules={chain.rules} version={chain.policyVersion} />,
+          },
           { id: "backtest", label: "Backtest", content: <Backtest /> },
           {
             id: "requests",
             label: "Change requests",
-            count: changeRequests.length,
-            content: <ChangeRequests agent={agent} requests={changeRequests} />,
+            count: pending,
+            content: (
+              <ChangeRequests
+                requests={snapshot.offchain.changeRequests}
+                rules={chain.rules}
+                agentName={agentName(snapshot)}
+              />
+            ),
           },
         ]}
       />

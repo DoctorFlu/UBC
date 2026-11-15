@@ -6,7 +6,7 @@ import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
-import type { LiveStatus } from "@/lib/domain";
+import { useLiveConsole } from "@/lib/live/LiveConsole";
 
 import { Brand } from "./Brand";
 import { DevSignerBadge } from "./DevSignerBadge";
@@ -17,15 +17,25 @@ import { ThemeToggle } from "./ThemeToggle";
 import { WalletButton } from "./WalletButton";
 
 export interface TopBarProps {
-  live: LiveStatus;
   navCounts: Partial<Record<string, number>>;
   /** The schedule of limits, rendered on the server and shown in the phone drawer. */
   schedule: ReactNode;
 }
 
-/** The status strip: live source, dev signer, wallet and the isolator. On phones, also the menu. */
-export function TopBar({ live, navCounts, schedule }: TopBarProps) {
+/** The status strip: the live feed, dev signer, wallet and the isolator. On phones, also the menu. */
+export function TopBar({ navCounts, schedule }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { snapshot, connection } = useLiveConsole();
+  const { feed } = snapshot;
+  const live = {
+    source: feed.source,
+    health: connection === "reconnecting" ? ("disconnected" as const) : feed.health,
+    detail:
+      connection === "reconnecting"
+        ? "Lost the connection to the console server; reconnecting."
+        : feed.detail,
+    lastEventAt: feed.lastEventAt,
+  };
   return (
     <header className={styles.topbar}>
       <div className={styles.topbarStart}>
@@ -43,12 +53,12 @@ export function TopBar({ live, navCounts, schedule }: TopBarProps) {
           <Brand showTag={false} nameClassName={styles.brandNameTop} />
         </span>
         <span className={styles.desktopOnly}>
-          <LiveIndicator source={live.source} lastEventAt={live.lastEventAt} />
+          <LiveIndicator {...live} />
         </span>
       </div>
       <div className={styles.topbarEnd}>
         <span className={styles.mobileOnly}>
-          <LiveIndicator source={live.source} lastEventAt={live.lastEventAt} compact />
+          <LiveIndicator {...live} compact />
         </span>
         <span className={styles.desktopOnly}>
           <DevSignerBadge />

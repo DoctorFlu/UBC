@@ -42,7 +42,7 @@
   --chip-lamp: var(--color-approved-lamp);
 }
 
-.held {
+.needs_approval {
   --chip-text: var(--color-held-text);
   --chip-soft: var(--color-held-soft);
   --chip-lamp: var(--color-held-lamp);
@@ -54,21 +54,29 @@
   --chip-lamp: var(--color-rejected-lamp);
 }
 
-.filled {
+.executed {
   --chip-text: var(--color-filled-text);
   --chip-soft: var(--color-filled-soft);
   --chip-lamp: var(--color-filled-lamp);
 }
 
-/* Unfilled is a dark lamp: a hollow ring. */
-.unfilled {
+/* Failed (did not fill) is a dark lamp: a hollow ring. */
+.failed {
   --chip-text: var(--color-unfilled-text);
   --chip-soft: var(--color-unfilled-soft);
   --chip-lamp: transparent;
 }
 
-.unfilled .lamp {
+.failed .lamp,
+.none .lamp {
   box-shadow: inset 0 0 0 1.5px var(--color-unfilled-lamp);
+}
+
+/* No verdict yet: neutral, with the same hollow lamp. */
+.none {
+  --chip-text: var(--color-unfilled-text);
+  --chip-soft: var(--color-unfilled-soft);
+  --chip-lamp: transparent;
 }
 
 /* Paused is the isolator off: inverse plate with a safety-yellow marker. */

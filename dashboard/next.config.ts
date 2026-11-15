@@ -18,11 +18,11 @@ const nextConfig: NextConfig = {
   // version-matched docs in node_modules/next/dist/docs instead.
   agentRules: false,
   // Next.js inlines a NEXT_PUBLIC_ variable only when it is set; an unset one stays a runtime
-  // lookup and the code behind it ships. Pinning defaults here makes both always inline, so a
+  // lookup and the code behind it ships. Pinning a default here makes it always inline, so a
   // build without the dev signer flag folds the signer's branch (and its public test key) away.
+  // The chain is not a build flag: the server decides it at runtime from POLICY_* and the RPC URL.
   env: {
     NEXT_PUBLIC_DEV_SIGNER: process.env.NEXT_PUBLIC_DEV_SIGNER === "1" ? "1" : "0",
-    NEXT_PUBLIC_CHAIN: process.env.NEXT_PUBLIC_CHAIN ?? "arc-testnet",
   },
 };
 

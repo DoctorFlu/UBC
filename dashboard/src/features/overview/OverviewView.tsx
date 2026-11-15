@@ -1,8 +1,12 @@
+"use client";
+
+import type { IntentView } from "@mandate/shared";
 import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
-import { MarketName, OrderSummary } from "@/components/domain/Intent";
+import { IntentLink, MarketName, OrderSummary } from "@/components/domain/Intent";
 import { RulesSchedule } from "@/components/domain/RulesSchedule";
+import { ChainUnavailable, NoPolicyYet } from "@/components/states/ChainStates";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
@@ -11,60 +15,84 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
-import type { Agent, Intent, Mandate, MandateUsage } from "@/lib/domain";
 import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import {
+  agentName,
+  isoFromUnix,
+  newestFirst,
+  sealedReasonText,
+  todayUsage,
+  waitingForApproval,
+} from "@/lib/live/derive";
+import type { ConsoleSnapshot } from "@/lib/live/types";
 
 import styles from "./overview.module.css";
 
-export interface OverviewData {
-  agent: Agent;
-  mandate: Mandate;
-  usage: MandateUsage;
-  intents: readonly Intent[];
-}
-
-const recentColumns: readonly Column<Intent>[] = [
-  { key: "time", header: "Time", cell: (intent) => formatTimeUtc(intent.createdAt), nowrap: true },
+const recentColumns: readonly Column<IntentView>[] = [
+  { key: "id", header: "Intent", cell: (intent) => <IntentLink id={intent.id} />, nowrap: true },
+  {
+    key: "time",
+    header: "Time",
+    cell: (intent) => formatTimeUtc(isoFromUnix(intent.proposedAt)),
+    nowrap: true,
+  },
   {
     key: "market",
     header: "Market",
-    cell: (intent) => <MarketName market={intent.market} />,
+    cell: (intent) => <MarketName symbol={intent.market} />,
     role: "primary",
   },
   { key: "order", header: "Order", cell: (intent) => <OrderSummary intent={intent} />, nowrap: true },
   {
     key: "amount",
     header: "Amount",
-    cell: (intent) => <Money cents={intent.notionalCents} />,
+    cell: (intent) => (intent.amountCents === null ? "Unknown" : <Money cents={intent.amountCents} />),
     align: "end",
     nowrap: true,
   },
   {
     key: "verdict",
     header: "Verdict",
-    cell: (intent) => <StatusChip status={intent.status} reasonCode={intent.reasonCode} />,
+    cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
   },
 ];
 
-export function OverviewView({ agent, mandate, usage, intents }: OverviewData) {
-  const held = intents.filter((intent) => intent.status === "held");
-  const recent = intents.slice(0, 5);
-  const heldLine =
-    held.length === 0
+/** The owner's first screen: rules in force with today's load, what waits for them, and the latest verdicts. */
+export function OverviewView({ preview }: { preview?: ConsoleSnapshot }) {
+  const live = useSnapshot();
+  const snapshot = preview ?? live;
+  const chain = snapshot.chain;
+  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Overview" />;
+
+  const name = agentName(snapshot);
+  const waiting = waitingForApproval(chain);
+  const recent = newestFirst(chain).slice(0, 5);
+  const rules = chain.rules;
+  const waitingLine =
+    waiting.length === 0
       ? "Nothing is waiting for you."
-      : `${held.length.toString()} ${held.length === 1 ? "intent needs" : "intents need"} your approval.`;
+      : `${waiting.length.toString()} ${waiting.length === 1 ? "intent needs" : "intents need"} your approval.`;
+  const agent = snapshot.contract?.roles?.agent;
 
   return (
     <div className={styles.view}>
       <PageHeader
         title="Overview"
-        description={`${agent.name} is trading under mandate v${mandate.version.toString()}. ${heldLine}`}
+        description={
+          rules
+            ? `${name} is trading under mandate v${chain.policyVersion.toString()}. ${waitingLine}`
+            : `${name} can't trade yet: the Policy contract has no mandate.`
+        }
         meta={
           <>
-            <HexValue label="Agent" value={agent.address} kind="address" />
-            <span>
-              Mandate set {formatDateUtc(mandate.updatedAt)}, {formatTimeUtc(mandate.updatedAt)}
-            </span>
+            {agent ? <HexValue label="Agent" value={agent} kind="address" /> : null}
+            {chain.policySetBy ? (
+              <span>
+                Mandate set {formatDateUtc(isoFromUnix(chain.policySetBy.timestamp))},{" "}
+                {formatTimeUtc(isoFromUnix(chain.policySetBy.timestamp))}
+              </span>
+            ) : null}
           </>
         }
       />
@@ -76,35 +104,59 @@ export function OverviewView({ agent, mandate, usage, intents }: OverviewData) {
           description="Each rule's limit and how much of it today's trading has used."
           actions={<ArrowLink href="/mandate">Mandate</ArrowLink>}
         >
-          <RulesSchedule mandate={mandate} usage={usage} />
+          {rules ? (
+            <RulesSchedule
+              rules={rules}
+              committedCents={chain.committedCents}
+              lossTodayCents={chain.lossTodayCents}
+              usage={todayUsage(chain)}
+            />
+          ) : (
+            <NoPolicyYet />
+          )}
         </Card>
 
         <Card
           className={styles.held}
-          tone={held.length > 0 ? "attention" : "default"}
+          tone={waiting.length > 0 ? "attention" : "default"}
           title="Needs your approval"
-          description={`Intents above ${formatUsdCents(mandate.approvalThresholdCents)} wait here for your signature.`}
+          description={
+            rules && rules.approvalAboveCents > 0
+              ? `Intents above ${formatUsdCents(rules.approvalAboveCents)} wait here for your signature.`
+              : "Intents above the approval threshold wait here for your signature."
+          }
         >
-          {held.length === 0 ? (
+          {waiting.length === 0 ? (
             <EmptyState plain icon={<Inbox strokeWidth={1.75} />} title="Nothing waiting">
               When the agent sends an intent above the approval threshold, it appears here.
             </EmptyState>
           ) : (
             <ul className={styles.heldList}>
-              {held.map((intent) => (
-                <li key={intent.id} className={styles.heldItem}>
-                  <div className={styles.heldHead}>
-                    <MarketName market={intent.market} />
-                    <Money cents={intent.notionalCents} className={styles.heldAmount} />
-                  </div>
-                  <div className={styles.heldMeta}>
-                    <OrderSummary intent={intent} />
-                    <span>{formatTimeUtc(intent.createdAt)}</span>
-                  </div>
-                  <p className={styles.rationale}>{intent.rationale}</p>
-                  <ApprovalActions intent={intent} block />
-                </li>
-              ))}
+              {waiting.map((intent) => {
+                const reason = sealedReasonText(chain, intent.id);
+                return (
+                  <li
+                    key={intent.id}
+                    className={styles.heldItem}
+                    data-testid={`waiting-intent-${intent.id.toString()}`}
+                  >
+                    <div className={styles.heldHead}>
+                      <MarketName symbol={intent.market} />
+                      {intent.amountCents === null ? null : (
+                        <Money cents={intent.amountCents} className={styles.heldAmount} />
+                      )}
+                    </div>
+                    <div className={styles.heldMeta}>
+                      <OrderSummary intent={intent} />
+                      <span>
+                        <IntentLink id={intent.id} /> · {formatTimeUtc(isoFromUnix(intent.proposedAt))}
+                      </span>
+                    </div>
+                    {reason ? <p className={styles.rationale}>{reason}</p> : null}
+                    <ApprovalActions intent={intent} block />
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>
@@ -120,12 +172,11 @@ export function OverviewView({ agent, mandate, usage, intents }: OverviewData) {
             captionHidden
             columns={recentColumns}
             rows={recent}
-            rowKey={(intent) => intent.id}
-            rowTone={(intent) => (intent.status === "held" ? "attention" : undefined)}
+            rowKey={(intent) => intent.id.toString()}
+            rowTone={(intent) => (intent.status === "needs_approval" ? "attention" : undefined)}
             empty={
               <EmptyState plain icon={<Inbox strokeWidth={1.75} />} title="No intents yet">
-                Once Grok Bot is paired and sends its first intent, every verdict appears here as it lands
-                onchain.
+                Once the agent sends its first intent, every verdict appears here as it lands onchain.
               </EmptyState>
             }
           />

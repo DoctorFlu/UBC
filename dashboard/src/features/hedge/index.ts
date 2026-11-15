@@ -1,1 +1,1 @@
-export { HedgeView, type HedgeData } from "./HedgeView";
+export { HedgeView } from "./HedgeView";

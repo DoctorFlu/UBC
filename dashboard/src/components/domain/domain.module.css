@@ -16,6 +16,24 @@
   font-size: 0.6875rem;
   color: var(--color-text-muted);
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.intentLink {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 0.8125rem;
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.marketMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.orderUnknown {
+  color: var(--color-text-muted);
 }
 
 .orderAmount {
@@ -28,6 +46,20 @@
 .orderLine {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.approvalBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.approvalNote {
+  max-width: 22rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: normal;
 }
 
 .approval {
@@ -126,20 +158,20 @@
   font-weight: var(--weight-semibold);
 }
 
-.trips,
-.tripsNone {
+.blocked,
+.blockedNone {
   justify-self: end;
   font-size: var(--text-xs);
   text-align: end;
   white-space: nowrap;
 }
 
-.trips {
+.blocked {
   color: var(--color-rejected-text);
   font-weight: var(--weight-semibold);
 }
 
-.tripsNone {
+.blockedNone {
   color: var(--color-text-muted);
 }
 
@@ -154,8 +186,8 @@
     grid-row: 2;
   }
 
-  .trips,
-  .tripsNone {
+  .blocked,
+  .blockedNone {
     grid-row: 1;
     grid-column: 2;
     align-self: start;

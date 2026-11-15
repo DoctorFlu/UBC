@@ -1,47 +1,60 @@
+"use client";
+
+import type { HedgePlan, PlannedRung } from "@mandate/planner";
 import type { CSSProperties } from "react";
 
 import { MarketName } from "@/components/domain/Intent";
+import { SampleDataNote } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
-import type { HedgePlan, Holding, LadderRung } from "@/lib/domain";
-import { formatContractPrice, formatCount, formatUsdCents, formatUsdCentsDelta } from "@/lib/format";
+import { sampleHedgePlan } from "@/fixtures/samples";
+import {
+  formatContractPrice,
+  formatDateUtc,
+  formatTimeUtc,
+  formatUsdCents,
+  formatUsdCentsDelta,
+} from "@/lib/format";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import type { ConsoleSnapshot } from "@/lib/live/types";
+import { describeMarket } from "@/lib/markets";
 
 import styles from "./hedge.module.css";
+import { HoldingsEditor } from "./HoldingsEditor";
 
-export interface HedgeData {
-  holdings: readonly Holding[];
-  ladder: readonly LadderRung[];
-  plan: HedgePlan;
-}
+const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 
-const usd = (dollars: number) => formatUsdCents(dollars * 100, { trimWholeCents: true });
-
-const ladderColumns: readonly Column<LadderRung>[] = [
-  { key: "strike", header: "Pays if BTC ends below", cell: (rung) => usd(rung.strike), nowrap: true },
-  { key: "market", header: "Market", cell: (rung) => <MarketName market={rung.market} />, role: "primary" },
+const ladderColumns: readonly Column<PlannedRung>[] = [
+  { key: "strike", header: "Pays if BTC ends below", cell: (rung) => usd(rung.strikeCents), nowrap: true },
   {
-    key: "ask",
-    header: "Ask",
-    cell: (rung) => formatContractPrice(rung.askCents),
+    key: "market",
+    header: "Market",
+    cell: (rung) => <MarketName symbol={rung.instrumentSymbol} />,
+    role: "primary",
+  },
+  {
+    key: "price",
+    header: "Limit",
+    cell: (rung) => formatContractPrice(rung.limitPriceCents),
     align: "end",
     nowrap: true,
   },
-  { key: "contracts", header: "Contracts", cell: (rung) => formatCount(rung.plannedContracts), align: "end" },
+  { key: "contracts", header: "Contracts", cell: (rung) => rung.quantity, align: "end" },
   {
     key: "cost",
     header: "Cost",
-    cell: (rung) => <Money cents={rung.askCents * rung.plannedContracts} />,
+    cell: (rung) => <Money cents={rung.amountCents} />,
     align: "end",
     nowrap: true,
   },
   {
     key: "pays",
     header: "Pays out",
-    cell: (rung) => <Money cents={rung.plannedContracts * 100} />,
+    cell: (rung) => <Money cents={rung.payoutCents} />,
     align: "end",
     nowrap: true,
   },
@@ -53,23 +66,26 @@ interface Band {
 }
 
 /**
- * Net hedge result at expiry for each price band between strikes. A "BTC below K" contract pays
- * $1 when BTC settles under K, so a band pays every rung whose strike is above it.
+ * The hedge's result after its cost for each price band between strikes. A NO on "BTC $K or above" pays
+ * $1 a contract when BTC settles under K, so a band collects every rung whose strike is above it.
  */
-function payoffBands(ladder: readonly LadderRung[], costCents: number): Band[] {
-  const rungs = [...ladder].sort((a, b) => b.strike - a.strike);
+function payoffBands(plan: HedgePlan): Band[] {
+  const rungs = [...plan.rungs].sort((a, b) => b.strikeCents - a.strikeCents);
   const bands: Band[] = [];
-  let contracts = 0;
+  let paysCents = 0;
   rungs.forEach((rung, index) => {
-    const above =
-      index === 0
-        ? `Above ${usd(rung.strike)}`
-        : `${usd(rung.strike)} to ${usd(rungs[index - 1]?.strike ?? 0)}`;
-    bands.push({ label: above, netCents: contracts * 100 - costCents });
-    contracts += rung.plannedContracts;
+    const above = rungs[index - 1];
+    bands.push({
+      label: above
+        ? `${usd(rung.strikeCents)} to ${usd(above.strikeCents)}`
+        : `Above ${usd(rung.strikeCents)}`,
+      netCents: paysCents - plan.totals.costCents,
+    });
+    paysCents += rung.payoutCents;
   });
   const lowest = rungs.at(-1);
-  if (lowest) bands.push({ label: `Below ${usd(lowest.strike)}`, netCents: contracts * 100 - costCents });
+  if (lowest)
+    bands.push({ label: `Below ${usd(lowest.strikeCents)}`, netCents: paysCents - plan.totals.costCents });
   return bands;
 }
 
@@ -109,9 +125,23 @@ function PayoffBands({ bands }: { bands: readonly Band[] }) {
   );
 }
 
-export function HedgeView({ holdings, ladder, plan }: HedgeData) {
-  const btc = holdings.find((holding) => holding.asset === "BTC");
-  const bands = payoffBands(ladder, plan.costCents);
+/** What the plan leaves exposed, in words: the first drop before the top rung, and anything under the floor. */
+function notCovered(plan: HedgePlan): string {
+  const range = plan.totals.protectedRange;
+  if (!range) return "Nothing: the plan buys no contracts.";
+  return `The first drop from ${usd(plan.spotCents)} to ${usd(range.fromCents)}, and any fall below ${usd(range.toCents)}, where the payout stops growing.`;
+}
+
+/**
+ * The owner's holdings (real, signed by the owner) and the hedge the agent plans for them. The plan
+ * and its payoff are sample data until the agent's plans are shown here (#17).
+ */
+export function HedgeView({ preview }: { preview?: ConsoleSnapshot }) {
+  const live = useSnapshot();
+  const snapshot = preview ?? live;
+  const { holdings, holdingsUpdatedAt, latestPlan } = snapshot.offchain;
+  const plan = sampleHedgePlan;
+  const settles = describeMarket(plan.rungs[0]?.instrumentSymbol ?? "").settles;
 
   return (
     <div className={styles.view}>
@@ -121,48 +151,48 @@ export function HedgeView({ holdings, ladder, plan }: HedgeData) {
       />
 
       <div className={styles.top}>
-        <Card title="What you hold" headingLevel={2}>
-          {btc ? (
-            <StatGroup>
-              <Stat
-                label="BTC"
-                value={btc.quantity}
-                hint={`at ${formatUsdCents(btc.priceCents, { trimWholeCents: true })}`}
-              />
-              <Stat label="Value" value={<Money cents={btc.valueCents} />} />
-            </StatGroup>
-          ) : (
-            <EmptyState plain title="No holdings yet">
-              Add the BTC you want protected and the agent sizes a ladder to it.
-            </EmptyState>
-          )}
+        <Card
+          title="What you hold"
+          description="The agent reads this to size a hedge. Saving it needs the owner wallet's signature."
+          headingLevel={2}
+        >
+          <HoldingsEditor holdings={holdings} updatedAt={holdingsUpdatedAt} />
         </Card>
         <Card title="The plan" headingLevel={2}>
+          <SampleDataNote issue="#17" className={styles.sampleNote}>
+            {latestPlan
+              ? `The agent stored plan ${latestPlan.planId.slice(0, 10)} for ${latestPlan.asset} on ${formatDateUtc(latestPlan.storedAt)} at ${formatTimeUtc(latestPlan.storedAt)}; this preview is a planner run on recorded quotes.`
+              : "A real planner run on recorded quotes, not your holdings."}
+          </SampleDataNote>
           <StatGroup>
-            <Stat label="Costs" value={<Money cents={plan.costCents} />} hint="At today's asks" />
+            <Stat label="Costs" value={<Money cents={plan.totals.costCents} />} hint="At the quoted asks" />
             <Stat
               label="Pays at most"
-              value={<Money cents={plan.maxPayoutCents} />}
-              hint={`If BTC ends below ${usd(ladder.at(-1)?.strike ?? 0)}`}
+              value={<Money cents={plan.totals.maxPayoutCents} />}
+              hint={`If BTC ends below ${usd(plan.rungs.at(-1)?.strikeCents ?? 0)}`}
             />
-            <Stat label="Starts paying" value={`Below ${usd(plan.coveredBelowStrike)}`} hint="On Dec 31" />
+            <Stat
+              label="Starts paying"
+              value={`Below ${usd(plan.rungs[0]?.strikeCents ?? 0)}`}
+              hint={settles ? `On ${settles}` : undefined}
+            />
           </StatGroup>
           <p className={styles.notCovered}>
-            <strong>Not covered.</strong> {plan.notCovered}
+            <strong>Not covered.</strong> {notCovered(plan)}
           </p>
         </Card>
       </div>
 
       <Card
-        title="Payoff on Dec 31"
+        title={settles ? `Payoff on ${settles}` : "Payoff at settlement"}
         description="The ladder's result after its cost, by where BTC settles. Your BTC itself gains or loses on top of this."
         headingLevel={2}
       >
-        {ladder.length > 0 ? (
-          <PayoffBands bands={bands} />
+        {plan.rungs.length > 0 ? (
+          <PayoffBands bands={payoffBands(plan)} />
         ) : (
           <EmptyState plain title="No ladder yet">
-            Once the agent proposes a ladder, its payoff by price appears here.
+            Once the agent plans a ladder, its payoff by price appears here.
           </EmptyState>
         )}
       </Card>
@@ -172,11 +202,11 @@ export function HedgeView({ holdings, ladder, plan }: HedgeData) {
           caption="Hedge ladder rungs, highest strike first"
           captionHidden
           columns={ladderColumns}
-          rows={ladder}
-          rowKey={(rung) => rung.market.symbol}
+          rows={plan.rungs}
+          rowKey={(rung) => rung.instrumentSymbol}
           empty={
             <EmptyState plain title="No rungs">
-              The agent has not proposed a ladder yet.
+              The agent has not planned a ladder yet.
             </EmptyState>
           }
         />

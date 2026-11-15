@@ -21,3 +21,7 @@
   font-weight: var(--weight-regular);
   color: var(--color-text-muted);
 }
+
+.sampleNote {
+  align-self: flex-start;
+}

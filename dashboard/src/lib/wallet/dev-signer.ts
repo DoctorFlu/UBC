@@ -41,6 +41,8 @@ interface TxRequest {
   value?: Hex;
   gas?: Hex;
   nonce?: Hex;
+  maxFeePerGas?: Hex;
+  maxPriorityFeePerGas?: Hex;
 }
 
 /** A minimal EIP-1193 provider: signs locally, forwards reads to the chain's RPC. */
@@ -82,6 +84,9 @@ function createDevProvider(chain: Chain) {
           ...(tx.data ? { data: tx.data } : {}),
           ...(tx.value ? { value: hexToBigInt(tx.value) } : {}),
           ...(tx.gas ? { gas: hexToBigInt(tx.gas) } : {}),
+          // Forward the fees the console chose: Arc drops a transaction whose maxFeePerGas is under its floor.
+          ...(tx.maxFeePerGas ? { maxFeePerGas: hexToBigInt(tx.maxFeePerGas) } : {}),
+          ...(tx.maxPriorityFeePerGas ? { maxPriorityFeePerGas: hexToBigInt(tx.maxPriorityFeePerGas) } : {}),
         });
       }
       default:

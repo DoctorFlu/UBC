@@ -1,1 +1,1 @@
-export { OverviewView, type OverviewData } from "./OverviewView";
+export { OverviewView } from "./OverviewView";

@@ -24,6 +24,47 @@
   font-weight: var(--weight-semibold);
 }
 
+.sampleNote {
+  margin-bottom: var(--space-4);
+}
+
+.muted {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Holdings editor: one row per asset, ticker and quantity side by side. */
+.holdings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.holdingRows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.holdingRow {
+  display: grid;
+  grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+/* Line the remove button up with the inputs, below their labels. */
+.removeHolding {
+  margin-top: 1.625rem;
+}
+
+.holdingActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 /* Payoff: one row per price band, bars diverging from a zero line. */
 .bands {
   display: flex;

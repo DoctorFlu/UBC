@@ -1,5 +1,6 @@
 import { Receipt } from "lucide-react";
 
+import { SampleDataNote } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { LimitMeter } from "@/components/ui/LimitMeter";
@@ -8,10 +9,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
-import type { Payment } from "@/lib/domain";
+import type { SamplePayment } from "@/fixtures/samples";
 import { formatCount, formatTimeUtc } from "@/lib/format";
 
 import styles from "./payments.module.css";
+
+type Payment = SamplePayment;
 
 export interface PaymentsData {
   payments: readonly Payment[];
@@ -41,11 +44,13 @@ const columns: readonly Column<Payment>[] = [
   {
     key: "tx",
     header: "Settlement",
-    cell: (payment) => <HexValue value={payment.settlementTx} kind="tx" />,
+    // Sample hashes are not real transactions, so they link nowhere.
+    cell: (payment) => <HexValue value={payment.settlementTx} kind="hash" />,
     nowrap: true,
   },
 ];
 
+/** x402 tool payments. Every number here is sample data until the payments service lands (#22). */
 export function PaymentsView({ payments, summary }: PaymentsData) {
   return (
     <div className={styles.view}>
@@ -53,6 +58,10 @@ export function PaymentsView({ payments, summary }: PaymentsData) {
         title="Payments"
         description="What Grok Bot paid for data and signals over x402, settled in USDC on Arc. This spend is separate from the trading budget."
       />
+
+      <SampleDataNote issue="#22" className={styles.sampleNote}>
+        Illustrative purchases and balances, not read from the agent&apos;s wallet.
+      </SampleDataNote>
 
       <div className={styles.top}>
         <Card title="Tool budget today" headingLevel={2}>
