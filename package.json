@@ -32,7 +32,10 @@
     "start:mcp": "npm run start:mcp -w @mandate/agent --",
     "dev:tunnel": "npm run dev:tunnel -w @mandate/agent --",
     "mcp:token": "npm run mcp:token -w @mandate/agent --",
-    "mcp:smoke": "npm run mcp:smoke -w @mandate/agent --"
+    "mcp:smoke": "npm run mcp:smoke -w @mandate/agent --",
+    "dev:chain": "tsx devchain/scripts/chain.ts",
+    "dev:executor": "tsx devchain/scripts/executor.ts",
+    "dev:propose": "tsx devchain/scripts/propose.ts"
   },
   "overrides": {
     "minimatch": "^11.0.8"
