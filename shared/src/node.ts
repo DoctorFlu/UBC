@@ -3,6 +3,7 @@
  * so that browser bundles of `@mandate/shared` never pull in `node:fs`.
  */
 import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPublicClient, createWalletClient, http, type Account, type Address, type Chain } from "viem";
 import { arcTestnet, devchain } from "./chains";
@@ -10,18 +11,26 @@ import { PolicyClient, type PolicyClientOptions } from "./client";
 import { deploymentFileSchema, type DeploymentFile } from "./deployment";
 import { addressSchema } from "./types";
 
+/**
+ * A path relative to this file. Built with `node:path` rather than `new URL(relative, import.meta.url)`,
+ * which bundlers (the dashboard's Turbopack build) read as an asset to copy into the build, while the
+ * deployment file is written as the app runs. Bundled code has no reliable location of its own, so the
+ * console passes `POLICY_DEPLOYMENT_FILE` instead of relying on this default.
+ */
+function besideThisFile(...segments: string[]): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), ...segments);
+}
+
 /** Where `npm run dev:chain` writes the local deployment, unless `POLICY_DEPLOYMENT_FILE` says otherwise. */
-export const LOCAL_DEPLOYMENT_PATH = fileURLToPath(
-  new URL("../../devchain/deployments/local.json", import.meta.url),
-);
+export const LOCAL_DEPLOYMENT_PATH = besideThisFile("..", "..", "devchain", "deployments", "local.json");
+
+/** Environment variables to read: `process.env` or any plain map of them (tests pass their own). */
+export type EnvVars = Readonly<Record<string, string | undefined>>;
 
 /**
  * The local deployment file to read and write: `POLICY_DEPLOYMENT_FILE` when set (tests that run their
  * own chain point every process at their own file), otherwise `LOCAL_DEPLOYMENT_PATH`.
  */
-/** Environment variables to read: `process.env` or any plain map of them (tests pass their own). */
-export type EnvVars = Readonly<Record<string, string | undefined>>;
-
 export function localDeploymentPath(env: EnvVars = process.env): string {
   return env.POLICY_DEPLOYMENT_FILE?.trim() || LOCAL_DEPLOYMENT_PATH;
 }

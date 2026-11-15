@@ -1,5 +1,9 @@
 import "server-only";
 
+import { resolve } from "node:path";
+
+import type { EnvVars } from "@mandate/shared/node";
+
 import { readConsoleConfig } from "./config";
 import { ConsoleService } from "./console-service";
 import { openDatabase } from "./db";
@@ -12,13 +16,26 @@ const KEY = Symbol.for("mandate.console-service");
 
 type Holder = Record<typeof KEY, ConsoleService | undefined>;
 
+/**
+ * The environment the console resolves its deployment from. Bundled server code has no reliable path of
+ * its own, so the devchain's deployment file is located from the dashboard folder Next.js runs in
+ * (`npm run dev:chain` writes `devchain/deployments/local.json`) unless `POLICY_DEPLOYMENT_FILE` is set.
+ */
+function consoleEnv(): EnvVars {
+  if (process.env.POLICY_DEPLOYMENT_FILE?.trim()) return process.env;
+  return {
+    ...process.env,
+    POLICY_DEPLOYMENT_FILE: resolve(process.cwd(), "..", "devchain", "deployments", "local.json"),
+  };
+}
+
 /** The running console service, created and started on first use. */
 export function getConsoleService(): ConsoleService {
   const holder = globalThis as unknown as Holder;
   let service = holder[KEY];
   if (!service) {
     const config = readConsoleConfig();
-    service = new ConsoleService(config, openDatabase(config.dataDir));
+    service = new ConsoleService(config, openDatabase(config.dataDir), { env: consoleEnv() });
     holder[KEY] = service;
   }
   service.start();
