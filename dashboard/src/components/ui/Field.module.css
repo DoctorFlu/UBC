@@ -1,0 +1,129 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.optional {
+  font-weight: var(--weight-regular);
+  color: var(--color-text-muted);
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+}
+
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-danger);
+  line-height: var(--leading-snug);
+}
+
+.error svg {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-top: 0.0625rem;
+}
+
+/* Inputs: a 1px boundary at 3:1 against the surface, ink on focus. */
+.control {
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  transition-property: border-color, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+.control:focus-within {
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 1px var(--color-focus);
+}
+
+.control[data-invalid] {
+  border-color: var(--color-danger);
+}
+
+.control[data-disabled] {
+  opacity: 0.55;
+}
+
+.affix {
+  flex: none;
+  padding-inline: var(--space-3) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.affix + .input {
+  padding-inline-start: var(--space-1);
+}
+
+.suffix {
+  flex: none;
+  padding-inline: 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  min-height: calc(2.5rem - 2px);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.input:focus,
+.input:focus-visible {
+  outline: none;
+}
+
+.select {
+  appearance: none;
+  padding-inline-end: var(--space-8);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.125rem) 50%,
+    calc(100% - 0.8125rem) 50%;
+  background-size:
+    0.3125rem 0.3125rem,
+    0.3125rem 0.3125rem;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  .control {
+    min-height: var(--tap-target);
+  }
+
+  .input {
+    min-height: calc(var(--tap-target) - 2px);
+    font-size: 1rem;
+  }
+}

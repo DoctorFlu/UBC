@@ -1,0 +1,75 @@
+.wrap {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wrap[data-block] {
+  display: flex;
+  width: 100%;
+}
+
+.hold {
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/* The fill sweeps left to right while held. It carries information, so it stays under reduced motion. */
+.fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--hold-fill);
+  transform-origin: left center;
+  scale: 0 1;
+  pointer-events: none;
+}
+
+.hold[data-phase="holding"] .fill {
+  scale: 1 1;
+  transition: scale var(--hold-ms) linear;
+}
+
+.hold[data-phase="confirmed"] .fill {
+  scale: 1 1;
+}
+
+.hold[data-tone="danger"] {
+  --hold-fill: var(--color-danger-solid-hover);
+}
+
+.hold[data-tone="ink"] {
+  --hold-fill: var(--color-ink-hover);
+}
+
+.hold[data-tone="neutral"] {
+  --hold-fill: var(--color-surface-hover);
+}
+
+.hold[data-phase="armed"] {
+  outline: 2px dashed currentColor;
+  outline-offset: -5px;
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+}
+
+.labels {
+  display: grid;
+}
+
+.labels > span {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  text-align: center;
+}
+
+.labels > span[data-active] {
+  visibility: visible;
+}

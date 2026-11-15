@@ -1,0 +1,25 @@
+.hex {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.value {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 0.8125rem;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-inline-end: var(--space-1);
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin-inline-end: var(--space-1);
+}

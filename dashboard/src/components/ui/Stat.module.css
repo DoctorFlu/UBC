@@ -1,0 +1,67 @@
+/* A row of figures that wraps by available width, not by breakpoint. */
+.group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
+  gap: var(--space-5) var(--space-6);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+}
+
+.value {
+  font-size: var(--text-2xl);
+  font-stretch: var(--stretch-condensed);
+  font-weight: var(--weight-semibold);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+
+.sm .value {
+  font-size: var(--text-xl);
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.delta svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.good {
+  color: var(--color-approved-text);
+}
+
+.bad {
+  color: var(--color-rejected-text);
+}
+
+.neutral {
+  color: var(--color-text-muted);
+}
