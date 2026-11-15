@@ -54,7 +54,7 @@ export function routedFetch(routes: [prefix: string, handler: Handler][]) {
   return { fetch: fetchImpl, calls };
 }
 
-/** The recorded crypto API: events page, one event, books and the BTC spot ticker. */
+/** The recorded crypto API: events page, one event, books, the BTC spot ticker and hourly BTC candles. */
 export function recordedApi() {
   const page = fixture("events-crypto.json") as { data: { ticker: string }[] };
   return routedFetch([
@@ -70,6 +70,7 @@ export function recordedApi() {
     ],
     ["/v1/book/", () => json(fixture("book-GEMI-BTC2611202200-HI61000.json"))],
     ["/v1/pubticker/btcusd", () => json(fixture("pubticker-btcusd.json"))],
+    ["/v2/candles/btcusd/1hr", () => json(fixture("candles-btcusd-1hr.json"))],
   ]);
 }
 

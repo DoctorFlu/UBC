@@ -208,3 +208,17 @@ export interface LadderListing {
   lowestStrikeCents: number | null;
   highestStrikeCents: number | null;
 }
+
+/** Candle widths Gemini's public candles endpoint serves. */
+export const CANDLE_TIME_FRAMES = ["1m", "5m", "15m", "30m", "1hr", "6hr", "1day"] as const;
+export type CandleTimeFrame = (typeof CANDLE_TIME_FRAMES)[number];
+
+/** One spot-market candle. Prices are integer cents, rounded half-up from Gemini's decimal. */
+export interface Candle {
+  /** Start of the candle's interval, in Unix milliseconds. */
+  openTimeMs: number;
+  openCents: number;
+  highCents: number;
+  lowCents: number;
+  closeCents: number;
+}

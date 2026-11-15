@@ -32,6 +32,33 @@ function toolCallCount(body: unknown): number {
   ).length;
 }
 
+/** The JSON-RPC method names in a request body, for the log. Names only, never parameters. */
+function rpcMethods(body: unknown): string[] {
+  const messages: unknown[] = Array.isArray(body) ? body : [body];
+  return messages
+    .map((message) =>
+      typeof message === "object" && message !== null ? (message as { method?: unknown }).method : undefined,
+    )
+    .filter((method): method is string => typeof method === "string" && /^[\w./-]{1,64}$/.test(method))
+    .slice(0, 8);
+}
+
+/** Name and version a client states in `initialize`, cut to a safe shape, or undefined. */
+function clientInfoOf(body: unknown): string | undefined {
+  const messages: unknown[] = Array.isArray(body) ? body : [body];
+  for (const message of messages) {
+    if (typeof message !== "object" || message === null) continue;
+    const { method, params } = message as { method?: unknown; params?: { clientInfo?: unknown } };
+    if (method !== "initialize" || typeof params?.clientInfo !== "object" || params.clientInfo === null)
+      continue;
+    const { name, version } = params.clientInfo as { name?: unknown; version?: unknown };
+    const clean = (value: unknown) =>
+      typeof value === "string" ? value.replace(/[^\w .@/-]/g, "").slice(0, 60) : "";
+    return `${clean(name)} ${clean(version)}`.trim();
+  }
+  return undefined;
+}
+
 /**
  * The HTTP surface:
  * - `GET /health`: no auth, status and version only.
@@ -118,9 +145,22 @@ export function createHttpApp(app: AppContext, endpoint: McpEndpoint): Hono<Http
         }
       }
       const request = c.req.raw;
-      return runInRequestScope({ requestId: c.get("requestId"), signal: request.signal }, () =>
-        endpoint.handle(request, body),
+      const response = await runInRequestScope(
+        { requestId: c.get("requestId"), signal: request.signal },
+        () => endpoint.handle(request, body),
       );
+      // Which protocol step this was and how large the answer is. Without it, a client that lists
+      // fewer tools than the server has cannot be told apart from one that never asked.
+      const client = clientInfoOf(body);
+      logger.info("mcp.request", {
+        requestId: c.get("requestId"),
+        rpc: rpcMethods(body),
+        protocol: c.req.header("mcp-protocol-version") ?? null,
+        ...(client === undefined ? {} : { client }),
+        status: response.status,
+        responseBytes: (await response.clone().arrayBuffer()).byteLength,
+      });
+      return response;
     },
   );
 

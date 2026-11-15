@@ -1,4 +1,5 @@
 import type { Tool } from "../mcp/tool";
+import { buySignal } from "./buy-signal";
 import { executePlan } from "./execute-plan";
 import { getActivity } from "./get-activity";
 import { getIntent } from "./get-intent";
@@ -23,6 +24,7 @@ import { whoami } from "./whoami";
  */
 // prettier-ignore
 export const tools: readonly Tool[] = [
+  buySignal,
   executePlan,
   getActivity,
   getIntent,

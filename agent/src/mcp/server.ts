@@ -54,7 +54,9 @@ export function buildMcpServer(app: AppContext, tools: readonly Tool[]): McpServ
         title: tool.title,
         description: tool.description,
         inputSchema: advertiseOnly(tool.inputSchema),
-        outputSchema: tool.outputSchema,
+        // `invokeTool` validates every result against the tool's output schema whether or not the
+        // schema is advertised, so leaving it out of the list only makes the list smaller.
+        ...(app.config.advertiseOutputSchemas ? { outputSchema: tool.outputSchema } : {}),
         annotations: { title: tool.title, ...tool.annotations },
       },
       (args) => invokeTool(tool, args, app, requestScope.getStore() ?? { requestId: randomUUID() }),

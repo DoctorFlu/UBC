@@ -2,6 +2,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import * as z from "zod";
 import { ARC_TESTNET } from "@mandate/shared";
 import { Secret } from "./secret";
+import {
+  PAYMENTS_ENV_KEYS,
+  paymentsConfigFrom,
+  paymentsEnvShape,
+  type PaymentsConfig,
+} from "./x402/payments-config";
 
 /** Every environment variable the MCP server reads. */
 export const ENV_KEYS = [
@@ -10,6 +16,7 @@ export const ENV_KEYS = [
   "MCP_AUTH_TOKEN",
   "MCP_ALLOWED_ORIGINS",
   "MCP_LOG_LEVEL",
+  "MCP_ADVERTISE_OUTPUT_SCHEMAS",
   "ARC_RPC_URL",
   "POLICY_ADDRESS",
   "POLICY_DEPLOY_BLOCK",
@@ -17,6 +24,7 @@ export const ENV_KEYS = [
   "CONSOLE_URL",
   "CONSOLE_SERVICE_TOKEN",
   "SIGNALS_URL",
+  ...PAYMENTS_ENV_KEYS,
 ] as const;
 
 export type EnvKey = (typeof ENV_KEYS)[number];
@@ -53,6 +61,12 @@ export interface Config {
   readonly port: number;
   readonly host: string;
   readonly logLevel: LogLevel;
+  /**
+   * Whether `tools/list` includes each tool's output schema. Off by default: the schemas are three
+   * quarters of the list's size, a chat agent reads the result itself, and results are validated
+   * against them on the server either way.
+   */
+  readonly advertiseOutputSchemas: boolean;
   /** Bearer token Grok Bot presents. */
   readonly authToken: Secret;
   /** Extra hostnames allowed in a browser `Origin` header, on top of localhost. */
@@ -69,6 +83,8 @@ export interface Config {
   readonly consoleServiceToken: Secret | undefined;
   readonly signalsUrl: string;
   readonly limits: Limits;
+  /** Paying for signals: buyer key, daily budget, price cap, data directory. */
+  readonly payments: PaymentsConfig;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -103,6 +119,10 @@ const EnvSchema = z.object({
     )
     .default([]),
   MCP_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  MCP_ADVERTISE_OUTPUT_SCHEMAS: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   ARC_RPC_URL: url("the Arc RPC").default(ARC_TESTNET.rpcUrl),
   POLICY_ADDRESS: z
     .string()
@@ -121,6 +141,7 @@ const EnvSchema = z.object({
   CONSOLE_URL: url("the console").default(DEFAULT_CONSOLE_URL),
   CONSOLE_SERVICE_TOKEN: z.string().min(16, { message: "must be at least 16 characters" }).optional(),
   SIGNALS_URL: url("the signal API").default(DEFAULT_SIGNALS_URL),
+  ...paymentsEnvShape,
 });
 
 export class ConfigError extends Error {
@@ -161,11 +182,14 @@ export function parseConfig(
       throw new ConfigError(["AGENT_PRIVATE_KEY: is not a valid secp256k1 private key"]);
     }
   }
+  const payments = paymentsConfigFrom(vars);
+  if (!payments.ok) throw new ConfigError(payments.problems);
 
   return {
     port: vars.MCP_PORT,
     host: vars.MCP_HOST,
     logLevel: vars.MCP_LOG_LEVEL,
+    advertiseOutputSchemas: vars.MCP_ADVERTISE_OUTPUT_SCHEMAS,
     authToken: new Secret(vars.MCP_AUTH_TOKEN),
     allowedOrigins: vars.MCP_ALLOWED_ORIGINS,
     arcRpcUrl: new Secret(vars.ARC_RPC_URL),
@@ -178,6 +202,7 @@ export function parseConfig(
       vars.CONSOLE_SERVICE_TOKEN === undefined ? undefined : new Secret(vars.CONSOLE_SERVICE_TOKEN),
     signalsUrl: vars.SIGNALS_URL,
     limits,
+    payments: payments.config,
   };
 }
 

@@ -1,14 +1,44 @@
 import { serve } from "@hono/node-server";
+import { createGeminiClient } from "@mandate/gemini";
 import { loadEnv } from "@mandate/shared";
 import { createSignalsApp } from "./app";
 import { readSignalsConfig } from "./config";
+import { createHedgeRoute } from "./routes/hedge";
+import { helloRoute } from "./routes/hello";
+import { DEFAULT_SIGNAL_MODEL } from "./signal/build";
+import { createHedgeSignalService } from "./signal/service";
 
 loadEnv();
 const config = readSignalsConfig();
+
+/**
+ * Public Gemini market data, cached so that request volume never turns into Gemini volume: at most
+ * one events listing a minute, one event and one spot ticker every five seconds per ladder and asset,
+ * and one candle series every five minutes per asset. The client's token bucket stays under Gemini's
+ * public limit of 120 requests a minute regardless.
+ */
+const gemini = createGeminiClient({
+  cacheTtlMs: { events: 60_000, event: 5_000, spot: 5_000, candles: 300_000 },
+});
+
+const hedgeRoute = createHedgeRoute({
+  priceUsd: config.hedge.priceUsd,
+  service: createHedgeSignalService({
+    source: gemini,
+    assets: config.hedge.assets,
+    model: {
+      ...DEFAULT_SIGNAL_MODEL,
+      fairBandBps: config.hedge.fairBandCents * 100,
+      volWindowHours: config.hedge.volWindowHours,
+    },
+  }),
+});
+
 const app = createSignalsApp({
   sellerAddress: config.sellerAddress,
   network: config.network,
   facilitatorUrl: config.facilitatorUrl,
+  routes: [helloRoute, hedgeRoute],
 });
 
 // Idle keep-alive must outlast the proxy in front of this server (cloudflared reuses an idle
@@ -20,5 +50,9 @@ serve(
   (info) => {
     console.log(`signals listening on http://localhost:${info.port}`);
     console.log(`seller ${config.sellerAddress} on ${config.network} via ${config.facilitatorUrl}`);
+    console.log(
+      `hedge signal $${config.hedge.priceUsd} per request for ${config.hedge.assets.join(", ")}, ` +
+        `fair band ${config.hedge.fairBandCents} cents, volatility window ${config.hedge.volWindowHours} hours`,
+    );
   },
 );
