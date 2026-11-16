@@ -19,6 +19,8 @@
  *   --blank                          Deploy without rules, to rehearse creating the first mandate.
  *   --prod                           Build the console and serve the build instead of `next dev`.
  *   --no-executor                    Do not start the simulated executor.
+ *   --watch                          Restart the MCP server when its code changes. The chain and the console
+ *                                    keep their state; the server forgets its plans, like any restart.
  *   --console-port <port>            Console port (default 3000).
  *   --mcp-public-url <url>           Public address of the MCP server (the tunnel), shown on the console's
  *                                    Setup page. Defaults to MCP_PUBLIC_URL.
@@ -59,6 +61,7 @@ const { values } = parseArgs({
     blank: { type: "boolean", default: false },
     prod: { type: "boolean", default: false },
     "no-executor": { type: "boolean", default: false },
+    watch: { type: "boolean", default: false },
     "console-port": { type: "string", default: "3000" },
     "mcp-public-url": { type: "string" },
   },
@@ -293,7 +296,7 @@ async function main(): Promise<void> {
   }
   start("console", next(values.prod ? "start" : "dev"), consoleEnv);
 
-  start("mcp", ["run", "start:mcp", "-w", "@mandate/agent"], {
+  start("mcp", ["run", values.watch ? "dev:mcp" : "start:mcp", "-w", "@mandate/agent"], {
     // Anvil's public test key for the agent role. It can only propose trades on the local chain.
     AGENT_PRIVATE_KEY: devPrivateKey("agent"),
     ARC_RPC_URL: record.rpcUrl,
