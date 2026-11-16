@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { type Page, expect, test } from "@playwright/test";
 import { createPublicClient, http, isAddressEqual } from "viem";
 
+import { auditRows } from "../src/features/audit/audit-rows";
 import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "../src/lib/format";
 
 import { OWNER_ADDRESS, routes, schemes, viewports } from "./routes";
@@ -267,9 +268,13 @@ test.describe("seeded demo", () => {
     await page.goto("/audit");
     const table = () => page.getByRole("region", { name: /Policy contract events/ });
 
-    // Everything the console ingested, newest first.
-    await expect(table().locator("tbody tr")).toHaveCount(events.length);
+    // Everything the console ingested, newest first, except the Paused event setPolicy emits without
+    // changing the pause state (the exports keep it).
+    const unchanged = auditRows({ events }).filter((row) => row.unchanged);
+    expect(unchanged.map((row) => row.event)).toEqual(["Paused"]);
+    await expect(table().locator("tbody tr")).toHaveCount(events.length - unchanged.length);
     await expect(table().locator("tbody tr").first()).toContainText(events.at(-1)?.type ?? "");
+    await expect(page.getByText(/Resumed/)).toHaveCount(0);
 
     // The owner's own decisions: in the seed, intent 2 approved and intent 3 rejected after a hold.
     await page.getByRole("tab", { name: /Owner decisions/ }).click();

@@ -25,6 +25,7 @@ import {
   GROUP_LABELS,
   auditRows,
   blockedByRule,
+  onScreen,
   toCsv,
   toJson,
   visibleRows,
@@ -114,8 +115,12 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
   const contract = snapshot.contract;
   if (!chain || !contract) return <ChainUnavailable snapshot={snapshot} title="Audit" />;
 
-  const rows = auditRows(chain);
+  const all = auditRows(chain);
+  const rows = onScreen(all);
   const shown = visibleRows(rows, group, order);
+  // The exports keep the raw events the table leaves out (see `AuditRow.unchanged`).
+  const exported = visibleRows(all, group, order);
+  const leftOut = exported.length - shown.length;
   const blocked = blockedByRule(rows).filter(([reason]) => reason !== "rejected by user");
   const total = blocked.reduce((sum, [, count]) => sum + count, 0);
   const ownerRejected = rows.filter((row) => row.reason === "rejected by user").length;
@@ -156,11 +161,11 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
         meta={<HexValue label="Policy contract" value={contract.address} kind="address" />}
         actions={
           <ExportButtons
-            count={shown.length}
+            count={exported.length}
             baseName={`mandate-audit-${group}-${order}`}
-            csv={() => toCsv(shown, explorer)}
+            csv={() => toCsv(exported, explorer)}
             json={() =>
-              toJson(shown, explorer, {
+              toJson(exported, explorer, {
                 contract: contract.address,
                 chainId: snapshot.network.chainId,
                 network: snapshot.network.name,
@@ -176,7 +181,11 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
       <div className={styles.layout}>
         <Card
           title="Events"
-          description={`${formatCount(shown.length)} of ${formatCount(rows.length)} shown, ${orderWord}.`}
+          description={`${formatCount(shown.length)} of ${formatCount(rows.length)} shown, ${orderWord}.${
+            leftOut > 0
+              ? ` The exports also hold ${formatCount(leftOut)} kill switch ${leftOut === 1 ? "event" : "events"} that changed nothing: setPolicy emits one with every rule change.`
+              : ""
+          }`}
           padding="flush"
           headingLevel={2}
           className={styles.events}
