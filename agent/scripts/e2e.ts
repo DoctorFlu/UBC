@@ -7,8 +7,8 @@
  * free port (never 8545, 8787, 8788 or 3000, so a live local stack keeps running alongside). It then drives the server over HTTP with the official MCP
  * SDK client, opening a fresh session for every tool call as Grok Bot does, against live public
  * Gemini market data. It checks the three demo cases (approved, blocked with the contract's
- * reason, waiting for the owner), whole-contract sizing of a single trade, the sealed decision
- * contexts, and that nothing secret reaches the server's logs.
+ * reason, waiting for the owner), whole-contract sizing of plans and single trades, the sealed
+ * decision contexts, and that nothing secret reaches the server's logs.
  *
  * Every key here is a public anvil test key or a random token made for this run; the token is
  * written to a temporary env file (mode 600) and never printed or passed on a command line.
@@ -272,6 +272,18 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
       requestText: "Protect my 0.05 BTC against a 3% drop this week, for at most $40.",
     });
     const planId = field(plan.structuredContent, "plan", "planId");
+    const planOrders = (field(plan.structuredContent, "plan", "orders") ?? []) as {
+      contracts: number;
+      limitPrice: number;
+      amountCents: number;
+    }[];
+    check(
+      planOrders.every(
+        (o) =>
+          Number.isInteger(o.contracts) && o.contracts >= 1 && o.amountCents === o.contracts * o.limitPrice,
+      ),
+      `every plan order is whole contracts (${planOrders.map((o) => `${o.contracts} at ${o.limitPrice}c`).join(", ") || "none"})`,
+    );
 
     process.stdout.write("\n-- simulate\n");
     const simulated = await run("simulate_trade", {
@@ -391,6 +403,14 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
       check(
         field(executed.structuredContent, "execution", "remaining") === 0,
         "execute_plan answered every order or stopped at a rejection",
+      );
+      const rows = (field(executed.structuredContent, "execution", "orders") ?? []) as {
+        orderIndex: number;
+        amountCents: number;
+      }[];
+      check(
+        rows.every((row) => row.amountCents === planOrders[row.orderIndex]?.amountCents),
+        "execute_plan proposes exactly the plan's whole-contract amounts",
       );
       const again = await run("execute_plan", { planId, reason: "The owner agreed to the plan." });
       check(
