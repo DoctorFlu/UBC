@@ -146,10 +146,10 @@ function fixtureEvents(): PolicyEvent[] {
   push(step(5), { type: "ResultRecorded", intentId: 1, filled: true, filledCents: 1_320, pnlCents: 0 });
   push(step(30), propose(2, ETH_2800, Category.Crypto, 450, 9), approved(2, ETH_2800, 450, 9));
   push(step(8), { type: "ResultRecorded", intentId: 2, filled: false, filledCents: 0, pnlCents: 0 });
-  push(step(600), propose(3, BTC_64K, Category.Crypto, 2_700, 27), {
+  push(step(600), propose(3, BTC_64K, Category.Crypto, 2_300, 23), {
     type: "IntentNeedsApproval",
     intentId: 3,
-    amountCents: 2_700,
+    amountCents: 2_300,
   });
   push(step(90), { type: "IntentRejected", intentId: 3, reason: "rejected by user" });
   push(step(900), propose(4, BTC_64K, Category.Crypto, 3_100, 31), {

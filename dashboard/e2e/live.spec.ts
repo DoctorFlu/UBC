@@ -2,8 +2,10 @@ import { type ChildProcess, spawn } from "node:child_process";
 
 import { type Page, expect, test } from "@playwright/test";
 
+import { CONSOLE_AGENT_ROUTES } from "@mandate/shared";
+
 import type { ConsoleSnapshot } from "../src/lib/live/types";
-import { routes } from "./routes";
+import { AGENT_ADDRESS, routes } from "./routes";
 import {
   BTC_64K,
   BTC_65K,
@@ -14,7 +16,14 @@ import {
   startTestChain,
   suitePaths,
 } from "./support/chain";
-import { E2E_SERVICE_TOKEN, decisionContext, sealReason, snapshot, waitForSnapshot } from "./support/console";
+import {
+  E2E_SERVICE_TOKEN,
+  agentApi,
+  decisionContext,
+  sealReason,
+  snapshot,
+  waitForSnapshot,
+} from "./support/console";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first mandate, watch
@@ -200,6 +209,120 @@ test("a rule that blocks an intent says so on the overview", async ({ page }) =>
   const blocked = await chain.agent.proposeTrade(noBuy(BTC_65K, 3_000, 31));
   expect(blocked).toMatchObject({ intentId: 3, verdict: "rejected", reason: "over max trade size" });
   await expect(page.getByText("Blocked 1 today")).toBeVisible();
+});
+
+test("editing a limit changes the backtest of past intents before anything is signed", async ({ page }) => {
+  const before = await snapshot(baseURL);
+  await open(page, "/mandate");
+  const backtest = page.getByTestId("backtest");
+  // The draft starts as the rules in force, which gave every one of the four intents its verdict.
+  await expect(backtest).toHaveAttribute("data-changed", "0");
+  await expect(backtest).toContainText("No verdict changes: all 4 past intents get the same answer");
+
+  // A lower max trade size (with the approval threshold under it, as the form requires): the $22 and
+  // $24 intents, held in reality, would be rejected outright.
+  const maxTrade = page.getByRole("textbox", { name: "Max trade size" });
+  const approvalAbove = page.getByRole("textbox", { name: "Approval above" });
+  await approvalAbove.fill("10");
+  await expect(backtest).toHaveAttribute("data-changed", "0");
+  await maxTrade.fill("15");
+  await expect(backtest).toHaveAttribute("data-changed", "2");
+  await expect(backtest).toContainText("2 of 4 past intents would get a different answer");
+  const changed = backtest.getByRole("region", { name: /verdict changes under the draft/ });
+  await expect(changed.locator("tbody tr")).toHaveCount(2);
+  await expect(changed.locator("tbody tr").first()).toContainText("#1");
+  await expect(changed.locator("tbody tr").first()).toContainText("over max trade size");
+
+  // Never asking for approval instead: the same two intents would have been approved.
+  await maxTrade.fill("25");
+  await approvalAbove.fill("0");
+  await expect(backtest).toHaveAttribute("data-changed", "2");
+  await expect(changed.locator("tbody tr").first()).toContainText("Approved");
+
+  // A value that does not parse stops the replay and says why, without moving anything.
+  await maxTrade.fill("abc");
+  await expect(backtest).toHaveAttribute("data-state", "invalid");
+
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page.getByTestId("backtest")).toHaveAttribute("data-changed", "0");
+  // Nothing was signed: the contract's rules are the ones from before.
+  expect((await snapshot(baseURL)).chain?.rules).toEqual(before.chain?.rules);
+});
+
+test("the agent's change request shows a diff and its backtest, and applying it lands onchain", async ({
+  page,
+}) => {
+  const filed = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequests, "POST", {
+    agentAddress: AGENT_ADDRESS,
+    proposed: { maxTradeCents: 3_500 },
+    reason: "The $64,000 rung needs a $30 order; splitting it costs more than it saves.",
+  })) as { id: string; status: string };
+  expect(filed.status).toBe("pending");
+
+  await open(page, "/mandate");
+  // A pending request opens its tab and counts on it.
+  await expect(page.getByRole("tab", { name: /Change requests/ })).toHaveAttribute("aria-selected", "true");
+  const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
+  await expect(card).toContainText("asks to change max trade size");
+  await expect(card).toContainText("splitting it costs more than it saves");
+  const diff = card.getByTestId("request-diff");
+  await expect(diff.locator("tbody tr")).toHaveCount(1);
+  await expect(diff).toContainText("$25.00");
+  await expect(diff).toContainText("$35.00");
+  // Under a $35 max trade size, the $30 intent the contract rejected would have waited for the owner.
+  const backtest = card.getByTestId("backtest");
+  await expect(backtest).toHaveAttribute("data-changed", "1");
+  await expect(backtest).toContainText("under the requested rules");
+
+  await card.getByRole("button", { name: "Review and sign" }).click();
+  const review = page.getByRole("dialog", { name: "Apply the agent's request" });
+  await expect(review.getByTestId("policy-review")).toContainText("Max trade size");
+  await review.getByRole("button", { name: "Sign in wallet" }).click();
+  await expect(toast(page)).toContainText("Mandate updated");
+  await review.getByRole("button", { name: "Done" }).click();
+
+  // The request is closed with the transaction that applied it, and the contract has the new rule.
+  const applied = page.locator(`[data-testid="change-request"][data-status="applied"]`);
+  await expect(applied).toContainText("asked to change max trade size");
+  await expect(applied).toContainText("Applied");
+  const after = await waitForSnapshot(
+    baseURL,
+    (current) =>
+      current.offchain.changeRequests.find((request) => request.id === filed.id)?.status === "applied",
+  );
+  expect(after.chain?.rules?.maxTradeCents).toBe(3_500);
+  const request = after.offchain.changeRequests.find((candidate) => candidate.id === filed.id);
+  expect(request?.appliedTxHash).toBe(after.chain?.policySetBy?.txHash);
+  expect(await chain.user.getRules()).toMatchObject({ maxTradeCents: 3_500 });
+  // The agent sees it closed too.
+  const seen = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequest(filed.id), "GET")) as {
+    status: string;
+    appliedTxHash: string;
+  };
+  expect(seen).toMatchObject({ status: "applied", appliedTxHash: request?.appliedTxHash });
+  await expect(page.getByRole("tab", { name: /Change requests/ })).toContainText("0");
+});
+
+test("the owner can dismiss a change request, and the rules stay as they are", async ({ page }) => {
+  const filed = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequests, "POST", {
+    agentAddress: AGENT_ADDRESS,
+    proposed: { budgetCents: 50_000 },
+    reason: "More room for next week's ladder.",
+  })) as { id: string };
+  const rules = (await snapshot(baseURL)).chain?.rules;
+  await open(page, "/mandate");
+  const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
+  await expect(card).toContainText("asks to change budget");
+  await card.getByRole("button", { name: "Dismiss" }).click();
+  await expect(toast(page)).toContainText("Request dismissed");
+  await expect(page.locator(`[data-testid="change-request"][data-status="dismissed"]`)).toContainText(
+    "Dismissed",
+  );
+  const seen = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequest(filed.id), "GET")) as {
+    status: string;
+  };
+  expect(seen.status).toBe("dismissed");
+  expect((await snapshot(baseURL)).chain?.rules).toEqual(rules);
 });
 
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {

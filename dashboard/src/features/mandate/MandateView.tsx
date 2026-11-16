@@ -1,12 +1,8 @@
 "use client";
 
-import { FlaskConical } from "lucide-react";
-
 import { ChainUnavailable } from "@/components/states/ChainStates";
-import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { EmptyState } from "@/components/ui/States";
 import { Tabs } from "@/components/ui/Tabs";
 import { formatDateUtc, formatTimeUtc } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
@@ -16,18 +12,10 @@ import type { ConsoleSnapshot } from "@/lib/live/types";
 import { ChangeRequests } from "./ChangeRequests";
 import { MandateEditor } from "./MandateEditor";
 
-function Backtest() {
-  return (
-    <Card>
-      <EmptyState icon={<FlaskConical strokeWidth={1.75} />} title="No backtest yet">
-        A backtest replays the last 30 days of intents against a draft, so you see which would have been
-        approved, held or rejected before you sign it. It arrives with the backtest service.
-      </EmptyState>
-    </Card>
-  );
-}
-
-/** The rules in force, the editor that signs new ones, and the agent's requests to change them. */
+/**
+ * The rules in force, the editor that signs new ones (with its backtest), and the agent's requests to
+ * change them.
+ */
 export function MandateView({ preview }: { preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
@@ -62,9 +50,8 @@ export function MandateView({ preview }: { preview?: ConsoleSnapshot }) {
           {
             id: "rules",
             label: "Rules",
-            content: <MandateEditor rules={chain.rules} version={chain.policyVersion} />,
+            content: <MandateEditor rules={chain.rules} version={chain.policyVersion} chain={chain} />,
           },
-          { id: "backtest", label: "Backtest", content: <Backtest /> },
           {
             id: "requests",
             label: "Change requests",
@@ -73,6 +60,7 @@ export function MandateView({ preview }: { preview?: ConsoleSnapshot }) {
               <ChangeRequests
                 requests={snapshot.offchain.changeRequests}
                 rules={chain.rules}
+                chain={chain}
                 agentName={agentName(snapshot)}
               />
             ),

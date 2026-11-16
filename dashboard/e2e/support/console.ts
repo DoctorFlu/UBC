@@ -12,7 +12,12 @@ export const E2E_SERVICE_TOKEN = "e2e-console-service-token-for-local-tests-only
 
 export const AGENT_NAME = "Grok Bot";
 
-async function agentApi(baseURL: string, path: string, method: "GET" | "PUT", body?: unknown) {
+export async function agentApi(
+  baseURL: string,
+  path: string,
+  method: "GET" | "PUT" | "POST",
+  body?: unknown,
+) {
   const response = await fetch(new URL(path, baseURL), {
     method,
     headers: {

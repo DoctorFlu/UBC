@@ -17,10 +17,12 @@ import { Card } from "@/components/ui/Card";
 import { Field, Input } from "@/components/ui/Field";
 import { Toggle } from "@/components/ui/Toggle";
 import { formatUsdCents, parseUsdToCents } from "@/lib/format";
+import type { ChainView } from "@/lib/live/types";
 import { ownerBlockedReason, useOwnerAccess } from "@/lib/owner/access";
 import { useHydrated } from "@/lib/useHydrated";
 
 import styles from "./mandate.module.css";
+import { BacktestPanel } from "./BacktestPanel";
 import { PolicyReview } from "./PolicyReview";
 import { AMOUNT_LABELS, type AmountKey, rulesDiff } from "./rules-diff";
 
@@ -66,13 +68,15 @@ export interface MandateEditorProps {
   /** Rules in force, or null before the first `setPolicy`. */
   rules: PolicyRules | null;
   version: number;
+  /** The history the draft is replayed against. */
+  chain: Pick<ChainView, "events" | "intents">;
 }
 
 /**
- * The policy editor: edit a draft, see exactly what changes, review it, then sign `setPolicy` with the
- * owner's wallet. The rules shown in force always come from the contract's events, never from the draft.
+ * The policy editor: edit a draft, see exactly what changes and how past intents would have fared
+ * under it, review it, then sign `setPolicy` with the owner's wallet. The rules shown in force always come from the contract's events, never from the draft.
  */
-export function MandateEditor({ rules, version }: MandateEditorProps) {
+export function MandateEditor({ rules, version, chain }: MandateEditorProps) {
   const access = useOwnerAccess();
   const blocked = ownerBlockedReason(access);
   const hydrated = useHydrated();
@@ -243,6 +247,15 @@ export function MandateEditor({ rules, version }: MandateEditorProps) {
             ))}
           </dl>
         )}
+      </Card>
+
+      <Card
+        className={styles.backtestCard}
+        title="Backtest"
+        description="Every intent the agent has proposed, replayed through the draft with the contract's own rules. It updates as you type; nothing is signed."
+        headingLevel={2}
+      >
+        <BacktestPanel chain={chain} draft={next} />
       </Card>
 
       {next ? (

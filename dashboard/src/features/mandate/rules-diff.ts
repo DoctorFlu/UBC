@@ -1,4 +1,11 @@
-import { CATEGORY_IDS, CATEGORY_LABELS, type PolicyRules, isCategoryAllowed } from "@mandate/shared";
+import {
+  CATEGORY_IDS,
+  CATEGORY_LABELS,
+  type PolicyRules,
+  type ProposedRules,
+  categoriesFromMask,
+  isCategoryAllowed,
+} from "@mandate/shared";
 
 import { formatUsdCents } from "@/lib/format";
 
@@ -46,6 +53,20 @@ export function rulesDiff(current: PolicyRules | null, next: PolicyRules): RuleC
     });
   }
   return changes;
+}
+
+/** The values an agent's request asked for, rule by rule, without comparing them to anything. */
+export function requestedValues(proposed: ProposedRules): RuleChange[] {
+  const values: RuleChange[] = [];
+  for (const key of Object.keys(AMOUNT_LABELS) as AmountKey[]) {
+    const cents = proposed[key];
+    if (cents !== undefined) values.push({ label: AMOUNT_LABELS[key], from: "", to: amountText(key, cents) });
+  }
+  if (proposed.allowedCategories !== undefined) {
+    const allowed = categoriesFromMask(proposed.allowedCategories).map((id) => CATEGORY_LABELS[id]);
+    values.push({ label: "Allowed markets", from: "", to: allowed.join(", ") || "None" });
+  }
+  return values;
 }
 
 /** Sentences the owner should read before signing: consequences the form alone does not show. */

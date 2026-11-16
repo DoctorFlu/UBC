@@ -204,8 +204,8 @@ test.describe("seeded demo", () => {
     await expect(table().locator("tbody tr")).toHaveCount(2);
     await page.getByRole("combobox", { name: "Order of events" }).selectOption("oldest");
     const shown = table().locator("tbody tr");
-    await expect(shown.nth(0)).toContainText("Approved by owner #2");
-    await expect(shown.nth(1)).toContainText("Rejected by owner #3");
+    await expect(shown.nth(0)).toContainText("Approved by owner Intent #2");
+    await expect(shown.nth(1)).toContainText("Rejected by owner Intent #3");
 
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export 2 rows as CSV" }).click();
