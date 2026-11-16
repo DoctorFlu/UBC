@@ -12,6 +12,7 @@ import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
+import { When } from "@/components/ui/When";
 import { NeedsYou } from "@/features/approvals";
 import { AdvancedSection, useAdvanced } from "@/lib/advanced/Advanced";
 import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
@@ -25,7 +26,7 @@ import styles from "./home.module.css";
 const timeColumn: Column<IntentView> = {
   key: "time",
   header: "Time",
-  cell: (intent) => formatTimeUtc(isoFromUnix(intent.proposedAt)),
+  cell: (intent) => <When at={intent.proposedAt} />,
   nowrap: true,
 };
 
@@ -115,7 +116,7 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
         <Card
           className={styles.rules}
           title="Rules in force"
-          actions={<ArrowLink href="/mandate">Rules</ArrowLink>}
+          actions={<ArrowLink href="/rules">Rules</ArrowLink>}
         >
           {rules ? (
             advanced ? (

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 
 import { IntentLink, IntentVerdict, MarketName, amountLabel } from "@/components/domain/Intent";
 import { ChainUnavailable } from "@/components/states/ChainStates";
@@ -10,10 +9,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import { Tabs } from "@/components/ui/Tabs";
+import { When } from "@/components/ui/When";
 import { useAdvanced } from "@/lib/advanced/Advanced";
 import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
 import { type HeldDecision, decidedAfterHold, needsOwner } from "@/lib/live/attention";
 import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useQueryTab } from "@/lib/useQueryTab";
 import { isoFromUnix } from "@/lib/live/derive";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 
@@ -22,10 +23,8 @@ import { NeedsYou } from "./NeedsYou";
 
 export type ApprovalsTab = "waiting" | "decided";
 
-function decidedAt({ decidedAt: at }: HeldDecision): string {
-  if (at === null) return "Not recorded";
-  const iso = isoFromUnix(at);
-  return `${formatDateUtc(iso)}, ${formatTimeUtc(iso)}`;
+function decidedAt({ decidedAt: at }: HeldDecision) {
+  return at === null ? "Not recorded" : <When at={at} date />;
 }
 
 const baseColumns: readonly Column<HeldDecision>[] = [
@@ -53,7 +52,7 @@ export function ApprovalsView({ tab, preview }: { tab: ApprovalsTab; preview?: C
   const live = useSnapshot();
   const snapshot = preview ?? live;
   const { advanced } = useAdvanced();
-  const [shown, setShown] = useState<ApprovalsTab>(tab);
+  const [shown, select] = useQueryTab<ApprovalsTab>("show", tab, "waiting");
   const chain = snapshot.chain;
   if (!chain) return <ChainUnavailable snapshot={snapshot} title="Approvals" />;
 
@@ -75,14 +74,7 @@ export function ApprovalsView({ tab, preview }: { tab: ApprovalsTab; preview?: C
       <Tabs
         label="Approvals"
         selected={shown}
-        onSelect={(id) => {
-          const next: ApprovalsTab = id === "decided" ? "decided" : "waiting";
-          setShown(next);
-          const url = new URL(window.location.href);
-          if (next === "decided") url.searchParams.set("show", "decided");
-          else url.searchParams.delete("show");
-          window.history.replaceState(null, "", url);
-        }}
+        onSelect={(id) => select(id === "decided" ? "decided" : "waiting")}
         tabs={[
           {
             id: "waiting",

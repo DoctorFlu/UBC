@@ -62,7 +62,7 @@ export interface AuditRow {
 }
 
 export const GROUP_LABELS: Record<AuditGroup, string> = {
-  mandate: "Mandate changes",
+  mandate: "Rule changes",
   pause: "Kill switch",
   verdict: "Proposal verdicts",
   owner: "Owner decisions",
@@ -107,7 +107,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
       const markets = categoriesFromMask(rules.allowedCategories).map((id) => CATEGORY_LABELS[id]);
       return {
         group: "mandate",
-        label: version === 1 ? "Mandate set" : `Mandate changed (v${version.toString()})`,
+        label: version === 1 ? "Rules set" : `Rules changed (v${version.toString()})`,
         summary: `Budget ${usd(rules.budgetCents)}, max trade ${usd(rules.maxTradeCents)}, approval above ${usd(rules.approvalAboveCents)}, daily loss ${usd(rules.dailyLossCents)}; markets: ${markets.join(", ") || "none"}`,
         status: rules.paused ? "paused" : null,
         reason: null,

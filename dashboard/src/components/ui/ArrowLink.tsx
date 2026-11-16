@@ -6,7 +6,7 @@ import { cx } from "@/lib/cx";
 
 import styles from "./ArrowLink.module.css";
 
-/** A short "go to" link for a card header: "All activity", "Mandate". */
+/** A short "go to" link for a card header: "All activity", "Rules". */
 export function ArrowLink({
   href,
   children,

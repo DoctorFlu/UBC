@@ -4,31 +4,38 @@ import { ChainUnavailable } from "@/components/states/ChainStates";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Tabs } from "@/components/ui/Tabs";
+import { useAdvanced } from "@/lib/advanced/Advanced";
 import { formatDateUtc, formatTimeUtc } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, isoFromUnix } from "@/lib/live/derive";
 import type { ConsoleSnapshot } from "@/lib/live/types";
+import { useQueryTab } from "@/lib/useQueryTab";
 
 import { ChangeRequests } from "./ChangeRequests";
-import { MandateEditor } from "./MandateEditor";
+import { RulesEditor } from "./RulesEditor";
+
+export type RulesTab = "rules" | "requests";
 
 /**
  * The rules in force, the editor that signs new ones (with its backtest), and the agent's requests to
- * change them.
+ * change them. Opens on the requests while one is pending, unless the address names a tab.
  */
-export function MandateView({ preview }: { preview?: ConsoleSnapshot }) {
+export function RulesView({ tab, preview }: { tab?: RulesTab | undefined; preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
-  const chain = snapshot.chain;
-  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Mandate" />;
+  const { advanced } = useAdvanced();
   const pending = snapshot.offchain.changeRequests.filter((request) => request.status === "pending").length;
+  const fallback: RulesTab = pending > 0 ? "requests" : "rules";
+  const [shown, select] = useQueryTab<RulesTab>("tab", tab ?? fallback, fallback);
+  const chain = snapshot.chain;
+  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Rules" />;
   const setBy = chain.policySetBy;
 
   return (
     <div>
       <PageHeader
-        title="Mandate"
-        description="The rules the Policy contract checks on every intent. Nothing here changes until you sign it."
+        title="Rules"
+        description="The Policy contract checks every intent against these rules. Nothing here changes until you sign it."
         meta={
           setBy ? (
             <>
@@ -36,21 +43,22 @@ export function MandateView({ preview }: { preview?: ConsoleSnapshot }) {
                 Version {chain.policyVersion}, set {formatDateUtc(isoFromUnix(setBy.timestamp))} at{" "}
                 {formatTimeUtc(isoFromUnix(setBy.timestamp))}
               </span>
-              <HexValue label="Signed in" value={setBy.txHash} kind="tx" />
+              {advanced ? <HexValue label="Signed in" value={setBy.txHash} kind="tx" /> : null}
             </>
           ) : (
-            <span>No mandate signed yet</span>
+            <span>No rules signed yet</span>
           )
         }
       />
       <Tabs
-        label="Mandate sections"
-        defaultTab={pending > 0 ? "requests" : "rules"}
+        label="Rules sections"
+        selected={shown}
+        onSelect={(id) => select(id === "requests" ? "requests" : "rules")}
         tabs={[
           {
             id: "rules",
-            label: "Rules",
-            content: <MandateEditor rules={chain.rules} version={chain.policyVersion} chain={chain} />,
+            label: "Rules in force",
+            content: <RulesEditor rules={chain.rules} version={chain.policyVersion} chain={chain} />,
           },
           {
             id: "requests",

@@ -350,7 +350,7 @@ export function GalleryView() {
         <Card
           title="Card title"
           description="A card groups one job. Its header can carry an action."
-          actions={<ArrowLink href="/mandate">Mandate</ArrowLink>}
+          actions={<ArrowLink href="/rules">Rules</ArrowLink>}
           footer={<span>Footer for totals or a timestamp</span>}
         >
           <SkeletonText lines={2} />

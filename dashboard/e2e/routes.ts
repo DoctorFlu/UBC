@@ -20,7 +20,7 @@ export const routes: readonly RouteCase[] = [
   { name: "approvals", path: "/approvals", heading: "Approvals", console: true },
   { name: "activity", path: "/activity", heading: "Activity", console: true },
   { name: "intent", path: "/activity/0", heading: "Intent #0", console: true },
-  { name: "mandate", path: "/mandate", heading: "Mandate", console: true },
+  { name: "rules", path: "/rules", heading: "Rules", console: true },
   { name: "hedge", path: "/hedge", heading: "Hedge", console: true },
   // The agent's latest plan, whose id the planner derives from its inputs: see `routePath`.
   { name: "evidence", path: LATEST_PLAN, heading: "Evidence chain", console: true },

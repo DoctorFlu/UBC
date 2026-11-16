@@ -39,7 +39,7 @@ describe("audit rows", () => {
   });
 
   it("numbers mandate versions and keeps setPolicy's own Paused event off the screen", () => {
-    expect(rows[0]).toMatchObject({ label: "Mandate set", group: "mandate", unchanged: false });
+    expect(rows[0]).toMatchObject({ label: "Rules set", group: "mandate", unchanged: false });
     // setPolicy emits Paused(false) after PolicyUpdated: nothing was paused, so nothing "resumed".
     expect(rows[1]).toMatchObject({ event: "Paused", unchanged: true });
     expect(onScreen(rows).some((row) => row.event === "Paused")).toBe(false);

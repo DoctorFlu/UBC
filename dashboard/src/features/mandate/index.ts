@@ -1,1 +1,0 @@
-export { MandateView } from "./MandateView";

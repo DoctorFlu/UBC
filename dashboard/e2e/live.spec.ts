@@ -29,7 +29,7 @@ import {
 import { type FakeGemini, SPORTS_MARKET, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 
 /**
- * The owner's whole loop against a real chain, as a person would do it: set the first mandate, watch
+ * The owner's whole loop against a real chain, as a person would do it: set the first rules, watch
  * intents arrive without a refresh, approve one, reject one, see a fill, pull the kill switch and watch
  * the contract refuse the next proposal, then restart the console and find exactly the same state.
  *
@@ -158,22 +158,22 @@ test.afterAll(async () => {
   await gemini.stop();
 });
 
-test("before the first mandate, the console says so", async ({ page }) => {
+test("before the first rules, the console says so", async ({ page }) => {
   await open(page, "/");
-  await expect(page.locator("main").getByText("No mandate yet", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Set the mandate" })).toBeVisible();
+  await expect(page.locator("main").getByText("No rules yet", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Set the rules" })).toBeVisible();
   await open(page, "/activity");
   await expect(page.getByText("No intents yet").first()).toBeVisible();
 });
 
-test("the owner signs the first mandate", async ({ page }) => {
-  await open(page, "/mandate");
-  await expect(page.getByRole("heading", { name: "Set the first mandate" })).toBeVisible();
+test("the owner signs the first rules", async ({ page }) => {
+  await open(page, "/rules");
+  await expect(page.getByRole("heading", { name: "Set the first rules" })).toBeVisible();
   await page.getByRole("button", { name: "Review and sign" }).click();
-  const review = page.getByRole("dialog", { name: "Review the first mandate" });
+  const review = page.getByRole("dialog", { name: "Review the first rules" });
   await expect(review.getByTestId("policy-review")).toContainText("Budget");
   await review.getByRole("button", { name: "Sign in wallet" }).click();
-  await expect(toast(page)).toContainText("Mandate set");
+  await expect(toast(page)).toContainText("Rules set");
   await review.getByRole("button", { name: "Done" }).click();
   await expect(page.getByText(/^Version 1, set /)).toBeVisible();
   const rules = (await snapshot(baseURL)).chain?.rules;
@@ -254,7 +254,7 @@ test("a rule that blocks an intent says so on Home", async ({ page }) => {
 
 test("editing a limit changes the backtest of past intents before anything is signed", async ({ page }) => {
   const before = await snapshot(baseURL);
-  await open(page, "/mandate");
+  await open(page, "/rules");
   const backtest = page.getByTestId("backtest");
   // The draft starts as the rules in force, which gave every one of the four intents its verdict.
   await expect(backtest).toHaveAttribute("data-changed", "0");
@@ -300,7 +300,7 @@ test("the agent's change request shows a diff and its backtest, and applying it 
   })) as { id: string; status: string };
   expect(filed.status).toBe("pending");
 
-  await open(page, "/mandate");
+  await open(page, "/rules");
   // A pending request opens its tab and counts on it.
   await expect(page.getByRole("tab", { name: /Change requests/ })).toHaveAttribute("aria-selected", "true");
   const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
@@ -351,7 +351,7 @@ test("the owner can dismiss a change request, and the rules stay as they are", a
     reason: "More room for next week's ladder.",
   })) as { id: string };
   const rules = (await snapshot(baseURL)).chain?.rules;
-  await open(page, "/mandate");
+  await open(page, "/rules");
   const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
   await expect(card).toContainText("asks to change budget");
   await card.getByRole("button", { name: "Dismiss" }).click();
@@ -768,7 +768,7 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
     );
     expect.soft(await overflowsViewport(page)).toBe(false);
 
-    for (const path of ["/audit", "/hedge", "/payments", "/mandate"]) {
+    for (const path of ["/audit", "/hedge", "/payments", "/rules"]) {
       await view(page, path);
       expect.soft(await overflowsViewport(page), `${path} at ${width.toString()} px`).toBe(false);
     }
