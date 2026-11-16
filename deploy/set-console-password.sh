@@ -71,4 +71,8 @@ HASH="$encoded" awk '
 ' "$env_file" >"$temp"
 mv "$temp" "$env_file"
 chmod 600 "$env_file"
-echo "CONSOLE_PASSWORD_HASH set in $env_file. Apply it with: docker compose up -d"
+if [ -n "${MANDATE_ENV_FILE:-}" ]; then
+  echo "CONSOLE_PASSWORD_HASH set in $env_file. Apply it with: docker compose --env-file $env_file up -d"
+else
+  echo "CONSOLE_PASSWORD_HASH set in $env_file. Apply it with: docker compose up -d"
+fi

@@ -142,9 +142,11 @@ COPY --from=contracts /app/devchain/out devchain/out
 RUN ln -s "$(node -p 'require.resolve(`@foundry-rs/anvil-linux-${process.arch === "x64" ? "amd64" : "arm64"}/bin/anvil`)')" \
       /usr/local/bin/anvil \
  && anvil --version \
- && node --import tsx -e 'import("@mandate/shared/node")' \
  && mkdir -p /data/agent /data/chain \
  && chown node:node /data/agent /data/chain
 USER node
+# As the user the services run as: COPY keeps the source's file modes, so a checkout made with umask 077
+# would build an image whose files `node` cannot read. Fail the build then, not the containers.
+RUN node --import tsx -e 'await import("@mandate/shared/node"); await import("@mandate/devchain");'
 # Each service sets its own command and health check in compose.yml.
 CMD ["node", "--import", "tsx", "agent/src/main.ts"]
