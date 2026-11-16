@@ -2,7 +2,8 @@ import {
   Activity,
   BookOpenCheck,
   Cable,
-  LayoutDashboard,
+  Gauge,
+  Inbox,
   type LucideIcon,
   Receipt,
   ScrollText,
@@ -12,9 +13,10 @@ import {
 import type { NavIcon as NavIconName } from "@/lib/nav";
 
 const icons: Record<NavIconName, LucideIcon> = {
-  overview: LayoutDashboard,
+  home: Gauge,
+  approvals: Inbox,
   activity: Activity,
-  mandate: ScrollText,
+  rules: ScrollText,
   hedge: ShieldHalf,
   payments: Receipt,
   audit: BookOpenCheck,
@@ -23,5 +25,5 @@ const icons: Record<NavIconName, LucideIcon> = {
 
 export function NavIcon({ name, className }: { name: NavIconName; className?: string }) {
   const Icon = icons[name];
-  return <Icon className={className} aria-hidden strokeWidth={1.75} />;
+  return <Icon className={className} aria-hidden nonScalingStroke strokeWidth={1.5} />;
 }
