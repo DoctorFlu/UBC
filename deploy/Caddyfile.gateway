@@ -1,0 +1,28 @@
+# Mandate behind a proxy that ends TLS (InstaBox's published ports), used by compose.gateway.yml. Caddy
+# serves plain HTTP on high ports and handles no certificate. The routes are the same file as in the
+# Caddyfile: caddy/app-routes.caddy.
+#
+# What the proxy sends was checked on InstaBox: it connects from inside the machine, rewrites Host to
+# 127.0.0.1:<port>, puts the public name in X-Forwarded-Host, sets X-Forwarded-Proto: https, puts the
+# client in X-Forwarded-For, and passes Authorization and the browser's Sec-Fetch-* headers unchanged.
+{
+	auto_https off
+	servers {
+		protocols h1
+		# Docker publishes the port on loopback only (compose.gateway.yml), so the only peers are the
+		# proxy and processes on the machine. Trusting them gives the logs the client's address and keeps
+		# the proxy's X-Forwarded-Proto: https for the console.
+		trusted_proxies static private_ranges
+		client_ip_headers X-Forwarded-For
+	}
+}
+
+http://:8080 {
+	# The console builds nothing from Host, but it should see its public name, not the proxy's
+	# 127.0.0.1:8080. The name comes from the env file, not from the request.
+	request_header Host {$MANDATE_HOST}
+	import /etc/caddy/app-routes.caddy
+}
+
+# The landing page, when compose.site.yml is in COMPOSE_FILE: its own listener, so its own origin.
+import /etc/caddy/sites/*.caddy

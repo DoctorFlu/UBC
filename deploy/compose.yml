@@ -7,6 +7,11 @@
 #   compose.arc.yml   the Policy contract on Arc testnet, from POLICY_ADDRESS and POLICY_DEPLOY_BLOCK
 #
 # Only Caddy publishes ports. Every other service is reachable on the private `mandate` network only.
+#
+# Health checks run every 2 seconds while a service starts (start_interval, so start-up order is quick) and
+# every 5 minutes after that. They only order start-up and show status: a crashed process exits and the
+# restart policy brings it back. Each check starts a process, so checking often would keep a machine from
+# ever counting as idle (InstaBox pauses an idle machine; see docs/hosting.md).
 
 name: mandate
 
@@ -47,9 +52,12 @@ services:
     environment:
       MANDATE_HOST: ${MANDATE_HOST:?set MANDATE_HOST in deploy/.env (see mandate.env.template)}
       CONSOLE_USER: ${CONSOLE_USER:-owner}
-      CONSOLE_PASSWORD_HASH: ${CONSOLE_PASSWORD_HASH:?run deploy/set-console-password.sh first}
+      # Until deploy/set-console-password.sh sets the owner's hash, a bcrypt hash of 32 random bytes that were
+      # thrown away: no password matches it, so every owner route answers 401 and the rest of the stack runs.
+      CONSOLE_PASSWORD_HASH: ${CONSOLE_PASSWORD_HASH:-JDJhJDE0JExhbUlmZGxqeTZCTnM4Q1p0SFI1aXU5NEwyQVNSdFZlM0YwUVJYMDRLQ0p6NkpoNm9Ndi91}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/app-routes.caddy:/etc/caddy/app-routes.caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     security_opt:
@@ -66,10 +74,11 @@ services:
     healthcheck:
       # Caddy's admin API answers on localhost inside the container only.
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
-      interval: 30s
+      interval: 5m
       timeout: 5s
       retries: 3
       start_period: 10s
+      start_interval: 2s
     deploy:
       resources:
         limits:
@@ -106,10 +115,11 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
-      interval: 30s
+      interval: 5m
       timeout: 5s
       retries: 3
       start_period: 60s
+      start_interval: 2s
     deploy:
       resources:
         limits:
@@ -152,10 +162,11 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
-      interval: 30s
+      interval: 5m
       timeout: 5s
       retries: 3
       start_period: 30s
+      start_interval: 2s
     deploy:
       resources:
         limits:
@@ -180,10 +191,11 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:8788/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
-      interval: 30s
+      interval: 5m
       timeout: 5s
       retries: 3
       start_period: 30s
+      start_interval: 2s
     deploy:
       resources:
         limits:
