@@ -67,6 +67,9 @@ The chain is decided at runtime, not at build time.
 With `POLICY_ADDRESS` set the console follows that contract on Arc testnet; otherwise it follows the local devchain's deployment file.
 Both chains use chain id 5042002 and native USDC with 18 decimals, and the browser's wallet follows whatever the server reports.
 
+`GET /api/health` answers `{"status":"ok","feed":...}` for container health checks and needs no credential.
+With `NEXT_OUTPUT=standalone` set at build time, `next build` writes a self-contained server to `.next/standalone`, which the hosting image runs (see [docs/hosting.md](../docs/hosting.md)).
+
 ### Dev signer
 
 With `NEXT_PUBLIC_DEV_SIGNER=1` the console connects automatically as the owner, so tests and local demos need no browser wallet.

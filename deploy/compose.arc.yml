@@ -1,0 +1,23 @@
+# The Policy contract on Arc testnet, layered on compose.yml (COMPOSE_FILE=compose.yml:compose.arc.yml).
+#
+# No anvil and no simulated executor: the contract, its deploy block and the agent's key come from
+# deploy/.env, and `docker compose` refuses to start while any of them is missing. The owner signs in the
+# console with their own browser wallet; this console build has no dev signer.
+
+services:
+  console:
+    image: mandate-console:arc
+    build:
+      args:
+        NEXT_PUBLIC_DEV_SIGNER: "0"
+    environment:
+      POLICY_ADDRESS: ${POLICY_ADDRESS:?the Arc testnet setup needs POLICY_ADDRESS, the deployed Policy contract, in deploy/.env}
+      POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
+      ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
+
+  mcp:
+    environment:
+      POLICY_ADDRESS: ${POLICY_ADDRESS:?the Arc testnet setup needs POLICY_ADDRESS, the deployed Policy contract, in deploy/.env}
+      POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
+      ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
+      AGENT_PRIVATE_KEY: ${AGENT_PRIVATE_KEY:?the Arc testnet setup needs AGENT_PRIVATE_KEY, the agent account's key, in deploy/.env}

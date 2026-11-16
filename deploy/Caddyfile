@@ -1,0 +1,93 @@
+# Mandate on one hostname, with automatic HTTPS: a Let's Encrypt certificate for a public name, or a
+# certificate from Caddy's own authority for localhost.
+#
+# The route split. Anything not listed as public needs the owner's login, so a route added to the console
+# later is private until someone decides otherwise here.
+#
+#   public, with its own check   /mcp                      bearer token (MCP_AUTH_TOKEN), checked by the MCP server
+#                                /api/webhooks/quicknode   HMAC signature, checked by the console
+#   public, nothing private      /agent/*                  the agent's public scorecard
+#                                /_next/static/*           the scripts, styles and fonts every page loads
+#                                /api/health, /mcp/health  liveness, no data
+#                                /favicon.ico
+#   internal only (404 here)     /api/agent/*              the console's agent API: the MCP server calls it
+#                                                          on the private network, nobody else needs it
+#   owner (HTTP basic auth)      everything else           the console's pages, /api/console/* (snapshot,
+#                                                          live events, owner writes, hedge quotes), and on
+#                                                          the demo chain /rpc
+#
+# The signal API is not routed at all: only the MCP server calls it, on the private network.
+{
+	# The compose file publishes TCP 80 and 443 only, so HTTP/3 (UDP) is off.
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$MANDATE_HOST} {
+	log {
+		output stdout
+		format json
+	}
+
+	request_body {
+		max_size 4MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	handle /mcp {
+		reverse_proxy mcp:8787
+	}
+
+	handle /mcp/health {
+		rewrite * /health
+		reverse_proxy mcp:8787
+	}
+
+	handle /api/webhooks/quicknode {
+		reverse_proxy console:3000
+	}
+
+	handle /api/agent/* {
+		respond 404
+	}
+
+	@public path /agent/* /_next/static/* /api/health /favicon.ico
+	handle @public {
+		reverse_proxy console:3000
+	}
+
+	handle {
+		route {
+			# A page on another site must not be able to act with the owner's login. Opening a console
+			# link from elsewhere (the pairing link in Grok Bot's chat) is a navigation, and is allowed.
+			@crossSite {
+				header Sec-Fetch-Site cross-site
+				header Sec-Fetch-Site same-site
+				not {
+					method GET HEAD
+					header Sec-Fetch-Mode navigate
+				}
+			}
+			respond @crossSite "Cross-site request refused" 403
+
+			basic_auth {
+				{$CONSOLE_USER} {$CONSOLE_PASSWORD_HASH}
+			}
+			# The console has no use for the owner's password.
+			request_header -Authorization
+
+			# Owner routes that exist only in some setups (the demo chain's /rpc), see compose.demo.yml.
+			import /etc/caddy/owner/*.caddy
+
+			reverse_proxy console:3000
+		}
+	}
+}

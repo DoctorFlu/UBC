@@ -114,6 +114,7 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 | `POLICY_ADDRESS` | unset | policy reads and trades |
 | `AGENT_PRIVATE_KEY` | unset | trades |
 | `POLICY_DEPLOY_BLOCK` | unset | rejection reasons in `get_intent` and `get_activity` (scans the last 200,000 blocks when unset) |
+| `POLICY_DEPLOYMENT_FILE` | unset | when `POLICY_ADDRESS` is empty, a devchain deployment file to take the contract, deploy block and RPC from (the hosted demo chain uses it) |
 | `CONSOLE_URL` | `http://localhost:3000` | holdings, pairing, plans, decision contexts, intent links, change requests and signal payment reports |
 | `CONSOLE_SERVICE_TOKEN` | unset | holdings, pairing, plans, decision contexts, intent links, change requests and signal payment reports |
 | `SIGNALS_URL` | `http://localhost:4021` | buying signals |

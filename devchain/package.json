@@ -11,7 +11,8 @@
     "chain": "tsx scripts/chain.ts",
     "executor": "tsx scripts/executor.ts",
     "propose": "tsx scripts/propose.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ensure-deployment": "tsx scripts/ensure-deployment.ts"
   },
   "dependencies": {
     "@mandate/gemini": "*",

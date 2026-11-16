@@ -1,0 +1,203 @@
+# Mandate on one host: the console, the MCP server and the signal API behind Caddy (automatic HTTPS).
+#
+# This file is the part both chains share. The chain comes from one of two override files, chosen by
+# COMPOSE_FILE in deploy/.env (see mandate.env.template and docs/hosting.md):
+#   compose.demo.yml  a self-contained demo chain: anvil with Arc's chain id, the Policy contract deployed
+#                     once, and the simulated executor
+#   compose.arc.yml   the Policy contract on Arc testnet, from POLICY_ADDRESS and POLICY_DEPLOY_BLOCK
+#
+# Only Caddy publishes ports. Every other service is reachable on the private `mandate` network only.
+
+name: mandate
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Shared by the Node services: an init process (signals and zombie processes), no privileges.
+x-node-service: &node-service
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging: *logging
+  networks:
+    - mandate
+
+# Images are built from this checkout, never pulled: `docker compose up` rebuilds what changed. The services
+# image is built once, by the mcp service; every other service that runs it only refers to it.
+x-services-image: &services-image
+  image: mandate-services:latest
+  pull_policy: never
+
+services:
+  caddy:
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    ports:
+      - "${MANDATE_HTTP_PORT:-80}:80"
+      - "${MANDATE_HTTPS_PORT:-443}:443"
+    environment:
+      MANDATE_HOST: ${MANDATE_HOST:?set MANDATE_HOST in deploy/.env (see mandate.env.template)}
+      CONSOLE_USER: ${CONSOLE_USER:-owner}
+      CONSOLE_PASSWORD_HASH: ${CONSOLE_PASSWORD_HASH:?run deploy/set-console-password.sh first}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    depends_on:
+      console:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
+    healthcheck:
+      # Caddy's admin API answers on localhost inside the container only.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging: *logging
+    networks:
+      - mandate
+
+  console:
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: console
+    <<: *node-service
+    # Next.js may write its cache next to the build; that is the one writable place besides /tmp and the store.
+    tmpfs:
+      - /tmp
+      - /app/dashboard/.next/cache:uid=1000,gid=1000
+    environment:
+      CONSOLE_URL: ${MANDATE_PUBLIC_URL:-https://${MANDATE_HOST}}
+      MCP_PUBLIC_URL: ${MANDATE_PUBLIC_URL:-https://${MANDATE_HOST}}/mcp
+      CONSOLE_SERVICE_TOKEN: ${CONSOLE_SERVICE_TOKEN:?set CONSOLE_SERVICE_TOKEN in deploy/.env}
+      CONSOLE_DATA_DIR: /data/console
+      CONSOLE_EVENT_SOURCE: ${CONSOLE_EVENT_SOURCE:-rpc}
+      CONSOLE_POLL_INTERVAL_MS: ${CONSOLE_POLL_INTERVAL_MS:-}
+      QUICKNODE_STREAM_SECURITY_TOKEN: ${QUICKNODE_STREAM_SECURITY_TOKEN:-}
+      NODE_OPTIONS: --max-old-space-size=384
+    volumes:
+      - console-data:/data/console
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  mcp:
+    <<: *node-service
+    image: mandate-services:latest
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: services
+    command: ["node", "--import", "tsx", "agent/src/main.ts"]
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8787"
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in deploy/.env}
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
+      MCP_ADVERTISE_OUTPUT_SCHEMAS: ${MCP_ADVERTISE_OUTPUT_SCHEMAS:-}
+      # The console's agent API, on the private network.
+      CONSOLE_URL: http://console:3000
+      CONSOLE_SERVICE_TOKEN: ${CONSOLE_SERVICE_TOKEN:?set CONSOLE_SERVICE_TOKEN in deploy/.env}
+      SIGNALS_URL: http://signals:8788
+      X402_BUYER_PRIVATE_KEY: ${X402_BUYER_PRIVATE_KEY:-}
+      SIGNAL_DAILY_BUDGET_USDC: ${SIGNAL_DAILY_BUDGET_USDC:-}
+      SIGNAL_MAX_PRICE_USDC: ${SIGNAL_MAX_PRICE_USDC:-}
+      AGENT_DATA_DIR: /data/agent
+      NODE_OPTIONS: --max-old-space-size=256
+    volumes:
+      - agent-data:/data/agent
+    depends_on:
+      console:
+        condition: service_healthy
+      signals:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  signals:
+    <<: [*node-service, *services-image]
+    command: ["node", "--import", "tsx", "signals/src/server.ts"]
+    environment:
+      SIGNALS_PORT: "8788"
+      # Only the address that receives payments: the signal API never needs the seller's key.
+      X402_SELLER_ADDRESS: ${X402_SELLER_ADDRESS:?set X402_SELLER_ADDRESS in deploy/.env}
+      X402_FACILITATOR_URL: ${X402_FACILITATOR_URL:-}
+      SIGNALS_HEDGE_PRICE_USD: ${SIGNALS_HEDGE_PRICE_USD:-}
+      SIGNALS_ASSETS: ${SIGNALS_ASSETS:-}
+      SIGNALS_FAIR_BAND_CENTS: ${SIGNALS_FAIR_BAND_CENTS:-}
+      SIGNALS_VOL_WINDOW_HOURS: ${SIGNALS_VOL_WINDOW_HOURS:-}
+      NODE_OPTIONS: --max-old-space-size=192
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8788/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+networks:
+  mandate: {}
+
+volumes:
+  # The console's SQLite store: events, decision contexts, holdings, plans, pairing, change requests,
+  # signal payments and budget.
+  console-data: {}
+  # The MCP server's signal spend ledger and purchased signals.
+  agent-data: {}
+  # Caddy's certificates and keys, and its autosaved configuration.
+  caddy-data: {}
+  caddy-config: {}

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   createPublicClient,
@@ -121,14 +121,20 @@ export function devPolicyClient(rpcUrl: string, address: Address, role: DevRole)
   });
 }
 
-/** Writes the deployment file other packages read through `resolvePolicyDeployment()`. */
+/**
+ * Writes the deployment file other packages read through `resolvePolicyDeployment()`. The file is written
+ * beside its final name and renamed into place, so a process that reads it while it is being replaced
+ * (the console polls it) sees the old record or the new one, never half of one.
+ */
 export function writeDeploymentFile(
   file: DeploymentFile,
   path: string = localDeploymentPath(),
 ): DeploymentFile {
   const valid = deploymentFileSchema.parse(file);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(valid, null, 2)}\n`);
+  const temp = `${path}.${String(process.pid)}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(valid, null, 2)}\n`);
+  renameSync(temp, path);
   return valid;
 }
 

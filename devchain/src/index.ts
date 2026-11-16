@@ -7,6 +7,7 @@ export * from "./anvil";
 export * from "./default-market";
 export * from "./deploy";
 export * from "./devchain";
+export * from "./ensure";
 export * from "./executor";
 export * from "./foundry";
 export * from "./gemini";

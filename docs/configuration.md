@@ -13,7 +13,7 @@ Scripts that create secrets write them straight into `.env` without printing the
 | `ARC_RPC_URL` | no | Arc testnet RPC endpoint. Defaults to `https://rpc.testnet.arc.io`. |
 | `POLICY_ADDRESS` | no | Deployed Policy contract. When empty, the local devchain deployment is used. |
 | `POLICY_DEPLOY_BLOCK` | no | Block the Policy contract was deployed in, so event scans start there instead of block 0. The MCP server reads it too, to recover rejection reasons from events; when it is unset, the server scans only the last 200,000 blocks. |
-| `POLICY_DEPLOYMENT_FILE` | no | Local deployment file to use when `POLICY_ADDRESS` is empty. Defaults to `devchain/deployments/local.json`, which `npm run dev:chain` writes. Tests that run their own chain point every process at their own file. |
+| `POLICY_DEPLOYMENT_FILE` | no | Local deployment file to use when `POLICY_ADDRESS` is empty. Defaults to `devchain/deployments/local.json`, which `npm run dev:chain` writes, for the console and the scripts. Tests that run their own chain point every process at their own file. The MCP server reads it only when it is set explicitly, taking the contract, its deploy block and the RPC from it; the hosted demo chain uses this. |
 
 Switching the console, the agent and the scripts from the local devchain to Arc testnet is configuration only: set `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and, if you use a provider, `ARC_RPC_URL`.
 The browser never receives `ARC_RPC_URL`, because it may carry a provider key; it uses Arc's public RPC.
@@ -45,9 +45,16 @@ See [agent/README.md](../agent/README.md).
 | `CONSOLE_POLL_INTERVAL_MS` | no | How often the RPC poller asks for new blocks. Defaults to 250 ms on the local devchain and 1 s on Arc testnet. |
 | `GEMINI_API_URL` | no | Gemini's public REST API, which the console reads (server side, cached for 10 s, no key) for the hedge view's live ladder and preview, and to check each intent's market against Gemini's listing (once per market, in the background; the answer is stored, so each market costs one lookup ever). For ladders it only asks about assets Gemini lists and the events of plans the console stores, and keeps at most 32 ladders. Listing checks have a budget of their own inside the client's 100 requests a minute: at most 24 requests in any 60 s and 12 a minute sustained, counted as the most each lookup could send (4 candidate event tickers, each tried twice) until it says what it sent. Intents waiting for approval are checked first, then the newest, and the queue never holds more than the intents the console shows. So a stream of invented markets from a stolen agent key is checked at one every 40 s and leaves the hedge view at least 81 requests a minute: a public console cannot be made to spend its Gemini rate limit. Defaults to `https://api.gemini.com`. The end-to-end tests point it at a local server that replays recorded responses. The dev scripts read it too: `dev:executor` checks approved intents against it and `dev:propose` picks its default market from it. |
 | `MCP_PUBLIC_URL` | no | Public address of the MCP server, shown on the console's Setup page so the owner can add it to Grok Bot. |
-| `NEXT_PUBLIC_DEV_SIGNER` | no | `1` adds a test-only owner signer (anvil account 0, a public key) for end-to-end tests and local demos. Never set it in a deployed build. |
+| `NEXT_PUBLIC_DEV_SIGNER` | no | `1` adds a test-only owner signer (anvil account 0, a public key) for end-to-end tests and local demos. It is read at build time. Never set it in a deployed build that runs on Arc testnet; the hosted demo chain sets it and keeps the whole console behind the owner's login. |
+| `CONSOLE_BROWSER_RPC_URL` | no | Local devchain only: the RPC address the browser uses, when it cannot reach the chain at the deployment file's address. The hosted demo chain sets it to `https://<host>/rpc`, which Caddy forwards to anvil behind the owner's login. |
 
 The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
+
+## Hosting
+
+The hosted setup in [hosting.md](hosting.md) reads one file, `deploy/.env`, which [`deploy/mandate.env.template`](../deploy/mandate.env.template) describes line by line.
+Besides the variables on this page it uses `COMPOSE_FILE` (demo chain or Arc testnet), `MANDATE_HOST` (the public hostname), `MANDATE_PUBLIC_URL`, `MANDATE_HTTP_PORT`, `MANDATE_HTTPS_PORT`, `CONSOLE_USER` and `CONSOLE_PASSWORD_HASH` (the owner's login at the proxy) and `DEVCHAIN_CONTRACT` (which contract the demo chain deploys).
+The compose files set the addresses between the services, the data folders and the listening interfaces themselves.
 
 ## QuickNode Streams
 

@@ -208,6 +208,10 @@ npm run redteam   # a scripted adversary attacks the mandate, both contract vari
 Configuration is described in [docs/configuration.md](docs/configuration.md).
 Every secret lives in `.env`, which is git-ignored.
 
+### Host it
+
+[docs/hosting.md](docs/hosting.md) runs the whole product on one small Linux VM with `docker compose up -d`, behind Caddy with automatic HTTPS, with Grok Bot connecting to `https://<host>/mcp`.
+
 ## What is real today
 
 | Piece | State |

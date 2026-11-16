@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createMandateServer } from "./app";
 import { ConfigError, parseConfig } from "./config";
+import { applyDeploymentFile } from "./deployment-file";
 import { loadEnvFile, resolveEnvFile } from "./env-file";
 import { createLogger } from "./logger";
 import { SERVER_VERSION } from "./version";
@@ -33,7 +34,7 @@ function main(): void {
   const loaded = loadEnvFile(envFile);
   const envFileLabel = loaded ? envFile : `${envFile} (not found)`;
 
-  const config = orExit(() => parseConfig(process.env), envFileLabel);
+  const config = orExit(() => parseConfig(applyDeploymentFile(process.env)), envFileLabel);
   const logger = createLogger({ level: config.logLevel });
   const server = orExit(() => createMandateServer(config, logger), envFileLabel);
 
