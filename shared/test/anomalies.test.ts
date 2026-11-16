@@ -39,6 +39,31 @@ describe("intentAnomalies", () => {
     );
   });
 
+  it("flags a market Gemini does not list, or lists under another category, only when it was checked", () => {
+    const checkedAt = "2026-11-15T12:00:00.000Z";
+    const sports = { ...NORMAL, market: "GEMI-NFL-2611152125-SF-DAL-M-SF" };
+    expect(intentAnomalies({ ...sports, listing: { listed: true, category: 1, checkedAt } })).toEqual([
+      { code: "category_mismatch", text: "Gemini lists this market as Sports, the intent says Crypto" },
+    ]);
+    expect(intentAnomalies({ ...NORMAL, listing: { listed: false, checkedAt } })).toEqual([
+      { code: "market_not_listed", text: "Gemini does not list this market" },
+    ]);
+    // Listed where the intent says, or not checked yet: nothing to flag.
+    expect(intentAnomalies({ ...NORMAL, listing: { listed: true, category: 0, checkedAt } })).toEqual([]);
+    expect(intentAnomalies(sports)).toEqual([]);
+    // An unknown category or a market that is not a symbol is flagged once, by its own rule.
+    expect(
+      intentAnomalies({ ...sports, category: 200, listing: { listed: true, category: 1, checkedAt } }).map(
+        (anomaly) => anomaly.code,
+      ),
+    ).toEqual(["category"]);
+    expect(
+      intentAnomalies({ ...NORMAL, market: "not a symbol", listing: { listed: false, checkedAt } }).map(
+        (anomaly) => anomaly.code,
+      ),
+    ).toEqual(["market"]);
+  });
+
   it("accepts only symbol-shaped markets of bounded length", () => {
     expect(isMarketSymbol("GEMI-FEDJAN26-DN25")).toBe(true);
     expect(isMarketSymbol("")).toBe(false);

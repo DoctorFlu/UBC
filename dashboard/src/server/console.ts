@@ -7,6 +7,7 @@ import type { EnvVars } from "@mandate/shared/node";
 import { readConsoleConfig } from "./config";
 import { ConsoleService } from "./console-service";
 import { openDatabase } from "./db";
+import { getMarketQuotes } from "./market/quotes";
 
 /**
  * One console service per server process. It lives on `globalThis` because Next.js may load server
@@ -42,7 +43,11 @@ export function getConsoleService(): ConsoleService {
   let service = holder[KEY];
   if (!service) {
     const config = readConsoleConfig();
-    service = new ConsoleService(config, openDatabase(config.dataDir), { env: consoleEnv() });
+    service = new ConsoleService(config, openDatabase(config.dataDir), {
+      env: consoleEnv(),
+      // Through the hedge view's cached Gemini client, so both share one rate limit and event cache.
+      marketLookup: (symbol) => getMarketQuotes().marketCategory(symbol),
+    });
     holder[KEY] = service;
   }
   service.start();

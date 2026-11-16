@@ -13,6 +13,7 @@ import {
   decodePolicyLogs,
   emptyPolicyViewState,
   intentsMissingDetails,
+  isMarketSymbol,
   reduceEvents,
   toSafeNumber,
   verifyContext,
@@ -44,7 +45,9 @@ import type { Database } from "./db";
 import { type ChainClient, LogScanner, blockTimestamps, findDeployBlock } from "./ingest/chain-reader";
 import { UNCONFIGURED_NETWORK, deploymentFileStamp, resolveDeployment } from "./ingest/deployment";
 import { StreamReceiver } from "./ingest/stream";
+import { type ListingLookup, MarketListings } from "./market/listings";
 import { EventStore, type IngestSource } from "./store/events";
+import { ListingStore } from "./store/listings";
 import {
   OffchainStore,
   type StoredIntentContextLink,
@@ -100,6 +103,8 @@ export class ConsoleService {
   readonly events: EventStore;
   readonly offchain: OffchainStore;
   readonly stream: StreamReceiver;
+  /** Gemini's listing of each intent's market, when the console has a way to ask Gemini. */
+  readonly listings: MarketListings | null;
 
   private session: Session | null = null;
   private network: ConsoleNetwork = UNCONFIGURED_NETWORK;
@@ -125,11 +130,19 @@ export class ConsoleService {
   constructor(
     readonly config: ConsoleConfig,
     db: Database,
-    private readonly options: { env?: EnvVars; logger?: Logger } = {},
+    private readonly options: { env?: EnvVars; logger?: Logger; marketLookup?: ListingLookup } = {},
   ) {
     this.events = new EventStore(db);
     this.offchain = new OffchainStore(db);
     this.stream = new StreamReceiver(config.streamSecurityToken);
+    this.listings = options.marketLookup
+      ? new MarketListings({
+          lookup: options.marketLookup,
+          store: new ListingStore(db),
+          onChange: () => this.changed(),
+          logger: this.log,
+        })
+      : null;
     this.feed = {
       source: config.eventSource,
       health: "starting",
@@ -163,6 +176,7 @@ export class ConsoleService {
     this.abort.abort();
     await this.loop;
     this.loop = null;
+    this.listings?.stop();
     if (this.notifyTimer) clearTimeout(this.notifyTimer);
   }
 
@@ -593,7 +607,24 @@ export class ConsoleService {
 
   private chainView(head: { blockNumber: number; timestamp: number }): ChainView {
     const view = buildChainView(this.state, head, this.details);
-    return { ...view, sealed: this.sealedReasons(view.intents) };
+    const intents = this.withListings(view.intents);
+    return { ...view, intents, sealed: this.sealedReasons(intents) };
+  }
+
+  /**
+   * Each intent with Gemini's listing of its market, as stored. Never waits on Gemini: a market not
+   * checked yet is queued, and the snapshot is pushed again once its verdict is stored.
+   */
+  private withListings(intents: IntentView[]): IntentView[] {
+    if (!this.listings) return intents;
+    const symbols = intents.flatMap((intent) =>
+      intent.market !== null && isMarketSymbol(intent.market) ? [intent.market] : [],
+    );
+    const known = this.listings.listings(symbols);
+    return intents.map((intent) => {
+      const listing = intent.market === null ? undefined : known.get(intent.market);
+      return listing ? { ...intent, listing } : intent;
+    });
   }
 
   /**

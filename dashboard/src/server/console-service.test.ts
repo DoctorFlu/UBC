@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DEMO_POLICY } from "@mandate/devchain";
-import { Category, policyBaseAbi, rulesToChain } from "@mandate/shared";
+import { Category, intentAnomalies, policyBaseAbi, rulesToChain } from "@mandate/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { ConsoleSnapshot } from "@/lib/live/types";
@@ -253,6 +253,76 @@ describe("ConsoleService with onchain values offchain code cannot hold", () => {
       expect(service.snapshot().feed.detail).toContain("1 Policy event");
     } finally {
       await service.stop();
+      await chain.stop();
+    }
+  }, 60_000);
+});
+
+describe("ConsoleService with Gemini's listing", () => {
+  it("flags a market Gemini lists under another category, or not at all, without ever waiting on Gemini", async () => {
+    const chain = await startTestChain({ contract: "production" });
+    const dataDir = mkdtempSync(join(tmpdir(), "mandate-console-"));
+    const sports = "GEMI-NFL-2611152125-SF-DAL-M-SF";
+    const unlisted = "GEMI-NOPE2611202200-X";
+    let answer: "listed" | "hang" = "hang";
+    const asked: string[] = [];
+    const marketLookup = (symbol: string) => {
+      asked.push(symbol);
+      if (answer === "hang") return new Promise<never>(() => undefined);
+      return Promise.resolve(
+        symbol === BTC_ABOVE_65K ? Category.Crypto : symbol === sports ? Category.Sports : null,
+      );
+    };
+    const start = () => {
+      const service = new ConsoleService(config(dataDir), openDatabase(dataDir), {
+        env: chain.env,
+        logger: silent,
+        marketLookup,
+      });
+      service.start();
+      return service;
+    };
+    const service = start();
+    let restarted: ConsoleService | null = null;
+    try {
+      for (const market of [BTC_ABOVE_65K, sports, unlisted]) {
+        await chain.agent.proposeTrade({ ...trade, market, amountCents: 500 });
+      }
+      // Gemini never answers: the snapshot is still served, with no listing and nothing flagged.
+      const waiting = await caughtUp(service, chain);
+      expect(waiting.chain?.intents.map((intent) => intent.listing)).toEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]);
+      expect(waiting.chain?.intents.flatMap((intent) => intentAnomalies(intent))).toEqual([]);
+      expect(asked).toEqual([BTC_ABOVE_65K]);
+      await service.stop();
+
+      // A restarted console whose Gemini answers checks each market once, stores it, and flags two.
+      answer = "listed";
+      asked.length = 0;
+      restarted = start();
+      const current = restarted;
+      await caughtUp(current, chain);
+      await expect
+        .poll(() => current.snapshot().chain?.intents.every((intent) => intent.listing !== undefined), {
+          timeout: 15_000,
+        })
+        .toBe(true);
+      expect(
+        current
+          .snapshot()
+          .chain?.intents.map((intent) => intentAnomalies(intent).map((anomaly) => anomaly.text)),
+      ).toEqual([
+        [],
+        ["Gemini lists this market as Sports, the intent says Crypto"],
+        ["Gemini does not list this market"],
+      ]);
+      expect(asked).toEqual([BTC_ABOVE_65K, sports, unlisted]);
+    } finally {
+      await service.stop();
+      await restarted?.stop();
       await chain.stop();
     }
   }, 60_000);
