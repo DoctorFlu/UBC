@@ -7,10 +7,11 @@
   "scripts": {
     "dev": "next dev --port 3001",
     "build": "next build",
+    "serve": "tsx scripts/serve.ts",
     "typegen": "next typegen",
     "typecheck": "npm run typegen && tsc --noEmit",
-    "e2e": "playwright test",
-    "screenshots": "E2E_SCREENSHOTS=1 playwright test --project=screenshots"
+    "e2e": "playwright test --project=phone-light --project=phone-dark --project=desktop-light --project=desktop-dark",
+    "screenshots": "playwright test --project=screenshots"
   },
   "dependencies": {
     "@mandate/brand": "*",
