@@ -13,6 +13,7 @@ import { HexValue } from "@/components/ui/HexValue";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { When } from "@/components/ui/When";
 import {
   type ChainIntent,
   type ChainStatus,
@@ -83,7 +84,7 @@ function Tx({ tx }: { tx: ChainTx }) {
   const iso = isoFromUnix(tx.at);
   return (
     <span className={styles.tx}>
-      <span className={styles.txTime}>{at(iso)}</span>
+      <When at={iso} date className={styles.txTime} />
       <HexValue value={tx.txHash} kind="tx" />
     </span>
   );
@@ -200,7 +201,9 @@ function SignalLink({ view, evidence }: { view: AgentPlanView; evidence: Evidenc
             <dt>Price</dt>
             <dd className="num">{formatUsdc(payment.amount)}</dd>
             <dt>Paid</dt>
-            <dd>{at(payment.paidAt)}</dd>
+            <dd>
+              <When at={payment.paidAt} date />
+            </dd>
             <dt>Network</dt>
             <dd className="mono">{clip(payment.network, MAX_SYMBOL)}</dd>
             <dt>Gateway settlement</dt>
@@ -265,7 +268,9 @@ function PlanLink({
           </span>
         </dd>
         <dt>Planned</dt>
-        <dd>{at(view.createdAt)}</dd>
+        <dd>
+          <When at={view.createdAt} date />
+        </dd>
         <dt>Costs</dt>
         <dd>
           <Money cents={plan.totals.costCents} />, for{" "}
@@ -453,7 +458,9 @@ export function EvidenceView({ view, preview }: { view: AgentPlanView; preview?:
             <Lamp tone={status.tone} testId="chain-status-chip">
               {status.label}
             </Lamp>
-            <span>Planned {at(view.createdAt)}</span>
+            <span>
+              Planned <When at={view.createdAt} date />
+            </span>
           </>
         }
       />

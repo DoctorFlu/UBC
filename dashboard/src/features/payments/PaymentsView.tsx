@@ -12,6 +12,7 @@ import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import { UsdcMeter } from "@/components/ui/LimitMeter";
+import { When } from "@/components/ui/When";
 import { formatDateUtc, formatTimeUtc } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
@@ -60,10 +61,7 @@ const columns: readonly Column<PaymentRow>[] = [
     key: "time",
     header: "Paid",
     cell: ({ payment }) => (
-      <time dateTime={payment.paidAt} className={styles.time}>
-        <span>{formatTimeUtc(payment.paidAt)}</span>
-        <span className={styles.detail}>{formatDateUtc(payment.paidAt)}</span>
-      </time>
+      <When at={payment.paidAt} className={styles.time} dateClassName={styles.detail} />
     ),
     nowrap: true,
   },

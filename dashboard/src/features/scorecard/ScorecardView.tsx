@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
+import { When } from "@/components/ui/When";
 import {
   formatCount,
   formatDateUtc,
@@ -48,10 +49,7 @@ const columns: readonly Column<RecentIntent>[] = [
     key: "time",
     header: "Time",
     cell: (intent) => (
-      <span className={styles.when}>
-        <span>{formatTimeUtc(isoFromUnix(intent.proposedAt))}</span>
-        <span className={styles.date}>{formatDateUtc(isoFromUnix(intent.proposedAt))}</span>
-      </span>
+      <When at={intent.proposedAt} className={styles.when} dateClassName={styles.date} />
     ),
     nowrap: true,
   },
@@ -114,10 +112,10 @@ function Proofs({ counted }: { counted: Counted }) {
         {counted.proofs.map((entry: Proof) => (
           <li key={`${entry.txHash}:${String(entry.intentId)}`}>
             <span className={styles.proofWhat}>
-              {entry.intentId === null ? "Mandate" : `Intent #${entry.intentId.toString()}`}
+              {entry.intentId === null ? "Rules" : `Intent #${entry.intentId.toString()}`}
             </span>
             <span className={styles.proofWhen}>
-              {at(entry.at)}, block {formatCount(entry.blockNumber)}
+              <When at={entry.at} date />, block {formatCount(entry.blockNumber)}
             </span>
             <HexValue value={entry.txHash} kind="tx" />
           </li>

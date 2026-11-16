@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import { type TabItem, Tabs } from "@/components/ui/Tabs";
+import { When } from "@/components/ui/When";
 import { formatCount, formatDateUtc, formatTimeUtc } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
@@ -38,10 +39,7 @@ const columns: readonly Column<AuditRow>[] = [
     key: "when",
     header: "Time",
     cell: (row) => (
-      <span className={styles.when}>
-        <span>{formatTimeUtc(row.at)}</span>
-        <span className={styles.date}>{formatDateUtc(row.at)}</span>
-      </span>
+      <When at={row.at} className={styles.when} dateClassName={styles.date} />
     ),
     nowrap: true,
   },

@@ -24,6 +24,7 @@ import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip, statusDescriptions } from "@/components/ui/StatusChip";
+import { When } from "@/components/ui/When";
 import {
   formatContractPrice,
   formatCount,
@@ -443,8 +444,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             <StatusChip status={intent.status} reason={intent.reason} />
             <FlaggedBadge flags={flags} />
             <span>
-              Proposed {formatDateUtc(isoFromUnix(intent.proposedAt))},{" "}
-              {formatTimeUtc(isoFromUnix(intent.proposedAt))}
+              Proposed <When at={intent.proposedAt} date />
             </span>
           </>
         }
@@ -530,7 +530,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                   {step.detail ? <p className={styles.stepDetail}>{step.detail}</p> : null}
                   <p className={styles.stepMeta}>
                     <span>
-                      {formatTimeUtc(isoFromUnix(step.timestamp))}, block {formatCount(step.blockNumber)}
+                      <When at={step.timestamp} />, block {formatCount(step.blockNumber)}
                     </span>
                     <HexValue value={step.txHash} kind="tx" />
                   </p>
