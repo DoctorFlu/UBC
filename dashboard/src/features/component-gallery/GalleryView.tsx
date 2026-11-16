@@ -143,7 +143,7 @@ export function GalleryView() {
       <Section
         id="tokens"
         title="Tokens"
-        note="Semantic color tokens and the type scale. Both themes are defined in styles/tokens.css."
+        note="Semantic color tokens and the type scale. Both themes are defined in brand/tokens.css."
       >
         <div className={styles.swatches}>
           {swatches.map(([name, token]) => (
