@@ -116,6 +116,37 @@ test.describe("seeded demo", () => {
     await expect(sealed).toContainText("The $65,000 rung pays first");
   });
 
+  test("a holdings row shows its error only once edited, and nothing moves when it does", async ({
+    page,
+  }) => {
+    await page.goto("/hedge");
+    const save = page.getByRole("button", { name: "Sign and save" });
+    await expect(save).toBeVisible();
+    await page.getByRole("button", { name: "Add an asset" }).click();
+    const row = page.getByTestId("holding-row").last();
+    const quantity = row.getByRole("textbox", { name: "Quantity" });
+    await expect(quantity).toBeVisible();
+    await expect(row.getByText(/Quantity: a number/)).toHaveCount(0);
+    await expect(quantity).not.toHaveAttribute("aria-invalid", "true");
+    const before = await save.boundingBox();
+
+    await quantity.fill("abc");
+    await expect(row.getByText("Quantity: a number like 0.05, at most 8 decimals.")).toBeVisible();
+    await expect(quantity).toHaveAttribute("aria-invalid", "true");
+    expect(await save.boundingBox()).toEqual(before);
+
+    await quantity.fill("0.05");
+    await expect(row.getByText(/Quantity: a number/)).toHaveCount(0);
+    expect(await save.boundingBox()).toEqual(before);
+
+    // A save attempt shows the errors of rows nobody edited yet, without sending anything.
+    await page.getByRole("button", { name: "Add an asset" }).click();
+    const blank = page.getByTestId("holding-row").last();
+    await expect(blank.getByText("Use the ticker, like BTC.")).toHaveCount(0);
+    await save.click();
+    await expect(blank.getByText("Use the ticker, like BTC.")).toBeVisible();
+  });
+
   test("an intent without a link says no reason was recorded", async ({ page }) => {
     await page.goto("/activity/1");
     await expect(page.getByTestId("sealed-reason")).toContainText("No reason recorded");
