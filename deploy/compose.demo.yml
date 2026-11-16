@@ -1,0 +1,154 @@
+# The self-contained demo chain, layered on compose.yml (COMPOSE_FILE=compose.yml:compose.demo.yml).
+#
+# anvil runs with Arc's chain id and keeps its state in the `chain` volume, `chain-init` deploys the Policy
+# contract with the demo rules once (and again only if the chain lost its state), and the simulated
+# executor fills approved intents without placing any order. Every key here is one of anvil's public
+# test keys: the chain holds nothing of value, and nothing on it can reach a shared network.
+#
+# The owner signs in the console with the built-in dev signer (anvil account 0). Its key is public, so the
+# console's owner routes, and the browser's /rpc route to anvil, stay behind the owner's login in Caddy.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# The services image compose.yml builds (for the mcp service), never pulled.
+x-node-service: &node-service
+  image: mandate-services:latest
+  pull_policy: never
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging: *logging
+  networks:
+    - mandate
+
+services:
+  anvil:
+    <<: *node-service
+    # Loads /data/chain/anvil-state.json when it exists, writes it every 5 seconds and on shutdown.
+    command:
+      - anvil
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8545"
+      - --chain-id
+      - "5042002"
+      - --state
+      - /data/chain/anvil-state.json
+      - --state-interval
+      - "5"
+    stop_grace_period: 30s
+    volumes:
+      - chain:/data/chain
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8545', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId' }) })
+          .then(async (r) => process.exit(r.ok && (await r.json()).result === '0x4cef52' ? 0 : 1), () => process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  chain-init:
+    <<: *node-service
+    command: ["node", "--import", "tsx", "devchain/scripts/ensure-deployment.ts"]
+    # Runs to completion on every `docker compose up`; the services below wait for it.
+    restart: "no"
+    environment:
+      DEVCHAIN_RPC_URL: http://anvil:8545
+      POLICY_DEPLOYMENT_FILE: /data/chain/deployment.json
+      DEVCHAIN_CONTRACT: ${DEVCHAIN_CONTRACT:-reference}
+      NODE_OPTIONS: --max-old-space-size=192
+    volumes:
+      - chain:/data/chain
+    depends_on:
+      anvil:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  executor:
+    <<: *node-service
+    command: ["node", "--import", "tsx", "devchain/scripts/executor.ts"]
+    environment:
+      POLICY_DEPLOYMENT_FILE: /data/chain/deployment.json
+      NODE_OPTIONS: --max-old-space-size=192
+    volumes:
+      - chain:/data/chain:ro
+    depends_on:
+      chain-init:
+        condition: service_completed_successfully
+    # The executor has no HTTP port; the check is that the chain it acts on answers. If the process dies,
+    # the container exits and the restart policy brings it back.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://anvil:8545', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId' }) })
+          .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  console:
+    image: mandate-console:demo
+    build:
+      args:
+        NEXT_PUBLIC_DEV_SIGNER: "1"
+    environment:
+      POLICY_DEPLOYMENT_FILE: /data/chain/deployment.json
+      # The browser reaches anvil through Caddy's /rpc, behind the owner's login.
+      CONSOLE_BROWSER_RPC_URL: ${MANDATE_PUBLIC_URL:-https://${MANDATE_HOST}}/rpc
+    volumes:
+      - chain:/data/chain:ro
+    depends_on:
+      chain-init:
+        condition: service_completed_successfully
+
+  mcp:
+    environment:
+      POLICY_DEPLOYMENT_FILE: /data/chain/deployment.json
+      # anvil account 1, a public test key: the agent role of the demo contract, worthless anywhere else.
+      AGENT_PRIVATE_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    volumes:
+      - chain:/data/chain:ro
+    depends_on:
+      chain-init:
+        condition: service_completed_successfully
+
+  caddy:
+    volumes:
+      - ./caddy/demo-rpc.caddy:/etc/caddy/owner/demo-rpc.caddy:ro
+
+volumes:
+  # anvil's state (anvil-state.json) and the deployment record (deployment.json) the other services read.
+  chain: {}

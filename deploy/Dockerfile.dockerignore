@@ -1,0 +1,31 @@
+# Build context for deploy/Dockerfile (BuildKit reads this file because it sits beside the Dockerfile).
+# Secrets first: no env file of any name may reach an image layer.
+**/.env
+**/.env.*
+**/*.env
+deploy/
+
+# Installed and built output: the image installs and builds its own.
+**/node_modules
+**/.next
+**/.data
+**/out
+**/cache
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/*.sqlite*
+**/*.log
+devchain/deployments
+contracts/lib
+contracts/broadcast
+
+# Repository and tooling state, tests output and large files the images never use.
+.git
+.github
+.claude
+**/.DS_Store
+dashboard/docs
+dashboard/playwright-report
+dashboard/test-results
+dashboard/blob-report

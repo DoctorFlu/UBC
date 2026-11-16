@@ -1,0 +1,6 @@
+# Demo chain only: the browser's route to anvil, so the console's dev signer can send the owner's
+# transactions. The Caddyfile imports this inside the owner's routes, behind the same login.
+handle /rpc {
+	rewrite * /
+	reverse_proxy anvil:8545
+}
