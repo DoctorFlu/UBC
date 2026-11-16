@@ -14,6 +14,7 @@ import {
   type TestChain,
   freshSuiteDir,
   noBuy,
+  proposeRaw,
   startTestChain,
   suitePaths,
 } from "./support/chain";
@@ -537,7 +538,7 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   const { plan } = stored;
 
   // The hedge test carried out the plan's cheapest order with a reason naming the plan: verified.
-  await open(page, `/hedge/plans/${encodeURIComponent(plan.planId)}`);
+  await page.goto(`/hedge/plans/${encodeURIComponent(plan.planId)}`);
   const status = page.getByTestId("chain-status");
   await expect(status).toHaveAttribute("data-status", "verified");
   await expect(page.getByTestId("evidence-intent")).toHaveCount(1);
@@ -566,7 +567,9 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
 
   // A hostile agent: a 16 KiB market on the chain and a 2,000-character request with no spaces.
   const hostileMarket = `GEMI-${"W".repeat(16 * 1024)}`;
-  const hostile = await chain.agent.proposeTrade(noBuy(hostileMarket, 300, 31));
+  const before = (await snapshot(baseURL)).chain?.intents.length ?? 0;
+  await proposeRaw(chain, hostileMarket, 300);
+  const hostile = { intentId: before };
   await waitForSnapshot(baseURL, (current) =>
     Boolean(current.chain?.intents.some((intent) => intent.id === hostile.intentId)),
   );
@@ -582,7 +585,7 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
     requestText: "W".repeat(2_000),
   });
   await agentApi(baseURL, CONSOLE_AGENT_ROUTES.plans, "POST", request);
-  await open(page, `/hedge/plans/${encodeURIComponent(request.plan.planId)}`);
+  await page.goto(`/hedge/plans/${encodeURIComponent(request.plan.planId)}`);
   await expect(page.getByTestId("chain-status")).toHaveAttribute("data-status", "not_executed");
   await expect(page.getByTestId("evidence-request")).toContainText("W".repeat(100));
   expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
