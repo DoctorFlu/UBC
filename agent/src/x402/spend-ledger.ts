@@ -51,6 +51,8 @@ export interface SpendEntry {
   url: string;
   nonce: string | null;
   reservedAt: string;
+  /** When the payment was recorded as paid, or null until then. */
+  paidAt: string | null;
 }
 
 export type ReserveResult = { ok: true; id: string; spentBefore: bigint } | { ok: false; spent: bigint };
@@ -106,6 +108,11 @@ export class SpendLedger {
 
   entriesOn(day: string): SpendEntry[] {
     return [...this.entries.values()].filter((entry) => entry.day === day);
+  }
+
+  /** Every paid entry, oldest first. */
+  paidEntries(): SpendEntry[] {
+    return [...this.entries.values()].filter((entry) => entry.status === "paid");
   }
 
   /** Reserves `amount` against `budget` for `day`, or refuses without writing anything. */
@@ -172,6 +179,7 @@ export class SpendLedger {
         url: event.url,
         nonce: null,
         reservedAt: event.at,
+        paidAt: null,
       });
       return;
     }
@@ -181,6 +189,7 @@ export class SpendLedger {
       entry.status = "paid";
       entry.amount = BigInt(event.amount);
       entry.nonce = event.nonce;
+      entry.paidAt = event.at;
     } else {
       entry.status = "released";
     }

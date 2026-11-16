@@ -1,4 +1,5 @@
 import type { Config } from "./config";
+import { createPaymentReporter } from "./console/payment-reports";
 import type { Logger } from "./logger";
 import { createServices, type Services } from "./services";
 
@@ -29,5 +30,9 @@ export function createAppContext(
   overrides: Partial<Services> & { clock?: Clock } = {},
 ): AppContext {
   const { clock = systemClock, ...services } = overrides;
-  return { ...createServices(config), ...services, config, logger, clock };
+  const merged = { ...createServices(config), ...services };
+  // Built from the final console and payments, so a test that swaps either gets a matching reporter.
+  const paymentReports =
+    "paymentReports" in services ? services.paymentReports : createPaymentReporter(merged, logger, clock);
+  return { ...merged, paymentReports, config, logger, clock };
 }

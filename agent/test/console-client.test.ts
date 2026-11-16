@@ -94,6 +94,44 @@ describe("HttpConsoleClient against the wire contract", () => {
     expect(fake.state.intentContexts.get(3)?.hash).toBe(hash);
   });
 
+  it("records signal payments once per receipt id, and reads a missing route as null", async () => {
+    const fake = createFakeConsole({ token: TOKEN });
+    const c = client(fake.clientFetch);
+    const receiptId = `0x${"9".repeat(64)}`;
+    const payment = {
+      amount: "1000",
+      paidAt: "2026-11-15T12:00:01.000Z",
+      resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+      network: "eip155:5042002",
+      payer: TEST_ADDRESS,
+      payee: null,
+      settlementId: null,
+      signal: null,
+    } as const;
+    const budget = {
+      buyerAddress: TEST_ADDRESS,
+      day: "2026-11-15",
+      dailyBudget: "20000",
+      spentToday: "1000",
+      maxPricePerPurchase: "5000",
+      resetsAt: "2026-11-16T00:00:00.000Z",
+      gatewayBalance: null,
+      asOf: "2026-11-15T12:00:02.000Z",
+    } as const;
+
+    const first = await c.putSignalPayment(receiptId, payment);
+    expect(first).toMatchObject({ receiptId });
+    expect(await c.putSignalPayment(receiptId, { ...payment, amount: "2" })).toEqual(first);
+    expect(fake.state.signalPayments.get(receiptId)?.amount).toBe("1000");
+    expect(await c.putSignalBudget(budget)).toMatchObject({ spentToday: "1000" });
+    expect(fake.state.requests).toContain(`PUT ${CONSOLE_AGENT_ROUTES.signalPayment(receiptId)}`);
+
+    fake.setSignalRoutes(false);
+    expect(await c.putSignalPayment(receiptId, payment)).toBeNull();
+    expect(await c.putSignalBudget(budget)).toBeNull();
+    await expect(c.putSignalPayment(receiptId, { ...payment, amount: "0.001" })).rejects.toThrow();
+  });
+
   it("sends the bearer token and maps 401 to unauthorized", async () => {
     const fake = createFakeConsole({ token: TOKEN });
     await expect(client(fake.clientFetch, "wrong-token").getHoldings()).rejects.toMatchObject({

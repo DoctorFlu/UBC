@@ -234,6 +234,11 @@ export class X402Buyer {
     return this.client.address;
   }
 
+  /** The Circle Gateway balance available to pay with, in USDC base units. */
+  async gatewayBalance(): Promise<bigint> {
+    return (await this.client.getBalances()).gateway.available;
+  }
+
   /** Makes sure the Gateway balance can cover payments, depositing from the wallet when it is low. */
   async ensureDeposit(options: EnsureDepositOptions): Promise<EnsureDepositResult> {
     const minAvailable = parseUnits(options.minAvailable, USDC_DECIMALS);

@@ -35,7 +35,11 @@ import type {
   ProposeResult,
   PutIntentContextRequest,
   PutPairingRequest,
+  PutSignalBudgetRequest,
+  PutSignalPaymentRequest,
   Roles,
+  SignalBudgetResponse,
+  SignalPaymentResponse,
   RuleInput,
   TradeIntentInput,
 } from "@mandate/shared";
@@ -46,7 +50,13 @@ import { createGeminiMarkets, type ResolvedMarket } from "./markets/gemini";
 import { createHedgePlanner } from "./planning/planner";
 import { ProposalLedger } from "./state/ledger";
 import { PlanStore } from "./state/plans";
-import { createSignalPayments, type BudgetState, type BuySignalOutcome } from "./x402/payments";
+import type { PaymentReporter } from "./console/payment-reports";
+import {
+  createSignalPayments,
+  type BudgetState,
+  type BuySignalOutcome,
+  type PaidSignalEntry,
+} from "./x402/payments";
 import type { SignalPurchase } from "./x402/signal-store";
 
 /**
@@ -136,6 +146,17 @@ export interface ConsoleClient {
   putPairing(request: PutPairingRequest, signal?: AbortSignal): Promise<PairingResponse>;
   /** The pairing state, or null when the agent never asked to pair. */
   getPairing(signal?: AbortSignal): Promise<PairingResponse | null>;
+  /** Records one signal payment (idempotent on the receipt id). Null when the console has no such route yet (404). */
+  putSignalPayment(
+    receiptId: string,
+    request: PutSignalPaymentRequest,
+    signal?: AbortSignal,
+  ): Promise<SignalPaymentResponse | null>;
+  /** Replaces the signal budget snapshot. Null when the console has no such route yet (404). */
+  putSignalBudget(
+    request: PutSignalBudgetRequest,
+    signal?: AbortSignal,
+  ): Promise<SignalBudgetResponse | null>;
 }
 
 /**
@@ -162,6 +183,10 @@ export interface PaymentsClient {
    * `signal: { receiptId, signal }` to let the plan use it.
    */
   purchasedSignal(receiptId: string): SignalPurchase | undefined;
+  /** Every signal payment in the durable spend ledger, oldest first: the outbox for console reports. */
+  paidSignals(): PaidSignalEntry[];
+  /** The buyer's available Circle Gateway balance, in USDC base units. Throws when it cannot be read. */
+  gatewayBalance(): Promise<bigint>;
 }
 
 export interface Services {
@@ -170,6 +195,11 @@ export interface Services {
   readonly planner: HedgePlanner | undefined;
   readonly console: ConsoleClient | undefined;
   readonly payments: PaymentsClient | undefined;
+  /**
+   * Reports signal payments and the signal budget to the console (issue #22). Exists when both the
+   * console and payments are configured; `createAppContext` builds it from them.
+   */
+  readonly paymentReports: PaymentReporter | undefined;
   /** Hedge plans and their execution progress, kept by the server process between sessions. */
   readonly plans: PlanStore;
   /** Recent proposals: replay protection, decision contexts, and documents waiting for the console. */
@@ -184,6 +214,7 @@ export function createServices(config: Config): Services {
     planner: createHedgePlanner(),
     console: createConsoleClient(config),
     payments: createSignalPayments(config),
+    paymentReports: undefined,
     plans: new PlanStore(),
     ledger: new ProposalLedger(),
   };

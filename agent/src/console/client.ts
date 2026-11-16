@@ -18,6 +18,10 @@ import {
   putContextRequestSchema,
   putIntentContextRequestSchema,
   putPairingRequestSchema,
+  putSignalBudgetRequestSchema,
+  putSignalPaymentRequestSchema,
+  signalBudgetResponseSchema,
+  signalPaymentResponseSchema,
   type ContextResponse,
   type DecisionContext,
   type HoldingsResponse,
@@ -29,6 +33,10 @@ import {
   type PostPolicyChangeRequest,
   type PutIntentContextRequest,
   type PutPairingRequest,
+  type PutSignalBudgetRequest,
+  type PutSignalPaymentRequest,
+  type SignalBudgetResponse,
+  type SignalPaymentResponse,
 } from "@mandate/shared";
 import type { Config } from "../config";
 import type { Secret } from "../secret";
@@ -136,6 +144,31 @@ export class HttpConsoleClient implements ConsoleClient {
 
   async getPairing(signal?: AbortSignal): Promise<PairingResponse | null> {
     return this.#call("GET", CONSOLE_AGENT_ROUTES.pairing, pairingResponseSchema, {
+      signal,
+      notFoundAsNull: true,
+    });
+  }
+
+  async putSignalPayment(
+    receiptId: string,
+    request: PutSignalPaymentRequest,
+    signal?: AbortSignal,
+  ): Promise<SignalPaymentResponse | null> {
+    const body = putSignalPaymentRequestSchema.parse(request);
+    return this.#call("PUT", CONSOLE_AGENT_ROUTES.signalPayment(receiptId), signalPaymentResponseSchema, {
+      body,
+      signal,
+      notFoundAsNull: true,
+    });
+  }
+
+  async putSignalBudget(
+    request: PutSignalBudgetRequest,
+    signal?: AbortSignal,
+  ): Promise<SignalBudgetResponse | null> {
+    const body = putSignalBudgetRequestSchema.parse(request);
+    return this.#call("PUT", CONSOLE_AGENT_ROUTES.signalBudget, signalBudgetResponseSchema, {
+      body,
       signal,
       notFoundAsNull: true,
     });

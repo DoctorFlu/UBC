@@ -114,8 +114,8 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 | `POLICY_ADDRESS` | unset | policy reads and trades |
 | `AGENT_PRIVATE_KEY` | unset | trades |
 | `POLICY_DEPLOY_BLOCK` | unset | rejection reasons in `get_intent` and `get_activity` (scans the last 200,000 blocks when unset) |
-| `CONSOLE_URL` | `http://localhost:3000` | holdings, pairing, plans, decision contexts and change requests |
-| `CONSOLE_SERVICE_TOKEN` | unset | holdings, pairing, plans, decision contexts and change requests |
+| `CONSOLE_URL` | `http://localhost:3000` | holdings, pairing, plans, decision contexts, intent links, change requests and signal payment reports |
+| `CONSOLE_SERVICE_TOKEN` | unset | holdings, pairing, plans, decision contexts, intent links, change requests and signal payment reports |
 | `SIGNALS_URL` | `http://localhost:4021` | buying signals |
 | `X402_BUYER_PRIVATE_KEY` | unset | buying signals (pays from its Circle Gateway balance) |
 | `SIGNAL_DAILY_BUDGET_USDC` | `0.02` | buying signals: most spent per UTC day |
@@ -191,6 +191,20 @@ The spend ledger (`<AGENT_DATA_DIR>/signal-spend.jsonl`) is an append-only file 
 Purchased signals live in `<AGENT_DATA_DIR>/signals/<receiptId>.json`, so a later tool call in a fresh session can use a signal by receipt id: `services.payments.purchasedSignal(receiptId)` returns `{ receiptId, signal }` ready for the planner's `signal` input.
 The server never deposits into Gateway.
 
+### Payment reports to the console
+
+The console shows what the agent bought, for how much, when and with which settlement reference, plus today's budget use and the Gateway balance (issue #22).
+The server reports this best effort through two routes in `@mandate/shared` `console-api.ts`:
+
+- `PUT /api/agent/v1/signal-payments/<receiptId>` records one payment, right after a successful `buy_signal`; the console keeps the first write for a receipt id.
+- `PUT /api/agent/v1/signal-budget` replaces the budget snapshot (daily budget, spent today, maximum price, reset time, Gateway balance when it can be read, buyer address); it is sent when the server starts and after each purchase.
+
+`buy_signal` answers `paymentRecorded: true` when the console has the payment, `false` when it does not yet, and `null` when nothing was paid or no console is configured; the purchase result never depends on it.
+Each request has a 3 s timeout and one retry, and the balance read is bounded the same way.
+The spend ledger is the outbox: on start, and every minute while something is pending, the server sends every paid entry the console has not confirmed in this process, and the console's idempotency keeps that free of duplicates.
+A console that does not serve these routes yet answers 404, which counts as "not recorded yet" and is logged at debug level only.
+Only public data is sent: amounts in USDC atomic units, times, addresses, the receipt id (the payment nonce), Gateway's settlement reference and a summary of the signal; never a key or the payment signature.
+
 `ENV_FILE=/path/to/.env npm run signal:e2e` runs the whole flow once on Arc testnet: it starts the signal API and this server on free ports, calls `buy_signal` with the SDK client over HTTP, plans a hedge with and without the signal, and looks the payment up in Gateway's transfer history.
 It spends the signal price (0.001 USDC by default) per run and keeps its data in `.data/signal-e2e`.
 
@@ -211,7 +225,7 @@ src/
   mcp/               tool framework, verdict envelope, untrusted text, MCP endpoint
   tools/             one file per tool, plus index.ts, the registry
   chain/             the agent's view of the Policy contract and the event index
-  console/           HTTP client for the console's agent API
+  console/           HTTP client for the console's agent API, signal payment reports
   markets/           Gemini market data and symbol resolution
   planning/          the hedge planner
   trading/           proposals and decision contexts
