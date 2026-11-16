@@ -523,6 +523,80 @@ test("a signal payment the agent records appears live, linked to the intent that
   await expect(page.getByTestId("budget-note")).toContainText("A new day started");
 });
 
+/** How far the page scrolls sideways: anything above 0 means some content widened it. */
+function sidewaysOverflow(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}
+
+test("a plan's evidence chain says plainly when it breaks, and hostile strings never widen a page", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const stored = (await snapshot(baseURL)).offchain.plans[0];
+  if (!stored) throw new Error("the hedge test posted a plan");
+  const { plan } = stored;
+
+  // The hedge test carried out the plan's cheapest order with a reason naming the plan: verified.
+  await open(page, `/hedge/plans/${encodeURIComponent(plan.planId)}`);
+  const status = page.getByTestId("chain-status");
+  await expect(status).toHaveAttribute("data-status", "verified");
+  await expect(page.getByTestId("evidence-intent")).toHaveCount(1);
+  await expect(page.getByTestId("evidence-signal")).toContainText("None. The plan used Gemini's quotes only");
+
+  // The agent proposes another of the plan's orders without sealing a reason: the chain turns
+  // unproven, live, and says which intent and why.
+  const cheapest = [...plan.orders].sort((a, b) => a.amountCents - b.amountCents)[0];
+  const other = plan.orders.find(
+    (order) => order !== cheapest && order.amountCents !== cheapest?.amountCents,
+  );
+  if (!other) throw new Error("the plan has a second order");
+  const unsealed = await chain.agent.proposeTrade(
+    noBuy(other.instrumentSymbol, other.amountCents, other.limitPriceCents),
+  );
+  await expect(status).toHaveAttribute("data-status", "not_stored");
+  await expect(status).toContainText("Unproven");
+  await expect(page.getByTestId("chain-gaps")).toContainText(
+    "1 intent matches an order of this plan by market and amount but has no sealed reason",
+  );
+  const unproven = page.getByTestId("evidence-intent").filter({
+    has: page.getByRole("link", { name: `Intent #${unsealed.intentId.toString()}`, exact: true }),
+  });
+  await expect(unproven.getByTestId("intent-seal")).toHaveText("No reason");
+  expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+
+  // A hostile agent: a 16 KiB market on the chain and a 2,000-character request with no spaces.
+  const hostileMarket = `GEMI-${"W".repeat(16 * 1024)}`;
+  const hostile = await chain.agent.proposeTrade(noBuy(hostileMarket, 300, 31));
+  await waitForSnapshot(baseURL, (current) =>
+    Boolean(current.chain?.intents.some((intent) => intent.id === hostile.intentId)),
+  );
+  const state = await snapshot(baseURL);
+  const rules = state.chain?.rules;
+  if (!rules) throw new Error("no mandate");
+  const request = await recordedPlanRequest({
+    quantity: "0.05",
+    dropPercent: 7,
+    maxCostCents: 4_000,
+    maxTradeCents: rules.maxTradeCents,
+    remainingBudgetCents: rules.budgetCents - (state.chain?.committedCents ?? 0),
+    requestText: "W".repeat(2_000),
+  });
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.plans, "POST", request);
+  await open(page, `/hedge/plans/${encodeURIComponent(request.plan.planId)}`);
+  await expect(page.getByTestId("chain-status")).toHaveAttribute("data-status", "not_executed");
+  await expect(page.getByTestId("evidence-request")).toContainText("W".repeat(100));
+  expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+
+  // The public scorecard shows the hostile intent clipped, and stays phone-wide.
+  await page.goto(`/agent/${AGENT_ADDRESS}`);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  const row = page.getByRole("row").filter({ hasText: `#${hostile.intentId.toString()} GEMI-WWW` });
+  await expect(row.first()).toContainText("…");
+  expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+  const html = await (await fetch(new URL(`/agent/${AGENT_ADDRESS}`, baseURL))).text();
+  expect(html).not.toContain("W".repeat(1_000));
+});
+
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
   await open(page, "/");
   const isolator = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });
