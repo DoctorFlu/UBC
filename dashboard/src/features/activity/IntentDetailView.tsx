@@ -114,7 +114,9 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
           // The contract only knows that the executor recorded a result, not where the order went.
           title: event.filled ? "Filled" : "Did not fill",
           detail: event.filled
-            ? `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
+            ? event.filledCents === null
+              ? "The executor recorded a fill too large to show."
+              : `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
             : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
           simulated: simulated && event.filled,

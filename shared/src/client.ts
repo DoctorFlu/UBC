@@ -30,7 +30,7 @@ import {
   type PolicyRules,
   type TradeIntentInput,
 } from "./types";
-import { toSafeNumber } from "./units";
+import { chainNumber, toSafeNumber } from "./units";
 
 /** A verdict as the chain reports it. Reasons are strings because a contract may add new ones. */
 export type ChainVerdict =
@@ -274,19 +274,22 @@ export class PolicyClient {
       functionName: "getIntent",
       args: [BigInt(intentId)],
     });
-    return {
+    // Whatever the agent and executor keys wrote: out-of-range numbers come back null and flagged.
+    const outOfRange: Record<string, string> = {};
+    const intent: Intent = {
       id: intentId,
       market: raw.market,
       category: raw.category,
       outcome: raw.outcome,
       isBuy: raw.isBuy,
-      amountCents: toSafeNumber(raw.amountCents, "amountCents"),
-      limitPrice: toSafeNumber(raw.limitPrice, "limitPrice"),
+      amountCents: chainNumber(raw.amountCents, "amountCents", outOfRange),
+      limitPrice: chainNumber(raw.limitPrice, "limitPrice", outOfRange),
       status: intentStatusFromCode(raw.status),
       proposedAt: toSafeNumber(raw.proposedAt, "proposedAt"),
-      filledCents: toSafeNumber(raw.filledCents, "filledCents"),
-      pnlCents: toSafeNumber(raw.pnlCents, "pnlCents"),
+      filledCents: chainNumber(raw.filledCents, "filledCents", outOfRange),
+      pnlCents: chainNumber(raw.pnlCents, "pnlCents", outOfRange),
     };
+    return Object.keys(outOfRange).length > 0 ? { ...intent, outOfRange } : intent;
   }
 
   /** Stored intents in id order (all of them, or the given ids). */

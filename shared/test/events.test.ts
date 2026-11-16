@@ -184,12 +184,90 @@ describe("decodePolicyLogs", () => {
     expect(event?.blockTimestamp).toBe(1234);
   });
 
-  it("refuses values that do not fit a safe integer instead of losing precision", () => {
-    const huge = makeLog(
-      "IntentNeedsApproval",
-      { intentId: 1n, amountCents: 2n ** 60n },
-      { blockNumber: 1, logIndex: 0, blockTimestamp: 1 },
-    );
-    expect(() => decodePolicyLogs([huge])).toThrow(UnitError);
+  it("keeps an event whose numbers do not fit, flags them exactly, and never rounds or clamps", () => {
+    const max = 2n ** 256n - 1n;
+    const at = (logIndex: number) => ({ blockNumber: 1, logIndex, blockTimestamp: 1 });
+    const decoded = decodePolicyLogs([
+      makeLog(
+        "IntentProposed",
+        {
+          intentId: 0n,
+          agent: AGENT,
+          market: "",
+          category: 200,
+          outcome: "MAYBE",
+          isBuy: true,
+          amountCents: max,
+          limitPrice: 2n ** 53n,
+          contextHash: ZERO_HASH,
+        },
+        at(0),
+      ),
+      makeLog(
+        "IntentApproved",
+        { intentId: 1n, market: "m", outcome: "NO", isBuy: false, amountCents: 100n, limitPrice: max },
+        at(1),
+      ),
+      makeLog("IntentNeedsApproval", { intentId: 2n, amountCents: 2n ** 60n }, at(2)),
+      makeLog(
+        "ResultRecorded",
+        { intentId: 1n, filled: true, filledCents: 100n, pnlCents: -(2n ** 255n) },
+        at(3),
+      ),
+      makeLog("IntentRejected", { intentId: 0n, reason: "over max trade size" }, at(4)),
+    ]);
+    expect(decoded).toHaveLength(5);
+    expect(decoded[0]).toMatchObject({
+      type: "IntentProposed",
+      amountCents: null,
+      limitPrice: null,
+      outOfRange: { amountCents: max.toString(), limitPrice: (2n ** 53n).toString() },
+    });
+    expect(decoded[1]).toMatchObject({
+      amountCents: 100,
+      limitPrice: null,
+      outOfRange: { limitPrice: max.toString() },
+    });
+    expect(decoded[2]).toMatchObject({
+      amountCents: null,
+      outOfRange: { amountCents: (2n ** 60n).toString() },
+    });
+    expect(decoded[3]).toMatchObject({
+      filledCents: 100,
+      pnlCents: null,
+      outOfRange: { pnlCents: (-(2n ** 255n)).toString() },
+    });
+    expect(decoded[4]).not.toHaveProperty("outOfRange");
+    for (const event of decoded) expect(policyEventSchema.parse(event)).toEqual(event);
+    // The largest exact value still decodes as a number.
+    const edge = makeLog("IntentNeedsApproval", { intentId: 3n, amountCents: 2n ** 53n - 1n }, at(5));
+    expect(decodePolicyLogs([edge])[0]).toEqual(expect.objectContaining({ amountCents: 2 ** 53 - 1 }));
+    expect(decodePolicyLogs([edge])[0]).not.toHaveProperty("outOfRange");
+  });
+
+  it("still refuses rules that do not fit: only the owner's key writes them", () => {
+    expect(() =>
+      rulesFromChain({ ...rulesToChain(RULES_FOR_RANGE_TEST), budgetCents: 2n ** 256n - 1n }),
+    ).toThrow(UnitError);
+  });
+
+  it("skips and reports such a rules event when the reader asks to keep moving", () => {
+    const at = (logIndex: number) => ({ blockNumber: 7, logIndex, blockTimestamp: 1_700_000_000 });
+    const huge = { ...rulesToChain(RULES_FOR_RANGE_TEST), budgetCents: 2n ** 256n - 1n };
+    const logs = [makeLog("PolicyUpdated", huge, at(0)), makeLog("Paused", { paused: true }, at(1))];
+    expect(() => decodePolicyLogs(logs)).toThrow(UnitError);
+    const skipped: number[] = [];
+    const events = decodePolicyLogs(logs, { onUndecodable: (log) => skipped.push(log.logIndex ?? -1) });
+    expect(events.map((event) => event.type)).toEqual(["Paused"]);
+    expect(skipped).toEqual([0]);
   });
 });
+
+const RULES_FOR_RANGE_TEST = {
+  budgetCents: 20_000,
+  maxTradeCents: 2_500,
+  allowedCategories: 1,
+  approvalAboveCents: 2_000,
+  dailyLossCents: 4_000,
+  paused: false,
+};

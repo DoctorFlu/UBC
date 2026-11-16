@@ -450,6 +450,72 @@ describe("get_activity", () => {
     }
   });
 
+  it("keeps working with out-of-range numbers in the history, and flags what this server never sent", async () => {
+    const h = harness();
+    const max = (2n ** 256n - 1n).toString();
+    await proposeTrade.run(
+      { market: ladderSymbol(63_000), outcome: "NO", limitPrice: 30, reason: "Hedge.", amountCents: 1_000 },
+      h.ctx,
+    );
+    const hostile = { category: Category.Crypto, proposedAt: 0, filledCents: 0, pnlCents: 0 };
+    h.policy.intents.push(
+      {
+        ...hostile,
+        id: 1,
+        market: ladderSymbol(63_000),
+        outcome: "NO",
+        isBuy: false,
+        amountCents: 100,
+        limitPrice: null,
+        status: "approved",
+        outOfRange: { limitPrice: max },
+      },
+      {
+        ...hostile,
+        id: 2,
+        market: "",
+        outcome: "MAYBE",
+        isBuy: true,
+        amountCents: null,
+        limitPrice: 0,
+        status: "rejected",
+        outOfRange: { amountCents: max },
+      },
+    );
+
+    const activity = await getActivity.run({}, h.ctx);
+    expect(activity.structured["status"]).toBe("ok");
+    const rows = activity.structured["intents"] as Row[];
+    expect(
+      rows.map((r) => [r["id"], r["amountCents"], r["limitPrice"], r["outOfRange"], r["flags"]]),
+    ).toEqual([
+      [
+        2,
+        null,
+        0,
+        { amountCents: max },
+        [
+          "market is not a Gemini symbol",
+          "outcome is not YES or NO",
+          "limit price 0 is outside 1 to 99",
+          "amount is too large for offchain code",
+        ],
+      ],
+      [1, 100, null, { limitPrice: max }, ["limit price is too large for offchain code"]],
+      [0, 1_000, 30, null, []],
+    ]);
+    expect(activity.summary).toContain("FLAGGED: #2, #1 could not have come from this server");
+
+    const one = await getIntent.run({ intentId: 1 }, h.ctx);
+    expect(one.structured["status"]).toBe("ok");
+    expect(one.summary).toContain("for $1.00 at an out-of-range limit price.");
+    expect(one.summary).toContain("FLAGGED, this server could not have sent it");
+    const two = await getIntent.run({ intentId: 2 }, h.ctx);
+    expect(two.summary).toContain("for an out-of-range amount at 0c.");
+
+    expect((await getPolicy.run({}, h.ctx)).structured["status"]).toBe("ok");
+  });
+
   it("answers unavailable without a Policy contract", async () => {
     expect((await getActivity.run({}, harness({ policy: null }).ctx)).structured["status"]).toBe(
       "unavailable",

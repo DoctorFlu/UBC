@@ -61,8 +61,18 @@ export type AuditOrder = "newest" | "oldest";
 
 const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 
-function order(event: { isBuy: boolean; outcome: string; market: string; amountCents: number }): string {
-  return `${event.isBuy ? "Buy" : "Sell"} ${event.outcome} on ${describeMarket(event.market).title}, ${formatUsdCents(event.amountCents)}`;
+/** A dollar amount, or a plain statement when the onchain value is too large for offchain code. */
+function amount(cents: number | null): string {
+  return cents === null ? "an amount too large to show" : formatUsdCents(cents);
+}
+
+function order(event: {
+  isBuy: boolean;
+  outcome: string;
+  market: string;
+  amountCents: number | null;
+}): string {
+  return `${event.isBuy ? "Buy" : "Sell"} ${event.outcome} on ${describeMarket(event.market).title}, ${amount(event.amountCents)}`;
 }
 
 type Described = Pick<AuditRow, "group" | "label" | "summary" | "status" | "reason" | "intentId">;
@@ -130,7 +140,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
       return {
         group: "verdict",
         label: "Held for approval",
-        summary: `${formatUsdCents(event.amountCents)} is above the approval threshold: waiting for the owner`,
+        summary: `${amount(event.amountCents)} is above the approval threshold: waiting for the owner`,
         status: "needs_approval",
         reason: null,
         intentId: event.intentId,
@@ -140,7 +150,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
         group: "result",
         label: event.filled ? "Fill recorded" : "No fill recorded",
         summary: event.filled
-          ? `The executor recorded a fill of ${formatUsdCents(event.filledCents)}, realized ${formatUsdCentsDelta(event.pnlCents)}`
+          ? `The executor recorded a fill of ${amount(event.filledCents)}, realized ${event.pnlCents === null ? "an amount too large to show" : formatUsdCentsDelta(event.pnlCents)}`
           : "The executor recorded that the order did not fill",
         status: event.filled ? "executed" : "failed",
         reason: null,

@@ -140,12 +140,13 @@ export function backtest(chain: Pick<ChainView, "events" | "intents">, draft: Po
     }
 
     if (event.type === "ResultRecorded") {
+      // As the shared reducer does: a fill or P&L too large for offchain code is flagged, never counted.
       const open = openBuys.get(id);
-      if (open !== undefined) {
+      if (open !== undefined && event.filledCents !== null) {
         committedCents -= open - event.filledCents;
         openBuys.delete(id);
       }
-      if (trading.has(id) && event.pnlCents < 0) {
+      if (trading.has(id) && event.pnlCents !== null && event.pnlCents < 0) {
         const day = utcDay(event.blockTimestamp);
         lossByDay.set(day, (lossByDay.get(day) ?? 0) - event.pnlCents);
       }

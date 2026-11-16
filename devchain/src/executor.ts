@@ -51,7 +51,9 @@ export type RefusalCode =
   | "market_not_listed"
   | "category_mismatch";
 
-export type IntentCheck = { ok: true } | { ok: false; code: RefusalCode; detail: string };
+/** On success, the amount and limit price the order would use, both known to fit. */
+export type IntentCheck =
+  { ok: true; amountCents: number; limitPrice: number } | { ok: false; code: RefusalCode; detail: string };
 
 /** A market string safe to print: the symbol, or a description of what was there instead. */
 export function describeMarket(market: string): string {
@@ -71,14 +73,23 @@ export async function checkApprovedIntent(intent: Intent, venue: Venue): Promise
   if (intent.outcome !== "YES" && intent.outcome !== "NO") {
     return { ok: false, code: "outcome_not_yes_no", detail: "the outcome is not YES or NO" };
   }
-  if (!Number.isSafeInteger(intent.amountCents) || intent.amountCents <= 0) {
-    return { ok: false, code: "number_out_of_range", detail: "the amount is not a usable number of cents" };
+  const { amountCents, limitPrice } = intent;
+  if (amountCents === null || limitPrice === null) {
+    const fields = Object.entries(intent.outOfRange ?? {}).map(([field, raw]) => `${field} ${raw}`);
+    return {
+      ok: false,
+      code: "number_out_of_range",
+      detail: `${fields.join(", ") || "a number"} does not fit an amount or price offchain code can use`,
+    };
   }
-  if (!isValidLimitPrice(intent.limitPrice)) {
+  if (amountCents <= 0) {
+    return { ok: false, code: "number_out_of_range", detail: "the amount is zero" };
+  }
+  if (!isValidLimitPrice(limitPrice)) {
     return {
       ok: false,
       code: "limit_price_out_of_range",
-      detail: `limit price ${String(intent.limitPrice)} is outside 1 to 99 cents`,
+      detail: `limit price ${String(limitPrice)} is outside 1 to 99 cents`,
     };
   }
   const listed = await venue.categoryOf(intent.market);
@@ -92,7 +103,7 @@ export async function checkApprovedIntent(intent: Intent, venue: Venue): Promise
       detail: `Gemini lists ${intent.market} as ${categoryLabel(listed)}, the intent says ${categoryLabel(intent.category)}`,
     };
   }
-  return { ok: true };
+  return { ok: true, amountCents, limitPrice };
 }
 
 export interface SimulatedExecutorOptions {
@@ -175,12 +186,12 @@ export function startSimulatedExecutor(options: SimulatedExecutorOptions): Simul
       const { txHash } = await client.recordResult({
         intentId,
         filled: true,
-        filledCents: intent.amountCents,
+        filledCents: check.amountCents,
         pnlCents: 0,
       });
       log(
         `[sim-executor] intent #${intentId} ${intent.isBuy ? "buy" : "sell"} ${intent.outcome} ${intent.market} ` +
-          `${formatCents(intent.amountCents)} at ${intent.limitPrice}c: simulated full fill (${txHash})`,
+          `${formatCents(check.amountCents)} at ${check.limitPrice}c: simulated full fill (${txHash})`,
       );
     } catch (error) {
       log(`[sim-executor] intent #${intentId}: ${errorText(error)}`);

@@ -99,6 +99,7 @@ export async function intentsFromEvents(
       // The contract stores zeros until a result is recorded; the reducer uses null for "no result yet".
       filledCents: v.filledCents ?? 0,
       pnlCents: v.pnlCents ?? 0,
+      ...(v.outOfRange === undefined ? {} : { outOfRange: v.outOfRange }),
     };
   });
 }

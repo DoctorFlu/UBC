@@ -2,7 +2,7 @@ import type { Address, Hex } from "viem";
 import type { PolicyState } from "./evaluate";
 import { compareEvents, eventKey } from "./events";
 import type { IntentStatus } from "./reasons";
-import type { Intent, PolicyEvent, PolicyRules } from "./types";
+import type { Intent, OutOfRange, PolicyEvent, PolicyRules } from "./types";
 
 /**
  * Rebuilds the full Policy contract state from its events. The dashboard and the agent use this instead of
@@ -42,6 +42,11 @@ export interface IntentView {
   /** Set once a result is recorded. */
   filledCents: number | null;
   pnlCents: number | null;
+  /**
+   * Fields above that are null because the value on chain does not fit a number, with the exact value.
+   * Absent when every number fits. Only a key other than this system's (a stolen agent key) writes these.
+   */
+  outOfRange?: OutOfRange;
   /** Transaction that proposed the intent (the first event seen for it). */
   proposedTxHash: Hex;
   /** Transaction that approved or rejected it, or null while none. */
@@ -166,7 +171,7 @@ export function intentsMissingDetails(state: PolicyViewState): number[] {
  */
 export function mergeIntentDetails(view: IntentView, stored: Intent): IntentView {
   if (stored.id !== view.id) throw new RangeError(`intent ${stored.id} does not match view ${view.id}`);
-  return {
+  const merged: IntentView = {
     ...view,
     market: view.market ?? stored.market,
     category: view.category ?? stored.category,
@@ -176,6 +181,29 @@ export function mergeIntentDetails(view: IntentView, stored: Intent): IntentView
     limitPrice: view.limitPrice ?? stored.limitPrice,
     proposedAt: stored.proposedAt,
   };
+  // Carry over only the stored flags for fields the view took from storage.
+  const fromStorage = pick(stored.outOfRange, [
+    ...(view.amountCents === null ? ["amountCents"] : []),
+    ...(view.limitPrice === null ? ["limitPrice"] : []),
+  ]);
+  return withOutOfRange(merged, fromStorage);
+}
+
+/** Whether any number of the intent is out of range on chain. */
+export function hasOutOfRange(intent: { outOfRange?: OutOfRange | undefined }): boolean {
+  return intent.outOfRange !== undefined && Object.keys(intent.outOfRange).length > 0;
+}
+
+function pick(source: OutOfRange | undefined, fields: readonly string[]): OutOfRange | undefined {
+  if (source === undefined) return undefined;
+  const picked = Object.fromEntries(fields.flatMap((f) => (source[f] === undefined ? [] : [[f, source[f]]])));
+  return Object.keys(picked).length > 0 ? picked : undefined;
+}
+
+/** `view` with `extra` flags added to its own, keeping the record free of an empty `outOfRange`. */
+function withOutOfRange(view: IntentView, extra: OutOfRange | undefined): IntentView {
+  if (extra === undefined || Object.keys(extra).length === 0) return view;
+  return { ...view, outOfRange: { ...view.outOfRange, ...extra } };
 }
 
 // ------------------------------------------------------------------ internals
@@ -223,7 +251,8 @@ function step(state: PolicyViewState, event: PolicyEvent): void {
       existing = blankIntent(id, event);
       state.counts.proposed += 1;
     }
-    state.intents[id] = { ...existing, ...patch };
+    const flags = "outOfRange" in event ? event.outOfRange : undefined;
+    state.intents[id] = withOutOfRange({ ...existing, ...patch }, flags);
   };
 
   switch (event.type) {
@@ -257,7 +286,9 @@ function step(state: PolicyViewState, event: PolicyEvent): void {
 
     case "IntentApproved":
       state.counts.approved += 1;
-      if (event.isBuy) {
+      // An approved amount is at most the max trade size, so it fits whenever the rules do; a null amount
+      // cannot be added exactly, and is left out rather than approximated.
+      if (event.isBuy && event.amountCents !== null) {
         state.committedCents += event.amountCents;
         state.openBuyAmounts[event.intentId] = event.amountCents;
       }
@@ -286,16 +317,21 @@ function step(state: PolicyViewState, event: PolicyEvent): void {
       if (event.filled) state.counts.executed += 1;
       else state.counts.failed += 1;
 
+      // The contract caps a fill at the intent's amount, so `filledCents` fits whenever the amount did.
+      // Profit and loss is whatever the executor key sent; an out-of-range one is flagged on the intent
+      // and left out of the totals rather than approximated.
       const openBuy = state.openBuyAmounts[event.intentId];
-      if (openBuy !== undefined) {
+      if (openBuy !== undefined && event.filledCents !== null) {
         state.committedCents -= openBuy - event.filledCents;
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- record keyed by intent id
         delete state.openBuyAmounts[event.intentId];
       }
-      state.realizedPnlCents += event.pnlCents;
-      if (event.pnlCents < 0) {
-        const day = utcDay(event.blockTimestamp);
-        state.lossByDay[day] = (state.lossByDay[day] ?? 0) - event.pnlCents;
+      if (event.pnlCents !== null) {
+        state.realizedPnlCents += event.pnlCents;
+        if (event.pnlCents < 0) {
+          const day = utcDay(event.blockTimestamp);
+          state.lossByDay[day] = (state.lossByDay[day] ?? 0) - event.pnlCents;
+        }
       }
       update(event.intentId, {
         status: event.filled ? "executed" : "failed",

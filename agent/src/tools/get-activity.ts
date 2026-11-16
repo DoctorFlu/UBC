@@ -80,10 +80,15 @@ export const getActivity = defineTool({
     const rejectedRows = rows.filter((r) => r.status === "rejected");
     const reasons = [...new Set(rejectedRows.map((r) => r.reason ?? "reason unknown"))];
     const filled = rows.reduce((sum, r) => sum + (r.filledCents ?? 0), 0);
+    const flagged = rows.filter((r) => r.flags.length > 0).map((r) => `#${r.id}`);
+    const flaggedText =
+      flagged.length === 0
+        ? ""
+        : ` FLAGGED: ${flagged.join(", ")} could not have come from this server (see flags); the agent key was used around it, so tell the owner.`;
     const summary =
       total === 0
         ? "No intents have been proposed on this contract yet."
-        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waiting.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}`;
+        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waiting.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}${flaggedText}`;
     return {
       structured: { ...v, total, intents: rows, truncated: total > rows.length },
       summary,

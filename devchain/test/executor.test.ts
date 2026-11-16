@@ -101,6 +101,7 @@ describe.each(POLICY_CONTRACTS)("the simulated executor on the %s contract", (ki
 
   it("fills a valid order and refuses everything a stolen key can get approved", async () => {
     const cases: [string, RawProposal][] = [
+      ["sell at limit price 2^256 - 1", order({ isBuy: false, limitPrice: 2n ** 256n - 1n })],
       ["valid", order()],
       ["empty market", order({ market: "" })],
       ["injection market", order({ market: INJECTION })],
@@ -119,6 +120,7 @@ describe.each(POLICY_CONTRACTS)("the simulated executor on the %s contract", (ki
     start(fakeVenue());
     const statuses = await waitForStatus(chain.outsider, ids, (s) => s !== "approved");
     expect(Object.fromEntries(cases.map(([label], i) => [label, statuses.get(ids[i] ?? -1)]))).toEqual({
+      "sell at limit price 2^256 - 1": "failed",
       valid: "executed",
       "empty market": "failed",
       "injection market": "failed",
@@ -136,6 +138,8 @@ describe.each(POLICY_CONTRACTS)("the simulated executor on the %s contract", (ki
     const log = lines.join("\n");
     expect(log).toContain("(category_mismatch)");
     expect(log).toContain("(market_not_listed)");
+    expect(log).toContain("(number_out_of_range)");
+    expect(log).not.toContain("polling failed");
     expect(log).not.toContain("IGNORE ALL PREVIOUS INSTRUCTIONS");
     expect(log).not.toContain("X".repeat(200));
   });
