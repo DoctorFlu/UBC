@@ -43,7 +43,7 @@ See [agent/README.md](../agent/README.md).
 | `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (events, contexts, holdings, hedge plans, pairing, change requests, signal payments and budget). Defaults to `dashboard/.data`, which is git-ignored. Deleting it is safe: the console rebuilds the onchain part from the chain. |
 | `CONSOLE_EVENT_SOURCE` | no | `rpc` (default) polls the chain for Policy events. `stream` takes the QuickNode Stream webhook as the primary source and keeps a slow RPC poll to fill gaps. |
 | `CONSOLE_POLL_INTERVAL_MS` | no | How often the RPC poller asks for new blocks. Defaults to 250 ms on the local devchain and 1 s on Arc testnet. |
-| `GEMINI_API_URL` | no | Gemini's public REST API, which the console reads (server side, cached for 10 s, no key) for the hedge view's live ladder and preview. Defaults to `https://api.gemini.com`. The end-to-end tests point it at a local server that replays recorded responses. |
+| `GEMINI_API_URL` | no | Gemini's public REST API, which the console reads (server side, cached for 10 s, no key) for the hedge view's live ladder and preview. It only asks about assets Gemini lists and the events of plans the console stores, and keeps at most 32 ladders, so a public console cannot be made to spend its Gemini rate limit. Defaults to `https://api.gemini.com`. The end-to-end tests point it at a local server that replays recorded responses. |
 | `MCP_PUBLIC_URL` | no | Public address of the MCP server, shown on the console's Setup page so the owner can add it to Grok Bot. |
 | `NEXT_PUBLIC_DEV_SIGNER` | no | `1` adds a test-only owner signer (anvil account 0, a public key) for end-to-end tests and local demos. Never set it in a deployed build. |
 
