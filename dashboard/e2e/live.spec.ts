@@ -592,8 +592,11 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
     limitMax: await proposeHostile(chain, { ...base, isBuy: false, limitPrice: MAX }),
     amountMax: await proposeHostile(chain, { ...base, amountCents: MAX }),
   };
+  // The production contract emits no proposal event: a rejected intent's details arrive from `getIntent`.
   const current = await waitForSnapshot(baseURL, (snap) =>
-    Boolean(snap.chain?.intents.some((intent) => intent.id === ids.amountMax)),
+    Object.values(ids).every((id) =>
+      snap.chain?.intents.some((intent) => intent.id === id && intent.market !== null),
+    ),
   );
   // Every intent is kept, the values offchain code cannot hold are null with their exact digits beside them.
   const byId = new Map(current.chain?.intents.map((intent) => [intent.id, intent]));
@@ -662,6 +665,13 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
   }
   expect(dialogs).toBe(0);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // The owner rejects the flagged intent that waits, so nothing waits for the tests after this one.
+  await chain.user.rejectIntent(ids.injection);
+  await waitForSnapshot(baseURL, (snap) =>
+    Boolean(
+      snap.chain?.intents.some((intent) => intent.id === ids.injection && intent.status === "rejected"),
+    ),
+  );
 });
 
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
