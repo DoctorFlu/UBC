@@ -23,7 +23,7 @@ export function BrandMark({ className }: { className?: string }) {
 export function Brand({ showTag = true, nameClassName }: { showTag?: boolean; nameClassName?: string }) {
   const { network } = useSnapshot();
   return (
-    <Link href="/" className={styles.brand} aria-label="Mandate, overview">
+    <Link href="/" className={styles.brand} aria-label="Mandate, home">
       <BrandMark />
       <span className={cx(styles.brandName, nameClassName)}>Mandate</span>
       {showTag ? (
