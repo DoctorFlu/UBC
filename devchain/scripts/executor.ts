@@ -11,8 +11,9 @@
  */
 import { resolvePolicyDeployment } from "@mandate/shared/node";
 import { devGeminiClient, devPolicyClient, geminiVenue, startSimulatedExecutor } from "../src";
+import { executorSettings } from "../src/executor-settings";
 
-const fillDelayMs = Number(process.env.SIM_EXECUTOR_DELAY_MS ?? 1_500);
+const { fillDelayMs, pollingIntervalMs } = executorSettings(process.env);
 
 const deployment = resolvePolicyDeployment();
 if (deployment.source !== "devchain") {
@@ -28,7 +29,8 @@ if (roles.executor.toLowerCase() !== client.account?.address.toLowerCase()) {
 }
 
 console.log(
-  `[sim-executor] SIMULATED executor (dev only) watching ${deployment.address}, fill delay ${fillDelayMs} ms; ` +
+  `[sim-executor] SIMULATED executor (dev only) watching ${deployment.address}, fill delay ${fillDelayMs} ms, ` +
+    `polling every ${String(pollingIntervalMs ?? 1_000)} ms; ` +
     "checks every approved intent against Gemini before filling",
 );
 const executor = startSimulatedExecutor({
@@ -36,6 +38,7 @@ const executor = startSimulatedExecutor({
   venue: geminiVenue(devGeminiClient()),
   fromBlock: deployment.fromBlock ?? 0n,
   fillDelayMs,
+  ...(pollingIntervalMs === undefined ? {} : { pollingIntervalMs }),
 });
 
 process.on("SIGINT", () => {
