@@ -3,8 +3,13 @@
  * enforces only the amount rules: it stores any market, outcome and limit price, and trusts the category.
  * The MCP server validates all of them before proposing, so each anomaly here means the agent key was used
  * around the server (a stolen key). Readers flag such intents; they never act on, or relay, their text.
+ *
+ * A reader that also checks the market against Gemini's listing (the console does, as the executor does
+ * before it trades) passes the answer as `listing`, which adds two anomalies: a market Gemini does not
+ * list, and a category other than the one Gemini lists the market under. The MCP server reads the
+ * category from Gemini, so neither comes from it either.
  */
-import { isCategoryId } from "./categories";
+import { type CategoryId, categoryLabel, isCategoryId } from "./categories";
 
 import { isValidLimitPrice } from "./units";
 
@@ -19,7 +24,21 @@ export function isMarketSymbol(value: string): boolean {
   return value.length <= MAX_MARKET_SYMBOL_LENGTH && MARKET_SYMBOL.test(value);
 }
 
-export type AnomalyCode = "market" | "outcome" | "category" | "limit_price" | "out_of_range";
+export type AnomalyCode =
+  | "market"
+  | "outcome"
+  | "category"
+  | "limit_price"
+  | "out_of_range"
+  | "market_not_listed"
+  | "category_mismatch";
+
+/**
+ * What Gemini said about a market the first time a reader checked it: not listed, or listed under a
+ * mandate category. Kept as first seen, so a market that has since settled keeps its verdict.
+ */
+export type MarketListing =
+  { listed: false; checkedAt: string } | { listed: true; category: CategoryId; checkedAt: string };
 
 export interface IntentAnomaly {
   code: AnomalyCode;
@@ -34,6 +53,8 @@ export interface AnomalyFields {
   category: number | null;
   limitPrice: number | null;
   outOfRange?: Readonly<Record<string, string>> | undefined;
+  /** Gemini's listing of `market`, when the reader checked it. Absent means not checked (yet). */
+  listing?: MarketListing | undefined;
 }
 
 const FIELD_NAMES: Record<string, string> = {
@@ -48,6 +69,21 @@ export function intentAnomalies(intent: AnomalyFields): IntentAnomaly[] {
   const found: IntentAnomaly[] = [];
   if (intent.market !== null && !isMarketSymbol(intent.market)) {
     found.push({ code: "market", text: "market is not a Gemini symbol" });
+  }
+  const listing = intent.listing;
+  if (listing !== undefined && intent.market !== null && isMarketSymbol(intent.market)) {
+    if (!listing.listed) {
+      found.push({ code: "market_not_listed", text: "Gemini does not list this market" });
+    } else if (
+      intent.category !== null &&
+      isCategoryId(intent.category) &&
+      intent.category !== listing.category
+    ) {
+      found.push({
+        code: "category_mismatch",
+        text: `Gemini lists this market as ${categoryLabel(listing.category)}, the intent says ${categoryLabel(intent.category)}`,
+      });
+    }
   }
   if (intent.outcome !== null && intent.outcome !== "YES" && intent.outcome !== "NO") {
     found.push({ code: "outcome", text: "outcome is not YES or NO" });
