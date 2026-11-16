@@ -24,5 +24,8 @@ export default defineConfig({
     // Compiles the devchain reference contract once, before test files start their own anvil.
     globalSetup: ["devchain/test/global-setup.ts"],
     testTimeout: 20_000,
+    // Hooks start a local chain (anvil) and deploy the contract. That takes about a second on an idle
+    // machine, but vitest's default of 10 s was missed on a busy one (2026-11-15, load above 100).
+    hookTimeout: 60_000,
   },
 });
