@@ -233,23 +233,26 @@
   }
 }
 
-/* The maker's plate on the enclosure door: the name, engraved large and quiet. */
+/* The maker's plate on the enclosure door: the name, engraved large and quiet, cut off by the page's
+   bottom edge. Decorative and hidden from assistive technology; SVG text so it spans the width exactly. */
 .wordmark {
+  width: 100%;
+  height: auto;
   margin-top: var(--space-10);
-  margin-bottom: -0.2em;
-  color: var(--color-panel);
-  font-size: clamp(5rem, 1rem + 19vw, 17rem);
-  font-stretch: 125%;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 0.8;
-  text-align: center;
-  white-space: nowrap;
+  overflow: hidden;
   user-select: none;
 }
 
+.wordmark text {
+  fill: var(--color-panel);
+  font-family: var(--font-sans);
+  font-size: 260px;
+  font-stretch: 125%;
+  font-weight: 800;
+}
+
 @media (forced-colors: active) {
-  .wordmark {
-    color: GrayText;
+  .wordmark text {
+    fill: GrayText;
   }
 }

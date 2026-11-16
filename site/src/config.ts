@@ -8,5 +8,5 @@ export const SCORECARD_AGENT = process.env.NEXT_PUBLIC_SCORECARD_AGENT ?? "";
 
 export const SCORECARD_URL = `${APP_URL}/agent/${SCORECARD_AGENT}`;
 
-/** The repository link in the footer; empty hides it (the repository is private until submission). */
+/** The repository link in the footer; empty (the default) hides it, so publishing it is the owner's choice. */
 export const REPO_URL = process.env.NEXT_PUBLIC_REPO_URL ?? "";

@@ -149,6 +149,17 @@
   translate: -50% 0;
 }
 
+/* The two marks sit $5 apart: one label hangs left of its line and the other right, so they never meet. */
+.mark:nth-last-child(2) .markLabel {
+  padding-inline-end: var(--space-1);
+  translate: -100% 0;
+}
+
+.mark:last-child .markLabel {
+  padding-inline-start: var(--space-1);
+  translate: 0 0;
+}
+
 .row {
   display: grid;
   grid-template-columns: minmax(7.5rem, 1fr) auto auto;
@@ -204,14 +215,6 @@
   height: var(--segmented-control-indicator-height);
   border-radius: var(--radius-xs);
   background: var(--color-text);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .segmentedIndicator {
-    transition-property: translate, width;
-    transition-duration: var(--duration-base);
-    transition-timing-function: var(--ease-out);
-  }
 }
 
 .segment {

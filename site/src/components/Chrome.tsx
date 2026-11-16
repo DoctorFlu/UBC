@@ -51,7 +51,7 @@ export function Footer() {
             <span className={styles.brandName}>Mandate</span>
           </a>
           <p className={styles.footerNote}>
-            Built for the UBC 2026 Hackathon. Testnet only: orders are simulated and no real money moves.
+            Built for the UBC 2026 Hackathon. Test networks only: fills are simulated and no real money moves.
           </p>
         </div>
         <ul className={styles.footerLinks}>
@@ -71,9 +71,11 @@ export function Footer() {
           </li>
         </ul>
       </div>
-      <p className={styles.wordmark} aria-hidden="true">
-        Mandate
-      </p>
+      <svg className={styles.wordmark} viewBox="0 0 1000 170" aria-hidden="true">
+        <text x="0" y="200" textLength="1000" lengthAdjust="spacingAndGlyphs">
+          Mandate
+        </text>
+      </svg>
     </footer>
   );
 }

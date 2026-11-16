@@ -1,12 +1,11 @@
-/* The anthracite band: the board in its dark finish, in either theme. The tokens use light-dark(), so
-   setting the scheme here re-resolves every colour inside the band. */
+/* The panel band: the enclosure behind the schedule cards, switchgear grey in light and anthracite in
+   dark. It follows the page's scheme: Chrome resolves light-dark() inside the tokens at :root, so a
+   local color-scheme override would not re-resolve them. */
 
 .band {
-  color-scheme: dark;
   margin-top: var(--section-space);
   padding-block: var(--section-space);
   background: var(--color-panel);
-  color: var(--color-text);
   border-block: 1px solid var(--color-rule);
 }
 
@@ -157,7 +156,7 @@
   position: relative;
   display: inline-flex;
   padding: 3px;
-  border: 1px solid var(--color-rule-strong);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-sm);
   background: var(--color-surface-sunken);
 }
@@ -170,16 +169,7 @@
   height: var(--active-tab-height);
   translate: var(--active-tab-left) 0;
   border-radius: var(--radius-xs);
-  background: var(--color-surface-raised);
-  box-shadow: inset 0 0 0 1px var(--color-rule-strong);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .tabIndicator:not([data-activation-direction="none"]) {
-    transition-property: translate, width;
-    transition-duration: var(--duration-base);
-    transition-timing-function: var(--ease-out);
-  }
+  background: var(--color-text);
 }
 
 .tab {
@@ -210,7 +200,7 @@
 }
 
 .tab[data-selected] {
-  color: var(--color-text);
+  color: var(--color-on-ink);
 }
 
 @media (hover: hover) {
@@ -276,7 +266,8 @@
 .call {
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   border-radius: var(--radius-sm);
   background: var(--color-surface-sunken);
   border: 1px solid var(--color-rule);
