@@ -31,7 +31,7 @@ flowchart LR
     owner([Owner]) -- "sets rules, approves, pauses" --> console
     owner -- "chats" --> grok[Grok Bot]
 
-    subgraph offchain [Offchain, this repo]
+    subgraph offchain ["Offchain, this repo"]
       mcp["MCP server<br/>agent/"]
       planner["Hedge planner<br/>planner/"]
       signals["Signal API, x402<br/>signals/"]
@@ -45,7 +45,7 @@ flowchart LR
     mcp -- "market data" --> gemini[(Gemini prediction markets)]
     mcp -- "proposeTrade, agent key" --> policy
 
-    subgraph arc [Arc]
+    subgraph arc ["Arc"]
       policy["Policy contract<br/>contracts/"]
     end
 
