@@ -11,7 +11,7 @@ import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 import styles from "./Shell.module.css";
 
 /**
- * The kill switch, reachable from every screen: hold to pause (or press twice). It sends the owner's
+ * The kill switch, reachable from every screen: hold to pause, or press twice. It sends the owner's
  * `setPaused`; the paused state then comes back from the contract's `Paused` event, never from here.
  */
 export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
@@ -56,6 +56,7 @@ export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
           size={size}
           icon={<Play aria-hidden />}
           confirmedLabel="Resuming"
+          armedLabel="Confirm resume"
           disabled={disabled}
           onConfirm={() => void toggle(false)}
         >
@@ -73,6 +74,7 @@ export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
         size={size}
         icon={<Power aria-hidden />}
         confirmedLabel="Pausing"
+        armedLabel="Confirm pause"
         disabled={disabled}
         onConfirm={() => void toggle(true)}
       >

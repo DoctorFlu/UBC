@@ -101,6 +101,23 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (deployment_id, intent_id)
   ) STRICT;
   `,
+  // 3: the agent's x402 signal payments (first write wins) and its latest signal budget snapshot (#22).
+  `
+  CREATE TABLE signal_payments (
+    receipt_id  TEXT NOT NULL PRIMARY KEY,
+    paid_at     TEXT NOT NULL,
+    payment     TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX signal_payments_paid ON signal_payments (paid_at);
+
+  CREATE TABLE signal_budget (
+    id        INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+    as_of     TEXT    NOT NULL,
+    snapshot  TEXT    NOT NULL,
+    stored_at TEXT    NOT NULL
+  ) STRICT;
+  `,
 ];
 
 /**

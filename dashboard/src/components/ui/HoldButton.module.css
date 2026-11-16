@@ -54,6 +54,41 @@
   outline-offset: -5px;
 }
 
+/* Pressing never moves the button: the shrink other buttons do on press is off for this one. */
+.wrap .hold:not(:disabled):not([aria-disabled="true"]):active {
+  scale: 1;
+}
+
+/*
+ * The arm window's countdown: a bar along the bottom edge that drains while the second press still
+ * counts. It carries information, so it stays under reduced motion, like the hold fill.
+ */
+.countdown {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 3px;
+  background: currentColor;
+  opacity: 0.55;
+  transform-origin: left center;
+  scale: 0 1;
+  pointer-events: none;
+}
+
+.hold[data-phase="armed"] .countdown {
+  animation: drain var(--arm-ms) linear forwards;
+}
+
+@keyframes drain {
+  from {
+    scale: 1 1;
+  }
+
+  to {
+    scale: 0 1;
+  }
+}
+
 .hint {
   font-size: var(--text-xs);
   color: var(--color-text-muted);

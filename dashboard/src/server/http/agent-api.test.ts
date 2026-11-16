@@ -15,6 +15,8 @@ import {
   pairingResponseSchema,
   planResponseSchema,
   policyChangeRequestSchema,
+  signalBudgetResponseSchema,
+  signalPaymentResponseSchema,
 } from "@mandate/shared";
 import type { EnvVars } from "@mandate/shared/node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -37,9 +39,12 @@ import {
   putContext,
   putIntentContext,
   putPairing,
+  putSignalBudget,
+  putSignalPayment,
 } from "./agent-api";
 
 const TOKEN = "console-service-token-for-tests-0123456789";
+const RECEIPT = `0x${"7c".repeat(32)}`;
 const AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const silent = { info: () => undefined, warn: () => undefined };
 
@@ -144,6 +149,17 @@ describe("agent API: authentication", () => {
     ["GET holdings", () => getHoldings(call("GET", CONSOLE_AGENT_ROUTES.holdings, undefined, null), service)],
     ["GET pairing", () => getPairing(call("GET", CONSOLE_AGENT_ROUTES.pairing, undefined, null), service)],
     ["POST plans", () => postPlan(call("POST", CONSOLE_AGENT_ROUTES.plans, {}, null), service)],
+    [
+      "PUT signal payment",
+      () =>
+        putSignalPayment(call("PUT", CONSOLE_AGENT_ROUTES.signalPayment(RECEIPT), {}, null), service, {
+          receiptId: RECEIPT,
+        }),
+    ],
+    [
+      "PUT signal budget",
+      () => putSignalBudget(call("PUT", CONSOLE_AGENT_ROUTES.signalBudget, {}, null), service),
+    ],
   ];
 
   it.each(requests)("%s without a token is 401", async (_name, send) => {
@@ -292,6 +308,31 @@ describe("agent API: hedge plans", () => {
     expect(service.offchain.plan(plan.planId)?.requestText).toBe(body.requestText);
   });
 
+  it("shows the latest plan of each asset in the snapshot, read back as the planner typed it", async () => {
+    const fresh = makeService();
+    const eth = { ...plan, planId: "plan_eth_1", asset: "ETH" };
+    const later = { ...plan, planId: "plan_btc_2" };
+    for (const next of [plan, eth, later]) {
+      const response = await postPlan(
+        call("POST", CONSOLE_AGENT_ROUTES.plans, {
+          ...body,
+          planId: next.planId,
+          asset: next.asset,
+          plan: next,
+        }),
+        fresh,
+      );
+      expect(response.status).toBe(201);
+    }
+    const plans = fresh.snapshot().offchain.plans;
+    expect(plans.map((entry) => [entry.asset, entry.planId])).toEqual([
+      ["BTC", "plan_btc_2"],
+      ["ETH", "plan_eth_1"],
+    ]);
+    expect(plans[0]?.plan).toEqual(later);
+    expect(plans[0]).toMatchObject({ requestText: body.requestText, createdAt: body.createdAt });
+  });
+
   it("refuses a plan that is not a planner HedgePlan, or whose id does not match", async () => {
     await expectError(
       await postPlan(
@@ -368,6 +409,113 @@ describe("agent API: policy change requests", () => {
       404,
       "not_found",
     );
+  });
+});
+
+describe("agent API: signal payments", () => {
+  const payment = {
+    amount: "1000",
+    paidAt: "2026-11-15T12:00:01.000Z",
+    resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+    network: "eip155:5042002",
+    payer: AGENT,
+    payee: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    settlementId: "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+    signal: {
+      signalId: `0x${"4e".repeat(32)}`,
+      asset: "BTC",
+      eventTicker: "BTC2611202200",
+      horizon: "weekly",
+      expiry: "2026-11-20T22:00:00.000Z",
+      asOf: "2026-11-15T12:00:00.000Z",
+      counts: { cheap: 3, fair: 15, expensive: 3, noOffer: 0 },
+    },
+  };
+  const put = (service: ConsoleService, receiptId: string, body: unknown, token: string | null = TOKEN) =>
+    putSignalPayment(call("PUT", CONSOLE_AGENT_ROUTES.signalPayment(receiptId), body, token), service, {
+      receiptId,
+    });
+
+  it("records a payment once: 201 first, then 200 with the first record whatever the body says", async () => {
+    const service = makeService();
+    const created = await put(service, RECEIPT.toUpperCase().replace("0X", "0x"), payment);
+    expect(created.status).toBe(201);
+    const first = signalPaymentResponseSchema.parse(await created.json());
+    expect(first.receiptId).toBe(RECEIPT);
+
+    const repeated = await put(service, RECEIPT, { ...payment, amount: "999999", signal: null });
+    expect(repeated.status).toBe(200);
+    expect(signalPaymentResponseSchema.parse(await repeated.json())).toEqual(first);
+    const shown = service.snapshot().offchain.signalPayments;
+    expect(shown).toEqual([{ ...payment, receiptId: RECEIPT, recordedAt: first.recordedAt }]);
+  });
+
+  it("lists payments newest first, a payment without a signal included", async () => {
+    const service = makeService();
+    const other = `0x${"ab".repeat(32)}`;
+    expect((await put(service, RECEIPT, payment)).status).toBe(201);
+    const later = {
+      ...payment,
+      paidAt: "2026-11-15T12:05:00.000Z",
+      payee: null,
+      settlementId: null,
+      signal: null,
+    };
+    expect((await put(service, other, later)).status).toBe(201);
+    expect(service.snapshot().offchain.signalPayments.map((entry) => entry.receiptId)).toEqual([
+      other,
+      RECEIPT,
+    ]);
+  });
+
+  it("refuses a bad receipt id, a bad body or extra keys with 422, and a bad token with 401", async () => {
+    const service = makeService();
+    await expectError(await put(service, "rcpt_1", payment), 422, "invalid_parameter");
+    await expectError(await put(service, RECEIPT, { ...payment, amount: "0.001" }), 422, "invalid_body");
+    await expectError(await put(service, RECEIPT, { ...payment, signature: "0x00" }), 422, "invalid_body");
+    await expectError(await put(service, RECEIPT, "not json"), 422, "invalid_body");
+    await expectError(await put(service, RECEIPT, payment, `${TOKEN}x`), 401, "unauthorized");
+    expect(service.snapshot().offchain.signalPayments).toEqual([]);
+  });
+});
+
+describe("agent API: signal budget", () => {
+  const snapshot = {
+    buyerAddress: AGENT,
+    day: "2026-11-15",
+    dailyBudget: "20000",
+    spentToday: "1000",
+    maxPricePerPurchase: "5000",
+    resetsAt: "2026-11-16T00:00:00.000Z",
+    gatewayBalance: "4999000",
+    asOf: "2026-11-15T12:00:02.000Z",
+  };
+  const put = (service: ConsoleService, body: unknown, token: string | null = TOKEN) =>
+    putSignalBudget(call("PUT", CONSOLE_AGENT_ROUTES.signalBudget, body, token), service);
+
+  it("keeps the snapshot with the latest asOf and answers with what it holds", async () => {
+    const service = makeService();
+    const first = await put(service, snapshot);
+    expect(first.status).toBe(200);
+    const stored = signalBudgetResponseSchema.parse(await first.json());
+    expect(stored).toMatchObject(snapshot);
+
+    const newer = { ...snapshot, spentToday: "2000", gatewayBalance: null, asOf: "2026-11-15T12:10:00.000Z" };
+    expect(signalBudgetResponseSchema.parse(await (await put(service, newer)).json())).toMatchObject(newer);
+
+    const older = { ...snapshot, spentToday: "0", asOf: "2026-11-15T11:00:00.000Z" };
+    const ignored = await put(service, older);
+    expect(ignored.status).toBe(200);
+    expect(signalBudgetResponseSchema.parse(await ignored.json())).toMatchObject(newer);
+    expect(service.snapshot().offchain.signalBudget).toMatchObject(newer);
+  });
+
+  it("refuses a float amount, extra keys and a bad token", async () => {
+    const service = makeService();
+    await expectError(await put(service, { ...snapshot, dailyBudget: "0.02" }), 422, "invalid_body");
+    await expectError(await put(service, { ...snapshot, privateKey: "x" }), 422, "invalid_body");
+    await expectError(await put(service, snapshot, null), 401, "unauthorized");
+    expect(service.snapshot().offchain.signalBudget).toBeNull();
   });
 });
 

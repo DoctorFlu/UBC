@@ -156,12 +156,16 @@
   gap: var(--space-4);
 }
 
+/* The agent's reason, framed whole like the reason on an intent: no side bar. */
 .reason {
   display: flex;
   flex-direction: column;
   gap: var(--space-1-5);
-  padding-left: var(--space-4);
-  border-left: 2px solid var(--color-rule-strong);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-xs);
+  background: var(--color-ground);
   max-width: 62ch;
 }
 
@@ -179,6 +183,115 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--space-3);
+}
+
+/* Side by side: the rule, what is in force, what the agent asks for. Framed so the table reads as one unit. */
+.sideBySide {
+  overflow: hidden;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  max-width: 40rem;
+}
+
+.to {
+  font-weight: var(--weight-semibold);
+}
+
+.requestBacktest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-rule);
+}
+
+.subheading {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+/* Backtest: the draft's verdict counts, the intents that change, and what a replay cannot know. */
+.backtestCard {
+  grid-column: 1 / -1;
+}
+
+.backtest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.verdicts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--space-4) var(--space-6);
+}
+
+.verdict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 0;
+}
+
+.verdict dt {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.verdictValue {
+  font-size: var(--text-2xl);
+  font-stretch: var(--stretch-condensed);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1.1;
+}
+
+.verdictWas {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.backtestSummary {
+  font-size: var(--text-sm);
+}
+
+.backtestTable {
+  overflow: hidden;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+}
+
+.muted {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.limits {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.limits summary {
+  width: fit-content;
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.limits summary:focus-visible {
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.limits ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-5);
+  max-width: 72ch;
 }
 
 @media (width < 72rem) {

@@ -2,8 +2,16 @@
  * Talking to a running console from the end-to-end tests: the agent API (as the MCP server would, with
  * the service token) and the snapshot the browser receives.
  */
-import { type DecisionContext, CONSOLE_AGENT_ROUTES, hashContext } from "@mandate/shared";
+import { devAccount } from "@mandate/devchain";
+import {
+  type ConsoleHolding,
+  type DecisionContext,
+  CONSOLE_AGENT_ROUTES,
+  hashContext,
+} from "@mandate/shared";
 import type { Hex } from "viem";
+
+import { newNonce, ownerRequestMessage } from "../../src/lib/owner-request";
 
 import type { ConsoleSnapshot } from "../../src/lib/live/types";
 
@@ -12,7 +20,12 @@ export const E2E_SERVICE_TOKEN = "e2e-console-service-token-for-local-tests-only
 
 export const AGENT_NAME = "Grok Bot";
 
-async function agentApi(baseURL: string, path: string, method: "GET" | "PUT", body?: unknown) {
+export async function agentApi(
+  baseURL: string,
+  path: string,
+  method: "GET" | "PUT" | "POST",
+  body?: unknown,
+) {
   const response = await fetch(new URL(path, baseURL), {
     method,
     headers: {
@@ -96,6 +109,86 @@ export function decisionContext(reason: string): DecisionContext {
     reason,
     createdAt: "2026-11-15T13:24:40.000Z",
   };
+}
+
+/** The receipt id of the signal payment the demo agent made. */
+export const DEMO_RECEIPT = `0x${"5d".repeat(32)}`;
+
+/** Plays the MCP server reporting one signal purchase (amounts in USDC atomic units). */
+export async function recordSignalPayment(
+  baseURL: string,
+  receiptId: string,
+  paidAt: string,
+  payer: string,
+): Promise<void> {
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalPayment(receiptId), "PUT", {
+    amount: "1000",
+    paidAt,
+    resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+    network: "eip155:5042002",
+    payer,
+    payee: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    settlementId: "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+    signal: {
+      signalId: `0x${"4e".repeat(32)}`,
+      asset: "BTC",
+      eventTicker: "BTC2611202200",
+      horizon: "weekly",
+      expiry: "2026-11-20T22:00:00.000Z",
+      asOf: paidAt,
+      counts: { cheap: 3, fair: 15, expensive: 3, noOffer: 0 },
+    },
+  });
+}
+
+/** Plays the MCP server reporting its signal budget for today. */
+export async function reportSignalBudget(
+  baseURL: string,
+  buyerAddress: string,
+  overrides: { spentToday?: string; resetsAt?: string } = {},
+): Promise<void> {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalBudget, "PUT", {
+    buyerAddress,
+    day: now.toISOString().slice(0, 10),
+    dailyBudget: "20000",
+    spentToday: overrides.spentToday ?? "1000",
+    maxPricePerPurchase: "5000",
+    resetsAt: overrides.resetsAt ?? tomorrow.toISOString(),
+    gatewayBalance: "4999000",
+    asOf: now.toISOString(),
+  });
+}
+
+/**
+ * Saves holdings as the owner does from the hedge page: the payload signed by the contract's `user()`
+ * (anvil account 0, a public test key), bound to this contract and chain.
+ */
+export async function saveHoldingsAsOwner(baseURL: string, holdings: ConsoleHolding[]): Promise<void> {
+  const current = await snapshot(baseURL);
+  const policyAddress = current.contract?.address;
+  if (!policyAddress) throw new Error("the console follows no Policy contract yet");
+  const payload = { holdings };
+  const issuedAt = new Date().toISOString();
+  const nonce = newNonce();
+  const signature = await devAccount("user").signMessage({
+    message: ownerRequestMessage({
+      action: "holdings.save",
+      payload,
+      policyAddress,
+      chainId: current.network.chainId,
+      issuedAt,
+      nonce,
+    }),
+  });
+  const response = await fetch(new URL("/api/console/holdings", baseURL), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ payload, auth: { issuedAt, nonce, signature } }),
+  });
+  if (!response.ok)
+    throw new Error(`saving holdings answered ${response.status.toString()}: ${await response.text()}`);
 }
 
 /** Stores the agent's decision context, then links it to the intent its transaction proposed. */

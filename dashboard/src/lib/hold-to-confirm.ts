@@ -5,7 +5,9 @@
  * 1. Hold: press (pointer, Space or Enter) and keep holding for `holdMs`.
  * 2. Press twice: any shorter press, or a single click from assistive technology, arms the
  *    control; a second activation within `armWindowMs` confirms. This is the non-hold
- *    alternative for people who cannot hold a key or pointer down.
+ *    alternative for people who cannot hold a key or pointer down. The window is long on purpose
+ *    (at least `MIN_ARM_WINDOW_MS`): a person reads the armed label, moves, and presses again, and a
+ *    second press that lands after a short window would silently do nothing.
  *
  * Cancelling (Escape, pointer leaving, focus leaving) returns to idle from any unconfirmed state.
  */
@@ -37,7 +39,10 @@ export interface HoldConfig {
   readonly armWindowMs: number;
 }
 
-export const DEFAULT_HOLD_CONFIG: HoldConfig = { holdMs: 1200, armWindowMs: 5000 };
+/** The shortest arm window the console uses. Anything shorter loses real second presses. */
+export const MIN_ARM_WINDOW_MS = 8_000;
+
+export const DEFAULT_HOLD_CONFIG: HoldConfig = { holdMs: 1200, armWindowMs: 10_000 };
 
 export const IDLE: HoldState = { phase: "idle" };
 

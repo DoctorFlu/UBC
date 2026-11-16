@@ -21,6 +21,8 @@ export interface TableProps<Row> {
   columns: readonly Column<Row>[];
   rows: readonly Row[];
   rowKey: (row: Row) => string;
+  /** An element id for a row, so other pages can link straight to it. */
+  rowId?: (row: Row) => string;
   /** Every table is named; hide the caption visually when a card title already says it. */
   caption: string;
   captionHidden?: boolean;
@@ -42,6 +44,7 @@ export function Table<Row>({
   caption,
   captionHidden = false,
   rowTone,
+  rowId,
   empty,
   className,
 }: TableProps<Row>) {
@@ -72,7 +75,7 @@ export function Table<Row>({
           {rows.map((row) => {
             const tone = rowTone?.(row);
             return (
-              <tr key={rowKey(row)} className={cx(styles.row, tone && styles[tone])}>
+              <tr key={rowKey(row)} id={rowId?.(row)} className={cx(styles.row, tone && styles[tone])}>
                 {columns.map((column) => (
                   <td
                     key={column.key}

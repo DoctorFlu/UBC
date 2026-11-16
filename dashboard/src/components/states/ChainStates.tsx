@@ -1,14 +1,12 @@
-import { CircleSlash, FileSignature, FlaskConical, PlugZap } from "lucide-react";
+import { CircleSlash, FileSignature, PlugZap } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { cx } from "@/lib/cx";
 import { ButtonLink } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 
 import { ViewSkeleton } from "./ViewStates";
-import styles from "./ViewStates.module.css";
 
 /**
  * What a view shows before the console has chain data: still reading history, no contract configured,
@@ -67,26 +65,5 @@ export function NothingHere({ title, children }: { title: string; children: Reac
     <EmptyState plain icon={<CircleSlash strokeWidth={1.75} />} title={title}>
       {children}
     </EmptyState>
-  );
-}
-
-/** Marks a block that shows fixture data because its real source lands in a later issue. */
-export function SampleDataNote({
-  issue,
-  children,
-  className,
-}: {
-  issue: string;
-  children?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <p className={cx(styles.sample, className)} data-testid="sample-data">
-      <FlaskConical aria-hidden strokeWidth={2} />
-      <span>
-        <strong>Sample data.</strong> {children ?? "Illustrative numbers, not read from your account."} Real
-        data arrives with {issue}.
-      </span>
-    </p>
   );
 }
