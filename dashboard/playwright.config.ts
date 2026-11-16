@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 import { suitePaths } from "./e2e/support/chain";
 import { E2E_SERVICE_TOKEN } from "./e2e/support/console";
+import { SUITE_GEMINI_PORT } from "./e2e/support/fake-gemini";
 
 /**
  * Headless Chromium only. Install it once with `npx playwright install chromium`.
@@ -21,6 +22,8 @@ import { E2E_SERVICE_TOKEN } from "./e2e/support/console";
  */
 const PORT = Number(process.env.E2E_PORT ?? 3100);
 const CHAIN_PORT = Number(process.env.E2E_CHAIN_PORT ?? 8645);
+// A local stand-in for Gemini's public API, answering from recorded responses (e2e/support/fake-gemini.ts).
+const GEMINI_PORT = SUITE_GEMINI_PORT;
 // localhost, not 127.0.0.1: the dev server's HMR socket only accepts the host it was started on.
 const baseURL = `http://localhost:${PORT.toString()}`;
 const prod = process.env.E2E_SERVER === "prod";
@@ -59,6 +62,15 @@ export default defineConfig({
           stdout: "pipe",
         },
         {
+          name: "gemini",
+          command: `npx tsx e2e/support/serve-gemini.ts --port ${GEMINI_PORT.toString()}`,
+          port: GEMINI_PORT,
+          wait: { stdout: /fake gemini ready/ },
+          reuseExistingServer: false,
+          timeout: 60_000,
+          stdout: "pipe",
+        },
+        {
           name: "console",
           command: prod
             ? `npx next build && npx next start --port ${PORT.toString()}`
@@ -77,6 +89,8 @@ export default defineConfig({
             CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
             CONSOLE_URL: baseURL,
             MCP_PUBLIC_URL: "https://mcp.example.test/mcp",
+            // Never the real Gemini: the suite's quotes come from recorded responses.
+            GEMINI_API_URL: `http://127.0.0.1:${GEMINI_PORT.toString()}`,
           },
         },
       ],

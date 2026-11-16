@@ -2,7 +2,7 @@
 
 import { type ConsoleHolding, holdingQuantitySchema, holdingSchema } from "@mandate/shared";
 import { CircleAlert, Plus, Save, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
@@ -23,9 +23,11 @@ interface Row {
 
 type RowField = "asset" | "quantity";
 
-let nextKey = 0;
+// Keys come from the list itself, never from a module counter: the server and the browser must render
+// the same element ids, or hydration fails.
 const toRows = (holdings: readonly ConsoleHolding[]): Row[] =>
-  holdings.map((holding) => ({ key: (nextKey += 1), ...holding }));
+  holdings.map((holding, index) => ({ key: index + 1, ...holding }));
+const nextKey = (rows: readonly Row[]) => Math.max(0, ...rows.map((row) => row.key)) + 1;
 const signature = (rows: readonly Pick<Row, "asset" | "quantity">[]) =>
   JSON.stringify(rows.map((row) => [row.asset.trim().toUpperCase(), row.quantity.trim()]));
 const fieldKey = (row: Row, field: RowField) => `${row.key.toString()}:${field}`;
@@ -65,6 +67,7 @@ export function HoldingsEditor({
   const hydrated = useHydrated();
   const { request, pending, access } = useOwnerRequest();
   const blocked = ownerBlockedReason(access);
+  const idBase = useId();
   const [rows, setRows] = useState(() => toRows(holdings));
   // Fields the owner edited, and whether a save was attempted: the only reasons to show an error.
   const [edited, setEdited] = useState<ReadonlySet<string>>(() => new Set());
@@ -134,7 +137,7 @@ export function HoldingsEditor({
             const asset = shown(row, index, "asset");
             const quantity = shown(row, index, "quantity");
             const message = asset ?? quantity;
-            const messageId = `holding-${row.key.toString()}-error`;
+            const messageId = `${idBase}-${row.key.toString()}-error`;
             const invalid = (error: string | undefined) => ({
               "aria-invalid": error !== undefined ? (true as const) : undefined,
               "aria-describedby": error !== undefined ? messageId : undefined,
@@ -197,7 +200,7 @@ export function HoldingsEditor({
           onClick={() =>
             setRows((current) => [
               ...current,
-              { key: (nextKey += 1), asset: current.length === 0 ? "BTC" : "", quantity: "" },
+              { key: nextKey(current), asset: current.length === 0 ? "BTC" : "", quantity: "" },
             ])
           }
         >

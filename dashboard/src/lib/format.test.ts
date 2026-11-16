@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatContractPrice,
+  formatContractsHundredths,
   formatCount,
   formatPercentBps,
   formatTimeUtc,
@@ -127,6 +128,23 @@ describe("formatCount", () => {
   it("groups thousands", () => {
     expect(formatCount(1200)).toBe("1,200");
     expect(formatCount(-7)).toBe(`${MINUS}7`);
+  });
+});
+
+describe("formatContractsHundredths", () => {
+  it("keeps every hundredth and never rounds to whole contracts", () => {
+    expect(formatContractsHundredths(2930)).toBe("29.30");
+    expect(formatContractsHundredths(2905)).toBe("29.05");
+    expect(formatContractsHundredths(1)).toBe("0.01");
+    expect(formatContractsHundredths(99)).toBe("0.99");
+    expect(formatContractsHundredths(5000)).toBe("50");
+    expect(formatContractsHundredths(0)).toBe("0");
+    expect(formatContractsHundredths(123_456)).toBe("1,234.56");
+  });
+
+  it("refuses fractions of a hundredth and negatives", () => {
+    expect(() => formatContractsHundredths(12.5)).toThrow(RangeError);
+    expect(() => formatContractsHundredths(-1)).toThrow(RangeError);
   });
 });
 

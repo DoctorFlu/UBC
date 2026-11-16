@@ -2,8 +2,11 @@ import { type ChildProcess, spawn } from "node:child_process";
 
 import { type Page, expect, test } from "@playwright/test";
 
+import { CONSOLE_AGENT_ROUTES } from "@mandate/shared";
+
+import { formatContractsHundredths, formatUsdCents } from "../src/lib/format";
 import type { ConsoleSnapshot } from "../src/lib/live/types";
-import { routes } from "./routes";
+import { AGENT_ADDRESS, routes } from "./routes";
 import {
   BTC_64K,
   BTC_65K,
@@ -14,7 +17,15 @@ import {
   startTestChain,
   suitePaths,
 } from "./support/chain";
-import { E2E_SERVICE_TOKEN, decisionContext, sealReason, snapshot, waitForSnapshot } from "./support/console";
+import {
+  E2E_SERVICE_TOKEN,
+  agentApi,
+  decisionContext,
+  sealReason,
+  snapshot,
+  waitForSnapshot,
+} from "./support/console";
+import { type FakeGemini, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first mandate, watch
@@ -27,12 +38,14 @@ import { E2E_SERVICE_TOKEN, decisionContext, sealReason, snapshot, waitForSnapsh
 
 const PORT = Number(process.env.E2E_LIVE_PORT ?? 3102);
 const CHAIN_PORT = Number(process.env.E2E_LIVE_CHAIN_PORT ?? 8646);
+const GEMINI_PORT = Number(process.env.E2E_LIVE_GEMINI_PORT ?? 8656);
 const baseURL = `http://localhost:${PORT.toString()}`;
 
 test.describe.configure({ mode: "serial" });
 test.use({ baseURL, viewport: { width: 1440, height: 900 } });
 
 let chain: TestChain;
+let gemini: FakeGemini;
 let server: ChildProcess | null = null;
 const paths = suitePaths("live");
 /** Every page the dashboard serves; `/activity/0` compiles the detail route even before intent 0 exists. */
@@ -54,6 +67,7 @@ async function startConsole(): Promise<void> {
       CONSOLE_EVENT_SOURCE: "rpc",
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
+      GEMINI_API_URL: gemini.url,
     },
   });
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
@@ -104,6 +118,7 @@ function toast(page: Page) {
 test.beforeAll(async () => {
   test.setTimeout(240_000);
   freshSuiteDir("live");
+  gemini = await startFakeGemini(GEMINI_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
   await startConsole();
 });
@@ -111,6 +126,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await stopConsole();
   await chain.anvil.stop();
+  await gemini.stop();
 });
 
 test("before the first mandate, the console says so", async ({ page }) => {
@@ -153,16 +169,27 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
   await expect(row(page, 1)).toContainText("Waiting");
   await expect(row(page, 2)).toContainText("Waiting");
 
-  // Approve by pressing twice: the alternative to holding, for keyboards and screen readers.
+  // Approve by pressing twice: the alternative to holding, for keyboards and screen readers. The
+  // first press arms the button without moving it, says what the second press does, and the second
+  // press still counts well after the 5 seconds the old window allowed.
   const approve = row(page, 1).getByRole("button", { name: /^Approve \$22\.00/ });
+  const before = await approve.boundingBox();
   await approve.click();
+  await expect(approve).toHaveAttribute("data-phase", "armed");
+  await expect(approve.getByText("Confirm approval", { exact: true })).toBeVisible();
+  expect(await approve.boundingBox()).toEqual(before);
+  await page.waitForTimeout(6_500);
+  await expect(approve).toHaveAttribute("data-phase", "armed");
   await approve.click();
   await expect(toast(page)).toContainText("Approved");
   await expect(row(page, 1)).toContainText("Approved");
 
-  await row(page, 2)
-    .getByRole("button", { name: /^Reject \$24\.00/ })
-    .click();
+  // Rejecting is a signed transaction too, so it takes the same two steps.
+  const reject = row(page, 2).getByRole("button", { name: /^Reject \$24\.00/ });
+  await reject.click();
+  await expect(reject.getByText("Confirm rejection", { exact: true })).toBeVisible();
+  await expect(row(page, 2)).toContainText("Waiting");
+  await reject.click();
   await expect(row(page, 2)).toContainText("rejected by user");
 });
 
@@ -191,6 +218,311 @@ test("a rule that blocks an intent says so on the overview", async ({ page }) =>
   await expect(page.getByText("Blocked 1 today")).toBeVisible();
 });
 
+test("editing a limit changes the backtest of past intents before anything is signed", async ({ page }) => {
+  const before = await snapshot(baseURL);
+  await open(page, "/mandate");
+  const backtest = page.getByTestId("backtest");
+  // The draft starts as the rules in force, which gave every one of the four intents its verdict.
+  await expect(backtest).toHaveAttribute("data-changed", "0");
+  await expect(backtest).toContainText("No verdict changes: all 4 past intents get the same answer");
+
+  // A lower max trade size (with the approval threshold under it, as the form requires): the $22 and
+  // $24 intents, held in reality, would be rejected outright.
+  const maxTrade = page.getByRole("textbox", { name: "Max trade size" });
+  const approvalAbove = page.getByRole("textbox", { name: "Approval above" });
+  await approvalAbove.fill("10");
+  await expect(backtest).toHaveAttribute("data-changed", "0");
+  await maxTrade.fill("15");
+  await expect(backtest).toHaveAttribute("data-changed", "2");
+  await expect(backtest).toContainText("2 of 4 past intents would get a different answer");
+  const changed = backtest.getByRole("region", { name: /verdict changes under the draft/ });
+  await expect(changed.locator("tbody tr")).toHaveCount(2);
+  await expect(changed.locator("tbody tr").first()).toContainText("#1");
+  await expect(changed.locator("tbody tr").first()).toContainText("over max trade size");
+
+  // Never asking for approval instead: the same two intents would have been approved.
+  await maxTrade.fill("25");
+  await approvalAbove.fill("0");
+  await expect(backtest).toHaveAttribute("data-changed", "2");
+  await expect(changed.locator("tbody tr").first()).toContainText("Approved");
+
+  // A value that does not parse stops the replay and says why, without moving anything.
+  await maxTrade.fill("abc");
+  await expect(backtest).toHaveAttribute("data-state", "invalid");
+
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page.getByTestId("backtest")).toHaveAttribute("data-changed", "0");
+  // Nothing was signed: the contract's rules are the ones from before.
+  expect((await snapshot(baseURL)).chain?.rules).toEqual(before.chain?.rules);
+});
+
+test("the agent's change request shows a diff and its backtest, and applying it lands onchain", async ({
+  page,
+}) => {
+  const filed = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequests, "POST", {
+    agentAddress: AGENT_ADDRESS,
+    proposed: { maxTradeCents: 3_500 },
+    reason: "The $64,000 rung needs a $30 order; splitting it costs more than it saves.",
+  })) as { id: string; status: string };
+  expect(filed.status).toBe("pending");
+
+  await open(page, "/mandate");
+  // A pending request opens its tab and counts on it.
+  await expect(page.getByRole("tab", { name: /Change requests/ })).toHaveAttribute("aria-selected", "true");
+  const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
+  await expect(card).toContainText("asks to change max trade size");
+  await expect(card).toContainText("splitting it costs more than it saves");
+  const diff = card.getByTestId("request-diff");
+  await expect(diff.locator("tbody tr")).toHaveCount(1);
+  await expect(diff).toContainText("$25.00");
+  await expect(diff).toContainText("$35.00");
+  // Under a $35 max trade size, the $30 intent the contract rejected would have waited for the owner.
+  const backtest = card.getByTestId("backtest");
+  await expect(backtest).toHaveAttribute("data-changed", "1");
+  await expect(backtest).toContainText("under the requested rules");
+
+  await card.getByRole("button", { name: "Review and sign" }).click();
+  const review = page.getByRole("dialog", { name: "Apply the agent's request" });
+  await expect(review.getByTestId("policy-review")).toContainText("Max trade size");
+  await review.getByRole("button", { name: "Sign in wallet" }).click();
+  await expect(toast(page)).toContainText("Mandate updated");
+  await review.getByRole("button", { name: "Done" }).click();
+
+  // The request is closed with the transaction that applied it, and the contract has the new rule.
+  const applied = page.locator(`[data-testid="change-request"][data-status="applied"]`);
+  await expect(applied).toContainText("asked to change max trade size");
+  await expect(applied).toContainText("Applied");
+  const after = await waitForSnapshot(
+    baseURL,
+    (current) =>
+      current.offchain.changeRequests.find((request) => request.id === filed.id)?.status === "applied",
+  );
+  expect(after.chain?.rules?.maxTradeCents).toBe(3_500);
+  const request = after.offchain.changeRequests.find((candidate) => candidate.id === filed.id);
+  expect(request?.appliedTxHash).toBe(after.chain?.policySetBy?.txHash);
+  expect(await chain.user.getRules()).toMatchObject({ maxTradeCents: 3_500 });
+  // The agent sees it closed too.
+  const seen = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequest(filed.id), "GET")) as {
+    status: string;
+    appliedTxHash: string;
+  };
+  expect(seen).toMatchObject({ status: "applied", appliedTxHash: request?.appliedTxHash });
+  await expect(page.getByRole("tab", { name: /Change requests/ })).toContainText("0");
+});
+
+test("the owner can dismiss a change request, and the rules stay as they are", async ({ page }) => {
+  const filed = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequests, "POST", {
+    agentAddress: AGENT_ADDRESS,
+    proposed: { budgetCents: 50_000 },
+    reason: "More room for next week's ladder.",
+  })) as { id: string };
+  const rules = (await snapshot(baseURL)).chain?.rules;
+  await open(page, "/mandate");
+  const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
+  await expect(card).toContainText("asks to change budget");
+  await card.getByRole("button", { name: "Dismiss" }).click();
+  await expect(toast(page)).toContainText("Request dismissed");
+  await expect(page.locator(`[data-testid="change-request"][data-status="dismissed"]`)).toContainText(
+    "Dismissed",
+  );
+  const seen = (await agentApi(baseURL, CONSOLE_AGENT_ROUTES.policyChangeRequest(filed.id), "GET")) as {
+    status: string;
+  };
+  expect(seen.status).toBe("dismissed");
+  expect((await snapshot(baseURL)).chain?.rules).toEqual(rules);
+});
+
+test("the hedge view: an honest empty state and preview, then the agent's plan, executed onchain", async ({
+  page,
+}) => {
+  await open(page, "/hedge");
+  await expect(page.getByText(/has not planned a hedge for BTC/)).toBeVisible();
+  await expect(page.getByTestId("hedge-preview")).toHaveText(
+    "No preview: Save your BTC holding to see a preview.",
+  );
+  await expect(page.getByTestId("live-ladder")).toBeVisible();
+
+  // Save a holding through the UI: the preview follows at once, made by the same planner.
+  const save = page.getByRole("button", { name: "Sign and save" });
+  await page.getByRole("button", { name: "Add an asset" }).click();
+  const holding = page.getByTestId("holding-row").last();
+  await holding.getByRole("textbox", { name: "Asset" }).fill("BTC");
+  await holding.getByRole("textbox", { name: "Quantity" }).fill("0.05");
+  await save.click();
+  await expect(toast(page)).toContainText("Holdings saved");
+  const state = await snapshot(baseURL);
+  const rules = state.chain?.rules;
+  if (!rules) throw new Error("no mandate");
+  const remaining = rules.budgetCents - (state.chain?.committedCents ?? 0);
+  const expected = (
+    await recordedPlanRequest({
+      quantity: "0.05",
+      dropPercent: 10,
+      maxCostCents: remaining,
+      maxTradeCents: rules.maxTradeCents,
+      remainingBudgetCents: remaining,
+      requestText: "",
+    })
+  ).plan;
+  const preview = page.getByTestId("hedge-preview");
+  await expect(preview).toContainText("Preview, not the agent’s plan.");
+  await expect(preview).toContainText(formatUsdCents(expected.totals.costCents));
+  await expect(preview).toContainText(formatContractsHundredths(expected.totals.contractsHundredths));
+  await expect(page.getByTestId("agent-plan")).toHaveCount(0);
+
+  // The agent posts its plan: it replaces the preview without a refresh.
+  const request = await recordedPlanRequest({
+    quantity: "0.05",
+    dropPercent: 5,
+    maxCostCents: 6_000,
+    maxTradeCents: rules.maxTradeCents,
+    remainingBudgetCents: remaining,
+    requestText: "Protect my 0.05 BTC against a 5% drop this week.",
+  });
+  const { plan } = request;
+  const order = [...plan.orders].sort((a, b) => a.amountCents - b.amountCents)[0];
+  if (!order) throw new Error("the plan has no orders");
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.plans, "POST", request);
+  const card = page.getByTestId("agent-plan");
+  await expect(card).toHaveAttribute("data-plan-id", plan.planId);
+  await expect(card).toContainText(request.requestText);
+  await expect(page.getByTestId("hedge-preview")).toHaveCount(0);
+  await expect(page.getByTestId("plan-execution")).toHaveText(
+    "Not executed: no intent on the chain cites this plan yet.",
+  );
+
+  // The agent proposes one of the plan's orders and seals a reason naming the plan; the executor fills it.
+  const proposed = await chain.agent.proposeTrade(
+    noBuy(order.instrumentSymbol, order.amountCents, order.limitPriceCents),
+  );
+  if (proposed.verdict === "needs_approval") await chain.user.approveIntent(proposed.intentId);
+  const intent = (
+    await waitForSnapshot(baseURL, (current) =>
+      Boolean(current.chain?.intents.some((candidate) => candidate.id === proposed.intentId)),
+    )
+  ).chain?.intents.find((candidate) => candidate.id === proposed.intentId);
+  if (!intent) throw new Error("the proposal did not reach the console");
+  await sealReason(baseURL, intent.id, intent.proposedTxHash, {
+    ...decisionContext("The cheapest rung of the plan, bought first."),
+    planId: plan.planId,
+  });
+  await chain.executor.recordResult({
+    intentId: intent.id,
+    filled: true,
+    filledCents: order.amountCents,
+    pnlCents: 0,
+  });
+  await expect(page.getByTestId("plan-execution")).toHaveText(
+    `1 of ${plan.orders.length.toString()} orders proposed, 1 filled.`,
+  );
+  const onChain = page
+    .getByRole("row")
+    .filter({ has: page.getByRole("link", { name: `Intent #${intent.id.toString()}`, exact: true }) });
+  await expect(onChain).toContainText(formatContractsHundredths(order.quantityHundredths));
+  await expect(onChain).toContainText("Executed");
+
+  // Gemini goes down: the quotes say so, and the plan stays.
+  gemini.setFailing(true);
+  try {
+    await expect(page.getByTestId("quotes-error")).toContainText("did not answer", { timeout: 45_000 });
+    await expect(card).toBeVisible();
+    await expect(page.getByTestId("live-ladder")).toHaveCount(0);
+  } finally {
+    gemini.setFailing(false);
+  }
+});
+
+test("a signal payment the agent records appears live, linked to the intent that used it", async ({
+  page,
+}) => {
+  const receipt = `0x${"5d".repeat(32)}`;
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const budget = {
+    buyerAddress: AGENT_ADDRESS,
+    day: today,
+    dailyBudget: "20000",
+    spentToday: "1000",
+    maxPricePerPurchase: "5000",
+    resetsAt: `${tomorrow}T00:00:00.000Z`,
+    gatewayBalance: "4999000",
+    asOf: new Date().toISOString(),
+  };
+
+  await open(page, "/payments");
+  await expect(page.getByText("No purchases yet")).toBeVisible();
+  await expect(page.getByText("Not reported yet")).toBeVisible();
+
+  // The MCP server reports its budget, then a purchase: both appear without a refresh.
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalBudget, "PUT", budget);
+  const meter = page.getByRole("meter", { name: "Spent" });
+  await expect(meter).toHaveAttribute("aria-valuetext", "0.001 USDC of 0.02 USDC of today's budget");
+  await expect(page.getByText("4.999 USDC")).toBeVisible();
+  await expect(page.getByTestId("budget-note")).toContainText("At most 0.005 USDC per purchase.");
+
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalPayment(receipt), "PUT", {
+    amount: "1000",
+    paidAt: new Date().toISOString(),
+    resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+    network: "eip155:5042002",
+    payer: AGENT_ADDRESS,
+    payee: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    settlementId: "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+    signal: {
+      signalId: `0x${"4e".repeat(32)}`,
+      asset: "BTC",
+      eventTicker: "BTC2611202200",
+      horizon: "weekly",
+      expiry: "2026-11-20T22:00:00.000Z",
+      asOf: new Date().toISOString(),
+      counts: { cheap: 3, fair: 15, expensive: 3, noOffer: 0 },
+    },
+  });
+  const payment = page.locator(`#payment-${receipt}`);
+  await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
+  await expect(payment).toContainText("3 cheap, 15 fair, 3 expensive");
+  await expect(payment).toContainText("0.001 USDC");
+  await expect(payment).toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
+  await expect(payment).toContainText("No intent cites it");
+
+  // An intent whose sealed reason cites the receipt links to it, and back.
+  const proposed = await chain.agent.proposeTrade(noBuy(BTC_65K, 500, 31));
+  const intent = (
+    await waitForSnapshot(baseURL, (current) =>
+      Boolean(current.chain?.intents.some((candidate) => candidate.id === proposed.intentId)),
+    )
+  ).chain?.intents.find((candidate) => candidate.id === proposed.intentId);
+  if (!intent) throw new Error("the proposal did not reach the console");
+  await sealReason(baseURL, intent.id, intent.proposedTxHash, {
+    ...decisionContext("Bought on the paid signal's cheapest rung."),
+    signalReceiptIds: [receipt],
+  });
+  const used = payment.getByRole("link", { name: `Intent #${intent.id.toString()}`, exact: true });
+  await expect(used).toBeVisible();
+  await used.click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Intent #${intent.id.toString()}` }),
+  ).toBeVisible();
+  await page
+    .getByTestId("sealed-reason")
+    .getByRole("link", { name: /^0x5d5d/ })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/payments#payment-${receipt}$`));
+  await expect(page.locator(`#payment-${receipt}`)).toBeVisible();
+
+  // A newer snapshot from a day that is over: its spend no longer counts.
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalBudget, "PUT", {
+    ...budget,
+    resetsAt: new Date(Date.now() - 60_000).toISOString(),
+    asOf: new Date().toISOString(),
+  });
+  await expect(page.getByRole("meter", { name: "Spent" })).toHaveAttribute(
+    "aria-valuetext",
+    "0.00 USDC of 0.02 USDC of today's budget",
+  );
+  await expect(page.getByTestId("budget-note")).toContainText("A new day started");
+});
+
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
   await open(page, "/");
   const isolator = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });
@@ -201,9 +533,9 @@ test("the kill switch pauses the agent and the contract refuses its next proposa
   await expect(toast(page)).toContainText("Agent paused");
 
   const refused = await chain.agent.proposeTrade(noBuy(BTC_65K, 500, 31));
-  expect(refused).toMatchObject({ intentId: 4, verdict: "rejected", reason: "agent paused" });
+  expect(refused).toMatchObject({ verdict: "rejected", reason: "agent paused" });
   await open(page, "/activity");
-  await expect(row(page, 4)).toContainText("agent paused");
+  await expect(row(page, refused.intentId)).toContainText("agent paused");
 });
 
 test("the agent's reason, linked offchain, is checked against the intent", async ({ page }) => {
@@ -234,6 +566,6 @@ test("a restarted console rebuilds exactly the same state", async ({ page }) => 
   expect(durableState(after)).toEqual(durableState(before));
 
   await open(page, "/activity");
-  for (const id of [0, 1, 2, 3, 4]) await expect(row(page, id)).toBeVisible();
+  for (const intent of after.chain?.intents ?? []) await expect(row(page, intent.id)).toBeVisible();
   await expect(page.getByTestId("paused-banner")).toBeVisible();
 });

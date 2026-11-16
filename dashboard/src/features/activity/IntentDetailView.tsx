@@ -16,11 +16,19 @@ import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip, statusDescriptions } from "@/components/ui/StatusChip";
-import { formatContractPrice, formatCount, formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import {
+  formatContractPrice,
+  formatCount,
+  formatDateUtc,
+  formatTimeUtc,
+  formatUsdCents,
+  shortenHex,
+} from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents, isoFromUnix } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
 import { categoryName, describeMarket } from "@/lib/markets";
+import { paymentHref } from "@/lib/payments/links";
 import { fillsAreSimulated } from "@/lib/network";
 
 import styles from "./detail.module.css";
@@ -178,7 +186,38 @@ const SOURCE_TEXT = {
  * The agent's reason, resolved by the console: the onchain `contextHash` when the contract records one,
  * otherwise the agent's offchain link, otherwise none. The document is checked with `verifyContext`.
  */
-function SealedReasonCard({ sealed, market }: { sealed: SealedReason | undefined; market: string | null }) {
+/** The receipt ids of the signals the agent paid for, each linked to its payment when the console has it. */
+function PaidSignals({ receipts, payments }: { receipts: readonly string[]; payments: ReadonlySet<string> }) {
+  if (receipts.length === 0) return <>None</>;
+  return (
+    <ul className={styles.receipts}>
+      {receipts.map((receipt) => (
+        <li key={receipt}>
+          {payments.has(receipt.toLowerCase()) ? (
+            <Link href={paymentHref(receipt)} className={styles.receipt}>
+              {shortenHex(receipt, 10, 6)}
+            </Link>
+          ) : (
+            <>
+              <span className={styles.receipt}>{shortenHex(receipt, 10, 6)}</span>{" "}
+              <span className={styles.receiptNote}>no payment recorded</span>
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SealedReasonCard({
+  sealed,
+  market,
+  payments,
+}: {
+  sealed: SealedReason | undefined;
+  market: string | null;
+  payments: ReadonlySet<string>;
+}) {
   if (!sealed) {
     return (
       <Card title="The agent's reason" headingLevel={2}>
@@ -249,7 +288,9 @@ function SealedReasonCard({ sealed, market }: { sealed: SealedReason | undefined
               {doc.planId}, rung {(doc.rungIndex + 1).toString()}
             </dd>
             <dt>Paid signals</dt>
-            <dd>{doc.signalReceiptIds.length === 0 ? "None" : doc.signalReceiptIds.join(", ")}</dd>
+            <dd>
+              <PaidSignals receipts={doc.signalReceiptIds} payments={payments} />
+            </dd>
             <dt>Hash</dt>
             <dd>
               <HexValue value={sealed.hash} kind="hash" />
@@ -355,7 +396,11 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             ) : null}
           </Card>
 
-          <SealedReasonCard sealed={chain.sealed[intent.id]} market={intent.market} />
+          <SealedReasonCard
+            sealed={chain.sealed[intent.id]}
+            market={intent.market}
+            payments={new Set(snapshot.offchain.signalPayments.map((payment) => payment.receiptId))}
+          />
         </div>
 
         <Card

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_HOLD_CONFIG,
   type HoldConfig,
   type HoldEvent,
   type HoldState,
   IDLE,
+  MIN_ARM_WINDOW_MS,
   holdProgress,
   holdReducer,
 } from "./hold-to-confirm";
@@ -102,6 +104,22 @@ describe("hold to confirm", () => {
         { type: "tick", at: 9 },
       ]),
     ).toEqual(IDLE);
+  });
+
+  it("keeps the console's default arm window at least 8 seconds long", () => {
+    expect(DEFAULT_HOLD_CONFIG.armWindowMs).toBeGreaterThanOrEqual(MIN_ARM_WINDOW_MS);
+    expect(MIN_ARM_WINDOW_MS).toBeGreaterThanOrEqual(8_000);
+  });
+
+  it("confirms a second press that comes 8 seconds after the first, with the default window", () => {
+    const events: HoldEvent[] = [
+      { type: "press", at: 0, input: "pointer" },
+      { type: "release", at: 150 },
+      { type: "tick", at: 8_150 },
+      { type: "press", at: 8_150, input: "pointer" },
+    ];
+    const state = events.reduce((current, event) => holdReducer(current, event), IDLE);
+    expect(state).toEqual({ phase: "confirmed", at: 8_150 });
   });
 
   it("reports progress only while holding", () => {

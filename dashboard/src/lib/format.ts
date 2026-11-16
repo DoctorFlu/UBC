@@ -118,6 +118,19 @@ export function formatCount(count: number | bigint): string {
   return negative ? `${MINUS}${digits}` : digits;
 }
 
+/**
+ * Contracts from hundredths, the 0.01-contract steps Gemini trades in: 2930 -> "29.30", 5000 -> "50",
+ * 1 -> "0.01", 123456 -> "1,234.56". Exact integer math, at most two decimals, never rounded to whole
+ * contracts; a whole number drops its ".00".
+ */
+export function formatContractsHundredths(hundredths: number | bigint): string {
+  const value = toBigInt(hundredths, "contracts");
+  if (value < 0n) throw new RangeError(`contracts cannot be negative, got ${value.toString()}`);
+  const whole = groupThousands((value / 100n).toString());
+  const fraction = value % 100n;
+  return fraction === 0n ? whole : `${whole}.${fraction.toString().padStart(2, "0")}`;
+}
+
 const timeFormatter = new Intl.DateTimeFormat("en-GB", {
   hour: "2-digit",
   minute: "2-digit",

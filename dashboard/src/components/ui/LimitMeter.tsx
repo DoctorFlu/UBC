@@ -1,7 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
-import { formatPercentBps, formatUsdCents, shareBps } from "@/lib/format";
+import { formatPercentBps, formatUsdCents } from "@/lib/format";
+import { formatUsdc } from "@/lib/payments/usdc";
 
 import styles from "./LimitMeter.module.css";
 
@@ -27,32 +28,59 @@ export function meterTone(bps: number): "ok" | "warn" | "over" {
 }
 
 /** One rule of the mandate as a rated circuit: its load on a graduated rail. */
-export function LimitMeter({
+export function LimitMeter({ usedCents, limitCents, ...rest }: LimitMeterProps) {
+  return (
+    <Meter
+      {...rest}
+      used={BigInt(usedCents)}
+      limit={BigInt(limitCents)}
+      format={(value) => formatUsdCents(value)}
+    />
+  );
+}
+
+export interface UsdcMeterProps extends Omit<LimitMeterProps, "usedCents" | "limitCents"> {
+  /** USDC atomic units (6 decimals). */
+  used: bigint;
+  limit: bigint;
+}
+
+/** The same rail for a USDC budget in atomic units, formatted exactly. */
+export function UsdcMeter({ used, limit, ...rest }: UsdcMeterProps) {
+  return <Meter {...rest} used={used} limit={limit} format={(value) => formatUsdc(value)} />;
+}
+
+function Meter({
   label,
-  usedCents,
-  limitCents,
+  used,
+  limit,
+  format,
   usedWord = "used",
   compact = false,
   className,
-}: LimitMeterProps) {
-  const bps = shareBps(usedCents, limitCents);
+}: Omit<LimitMeterProps, "usedCents" | "limitCents"> & {
+  used: bigint;
+  limit: bigint;
+  format: (value: bigint) => string;
+}) {
+  const bps = limit <= 0n ? 0 : Number((used * 10_000n) / limit);
   const tone = meterTone(bps);
   const load = `${Math.min(100, bps / 100).toString()}%`;
-  const reading = `${formatUsdCents(usedCents)} of ${formatUsdCents(limitCents)}`;
-  const headroom = Math.max(0, limitCents - usedCents);
+  const reading = `${format(used)} of ${format(limit)}`;
+  const headroom = limit > used ? limit - used : 0n;
   return (
     <div className={cx(styles.meter, styles[tone], compact && styles.compact, className)}>
       <span className={styles.label}>{label}</span>
       <span className={styles.reading}>
-        <strong>{formatUsdCents(usedCents)}</strong> of {formatUsdCents(limitCents)}
+        <strong>{format(used)}</strong> of {format(limit)}
       </span>
       <div
         className={styles.rail}
         role="meter"
         aria-label={typeof label === "string" ? label : undefined}
         aria-valuemin={0}
-        aria-valuemax={limitCents}
-        aria-valuenow={Math.min(usedCents, limitCents)}
+        aria-valuemax={Number(limit)}
+        aria-valuenow={Number(used < limit ? used : limit)}
         aria-valuetext={`${reading} ${usedWord}`}
         style={{ "--load": load } as CSSProperties}
       >
@@ -67,7 +95,7 @@ export function LimitMeter({
             {formatPercentBps(bps, { fractionDigits: 0 })} {usedWord}
             {tone === "warn" ? ", nearly reached" : tone === "over" ? ", reached" : ""}
           </span>
-          <span>{formatUsdCents(headroom)} left</span>
+          <span>{format(headroom)} left</span>
         </div>
       )}
     </div>

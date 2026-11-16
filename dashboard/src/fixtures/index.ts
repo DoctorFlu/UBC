@@ -18,6 +18,8 @@ import type { Address, Hex } from "viem";
 import { buildChainView } from "@/lib/live/chain-view";
 import type { ChainView, ConsoleNetwork, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
 
+import { sampleHedgePlan } from "./samples";
+
 /** Anvil account #0, the dev signer's owner address (a public test key; see lib/wallet/dev-signer.ts). */
 export const OWNER_ADDRESS: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 /** Anvil account #1, standing in for Grok Bot's agent key. */
@@ -51,6 +53,9 @@ const NBA = "GEMI-NBA2611161900-LAL";
 /** 2026-11-15 13:20:00 UTC. */
 const START = 1_794_748_800;
 
+/** The receipt id (the x402 authorization nonce) of the signal the fixture's agent paid for. */
+export const FIXTURE_RECEIPT = `0x${"7c".repeat(32)}` as const;
+
 export const fixtureContext: DecisionContext = {
   version: 1,
   requestText: "Protect my 0.05 BTC below $66,000 this week.",
@@ -65,7 +70,7 @@ export const fixtureContext: DecisionContext = {
       { instrumentSymbol: BTC_64K, label: "$64,000 or above", yesBidCents: 75, yesAskCents: 76 },
     ],
   },
-  signalReceiptIds: ["rcpt_btc_iv_30d"],
+  signalReceiptIds: [FIXTURE_RECEIPT],
   reason: "The $66,000 rung pays first if BTC falls this week, and costs the least per dollar covered.",
   createdAt: "2026-11-15T13:24:40.000Z",
 };
@@ -146,10 +151,10 @@ function fixtureEvents(): PolicyEvent[] {
   push(step(5), { type: "ResultRecorded", intentId: 1, filled: true, filledCents: 1_320, pnlCents: 0 });
   push(step(30), propose(2, ETH_2800, Category.Crypto, 450, 9), approved(2, ETH_2800, 450, 9));
   push(step(8), { type: "ResultRecorded", intentId: 2, filled: false, filledCents: 0, pnlCents: 0 });
-  push(step(600), propose(3, BTC_64K, Category.Crypto, 2_700, 27), {
+  push(step(600), propose(3, BTC_64K, Category.Crypto, 2_300, 23), {
     type: "IntentNeedsApproval",
     intentId: 3,
-    amountCents: 2_700,
+    amountCents: 2_300,
   });
   push(step(90), { type: "IntentRejected", intentId: 3, reason: "rejected by user" });
   push(step(900), propose(4, BTC_64K, Category.Crypto, 3_100, 31), {
@@ -235,7 +240,49 @@ export const fixtureSnapshot: ConsoleSnapshot = {
         appliedTxHash: null,
       },
     ],
-    latestPlan: { planId: fixtureContext.planId, asset: "BTC", storedAt: "2026-11-15T13:24:38.000Z" },
+    plans: [
+      {
+        planId: sampleHedgePlan.planId,
+        asset: "BTC",
+        requestText: "Protect my 0.05 BTC down to $62,000 this week, for at most $60.",
+        createdAt: "2026-11-15T13:24:31.000Z",
+        storedAt: "2026-11-15T13:24:32.000Z",
+        plan: sampleHedgePlan,
+      },
+    ],
+    signalPayments: [
+      {
+        receiptId: FIXTURE_RECEIPT,
+        amount: "1000",
+        paidAt: "2026-11-15T13:24:21.000Z",
+        resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+        network: "eip155:5042002",
+        payer: AGENT_ADDRESS,
+        payee: EXECUTOR_ADDRESS,
+        settlementId: "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+        signal: {
+          signalId: `0x${"4e".repeat(32)}`,
+          asset: "BTC",
+          eventTicker: "BTC2611202200",
+          horizon: "weekly",
+          expiry: "2026-11-20T22:00:00.000Z",
+          asOf: "2026-11-15T13:24:00.000Z",
+          counts: { cheap: 3, fair: 15, expensive: 3, noOffer: 0 },
+        },
+        recordedAt: "2026-11-15T13:24:22.000Z",
+      },
+    ],
+    signalBudget: {
+      buyerAddress: AGENT_ADDRESS,
+      day: "2026-11-15",
+      dailyBudget: "20000",
+      spentToday: "1000",
+      maxPricePerPurchase: "5000",
+      resetsAt: "2026-11-16T00:00:00.000Z",
+      gatewayBalance: "4999000",
+      asOf: "2026-11-15T13:24:22.000Z",
+      storedAt: "2026-11-15T13:24:23.000Z",
+    },
   },
   mcpPublicUrl: "https://mandate-mcp.example.dev/mcp",
 };
@@ -250,6 +297,8 @@ export const emptyFixtureSnapshot: ConsoleSnapshot = {
     holdingsUpdatedAt: null,
     pairing: null,
     changeRequests: [],
-    latestPlan: null,
+    plans: [],
+    signalPayments: [],
+    signalBudget: null,
   },
 };

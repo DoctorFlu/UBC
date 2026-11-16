@@ -8,14 +8,42 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { EmptyState } from "@/components/ui/States";
+import { type Column, Table } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Toast";
 import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import type { ChainView } from "@/lib/live/types";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
 
 import styles from "./mandate.module.css";
+import { BacktestPanel } from "./BacktestPanel";
 import { PolicyReview } from "./PolicyReview";
-import { rulesDiff } from "./rules-diff";
+import { type RuleChange, requestedValues, rulesDiff } from "./rules-diff";
+
+type History = Pick<ChainView, "events" | "intents">;
+
+const diffColumns: readonly Column<RuleChange>[] = [
+  { key: "rule", header: "Rule", cell: (change) => change.label, role: "primary" },
+  {
+    key: "now",
+    header: "In force",
+    cell: (change) => <span className={styles.from}>{change.from}</span>,
+    align: "end",
+    nowrap: true,
+  },
+  {
+    key: "requested",
+    header: "Requested",
+    cell: (change) => <strong className={styles.to}>{change.to}</strong>,
+    align: "end",
+    nowrap: true,
+  },
+];
+
+const requestedColumns: readonly Column<RuleChange>[] = [
+  { key: "rule", header: "Rule", cell: (change) => change.label, role: "primary" },
+  { key: "requested", header: "Requested", cell: (change) => change.to, align: "end", nowrap: true },
+];
 
 async function markApplied(id: string, txHash: string): Promise<string | null> {
   const response = await fetch(`/api/console/change-requests/${encodeURIComponent(id)}/applied`, {
@@ -35,10 +63,12 @@ async function markApplied(id: string, txHash: string): Promise<string | null> {
 function RequestCard({
   request,
   rules,
+  chain,
   agentName,
 }: {
   request: PolicyChangeRequest;
   rules: PolicyRules | null;
+  chain: History;
   agentName: string;
 }) {
   const toast = useToast();
@@ -46,12 +76,15 @@ function RequestCard({
   const [reviewing, setReviewing] = useState(false);
   const blocked = ownerBlockedReason(access);
   const next: PolicyRules | null = rules ? { ...rules, ...request.proposed } : null;
-  const changes = next ? rulesDiff(rules, next) : [];
-  const summary =
-    changes.length === 0
+  const pendingRequest = request.status === "pending";
+  const changes = next && pendingRequest ? rulesDiff(rules, next) : [];
+  // A closed request is history: say what was asked, not how it compares to the rules in force now.
+  const requested = requestedValues(request.proposed);
+  const summary = !pendingRequest
+    ? `${agentName} asked to change ${requested.map((value) => value.label.toLowerCase()).join(", ")}`
+    : changes.length === 0
       ? `${agentName} asks for rules that are already in force`
       : `${agentName} asks to change ${changes.map((change) => change.label.toLowerCase()).join(", ")}`;
-  const pendingRequest = request.status === "pending";
 
   const dismiss = async () => {
     const result = await ownerRequest(
@@ -72,16 +105,26 @@ function RequestCard({
       <Card tone={pendingRequest ? "attention" : "default"} title={`${summary}.`} headingLevel={3}>
         <div className={styles.request}>
           {changes.length > 0 ? (
-            <dl className={styles.changeList}>
-              {changes.map((change) => (
-                <div key={change.label} className={styles.change}>
-                  <dt>{change.label}</dt>
-                  <dd className="num">
-                    <span className={styles.from}>{change.from}</span> to <strong>{change.to}</strong>
-                  </dd>
-                </div>
-              ))}
-            </dl>
+            <div className={styles.sideBySide} data-testid="request-diff">
+              <Table
+                caption="The rules in force beside the rules the agent requests"
+                captionHidden
+                columns={diffColumns}
+                rows={changes}
+                rowKey={(change) => change.label}
+              />
+            </div>
+          ) : null}
+          {!pendingRequest && requested.length > 0 ? (
+            <div className={styles.sideBySide}>
+              <Table
+                caption="The rules the agent asked for"
+                captionHidden
+                columns={requestedColumns}
+                rows={requested}
+                rowKey={(value) => value.label}
+              />
+            </div>
           ) : null}
           <blockquote className={styles.reason}>
             <p>{request.reason}</p>
@@ -89,6 +132,12 @@ function RequestCard({
               {agentName}, {formatDateUtc(request.createdAt)} at {formatTimeUtc(request.createdAt)}
             </footer>
           </blockquote>
+          {pendingRequest && next && changes.length > 0 ? (
+            <section className={styles.requestBacktest} aria-label="Backtest of the requested rules">
+              <h4 className={styles.subheading}>Backtest of the requested rules</h4>
+              <BacktestPanel chain={chain} draft={next} subject="the requested rules" />
+            </section>
+          ) : null}
           {pendingRequest ? (
             <div className={styles.requestActions}>
               <Button
@@ -121,7 +170,8 @@ function RequestCard({
           )}
         </div>
       </Card>
-      {next && pendingRequest ? (
+      {/* Stays mounted after the request closes, so the owner sees the signed step and its Done button. */}
+      {next && (pendingRequest || reviewing) ? (
         <PolicyReview
           open={reviewing}
           onClose={() => setReviewing(false)}
@@ -142,10 +192,12 @@ function RequestCard({
 export function ChangeRequests({
   requests,
   rules,
+  chain,
   agentName,
 }: {
   requests: readonly PolicyChangeRequest[];
   rules: PolicyRules | null;
+  chain: History;
   agentName: string;
 }) {
   if (requests.length === 0) {
@@ -161,7 +213,7 @@ export function ChangeRequests({
   return (
     <ul className={styles.requests}>
       {requests.map((request) => (
-        <RequestCard key={request.id} request={request} rules={rules} agentName={agentName} />
+        <RequestCard key={request.id} request={request} rules={rules} chain={chain} agentName={agentName} />
       ))}
     </ul>
   );

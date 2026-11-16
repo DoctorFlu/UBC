@@ -1,6 +1,7 @@
 /**
- * The audit trail: one row per Policy event, newest first, worded for the owner and for a CSV. Every row
- * is read from the contract's events; nothing here is stored or edited by the console.
+ * The audit trail: one row per Policy event the console ingested, worded for the owner and for an
+ * export. Every row is read from the contract's events; nothing here is stored or edited by the
+ * console, so each one can be checked against its block and transaction.
  */
 import {
   CATEGORY_LABELS,
@@ -18,11 +19,29 @@ import { isoFromUnix } from "@/lib/live/derive";
 import type { ChainView } from "@/lib/live/types";
 import { describeMarket } from "@/lib/markets";
 
+/**
+ * What kind of decision a row records:
+ * - `mandate`: the owner set or changed the rules (`PolicyUpdated`).
+ * - `pause`: the kill switch (`Paused`).
+ * - `verdict`: the contract's answer to a proposal, in the proposal's own transaction.
+ * - `owner`: the owner approving or rejecting a held intent (`approveIntent`, `rejectIntent`).
+ * - `result`: what the executor recorded (`ResultRecorded`).
+ */
+export type AuditGroup = "mandate" | "pause" | "verdict" | "owner" | "result";
+
 export interface AuditRow {
   id: string;
+  /** ISO time of the block. */
   at: string;
+  /** Unix seconds of the block, as the contract sees time. */
+  blockTimestamp: number;
   blockNumber: number;
+  logIndex: number;
+  /** The contract's event name, exactly as emitted. */
   event: PolicyEventType;
+  group: AuditGroup;
+  /** The event in the owner's words, e.g. "Approved by owner". */
+  label: string;
   intentId: number | null;
   summary: string;
   status: StatusKind | null;
@@ -30,15 +49,15 @@ export interface AuditRow {
   txHash: Hex;
 }
 
-export const EVENT_LABELS: Record<PolicyEventType, string> = {
-  PolicyUpdated: "Mandate set",
-  Paused: "Kill switch",
-  IntentProposed: "Intent proposed",
-  IntentApproved: "Intent approved",
-  IntentRejected: "Intent rejected",
-  IntentNeedsApproval: "Held for approval",
-  ResultRecorded: "Result recorded",
+export const GROUP_LABELS: Record<AuditGroup, string> = {
+  mandate: "Mandate changes",
+  pause: "Kill switch",
+  verdict: "Proposal verdicts",
+  owner: "Owner decisions",
+  result: "Executor results",
 };
+
+export type AuditOrder = "newest" | "oldest";
 
 const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 
@@ -46,12 +65,21 @@ function order(event: { isBuy: boolean; outcome: string; market: string; amountC
   return `${event.isBuy ? "Buy" : "Sell"} ${event.outcome} on ${describeMarket(event.market).title}, ${formatUsdCents(event.amountCents)}`;
 }
 
-function describe(event: PolicyEvent): Pick<AuditRow, "summary" | "status" | "reason" | "intentId"> {
+type Described = Pick<AuditRow, "group" | "label" | "summary" | "status" | "reason" | "intentId">;
+
+/**
+ * Describes one event. `held` is true when the intent was held for the owner in an earlier
+ * transaction: its approval or rejection then records the owner's decision, not a verdict at proposal.
+ * `version` is the mandate's version after a `PolicyUpdated`.
+ */
+function describe(event: PolicyEvent, held: boolean, version: number): Described {
   switch (event.type) {
     case "PolicyUpdated": {
       const { rules } = event;
       const markets = categoriesFromMask(rules.allowedCategories).map((id) => CATEGORY_LABELS[id]);
       return {
+        group: "mandate",
+        label: version === 1 ? "Mandate set" : `Mandate changed (v${version.toString()})`,
         summary: `Budget ${usd(rules.budgetCents)}, max trade ${usd(rules.maxTradeCents)}, approval above ${usd(rules.approvalAboveCents)}, daily loss ${usd(rules.dailyLossCents)}; markets: ${markets.join(", ") || "none"}`,
         status: rules.paused ? "paused" : null,
         reason: null,
@@ -60,26 +88,48 @@ function describe(event: PolicyEvent): Pick<AuditRow, "summary" | "status" | "re
     }
     case "Paused":
       return {
+        group: "pause",
+        label: event.paused ? "Paused" : "Resumed",
         summary: event.paused
-          ? "Paused: every new intent is rejected"
-          : "Resumed: new intents are checked again",
+          ? "Kill switch on: every new intent is rejected"
+          : "Kill switch off: new intents are checked again",
         status: event.paused ? "paused" : null,
         reason: null,
         intentId: null,
       };
     case "IntentProposed":
-      return { summary: order(event), status: null, reason: null, intentId: event.intentId };
-    case "IntentApproved":
-      return { summary: order(event), status: "approved", reason: null, intentId: event.intentId };
-    case "IntentRejected":
       return {
+        group: "verdict",
+        label: "Intent proposed",
+        summary: order(event),
+        status: null,
+        reason: null,
+        intentId: event.intentId,
+      };
+    case "IntentApproved":
+      return {
+        group: held ? "owner" : "verdict",
+        label: held ? "Approved by owner" : "Intent approved",
+        summary: order(event),
+        status: "approved",
+        reason: null,
+        intentId: event.intentId,
+      };
+    case "IntentRejected": {
+      const byOwner = event.reason === "rejected by user";
+      return {
+        group: held ? "owner" : "verdict",
+        label: byOwner ? "Rejected by owner" : held ? "Rejected on approval" : "Intent rejected",
         summary: describeReason(event.reason).explanation,
         status: "rejected",
         reason: event.reason,
         intentId: event.intentId,
       };
+    }
     case "IntentNeedsApproval":
       return {
+        group: "verdict",
+        label: "Held for approval",
         summary: `${formatUsdCents(event.amountCents)} is above the approval threshold: waiting for the owner`,
         status: "needs_approval",
         reason: null,
@@ -87,9 +137,11 @@ function describe(event: PolicyEvent): Pick<AuditRow, "summary" | "status" | "re
       };
     case "ResultRecorded":
       return {
+        group: "result",
+        label: event.filled ? "Fill recorded" : "No fill recorded",
         summary: event.filled
-          ? `Filled ${formatUsdCents(event.filledCents)}, realized ${formatUsdCentsDelta(event.pnlCents)}`
-          : "Did not fill",
+          ? `The executor recorded a fill of ${formatUsdCents(event.filledCents)}, realized ${formatUsdCentsDelta(event.pnlCents)}`
+          : "The executor recorded that the order did not fill",
         status: event.filled ? "executed" : "failed",
         reason: null,
         intentId: event.intentId,
@@ -97,13 +149,110 @@ function describe(event: PolicyEvent): Pick<AuditRow, "summary" | "status" | "re
   }
 }
 
-export function auditRows(chain: ChainView): AuditRow[] {
-  return [...chain.events].reverse().map((event) => ({
-    id: eventKey(event),
-    at: isoFromUnix(event.blockTimestamp),
-    blockNumber: event.blockNumber,
-    event: event.type,
-    txHash: event.transactionHash,
-    ...describe(event),
-  }));
+/** Every event as an audit row, oldest first (chain order). */
+export function auditRows(chain: Pick<ChainView, "events">): AuditRow[] {
+  const heldIn = new Map<number, Hex>();
+  let version = 0;
+  return chain.events.map((event) => {
+    if (event.type === "PolicyUpdated") version += 1;
+    const intentId = "intentId" in event ? event.intentId : null;
+    const heldTx = intentId === null ? undefined : heldIn.get(intentId);
+    const held = heldTx !== undefined && heldTx.toLowerCase() !== event.transactionHash.toLowerCase();
+    if (event.type === "IntentNeedsApproval") heldIn.set(event.intentId, event.transactionHash);
+    return {
+      id: eventKey(event),
+      at: isoFromUnix(event.blockTimestamp),
+      blockTimestamp: event.blockTimestamp,
+      blockNumber: event.blockNumber,
+      logIndex: event.logIndex,
+      event: event.type,
+      txHash: event.transactionHash,
+      ...describe(event, held, version),
+    };
+  });
+}
+
+/** The rows a filter and an order show, in the order shown. */
+export function visibleRows(
+  rows: readonly AuditRow[],
+  group: AuditGroup | "all",
+  sort: AuditOrder,
+): AuditRow[] {
+  const kept = group === "all" ? [...rows] : rows.filter((row) => row.group === group);
+  return sort === "newest" ? kept.reverse() : kept;
+}
+
+/** Rejections by the contract's reason string, most frequent first. */
+export function blockedByRule(rows: readonly AuditRow[]): [reason: string, count: number][] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (row.event === "IntentRejected" && row.reason !== null) {
+      counts.set(row.reason, (counts.get(row.reason) ?? 0) + 1);
+    }
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+// ------------------------------------------------------------------ export
+
+const EXPORT_COLUMNS = [
+  "time_utc",
+  "block_timestamp",
+  "block",
+  "log_index",
+  "event",
+  "label",
+  "intent",
+  "status",
+  "reason",
+  "summary",
+  "tx_hash",
+  "explorer_url",
+] as const;
+
+export type AuditExportRecord = Record<(typeof EXPORT_COLUMNS)[number], string | number | null>;
+
+export function exportRecord(row: AuditRow, explorerUrl: string | null): AuditExportRecord {
+  return {
+    time_utc: row.at,
+    block_timestamp: row.blockTimestamp,
+    block: row.blockNumber,
+    log_index: row.logIndex,
+    event: row.event,
+    label: row.label,
+    intent: row.intentId,
+    status: row.status,
+    reason: row.reason,
+    summary: row.summary,
+    tx_hash: row.txHash,
+    explorer_url: explorerUrl ? `${explorerUrl}/tx/${row.txHash}` : null,
+  };
+}
+
+function csvCell(value: string | number | null): string {
+  const text = value === null ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+/** RFC 4180 CSV of exactly these rows, in this order, with a header line. */
+export function toCsv(rows: readonly AuditRow[], explorerUrl: string | null): string {
+  const lines = rows.map((row) => {
+    const record = exportRecord(row, explorerUrl);
+    return EXPORT_COLUMNS.map((column) => csvCell(record[column])).join(",");
+  });
+  return `${[EXPORT_COLUMNS.join(","), ...lines].join("\r\n")}\r\n`;
+}
+
+export interface AuditExportMeta {
+  contract: string;
+  chainId: number;
+  network: string;
+  filter: AuditGroup | "all";
+  order: AuditOrder;
+  exportedAt: string;
+}
+
+/** The same rows as JSON, with what they were read from and how they were filtered. */
+export function toJson(rows: readonly AuditRow[], explorerUrl: string | null, meta: AuditExportMeta): string {
+  return `${JSON.stringify({ ...meta, rows: rows.map((row) => exportRecord(row, explorerUrl)) }, null, 2)}\n`;
 }

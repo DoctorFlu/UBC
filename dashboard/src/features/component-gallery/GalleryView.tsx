@@ -192,6 +192,7 @@ export function GalleryView() {
           <HoldButton
             tone="danger"
             icon={<Power aria-hidden />}
+            armedLabel="Confirm pause"
             showHint
             onConfirm={() => toast({ title: "Agent paused", tone: "danger" })}
           >
@@ -201,6 +202,7 @@ export function GalleryView() {
             tone="ink"
             showHint
             confirmedLabel="Approved"
+            armedLabel="Confirm approval"
             onConfirm={() => toast({ title: "Approved", tone: "success" })}
           >
             Approve

@@ -1,1 +1,1 @@
-export { PaymentsView, type PaymentsData } from "./PaymentsView";
+export { PaymentsView } from "./PaymentsView";

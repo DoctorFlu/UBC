@@ -3,7 +3,6 @@
 import type { IntentView } from "@mandate/shared";
 import { Check, X } from "lucide-react";
 
-import { Button } from "@/components/ui/Button";
 import { HoldButton } from "@/components/ui/HoldButton";
 import { useToast } from "@/components/ui/Toast";
 import { formatUsdCents } from "@/lib/format";
@@ -15,7 +14,7 @@ import styles from "./domain.module.css";
 import { OwnerTxStatus } from "./OwnerTxStatus";
 
 /**
- * Approve (hold, or press twice) or reject an intent waiting for the owner. Each is an owner-signed
+ * Approve or reject an intent waiting for the owner, each by holding or pressing twice. Each is an owner-signed
  * `approveIntent` or `rejectIntent`; the row changes when the console reads the resulting event.
  * `approveIntent` re-checks only the budget, so an approval can still end as "over budget".
  */
@@ -62,23 +61,26 @@ export function ApprovalActions({ intent, block = false }: { intent: IntentView;
           block={block}
           icon={<Check aria-hidden />}
           confirmedLabel="Approving"
+          armedLabel="Confirm approval"
           aria-label={`Approve ${subject}`}
           disabled={working || blocked !== null}
           onConfirm={() => void approve()}
         >
           Approve
         </HoldButton>
-        <Button
-          variant="secondary"
+        <HoldButton
+          tone="neutral"
           size="sm"
           block={block}
           icon={<X aria-hidden />}
+          confirmedLabel="Rejecting"
+          armedLabel="Confirm rejection"
           aria-label={`Reject ${subject}`}
           disabled={working || blocked !== null}
-          onClick={() => void reject()}
+          onConfirm={() => void reject()}
         >
           Reject
-        </Button>
+        </HoldButton>
       </div>
       {blocked && access.kind !== "loading" ? <p className={styles.approvalNote}>{blocked}</p> : null}
       <OwnerTxStatus state={state} />
