@@ -76,7 +76,7 @@ const columns: readonly Column<RecentIntent>[] = [
   },
   {
     key: "verdict",
-    header: "Verdict",
+    header: "Where it stands",
     cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
   },
   {
@@ -320,9 +320,9 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
         ) : null}
       </Card>
 
-      <Card title="Recent verdicts" padding="flush" headingLevel={2}>
+      <Card title="Recent intents" padding="flush" headingLevel={2}>
         <Table
-          caption="Recent intents and the contract's verdicts, newest first"
+          caption="Recent intents and where each stands now, newest first"
           captionHidden
           columns={columns}
           rows={card.recent}
