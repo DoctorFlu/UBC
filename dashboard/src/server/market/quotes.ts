@@ -6,8 +6,10 @@ import {
   type GeminiClient,
   type Ladder,
   createGeminiClient,
+  findInstrument,
   isGeminiError,
 } from "@mandate/gemini";
+import { type CategoryId, categoryFromGemini } from "@mandate/shared";
 
 import type { LadderQuotes, MarketDataError } from "@/lib/hedge/types";
 
@@ -69,6 +71,15 @@ export class MarketQuotes {
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.sleep ? { sleep: options.sleep } : {}),
     });
+  }
+
+  /**
+   * The mandate category of the Gemini event that lists `instrumentSymbol`, or null when Gemini lists no
+   * such market. Throws when Gemini cannot answer. Uses the client's own cache of event reads.
+   */
+  async marketCategory(instrumentSymbol: string): Promise<CategoryId | null> {
+    const found = await findInstrument((ticker) => this.client.getEvent(ticker), instrumentSymbol);
+    return found === null ? null : categoryFromGemini(found.event.category ?? "");
   }
 
   /**

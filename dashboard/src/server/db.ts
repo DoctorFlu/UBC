@@ -13,7 +13,8 @@ import type { DatabaseSync } from "node:sqlite";
  * - a cache of Policy contract events, keyed by deployment, transaction hash and log index, so
  *   repeated deliveries are ignored and a restart resumes instead of rescanning the chain;
  * - the offchain records the console is the system of record for: holdings, decision contexts, hedge
- *   plans, policy change requests, agent pairing and intent-to-context links.
+ *   plans, policy change requests, agent pairing and intent-to-context links;
+ * - what Gemini said about each intent's market the first time the console checked it.
  */
 export type Database = DatabaseSync;
 
@@ -116,6 +117,15 @@ const MIGRATIONS: readonly string[] = [
     as_of     TEXT    NOT NULL,
     snapshot  TEXT    NOT NULL,
     stored_at TEXT    NOT NULL
+  ) STRICT;
+  `,
+  // 4: Gemini's listing of each market an intent named, as first checked (#71). First verdict wins.
+  `
+  CREATE TABLE market_listings (
+    symbol     TEXT    NOT NULL PRIMARY KEY,
+    listed     INTEGER NOT NULL,
+    category   INTEGER,
+    checked_at TEXT    NOT NULL
   ) STRICT;
   `,
 ];
