@@ -153,16 +153,27 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
   await expect(row(page, 1)).toContainText("Waiting");
   await expect(row(page, 2)).toContainText("Waiting");
 
-  // Approve by pressing twice: the alternative to holding, for keyboards and screen readers.
+  // Approve by pressing twice: the alternative to holding, for keyboards and screen readers. The
+  // first press arms the button without moving it, says what the second press does, and the second
+  // press still counts well after the 5 seconds the old window allowed.
   const approve = row(page, 1).getByRole("button", { name: /^Approve \$22\.00/ });
+  const before = await approve.boundingBox();
   await approve.click();
+  await expect(approve).toHaveAttribute("data-phase", "armed");
+  await expect(approve.getByText("Confirm approval", { exact: true })).toBeVisible();
+  expect(await approve.boundingBox()).toEqual(before);
+  await page.waitForTimeout(6_500);
+  await expect(approve).toHaveAttribute("data-phase", "armed");
   await approve.click();
   await expect(toast(page)).toContainText("Approved");
   await expect(row(page, 1)).toContainText("Approved");
 
-  await row(page, 2)
-    .getByRole("button", { name: /^Reject \$24\.00/ })
-    .click();
+  // Rejecting is a signed transaction too, so it takes the same two steps.
+  const reject = row(page, 2).getByRole("button", { name: /^Reject \$24\.00/ });
+  await reject.click();
+  await expect(reject.getByText("Confirm rejection", { exact: true })).toBeVisible();
+  await expect(row(page, 2)).toContainText("Waiting");
+  await reject.click();
   await expect(row(page, 2)).toContainText("rejected by user");
 });
 

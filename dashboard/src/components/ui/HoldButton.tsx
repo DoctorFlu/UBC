@@ -30,6 +30,11 @@ export interface HoldButtonProps {
   children: ReactNode;
   /** Shown briefly after confirming, e.g. "Paused". */
   confirmedLabel?: ReactNode;
+  /**
+   * Shown while armed, waiting for the second press, e.g. "Confirm approval". A bar under it drains
+   * over the arm window, so the owner sees how long the second press still counts.
+   */
+  armedLabel?: ReactNode;
   onConfirm: () => void;
   tone?: "danger" | "ink" | "neutral";
   size?: ButtonSize;
@@ -48,10 +53,15 @@ const variantForTone = { danger: "danger", ink: "primary", neutral: "secondary" 
 /**
  * A destructive action that cannot fire by accident: hold it for `holdMs`, or press it twice.
  * Works with pointer, touch, Space, Enter, and screen reader activation. Escape or moving away cancels.
+ *
+ * The first press never moves or resizes the button: every label shares one grid cell (the button
+ * keeps the width of the longest) and the pressed-state shrink of other buttons is off here. Once
+ * armed, the label says what the second press does and a bar drains over the arm window.
  */
 export function HoldButton({
   children,
   confirmedLabel,
+  armedLabel = "Confirm",
   onConfirm,
   tone = "danger",
   size = "md",
@@ -63,7 +73,8 @@ export function HoldButton({
   className,
   "aria-label": ariaLabel,
 }: HoldButtonProps) {
-  const config: HoldConfig = { holdMs, armWindowMs: DEFAULT_HOLD_CONFIG.armWindowMs };
+  const armWindowMs = DEFAULT_HOLD_CONFIG.armWindowMs;
+  const config: HoldConfig = { holdMs, armWindowMs };
   const [state, dispatch] = useReducer((s: HoldState, e: HoldEvent) => holdReducer(s, e, config), IDLE);
   // True between our own press and the click the browser fires after it, so that click is not
   // mistaken for a separate (assistive technology) activation.
@@ -80,7 +91,7 @@ export function HoldButton({
     if (state.phase === "armed") {
       const timer = setTimeout(
         () => dispatch({ type: "tick", at: performance.now() }),
-        DEFAULT_HOLD_CONFIG.armWindowMs + 16,
+        armWindowMs + 16,
       );
       return () => clearTimeout(timer);
     }
@@ -90,7 +101,7 @@ export function HoldButton({
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [state, holdMs]);
+  }, [state, holdMs, armWindowMs]);
 
   const press = (input: "pointer" | "keyboard") => {
     // Space and Enter are prevented on key down and key up, so no click follows them.
@@ -133,13 +144,13 @@ export function HoldButton({
   const labels: [HoldState["phase"], ReactNode][] = [
     ["idle", children],
     ["holding", "Keep holding"],
-    ["armed", "Press again"],
+    ["armed", armedLabel],
     ["confirmed", confirmedLabel ?? children],
   ];
 
   const announcement =
     state.phase === "armed"
-      ? "Press again to confirm."
+      ? `Press again within ${String(armWindowMs / 1000)} seconds to confirm.`
       : state.phase === "confirmed"
         ? typeof confirmedLabel === "string"
           ? confirmedLabel
@@ -153,7 +164,12 @@ export function HoldButton({
         className={buttonClass({ variant: variantForTone[tone], size, block }, cx(styles.hold, className))}
         data-phase={state.phase}
         data-tone={tone}
-        style={{ "--hold-ms": `${holdMs.toString()}ms` } as CSSProperties}
+        style={
+          {
+            "--hold-ms": `${holdMs.toString()}ms`,
+            "--arm-ms": `${armWindowMs.toString()}ms`,
+          } as CSSProperties
+        }
         disabled={disabled}
         aria-label={ariaLabel}
         aria-describedby={hintId}
@@ -168,6 +184,7 @@ export function HoldButton({
         onContextMenu={(event) => event.preventDefault()}
       >
         <span className={styles.fill} aria-hidden />
+        <span className={styles.countdown} aria-hidden data-testid="hold-countdown" />
         {icon}
         <span className={styles.labels}>
           {labels.map(([phase, text]) => (
