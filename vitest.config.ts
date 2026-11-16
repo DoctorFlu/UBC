@@ -19,6 +19,7 @@ export default defineConfig({
     include: [
       "{shared,gemini,planner,agent,signals,devchain,streams,redteam}/**/*.test.ts",
       "dashboard/src/**/*.test.ts",
+      "deploy/test/**/*.test.ts",
     ],
     passWithNoTests: true,
     // Compiles the devchain reference contract once, before test files start their own anvil.
