@@ -4,12 +4,15 @@
 #   deploy/smoke.sh https://<host>
 #
 # Reads its secrets from the environment, never from the command line, and never prints them:
-#   MCP_AUTH_TOKEN    the MCP server's bearer token (required)
-#   CONSOLE_PASSWORD  the owner's console password. Without it, the smoke test checks that every owner
-#                     route refuses everyone, as it must before the owner sets a password, and skips the
-#                     checks that need the login.
-#   CONSOLE_USER      the owner's user name (default owner)
-#   SMOKE_CA_CERT     a CA certificate to trust, for a host with a private certificate (localhost)
+#   MCP_AUTH_TOKEN      the MCP server's bearer token. Without it, the checks that need it are skipped, so
+#                       the test can run from a machine that should not hold the token.
+#   CONSOLE_PASSWORD    the owner's console password. Without it, the test checks that every owner route
+#                       refuses everyone, as it must before the owner sets a password, and skips the checks
+#                       that need the login.
+#   CONSOLE_USER        the owner's user name (default owner)
+#   SMOKE_AGENT_ADDRESS the agent's address, for the public scorecard when MCP_AUTH_TOKEN is not given (it
+#                       is public: the scorecard's URL)
+#   SMOKE_CA_CERT       a CA certificate to trust, for a host with a private certificate (localhost)
 #
 # It only reads and asks; it changes nothing. Exits 0 when every check passes.
 set -uo pipefail
@@ -20,7 +23,7 @@ if [ -z "$base" ]; then
   exit 2
 fi
 base="${base%/}"
-: "${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in the environment}"
+token="${MCP_AUTH_TOKEN:-}"
 password="${CONSOLE_PASSWORD:-}"
 
 work="$(mktemp -d)"
@@ -29,7 +32,7 @@ chmod 700 "$work"
 
 basic() { printf 'Authorization: Basic %s\n' "$(printf '%s:%s' "${CONSOLE_USER:-owner}" "$1" | base64 | tr -d '\n')"; }
 # Credentials go to curl in header files (mode 600), so they never appear in the process list.
-printf 'Authorization: Bearer %s\n' "$MCP_AUTH_TOKEN" >"$work/mcp-auth"
+[ -n "$token" ] && printf 'Authorization: Bearer %s\n' "$token" >"$work/mcp-auth"
 [ -n "$password" ] && basic "$password" >"$work/owner-auth"
 : >"$work/none"
 basic not-the-password >"$work/wrong-auth"
@@ -91,14 +94,19 @@ expect "MCP refuses a request without the token" none POST /mcp 401 \
   --header "Content-Type: application/json" --header "Accept: application/json, text/event-stream" \
   --data-binary "$initialize"
 if has_basic_challenge; then fail "MCP's 401 comes from the MCP server, not the owner login"; fi
-mcp "$initialize"
-check "MCP initialize with the token (POST /mcp -> $status)" '[ "$status" = 200 ] && grep -q "\"serverInfo\"" "$work/body"'
-mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-tools="$(grep -o '"name":"[a-z_]*"' "$work/body" | sort -u | wc -l | tr -d ' ')"
-check "MCP tools/list ($tools tools)" '[ "$status" = 200 ] && [ "$tools" -gt 5 ]'
-mcp '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}'
-agent="$(sed -n 's/.*"agentAddress":"\(0x[0-9a-fA-F]\{40\}\)".*/\1/p' "$work/body" | head -n 1)"
-check "MCP tools/call whoami, read only (agent ${agent:-unknown})" '[ "$status" = 200 ] && [ -n "$agent" ]'
+agent="${SMOKE_AGENT_ADDRESS:-}"
+if [ -z "$token" ]; then
+  echo "   (no MCP_AUTH_TOKEN: the checks that need the token are skipped)"
+else
+  mcp "$initialize"
+  check "MCP initialize with the token (POST /mcp -> $status)" '[ "$status" = 200 ] && grep -q "\"serverInfo\"" "$work/body"'
+  mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  tools="$(grep -o '"name":"[a-z_]*"' "$work/body" | sort -u | wc -l | tr -d ' ')"
+  check "MCP tools/list ($tools tools)" '[ "$status" = 200 ] && [ "$tools" -gt 5 ]'
+  mcp '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}'
+  agent="$(sed -n 's/.*"agentAddress":"\(0x[0-9a-fA-F]\{40\}\)".*/\1/p' "$work/body" | head -n 1)"
+  check "MCP tools/call whoami, read only (agent ${agent:-unknown})" '[ "$status" = 200 ] && [ -n "$agent" ]'
+fi
 
 echo "-- owner routes: the owner's login"
 for path in / /hedge /hedge/plans/smoke-test /setup /api/console/snapshot; do
@@ -140,7 +148,7 @@ if [ -n "$agent" ]; then
   asset="$(sed -n 's/.*\(\/_next\/static\/[^"]*\.js\)".*/\1/p' "$work/body" | head -n 1)"
   [ -n "$asset" ] && expect "the scorecard's scripts without a login" none GET "$asset" 200
 else
-  fail "the MCP server names the agent, for the scorecard (is the chain connected?)"
+  fail "the agent's address, for the scorecard (from the MCP server, or set SMOKE_AGENT_ADDRESS)"
 fi
 # 401 for a delivery without a valid signature, or 503 while QUICKNODE_STREAM_SECURITY_TOKEN is unset.
 request none POST /api/webhooks/quicknode --header "Content-Type: application/json" --data-binary '{"data":[]}'
@@ -148,7 +156,7 @@ check "QuickNode webhook is public and checks its own signature (POST /api/webho
   '{ [ "$status" = 401 ] || [ "$status" = 503 ]; } && ! has_basic_challenge'
 
 echo "-- internal only"
-expect "the console's agent API is not public" mcp-auth GET /api/agent/v1/holdings 404
+expect "the console's agent API is not public" none GET /api/agent/v1/holdings 404
 
 if [ "$failures" -eq 0 ]; then
   echo "All checks passed."
