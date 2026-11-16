@@ -215,7 +215,7 @@ function verdictFor(
   }
   return approved(reasons, {
     actor: "agent",
-    hint: "The executor places approved orders on Gemini. Call get_activity later to report fills to the owner.",
+    hint: "The executor places approved orders. Call get_activity later to report fills to the owner.",
   });
 }
 

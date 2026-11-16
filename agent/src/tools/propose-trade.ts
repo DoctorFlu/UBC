@@ -40,7 +40,7 @@ function describe(proposal: Proposal, verdict: Verdict): string {
         : " Decision context stored offchain only (this contract cannot record its hash).";
   switch (proposal.decision) {
     case "approved":
-      return `Intent #${proposal.intentId ?? "?"} approved: ${what}. The executor places it on Gemini.${context}`;
+      return `Intent #${proposal.intentId ?? "?"} approved: ${what}. The executor places approved orders.${context}`;
     case "needs_approval":
       return `Intent #${proposal.intentId ?? "?"} is waiting for the owner's approval: ${what}. ${proposal.rule?.detail ?? ""}${context}`.trim();
     case "rejected":

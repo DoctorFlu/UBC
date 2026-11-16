@@ -101,6 +101,9 @@ describe("propose_trade", () => {
       nextAction: { actor: "agent", hint: expect.stringContaining("get_intent") as unknown },
     });
     expect(ok.summary).toMatch(/^Intent #0 approved: buy NO GEMI-BTC2611202200-HI63000 for \$10.00 at 30c/);
+    // The executor may be the simulated one on the devchain: never claim where an order was placed.
+    expect(ok.summary).toContain("The executor places approved orders.");
+    expect(`${ok.summary} ${JSON.stringify(ok.structured["nextAction"])}`).not.toMatch(/on Gemini/);
 
     const wait = await proposeTrade.run({ ...args, amountCents: 2_200 }, h.ctx);
     expect(wait.structured).toMatchObject({
@@ -370,6 +373,9 @@ describe("execute_plan", () => {
       );
     }
     expect(summary).toContain(`${total} of ${total} orders submitted`);
+    expect(structured).toMatchObject({
+      nextAction: { hint: expect.stringMatching(/^The executor places approved orders\./) as unknown },
+    });
 
     const again = await executePlan.run({ planId, reason: "Owner approved the plan." }, h.ctx);
     expect(h.policy.proposed).toHaveLength(total);

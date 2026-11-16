@@ -148,7 +148,7 @@ function verdictOf(result: ProposeResult, rule: RuleHit | null): Verdict {
     case "approved":
       return approved([], {
         actor: "agent",
-        hint: `The executor now places the order on Gemini. Call get_intent with intentId ${result.intentId} later to see whether it filled.`,
+        hint: `The executor places approved orders. Call get_intent with intentId ${result.intentId} later to see whether it filled.`,
       });
     case "needs_approval":
       return held(rule === null ? [] : [hitReason(rule)], {
