@@ -17,15 +17,27 @@ import { OwnerTxStatus } from "./OwnerTxStatus";
  * Approve or reject an intent waiting for the owner, each by holding or pressing twice. Each is an owner-signed
  * `approveIntent` or `rejectIntent`; the row changes when the console reads the resulting event.
  * `approveIntent` re-checks only the budget, so an approval can still end as "over budget".
+ *
+ * `warn` (the default in `block` mode) says beside the buttons why a flagged intent could not come from the
+ * MCP server, for example "Gemini lists this market as Sports, the intent says Crypto". A table row leaves
+ * it out: its Flagged badge sits beside the verdict, and the warning would widen the table.
  */
-export function ApprovalActions({ intent, block = false }: { intent: IntentView; block?: boolean }) {
+export function ApprovalActions({
+  intent,
+  block = false,
+  warn = block,
+}: {
+  intent: IntentView;
+  block?: boolean;
+  warn?: boolean;
+}) {
   const toast = useToast();
   const { state, send, working, access } = useOwnerTx();
   const blocked = ownerBlockedReason(access);
   const amount = intent.amountCents === null ? "this intent" : formatUsdCents(intent.amountCents);
   const market = intent.market ? describeMarket(intent.market).title : `intent ${intent.id.toString()}`;
   const subject = `${amount} on ${market}`;
-  const flagged = intentAnomalies(intent).length > 0;
+  const flags = intentAnomalies(intent).map((anomaly) => anomaly.text);
 
   const approve = async () => {
     const result = await send(`Approve intent ${intent.id.toString()}`, {
@@ -55,10 +67,10 @@ export function ApprovalActions({ intent, block = false }: { intent: IntentView;
 
   return (
     <div className={styles.approvalBlock}>
-      {/* On a card of its own; a table row and the intent page already flag it beside the verdict. */}
-      {flagged && block ? (
-        <p className={styles.approvalWarning}>
-          The MCP server could not have sent this intent. Reject it unless you know who proposed it.
+      {flags.length > 0 && warn ? (
+        <p className={styles.approvalWarning} data-testid="approval-warning">
+          The MCP server could not have sent this intent: {flags.join("; ")}. Reject it unless you know who
+          proposed it.
         </p>
       ) : null}
       <div className={styles.approval} data-block={block || undefined}>

@@ -56,6 +56,8 @@ interface Step {
 function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
   const events = intentEvents(chain, intentId);
   const intent = chain.intents.find((candidate) => candidate.id === intentId);
+  // The executor refuses what the MCP server could not have sent, and records it as not filled.
+  const refused = intent !== undefined && intentFlags(intent).length > 0;
   const out: Step[] = [];
   const meta = (event: PolicyEvent) => ({
     key: `${event.transactionHash}:${event.logIndex.toString()}`,
@@ -125,7 +127,9 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
             ? event.filledCents === null
               ? "The executor recorded a fill too large to show."
               : `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
-            : "The executor recorded that the order did not fill; its amount went back to the budget.",
+            : refused
+              ? "The executor refuses intents like this one, flagged above, so it recorded that the order did not fill; its amount went back to the budget."
+              : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
           simulated: simulated && event.filled,
         });
@@ -491,7 +495,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             </dl>
             {intent.status === "needs_approval" ? (
               <div className={styles.decide}>
-                <ApprovalActions intent={intent} />
+                <ApprovalActions intent={intent} warn />
               </div>
             ) : null}
           </Card>

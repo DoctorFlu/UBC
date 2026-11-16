@@ -127,6 +127,27 @@ describe("audit rows", () => {
     expect(csv.length).toBeLessThan(1_000);
   });
 
+  it("flags a market Gemini lists elsewhere, and says the executor refused it rather than just no fill", () => {
+    const base = chain.events.find((event) => event.type === "ResultRecorded");
+    if (base?.type !== "ResultRecorded") throw new Error("the fixture has a result");
+    const noFill = { ...base, intentId: 901, filled: false, filledCents: 0, pnlCents: 0 };
+    const intent = {
+      ...(chain.intents[0] as NonNullable<(typeof chain.intents)[0]>),
+      id: 901,
+      market: "GEMI-NFL-2611152125-SF-DAL-M-SF",
+      category: 0,
+    };
+    const listing = { listed: true as const, category: 1 as const, checkedAt: "2026-11-15T12:00:00.000Z" };
+    const [flagged] = auditRows({ events: [noFill], intents: [{ ...intent, listing }] });
+    expect(flagged?.flags).toEqual(["Gemini lists this market as Sports, the intent says Crypto"]);
+    expect(flagged?.summary).toBe(
+      "The executor recorded that the order did not fill: it refuses intents the MCP server could not have sent",
+    );
+    const [plain] = auditRows({ events: [noFill], intents: [intent] });
+    expect(plain?.flags).toEqual([]);
+    expect(plain?.summary).toBe("The executor recorded that the order did not fill");
+  });
+
   it("quotes CSV cells that hold a comma, a quote or a line break", () => {
     const first = rows[0];
     if (!first) throw new Error("no rows");
