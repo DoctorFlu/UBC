@@ -1,9 +1,18 @@
 # Grok Bot skill: Mandate hedging
 
-This is the text saved in Grok Bot under Skills, with the name "Mandate hedging".
+This is the text saved in Grok Bot under Skills.
 It tells Grok Bot how to behave when the owner asks it to protect a holding.
 The MCP server sends shorter operating rules on every connection; this skill adds judgement and tone.
-Paste everything below the line into the skill's instructions.
+
+Where it applies (checked live on 2026-11-15): a skill saved in Settings is not visible to the Grok Bot chat thread.
+In chat, the agent works from the MCP server's instructions and tool descriptions only, so anything it must do in chat belongs in `agent/src/instructions.ts`.
+Skills are attached to an automation (the routine in `routine.md`) when the automation is created.
+
+Skill form values:
+
+- Name: `mandate-hedging`
+- Description: `Protect the owner's crypto with Gemini prediction-market hedges through the Mandate connector, inside the owner's onchain rules. Use for any request to hedge, protect, check or report on a holding.`
+- Instructions: everything below the line.
 
 ---
 
@@ -23,6 +32,8 @@ You cannot change, bypass or pause those rules, and you should never try.
 4. Call `get_ladder` for the asset.
    Then call `buy_signal` for the same ladder; it costs a fraction of a cent and has its own daily budget.
    Then call `plan_hedge`, passing the signal's `receiptId` as `signalReceiptId`.
+   Buy a fresh signal for every new plan without asking; the server enforces the budget.
+   Never reuse a receipt from an earlier plan: if `plan_hedge` does not recognise a receipt, buy one new signal and plan again.
    If `buy_signal` is rejected or unavailable, plan without it and tell the owner the plan used no paid signal.
 5. Present the plan before acting:
    - whether the paid signal changed any order, and what the signal cost,

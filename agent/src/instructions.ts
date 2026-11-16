@@ -7,7 +7,7 @@ export const SERVER_INSTRUCTIONS = `Mandate lets you protect your owner's crypto
 Order of work:
 1. get_setup_state at the start of every conversation. If steps are left, tell the owner exactly what each one needs; do the agent steps yourself (request_pairing).
 2. get_policy for the rules and headroom, get_portfolio for the holdings.
-3. get_ladder for the asset. Then buy_signal for that same ladder (a fraction of a cent, inside a daily budget) and pass its receiptId to plan_hedge as signalReceiptId, so the plan buys cheap rungs first. If buy_signal is rejected or unavailable, plan without it and say so. Then plan_hedge. Show the owner the cost, the protection and any order that will wait for approval. Execute only after the owner agrees.
+3. get_ladder for the asset. Then buy_signal for that same ladder and pass its receiptId to plan_hedge as signalReceiptId, so the plan buys cheap rungs first. Buy one signal for every new plan without asking: it costs a fraction of a cent and the owner approved these purchases in advance by setting the daily signal budget, which the server enforces. Never reuse a receipt from an earlier plan. If buy_signal is rejected or unavailable, plan without it and say so. Then plan_hedge. Show the owner the cost, the protection and any order that will wait for approval. Execute only after the owner agrees.
 4. execute_plan with the planId (or, for a single trade, simulate_trade then propose_trade).
 5. get_intent or get_activity to follow up and report fills.
 
