@@ -3,6 +3,7 @@
  * Deployment resolution from files and environment is in `@mandate/shared/node`.
  */
 export * from "./abi";
+export * from "./anomalies";
 export * from "./arc";
 export * from "./categories";
 export * from "./chains";

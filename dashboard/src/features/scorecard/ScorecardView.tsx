@@ -2,13 +2,14 @@ import { CATEGORY_LABELS, categoriesFromMask } from "@mandate/shared";
 import type { ReactNode } from "react";
 import type { Address } from "viem";
 
+import { FlaggedBadge, MarketName } from "@/components/domain/Intent";
+import { StatusChip } from "@/components/ui/StatusChip";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
-import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import {
   formatCount,
@@ -59,10 +60,10 @@ const columns: readonly Column<RecentIntent>[] = [
     header: "Market",
     cell: (intent) => (
       <span className={styles.market}>
-        <span>
-          <span className="visually-hidden">Intent </span>#{intent.id} {intent.title}
+        <span className={styles.intentId}>
+          <span className="visually-hidden">Intent </span>#{intent.id}
         </span>
-        {intent.symbol ? <span className={`mono ${styles.symbol}`}>{intent.symbol}</span> : null}
+        <MarketName symbol={intent.market} category={intent.category} />
       </span>
     ),
     role: "primary",
@@ -70,14 +71,26 @@ const columns: readonly Column<RecentIntent>[] = [
   {
     key: "amount",
     header: "Amount",
-    cell: (intent) => (intent.amountCents === null ? "Unknown" : <Money cents={intent.amountCents} />),
+    cell: (intent) =>
+      intent.amountCents !== null ? (
+        <Money cents={intent.amountCents} />
+      ) : intent.amountOutOfRange ? (
+        "Out of range"
+      ) : (
+        "Unknown"
+      ),
     align: "end",
     nowrap: true,
   },
   {
     key: "verdict",
     header: "Where it stands",
-    cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
+    cell: (intent) => (
+      <span className={styles.verdict}>
+        <StatusChip status={intent.status} reason={intent.reason} />
+        <FlaggedBadge flags={intent.flags} />
+      </span>
+    ),
   },
   {
     key: "tx",
@@ -286,6 +299,11 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
               ? "No approved intent is waiting for a result."
               : `${formatCount(fills.open)} approved ${fills.open === 1 ? "intent has" : "intents have"} no result yet.`}
           </p>
+          {fills.outOfRange > 0 ? (
+            <p className={styles.note} data-testid="fills-out-of-range">
+              {`${formatCount(fills.outOfRange)} ${fills.outOfRange === 1 ? "fill records" : "fills record"} an amount or result out of range; ${fills.outOfRange === 1 ? "it is" : "they are"} counted but left out of the totals.`}
+            </p>
+          ) : null}
         </Card>
       </div>
 

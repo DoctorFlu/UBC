@@ -4,7 +4,7 @@ import { INTENT_STATUS_LABELS, type IntentStatus, type IntentView } from "@manda
 import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
-import { IntentLink, MarketName, OrderAmount } from "@/components/domain/Intent";
+import { IntentLink, IntentVerdict, MarketName, OrderAmount } from "@/components/domain/Intent";
 import { SimulatedFill } from "@/components/domain/SimulatedFill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
@@ -12,7 +12,6 @@ import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
-import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import { type TabItem, Tabs } from "@/components/ui/Tabs";
 import { formatCount, formatTimeUtc, formatUsdCents } from "@/lib/format";
@@ -40,14 +39,14 @@ const columns: readonly Column<IntentView>[] = [
   {
     key: "order",
     header: "Order",
+    // Not nowrap: an order the MCP server could not have sent reads longer, and wraps rather than widening.
     cell: (intent) => <OrderAmount intent={intent} />,
     align: "end",
-    nowrap: true,
   },
   {
     key: "verdict",
     header: "Verdict",
-    cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
+    cell: (intent) => <IntentVerdict intent={intent} />,
   },
   {
     key: "tx",

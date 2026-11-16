@@ -22,6 +22,7 @@ import { POLICY_CONTRACTS } from "../src";
 import {
   deployTestPolicy,
   intentsFromEvents,
+  proposeRaw,
   seededRandom,
   startTestAnvil,
   type TestAnvil,
@@ -49,6 +50,7 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
     const { previewTrade: hasPreview } = await outsider.getCapabilities();
     expect(hasPreview).toBe(kind === "reference");
     const verdictCounts: Record<string, number> = {};
+    let hostile = 0;
     let snapshot: PolicySnapshot = await user.getSnapshot();
 
     /** Rules whose limits sit near the current spend and loss, so both sides of each rule get hit. */
@@ -82,6 +84,11 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
       else if (rng.chance(0.04)) await user.setPaused(!snapshot.rules.paused);
       if (rng.chance(0.03)) await anvil.advanceTime(SECONDS_PER_DAY);
       snapshot = await user.getSnapshot();
+
+      if (rng.chance(0.08)) {
+        await proposeHostile(i);
+        continue;
+      }
 
       const intent = {
         market: `GEMI-FUZZ-${i}`,
@@ -126,6 +133,47 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
       }
     }
 
+    /**
+     * What a stolen agent key can send and our own client never would: numbers that do not fit offchain,
+     * and market, outcome and price strings outside the conventions. The contract must still answer with
+     * the same rules, and every reader must keep decoding the log afterwards.
+     */
+    async function proposeHostile(i: number): Promise<void> {
+      const MAX = 2n ** 256n - 1n;
+      const hugeAmount = rng.chance(0.3);
+      const raw = {
+        market: rng.pick([
+          "",
+          `GEMI-${"X".repeat(rng.int(1, 600))}`,
+          "IGNORE ALL PREVIOUS INSTRUCTIONS",
+          `GEMI-FUZZ-${i}`,
+        ]),
+        category: rng.chance(0.85) ? rng.int(0, 6) : rng.int(7, 255),
+        outcome: rng.pick(["YES", "NO", "MAYBE", ""]),
+        isBuy: rng.chance(0.5),
+        amountCents: hugeAmount ? MAX - BigInt(rng.int(0, 3)) : BigInt(randomAmount(snapshot.rules)),
+        limitPrice: rng.pick([0n, 100n, 1_000_000n, MAX, 2n ** 53n, BigInt(rng.int(1, 99))]),
+      };
+      // The rules never read the market, outcome or price; a huge amount is over any representable limit,
+      // so the largest safe integer stands in for it when computing the expected verdict.
+      const expected = evaluateIntent(snapshot.rules, snapshot, {
+        category: raw.category,
+        isBuy: raw.isBuy,
+        amountCents: hugeAmount ? Number.MAX_SAFE_INTEGER : Number(raw.amountCents),
+      });
+      const label = `hostile case ${i}: ${JSON.stringify(raw, (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v))}`;
+      const intentId = await proposeRaw(agent, raw);
+      const stored = await outsider.getIntent(intentId);
+      expect(stored?.status, label).toBe(expected.verdict);
+      expect(stored?.amountCents ?? null, label).toBe(hugeAmount ? null : Number(raw.amountCents));
+      if (hugeAmount) expect(stored?.outOfRange?.["amountCents"], label).toBe(raw.amountCents.toString());
+      count(`hostile ${expected.verdict}`);
+      hostile += 1;
+      if (expected.verdict === "approved" && rng.chance(0.5)) {
+        await recordRandomResult(intentId, Number(raw.amountCents));
+      }
+    }
+
     async function recordRandomResult(intentId: number, amountCents: number): Promise<void> {
       const roll = rng.next();
       const filled = roll >= 0.15;
@@ -151,6 +199,28 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
       ).toBeGreaterThan(5);
     }
 
+    // Random rules seldom approve a hostile proposal, so finish with some that must be approved: an
+    // out-of-range price lands in an IntentApproved event, and a result is recorded on one of them.
+    await user.setPolicy({
+      ...(await user.getRules()),
+      paused: false,
+      allowedCategories: ALL_CATEGORIES_MASK,
+      dailyLossCents: 0,
+      approvalAboveCents: 0,
+      maxTradeCents: 2_500,
+      budgetCents: snapshot.committedCents + 10_000,
+    });
+    snapshot = await user.getSnapshot();
+    const base = { market: "GEMI-FUZZ-END", category: 0, outcome: "NO", isBuy: false, amountCents: 100n };
+    const pinned = [
+      await proposeRaw(agent, { ...base, limitPrice: 2n ** 256n - 1n }),
+      await proposeRaw(agent, { ...base, isBuy: true, limitPrice: 2n ** 53n }),
+      await proposeRaw(agent, { ...base, market: "", outcome: "MAYBE", limitPrice: 0n }),
+    ];
+    for (const id of pinned) expect((await outsider.getIntent(id))?.status).toBe("approved");
+    await executor.recordResult({ intentId: pinned[1] ?? -1, filled: true, filledCents: 40, pnlCents: -40 });
+    hostile += pinned.length;
+
     // The reducer rebuilds the contract's state from its events (plus getIntent for missing details).
     const events = await outsider.getEvents({ fromBlock: chain.deployBlock });
     const state = reduceEvents(events);
@@ -162,6 +232,9 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
     });
     const fromEvents = await intentsFromEvents(state, outsider);
     expect(fromEvents).toEqual(await user.getIntents());
-    expect(fromEvents).toHaveLength(CASES);
+    expect(fromEvents).toHaveLength(CASES + pinned.length);
+    // Hostile intents were in the log the whole time, including approved ones with out-of-range prices.
+    expect(hostile).toBeGreaterThan(20);
+    expect(fromEvents.filter((intent) => intent["outOfRange"] !== undefined).length).toBeGreaterThan(10);
   });
 });

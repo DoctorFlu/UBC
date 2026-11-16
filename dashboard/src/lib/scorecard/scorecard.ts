@@ -7,19 +7,23 @@
  * same size however long the history grows. The numbers agree with the audit trail by construction of
  * the same rules, and a test holds them to it.
  */
-import { type IntentStatus, type PolicyEvent, type PolicyRules, describeReason } from "@mandate/shared";
+import {
+  type IntentStatus,
+  type PolicyEvent,
+  type PolicyRules,
+  describeReason,
+  intentAnomalies,
+} from "@mandate/shared";
 import type { Address, Hex } from "viem";
 
 import type { ChainView } from "@/lib/live/types";
-import { describeMarket } from "@/lib/markets";
 import { clip } from "@/lib/text";
 
 /** Transactions listed under each number, newest first; the rest are in the contract's event log. */
 export const PROOF_LIMIT = 10;
 /** Intents in the recent verdicts table. */
 export const RECENT_LIMIT = 20;
-/** Onchain strings are untrusted and can be huge: they are clipped to this before they reach the page. */
-const MAX_SYMBOL = 64;
+/** Onchain strings are untrusted and can be huge: reasons are clipped to this before they reach the page. */
 const MAX_REASON = 64;
 
 /** One event behind a number: its transaction, block and time (unix seconds). */
@@ -44,11 +48,17 @@ export interface BlockedRule extends Counted {
 
 export interface RecentIntent {
   id: number;
-  /** "BTC $65,000 or above", or the clipped symbol. */
-  title: string;
-  /** The clipped symbol, or null when it is the title or unknown. */
-  symbol: string | null;
+  /**
+   * The onchain market, for `MarketName`, which shows a Gemini symbol and never prints anything else
+   * raw. Null when no event carried it.
+   */
+  market: string | null;
+  category: number | null;
+  /** Null when no event carried it, or when it is out of range (`amountOutOfRange`). */
   amountCents: number | null;
+  amountOutOfRange: boolean;
+  /** Why the agent's MCP server could not have sent it, each describing a value without quoting it. */
+  flags: string[];
   status: IntentStatus;
   reason: string | null;
   proposedAt: number;
@@ -77,8 +87,11 @@ export interface PublicScorecard {
   fills: {
     filled: Counted;
     notFilled: Counted;
+    /** Sums over fills whose amounts fit offchain numbers. */
     filledCents: number;
     realizedPnlCents: number;
+    /** Fills whose filled amount or result is out of range: counted, but left out of the sums. */
+    outOfRange: number;
     /** Approved intents the executor has not reported on yet. */
     open: number;
   };
@@ -128,6 +141,7 @@ export function buildScorecard(
   let setBy: Proof | null = null;
   let filledCents = 0;
   let realizedPnlCents = 0;
+  let fillsOutOfRange = 0;
 
   for (const event of chain.events) {
     if (event.type === "PolicyUpdated") {
@@ -166,8 +180,12 @@ export function buildScorecard(
       case "ResultRecorded":
         if (event.filled) {
           filled.add(event);
-          filledCents += event.filledCents;
-          realizedPnlCents += event.pnlCents;
+          if (event.filledCents === null || event.pnlCents === null) {
+            fillsOutOfRange += 1;
+          } else {
+            filledCents += event.filledCents;
+            realizedPnlCents += event.pnlCents;
+          }
         } else {
           notFilled.add(event);
         }
@@ -185,13 +203,13 @@ export function buildScorecard(
     .slice(-RECENT_LIMIT)
     .reverse()
     .map((intent): RecentIntent => {
-      const symbol = intent.market === null ? null : clip(intent.market, MAX_SYMBOL);
-      const title = symbol === null ? "Market not recorded" : describeMarket(symbol).title;
       return {
         id: intent.id,
-        title,
-        symbol: symbol !== null && symbol !== title ? symbol : null,
+        market: intent.market,
+        category: intent.category,
         amountCents: intent.amountCents,
+        amountOutOfRange: intent.outOfRange?.["amountCents"] !== undefined,
+        flags: intentAnomalies(intent).map((anomaly) => anomaly.text),
         status: intent.status,
         reason: intent.reason === null ? null : clip(intent.reason, MAX_REASON),
         proposedAt: intent.proposedAt,
@@ -216,6 +234,7 @@ export function buildScorecard(
       notFilled: notFilled.done(),
       filledCents,
       realizedPnlCents,
+      outOfRange: fillsOutOfRange,
       open: chain.intents.filter((intent) => intent.status === "approved").length,
     },
     recent,

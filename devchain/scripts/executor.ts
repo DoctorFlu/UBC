@@ -2,14 +2,17 @@
  * `npm run dev:executor`: SIMULATED EXECUTOR, DEVELOPMENT ONLY.
  *
  * Watches the devchain Policy contract for `IntentApproved` and, after a short delay, records a full fill
- * with zero profit and loss. It never talks to Gemini. It exists so the console and agent can show fills
- * before the real executor is built. It refuses to run against anything but the local devchain.
+ * with zero profit and loss. It never places an order. Before acting it checks the intent the way a real
+ * executor must (see `src/executor.ts`): a market Gemini does not list, a category Gemini disagrees with,
+ * an outcome other than YES or NO, or a limit price outside 1 to 99 is refused and recorded as not
+ * filled. It reads Gemini's public market data for that check; when Gemini cannot be reached it waits and
+ * tries again rather than fill blindly. It refuses to run against anything but the local devchain.
  */
-import { formatCents, type PolicyEventOf } from "@mandate/shared";
+import { createGeminiClient } from "@mandate/gemini";
 import { resolvePolicyDeployment } from "@mandate/shared/node";
-import { devPolicyClient } from "../src";
+import { devPolicyClient, geminiVenue, startSimulatedExecutor } from "../src";
 
-const delayMs = Number(process.env.SIM_EXECUTOR_DELAY_MS ?? 1_500);
+const fillDelayMs = Number(process.env.SIM_EXECUTOR_DELAY_MS ?? 1_500);
 
 const deployment = resolvePolicyDeployment();
 if (deployment.source !== "devchain") {
@@ -24,48 +27,18 @@ if (roles.executor.toLowerCase() !== client.account?.address.toLowerCase()) {
   process.exit(1);
 }
 
-const inFlight = new Set<number>();
-
-async function fill(event: PolicyEventOf<"IntentApproved">): Promise<void> {
-  if (inFlight.has(event.intentId)) return;
-  inFlight.add(event.intentId);
-  try {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    const intent = await client.getIntent(event.intentId);
-    if (intent?.status !== "approved") return; // already recorded, for example after a restart
-    const { txHash } = await client.recordResult({
-      intentId: event.intentId,
-      filled: true,
-      filledCents: event.amountCents,
-      pnlCents: 0,
-    });
-    console.log(
-      `[sim-executor] intent #${event.intentId} ${event.isBuy ? "buy" : "sell"} ${event.outcome} ` +
-        `${event.market} ${formatCents(event.amountCents)} at ${event.limitPrice}c: simulated full fill (${txHash})`,
-    );
-  } catch (error) {
-    console.error(`[sim-executor] intent #${event.intentId}:`, error);
-  } finally {
-    inFlight.delete(event.intentId);
-  }
-}
-
 console.log(
-  `[sim-executor] SIMULATED executor (dev only) watching ${deployment.address}, fill delay ${delayMs} ms`,
+  `[sim-executor] SIMULATED executor (dev only) watching ${deployment.address}, fill delay ${fillDelayMs} ms; ` +
+    "checks every approved intent against Gemini before filling",
 );
-const stop = client.watchEvents({
+const executor = startSimulatedExecutor({
+  client,
+  venue: geminiVenue(createGeminiClient({ maxRetries: 1, timeoutMs: 8_000 })),
   fromBlock: deployment.fromBlock ?? 0n,
-  onEvents: (events) => {
-    for (const event of events) {
-      if (event.type === "IntentApproved") void fill(event);
-    }
-  },
-  onError: (error) => {
-    console.error("[sim-executor] polling failed:", error instanceof Error ? error.message : error);
-  },
+  fillDelayMs,
 });
 
 process.on("SIGINT", () => {
-  stop();
+  executor.stop();
   process.exit(0);
 });

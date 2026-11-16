@@ -339,7 +339,7 @@ test.describe("seeded demo", () => {
   }) => {
     const current = await snapshot(baseURL ?? "");
     const events = current.chain?.events ?? [];
-    const rows = auditRows({ events });
+    const rows = auditRows({ events, intents: current.chain?.intents ?? [] });
     const count = (keep: (row: (typeof rows)[number]) => boolean) => rows.filter(keep).length.toString();
 
     const response = await page.goto(`/agent/${AGENT_ADDRESS}`);
@@ -426,7 +426,9 @@ test.describe("seeded demo", () => {
 
     // Everything the console ingested, newest first, except the Paused event setPolicy emits without
     // changing the pause state (the exports keep it).
-    const unchanged = auditRows({ events }).filter((row) => row.unchanged);
+    const unchanged = auditRows({ events, intents: current.chain?.intents ?? [] }).filter(
+      (row) => row.unchanged,
+    );
     expect(unchanged.map((row) => row.event)).toEqual(["Paused"]);
     await expect(table().locator("tbody tr")).toHaveCount(events.length - unchanged.length);
     await expect(table().locator("tbody tr").first()).toContainText(events.at(-1)?.type ?? "");

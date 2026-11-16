@@ -12,7 +12,7 @@ const fixture = fixtureSnapshot.chain;
 if (!fixture) throw new Error("the fixture snapshot has a chain");
 
 /** The scorecard's numbers, recounted from the audit trail's rows. */
-function fromAudit(chain: Pick<ChainView, "events">) {
+function fromAudit(chain: Pick<ChainView, "events" | "intents">) {
   const rows = auditRows(chain);
   const count = (keep: (row: (typeof rows)[number]) => boolean) => rows.filter(keep).length;
   return {
@@ -146,6 +146,25 @@ describe("buildScorecard", () => {
     expect(card.proposed.count).toBe(chain.intents.length);
   });
 
+  it("counts a fill whose amounts are out of range, and leaves it out of the totals", () => {
+    const chain = longHistory(6);
+    const events = chain.events.map((event) =>
+      event.type === "ResultRecorded" && event.intentId === 0
+        ? {
+            ...event,
+            filledCents: null,
+            pnlCents: null,
+            outOfRange: { filledCents: (2n ** 255n).toString() },
+          }
+        : event,
+    );
+    const card = buildScorecard({ ...chain, events });
+    expect(card.fills.filled.count).toBe(buildScorecard(chain).fills.filled.count);
+    expect(card.fills.outOfRange).toBe(1);
+    expect(card.fills.filledCents).toBe(buildScorecard(chain).fills.filledCents - 500);
+    expect(card.fills.realizedPnlCents).toBe(buildScorecard(chain).fills.realizedPnlCents + 20);
+  });
+
   it("lists the newest transactions behind each number, and no more than the cap", () => {
     const chain = longHistory(60);
     const card = buildScorecard(chain);
@@ -161,14 +180,16 @@ describe("buildScorecard", () => {
     expect(card.mandate.setBy?.txHash).toBe(chain.policySetBy?.txHash);
   });
 
-  it("holds nothing offchain, and clips hostile onchain strings", () => {
+  it("holds nothing offchain, and flags hostile onchain strings without copying them", () => {
     const huge = `GEMI-${"X".repeat(16_384)}`;
     const chain: ChainView = {
       ...fixture,
       intents: fixture.intents.map((intent, index) => (index === 0 ? { ...intent, market: huge } : intent)),
     };
     const card = buildScorecard(chain);
-    const json = JSON.stringify(card);
+    // The market is the chain view's own string, for MarketName, which never prints it raw: the rest
+    // of the card stays small however large the onchain strings are.
+    const json = JSON.stringify(card, (key, value: unknown) => (key === "market" ? undefined : value));
     // The fixture's sealed reasons, plans and payments carry these; none may reach the public page.
     expect(json).not.toContain("plan_3f0c9a1b5e2d7c48");
     expect(json).not.toContain("requestText");
@@ -177,7 +198,8 @@ describe("buildScorecard", () => {
     expect(json).not.toContain("signalReceiptIds");
     expect(json.length).toBeLessThan(20_000);
     const first = card.recent.find((intent) => intent.id === 0);
-    expect(first?.title.length).toBeLessThanOrEqual(64);
+    expect(first?.market).toBe(huge);
+    expect(first?.flags).toEqual(["market is not a Gemini symbol"]);
   });
 });
 

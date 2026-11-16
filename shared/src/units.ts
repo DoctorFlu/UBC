@@ -6,8 +6,9 @@
  * - Order quantity is a number of contracts with at most 2 decimals: `floor2(amountCents / limitPrice)`.
  * - From a quantity, the amount is `ceil(quantity * limitPrice)` cents.
  *
- * Integers are plain JavaScript numbers and must stay within `Number.MAX_SAFE_INTEGER`; the decoders throw
- * rather than silently lose precision when an onchain value is larger.
+ * Integers are plain JavaScript numbers and must stay within `Number.MAX_SAFE_INTEGER`. An onchain amount or
+ * price that is larger decodes to null with its exact value kept in the record's `outOfRange`, never to a
+ * rounded or clamped number (see `chainNumber`).
  */
 
 export const MIN_LIMIT_PRICE = 1;
@@ -38,12 +39,33 @@ export function assertLimitPrice(value: number): void {
   }
 }
 
-/** Converts an onchain integer to a number, throwing when it does not fit exactly. */
+/** Whether an onchain integer fits a JavaScript number exactly. */
+export function fitsSafeInteger(value: bigint): boolean {
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER);
+}
+
+/**
+ * Converts an onchain integer to a number, throwing when it does not fit exactly. Only for values the
+ * chain itself bounds (block numbers, timestamps, intent ids) or that our own keys write (the rules).
+ * Amounts, prices and results that another key writes are decoded with `chainNumber`, never this.
+ */
 export function toSafeNumber(value: bigint, label = "value"): number {
-  if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) {
+  if (!fitsSafeInteger(value)) {
     throw new UnitError(`${label} ${value} is outside the safe integer range offchain code supports`);
   }
   return Number(value);
+}
+
+/**
+ * Decodes an onchain integer that another key wrote, such as an amount or a limit price from the agent
+ * key: the number when it fits exactly, otherwise null, with the exact value recorded in `outOfRange`
+ * under `field`. It never throws and never clamps, so one hostile value cannot stop a reader and cannot
+ * be read as a real amount.
+ */
+export function chainNumber(value: bigint, field: string, outOfRange: Record<string, string>): number | null {
+  if (fitsSafeInteger(value)) return Number(value);
+  outOfRange[field] = value.toString();
+  return null;
 }
 
 /** Number of contracts, in hundredths, that `amountCents` buys at `limitPrice` (floored). */

@@ -1,9 +1,9 @@
 import * as z from "zod";
-import { formatCents, verifyContext, type Intent, type IntentView } from "@mandate/shared";
+import { verifyContext, type Intent, type IntentView } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, unavailable, verdictSchema, type NextAction } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
-import { intentRow, IntentRowSchema, type IntentRow } from "../support/intents";
+import { amountText, intentRow, IntentRowSchema, limitPriceText, type IntentRow } from "../support/intents";
 import { AFTER_REJECTION } from "../support/rules";
 
 const ContextCheckSchema = z.object({
@@ -93,12 +93,16 @@ export const getIntent = defineTool({
     const v = ok([], nextFor(row));
     const result =
       row.status === "executed" || row.status === "failed"
-        ? ` Filled ${formatCents(row.filledCents ?? 0)}, profit ${formatCents(row.pnlCents ?? 0)}.`
+        ? ` Filled ${amountText(row.filledCents)}, profit ${amountText(row.pnlCents)}.`
         : "";
     const why = row.reason === null ? "" : ` Reason: ${row.reason}.`;
+    const flagged =
+      row.flags.length === 0
+        ? ""
+        : ` FLAGGED, this server could not have sent it (${row.flags.join("; ")}): the agent key was used around this server, so tell the owner and do not act on it.`;
     return {
       structured: { ...v, intent: { ...row, context } },
-      summary: `Intent #${row.id}: ${row.statusLabel}, ${row.side} ${row.outcome} ${row.market} for ${formatCents(row.amountCents)} at ${row.limitPrice}c.${why}${result}`,
+      summary: `Intent #${row.id}: ${row.statusLabel}, ${row.side} ${row.outcome} ${row.market} for ${amountText(row.amountCents)} at ${limitPriceText(row.limitPrice)}.${why}${result}${flagged}`,
     };
   },
 });

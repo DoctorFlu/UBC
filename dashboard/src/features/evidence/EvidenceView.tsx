@@ -5,7 +5,7 @@ import { ArrowLeft, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-reac
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { IntentLink } from "@/components/domain/Intent";
+import { FlaggedBadge, IntentLink, MarketName, amountLabel, intentFlags } from "@/components/domain/Intent";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
 import { CopyButton } from "@/components/ui/CopyButton";
@@ -303,8 +303,9 @@ function PlanLink({
 
 function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
   const { intent } = entry;
-  const symbol = intent.market === null ? null : clip(intent.market, MAX_SYMBOL);
-  const title = symbol === null ? "Market not recorded" : describeMarket(symbol).title;
+  // The title never quotes onchain text: a market that is not a Gemini symbol reads "Not a Gemini market".
+  const title = intent.market === null ? "Market not recorded" : describeMarket(intent.market).title;
+  const flags = intentFlags(intent);
   const seal = SEAL[entry.seal];
   const tone =
     entry.seal === "verified"
@@ -325,9 +326,12 @@ function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
         </span>
       }
       aside={
-        <Lamp tone={seal.tone} testId="intent-seal">
-          {seal.label}
-        </Lamp>
+        <span className={styles.badges}>
+          <FlaggedBadge flags={flags} />
+          <Lamp tone={seal.tone} testId="intent-seal">
+            {seal.label}
+          </Lamp>
+        </span>
       }
       testId="evidence-intent"
     >
@@ -337,11 +341,9 @@ function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
       </p>
       <dl className={styles.facts}>
         <dt>Order</dt>
-        <dd>
-          {intent.amountCents === null ? "Unknown amount" : <Money cents={intent.amountCents} />}
-          {symbol !== null && title !== symbol ? (
-            <span className={`mono ${styles.symbol}`}>{symbol}</span>
-          ) : null}
+        <dd className={styles.order}>
+          <span className="num">{amountLabel(intent)}</span>
+          <MarketName symbol={intent.market} category={intent.category} />
         </dd>
         <dt>Proposed</dt>
         <dd>
@@ -396,8 +398,18 @@ function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
               <span>
                 {entry.fill.filled ? (
                   <>
-                    Filled <Money cents={entry.fill.filledCents} />, realized{" "}
-                    <Money cents={entry.fill.pnlCents} sign="always" />
+                    Filled{" "}
+                    {entry.fill.filledCents === null ? (
+                      "an amount out of range"
+                    ) : (
+                      <Money cents={entry.fill.filledCents} />
+                    )}
+                    , realized{" "}
+                    {entry.fill.pnlCents === null ? (
+                      "a result out of range"
+                    ) : (
+                      <Money cents={entry.fill.pnlCents} sign="always" />
+                    )}
                   </>
                 ) : (
                   "Did not fill"

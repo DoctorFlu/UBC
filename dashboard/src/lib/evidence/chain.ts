@@ -56,8 +56,9 @@ export type OwnerDecision =
 
 export interface FillRecord {
   filled: boolean;
-  filledCents: number;
-  pnlCents: number;
+  /** Null when the executor recorded a value too large for offchain numbers (out of range). */
+  filledCents: number | null;
+  pnlCents: number | null;
   tx: ChainTx;
 }
 

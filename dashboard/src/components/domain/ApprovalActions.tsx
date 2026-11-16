@@ -1,6 +1,6 @@
 "use client";
 
-import type { IntentView } from "@mandate/shared";
+import { type IntentView, intentAnomalies } from "@mandate/shared";
 import { Check, X } from "lucide-react";
 
 import { HoldButton } from "@/components/ui/HoldButton";
@@ -25,6 +25,7 @@ export function ApprovalActions({ intent, block = false }: { intent: IntentView;
   const amount = intent.amountCents === null ? "this intent" : formatUsdCents(intent.amountCents);
   const market = intent.market ? describeMarket(intent.market).title : `intent ${intent.id.toString()}`;
   const subject = `${amount} on ${market}`;
+  const flagged = intentAnomalies(intent).length > 0;
 
   const approve = async () => {
     const result = await send(`Approve intent ${intent.id.toString()}`, {
@@ -54,6 +55,12 @@ export function ApprovalActions({ intent, block = false }: { intent: IntentView;
 
   return (
     <div className={styles.approvalBlock}>
+      {/* On a card of its own; a table row and the intent page already flag it beside the verdict. */}
+      {flagged && block ? (
+        <p className={styles.approvalWarning}>
+          The MCP server could not have sent this intent. Reject it unless you know who proposed it.
+        </p>
+      ) : null}
       <div className={styles.approval} data-block={block || undefined}>
         <HoldButton
           tone="ink"

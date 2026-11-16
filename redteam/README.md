@@ -52,7 +52,7 @@ It signs only with the public anvil keys from `devPrivateKey`.
 
 It leaves the demo usable:
 
-- It skips the attacks that cannot be undone or would stop the demo: draining the budget, reaching the daily loss limit, poisoning the event log, and flooding the rate limit.
+- It skips the attacks that cannot be undone or would stop the demo: draining the budget, reaching the daily loss limit, planting numbers too large for offchain code, and flooding the rate limit.
 - It plants an inert canary instead of a working prompt injection in the onchain market text, and a 1 KiB market instead of 16 KiB, because a demo agent may read them.
 - It pauses the mandate as the owner for the two paused attacks and resumes it in a `finally` (also on Ctrl+C).
 - After every attack it re-reads the roles and rules, and stops at once if anything owner-only changed.
@@ -68,7 +68,7 @@ It leaves the demo usable:
 
 ## What it does not prove
 
-- It does not attack the console, the owner's wallet, the executor or Gemini; a stolen owner or executor key is out of scope.
+- It does not attack the console, the owner's wallet or Gemini, and it checks the executor only through its pre-trade check (`chain.executor-refuses`), not by letting it trade; a stolen owner or executor key is out of scope.
 - It does not test the paid signal API or Circle (`buy_signal`), so no real money moves.
 - An LLM jailbreak is simulated by a script that does exactly what a jailbroken agent would; it does not test how resistant Grok itself is.
 - Refused owner-only calls are mined as reverted transactions with the agent's address and hash, but they emit no event, so the console's activity feed (built from events) does not show them; only proposals and their verdicts appear there.
@@ -77,23 +77,20 @@ It leaves the demo usable:
 
 The run reports these plainly; each attack's row in [REPORT.md](REPORT.md) has the transactions.
 
-1. **Readers break on out-of-range numbers** (`chain.poison-readers`, the one `BREACH`).
-   `@mandate/shared` refuses any onchain number above 2^53 - 1 (`UnitError`) in `decodePolicyLogs` and `PolicyClient.getIntent`.
-   The contract accepts such numbers from the agent key: a sell with limit price 2^256 - 1 is approved and the number lands in `IntentApproved`; a buy of 2^256 - 1 cents is rejected but stored.
-   From then on the MCP server's `get_activity` and `get_intent` fail with `INTERNAL`, and the console's log scanner and the simulated executor, which use the same decoder, cannot move past that block.
-   For the simulated executor this was reproduced: it logs `polling failed` on every poll and never fills a valid order approved after the poisoned one.
-   For the console it follows from the code: `console-service.ts` advances its cursor only after `scanner.read` decodes the chunk, and the decode throws.
-   The rules still hold onchain; what breaks is visibility and the fills.
-   Only a stolen key can do this (the server's schema allows prices 1 to 99 and amounts up to $1,000,000).
-   The fix belongs in `shared/`; it is not made here.
+1. **Fixed here: readers broke on out-of-range numbers** (`chain.poison-readers`, now `held`).
+   The contract accepts numbers above 2^53 - 1 from the agent key: a sell with limit price 2^256 - 1 is approved, and a buy of 2^256 - 1 cents is rejected but stored.
+   `@mandate/shared` used to refuse them, so one such event stalled the console's log scanner, the simulated executor and the MCP server's history for good.
+   Amounts, limit prices and results now decode to `null` with the exact digits in `outOfRange`, never rounded or clamped, and every reader keeps working.
+   Rules, which only the owner key sets, are still refused; the console skips and reports such an event instead of stopping.
 2. **Splitting defeats the per-order rules** (`mcp.split-order`): a $30 order is rejected, but 2 x $15 is approved without the owner.
    The max trade size and the approval threshold apply per order; only the budget (a lifetime cap) bounds the total.
 3. **Sells have no cumulative cap** (`mcp.sell-outside-budget`, `chain.sells-past-budget`): the budget counts buys only, so sells up to the max trade size are approved even with the budget used up, at any limit price.
    Only the daily loss limit stops them, and only after the executor records realized losses.
 4. **The contract trusts the category argument** (`chain.mislabel-category`): a Sports market proposed as Crypto with the agent key is approved.
-   Through the MCP server the category is read from Gemini, never from the agent, so this needs a stolen key; nothing after the contract checks it today.
+   Through the MCP server the category is read from Gemini, never from the agent, so this needs a stolen key.
+   The executor now looks the market up on Gemini and refuses the intent when the categories differ (`chain.executor-refuses`).
 5. **The contract stores any market, outcome and limit price** (`chain.market-strings`, `chain.limit-price-edges`): empty, oversized and instruction-carrying markets, outcome `MAYBE`, and prices 0 or above 99 are all approved.
-   An executor must refuse them; the simulated one fills anything.
+   The executor refuses each one before trading and records it as not filled (`chain.executor-refuses`); the console flags them and shows only a short preview of the text.
 6. **Fixed here: planted text reached the model** (`mcp.chain-text-relay`).
    `get_intent` put onchain market text in its summary and `get_activity` returned it raw, so a stolen key could plant instructions for Grok Bot in the audit log.
    The server now withholds any market that is not a Gemini symbol and any outcome other than YES or NO (`agent/src/support/intents.ts`).
@@ -123,5 +120,4 @@ src/
 test/          runs the self-contained mode on both contracts and pins every verdict
 ```
 
-The test suite in `test/redteam.test.ts` fails if any attack's verdict changes, an attack is added or removed, or a new breach appears.
-When the shared decoder is fixed, `chain.poison-readers` turns `bounded` and the test says so: update its expected verdict then.
+The test suite in `test/redteam.test.ts` fails if any attack's verdict changes, an attack is added or removed, or any breach appears.

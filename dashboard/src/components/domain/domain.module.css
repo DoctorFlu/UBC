@@ -8,6 +8,68 @@
 .marketTitle {
   font-weight: var(--weight-medium);
   color: var(--color-text);
+  /* A symbol has no spaces, and onchain text can be any length: never let it widen the page. */
+  overflow-wrap: anywhere;
+}
+
+.market[data-suspect] .marketTitle {
+  color: var(--color-danger);
+}
+
+/* A quoted, single-line preview of onchain text that is not a market symbol. */
+.marketPreview {
+  font-family: var(--font-mono);
+  font-stretch: 80%;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* An intent the MCP server could not have sent: an outlined marker, distinct from the filled verdict chips. */
+.flagged {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 1.5rem;
+  padding: var(--space-0-5) var(--space-2);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-xs);
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+  /* Its own width in a stacked card, never stretched across it. */
+  align-self: flex-start;
+}
+
+/* Beside the verdict chip in tables, wrapping under it when the column is narrow. */
+.verdict {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+/* A table stacked on a phone aligns its values to the end: wrap the badge there too. */
+@container (width < 36rem) {
+  .verdict {
+    justify-content: flex-end;
+  }
+}
+
+.flaggedIcon {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
 }
 
 .marketSymbol {
@@ -59,6 +121,14 @@
   max-width: 22rem;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  white-space: normal;
+}
+
+.approvalWarning {
+  max-width: 22rem;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-danger);
   white-space: normal;
 }
 

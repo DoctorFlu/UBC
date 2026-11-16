@@ -13,13 +13,12 @@ import {
   buildContracts,
   deployPolicy,
   deploymentRecord,
-  devAccount,
   devPolicyClient,
   startAnvil,
   writeDeploymentFile,
 } from "@mandate/devchain";
-import { Category, type PolicyClient, type TradeIntentInput, policyAbi } from "@mandate/shared";
-import { type Address, createPublicClient, createWalletClient, encodeFunctionData, http } from "viem";
+import { Category, type PolicyClient, type TradeIntentInput, policyBaseAbi } from "@mandate/shared";
+import type { Address } from "viem";
 
 export const DASHBOARD_DIR = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -94,6 +93,37 @@ export function noBuy(
   } satisfies TradeIntentInput;
 }
 
+/** A proposal with any values the ABI can carry, as a stolen agent key would send it. */
+export interface HostileProposal {
+  market: string;
+  category: number;
+  outcome: string;
+  isBuy: boolean;
+  amountCents: bigint;
+  limitPrice: bigint;
+}
+
+/**
+ * Sends `proposeTrade` with the agent's key and none of the MCP server's checks, the way an attacker
+ * holding the key would (`PolicyClient.proposeTrade` refuses such values before sending). Returns the id.
+ */
+export async function proposeHostile(chain: TestChain, p: HostileProposal): Promise<number> {
+  const wallet = chain.agent.walletClient;
+  if (!wallet) throw new Error("the agent client has no wallet");
+  const id = await chain.agent.getIntentCount();
+  const hash = await wallet.writeContract({
+    address: chain.address,
+    abi: policyBaseAbi,
+    functionName: "proposeTrade",
+    args: [p.market, p.category, p.outcome, p.isBuy, p.amountCents, p.limitPrice],
+    account: wallet.account,
+    chain: wallet.chain,
+  });
+  const receipt = await chain.agent.publicClient.waitForTransactionReceipt({ hash, pollingInterval: 50 });
+  if (receipt.status !== "success") throw new Error(`proposeTrade ${hash} reverted`);
+  return id;
+}
+
 /**
  * The demo history the smoke test and the screenshots read: the demo mandate, then every verdict the
  * contract gives, with one intent still waiting for the owner. Ids start at 0.
@@ -119,25 +149,4 @@ export async function seedDemo(chain: TestChain): Promise<void> {
   await agent.proposeTrade(noBuy("GEMI-NBA2611200100-HILAL", 1_560, 52, Category.Sports));
   // 6: waiting for the owner.
   await agent.proposeTrade(noBuy(BTC_63K, 2_400, 24));
-}
-
-/**
- * Proposes straight to the contract with the agent's key, past the client's input checks, as a hostile
- * agent (or the red team) can: the contract accepts any market string, so the console must too.
- */
-export async function proposeRaw(chain: TestChain, market: string, amountCents: number): Promise<void> {
-  const transport = http(chain.anvil.rpcUrl);
-  const wallet = createWalletClient({ account: devAccount("agent"), transport });
-  const hash = await wallet.sendTransaction({
-    chain: null,
-    to: chain.address,
-    data: encodeFunctionData({
-      abi: policyAbi,
-      functionName: "proposeTrade",
-      args: [market, Category.Crypto, "NO", true, BigInt(amountCents), 31n],
-    }),
-    gas: 25_000_000n,
-  });
-  const receipt = await createPublicClient({ transport }).waitForTransactionReceipt({ hash });
-  if (receipt.status !== "success") throw new Error("the hostile proposal reverted");
 }

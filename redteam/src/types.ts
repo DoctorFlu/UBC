@@ -1,4 +1,5 @@
 import type { Address, Hex } from "viem";
+import type { RefusalCode, Venue } from "@mandate/devchain";
 import type { PolicyClient, PolicyRules } from "@mandate/shared";
 import type { ChainAttacker } from "./chain";
 import type { McpAttacker } from "./mcp";
@@ -77,6 +78,11 @@ export interface SharedState {
   approved: { intentId: number; amountCents: number }[];
   /** The intent whose market string carries a prompt injection, planted with the agent key. */
   injectionIntentId: number | null;
+  /**
+   * Approved intents the MCP server could never have sent, planted with the agent key, and the reason
+   * the executor must give for refusing each (`chain.executor-refuses` checks them).
+   */
+  untradeable: { intentId: number; label: string; refusal: RefusalCode }[];
 }
 
 export interface AttackContext {
@@ -94,6 +100,8 @@ export interface AttackContext {
   owner: PolicyClient;
   /** The devchain executor, used only to set up the daily-loss scenario on our own chain. */
   executor: PolicyClient | null;
+  /** Where the executor looks up a market before trading: the recorded markets here, Gemini on the stack. */
+  venue: Venue;
   /** Addresses for role attacks. */
   outsider: Address;
   /** The MCP server's log lines, when the red team runs the server itself; null against the live stack. */
