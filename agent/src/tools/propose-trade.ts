@@ -54,7 +54,7 @@ export const proposeTrade = defineTool({
   name: "propose_trade",
   title: "Propose one trade",
   description:
-    "Submits one trade intent to the Policy contract from the agent's key: the only way to trade. The contract answers approved (the executor then places the order on Gemini), held (waiting for the owner's approval in the console) or rejected with the rule that stopped it. A rejection is a final answer: explain it to the owner, never retry, resize or split. Call simulate_trade first. The category is read from Gemini. Your reason is sealed into a decision-context document whose hash goes onchain with the intent. An identical call within 10 minutes returns the first result instead of trading twice.",
+    "Submits one trade intent to the Policy contract from the agent's key: the only way to trade. The contract answers approved (the executor then places the order), held (waiting for the owner's approval in the console) or rejected with the rule that stopped it. A rejection is a final answer: explain it to the owner, never retry, resize or split. Call simulate_trade first. The category is read from Gemini. Your reason is sealed into a decision-context document that the owner can read; its hash is recorded with the intent, onchain when the contract supports it. An identical call within 10 minutes returns the first result instead of trading twice.",
   inputSchema: z.object({
     market: tradeArgs.market,
     outcome: tradeArgs.outcome,
