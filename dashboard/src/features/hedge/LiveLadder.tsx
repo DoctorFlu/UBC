@@ -1,8 +1,10 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { useState } from "react";
 
-import { MarketName } from "@/components/domain/Intent";
+import { Button } from "@/components/ui/Button";
+
 import { Skeleton } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import type { LadderQuotes, QuoteRung } from "@/lib/hedge/types";
@@ -29,8 +31,12 @@ function columns(asset: string, planLabel: string): readonly Column<LadderRow>[]
     },
     {
       key: "market",
-      header: "Market",
-      cell: (row) => <MarketName symbol={row.instrumentSymbol} />,
+      header: "Contract",
+      cell: (row) => (
+        <span className={styles.symbol} translate="no">
+          {row.instrumentSymbol}
+        </span>
+      ),
       role: "primary",
     },
     {
@@ -121,16 +127,66 @@ export function LiveLadder({
     ...rung,
     boughtHundredths: bought.get(rung.instrumentSymbol) ?? 0,
   }));
+  return <LadderTable asset={asset} quotes={quotes} rows={rows} planLabel={planLabel} />;
+}
+
+/** Strikes shown around the plan before the owner asks for all of them. */
+const CONTEXT_RUNGS = 2;
+
+/**
+ * The rows worth seeing first: every bought rung with two strikes either side, or, with nothing
+ * bought, the strikes nearest spot. Indices into `rows`, which run highest strike first.
+ */
+export function nearbyRange(rows: readonly LadderRow[], spotCents: number): [number, number] {
+  const bought = rows.flatMap((row, index) => (row.boughtHundredths > 0 ? [index] : []));
+  if (bought.length > 0) {
+    return [
+      Math.max(0, (bought[0] ?? 0) - CONTEXT_RUNGS),
+      Math.min(rows.length - 1, (bought.at(-1) ?? 0) + CONTEXT_RUNGS),
+    ];
+  }
+  const below = rows.findIndex((row) => row.strikeCents <= spotCents);
+  const center = below < 0 ? rows.length - 1 : below;
+  return [Math.max(0, center - 3), Math.min(rows.length - 1, center + 2)];
+}
+
+function LadderTable({
+  asset,
+  quotes,
+  rows,
+  planLabel,
+}: {
+  asset: string;
+  quotes: LadderQuotes;
+  rows: LadderRow[];
+  planLabel: string;
+}) {
+  const [all, setAll] = useState(false);
+  const [from, to] = nearbyRange(rows, quotes.spotCents);
+  const trimmed = to - from + 1 < rows.length;
+  const shown = all || !trimmed ? rows : rows.slice(from, to + 1);
   return (
     <div className={styles.ladder} data-testid="live-ladder" data-event={quotes.eventTicker}>
       <Table
         caption={`Live quotes for ${quotes.title}, highest strike first`}
         captionHidden
         columns={columns(asset, planLabel)}
-        rows={rows}
+        rows={shown}
         rowKey={(row) => row.instrumentSymbol}
         rowTone={(row) => (row.boughtHundredths > 0 ? "attention" : undefined)}
       />
+      {trimmed ? (
+        <div className={styles.ladderFoot}>
+          <span>
+            {all
+              ? `All ${rows.length.toString()} strikes.`
+              : `${shown.length.toString()} of ${rows.length.toString()} strikes, around the plan.`}
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setAll((current) => !current)} aria-expanded={all}>
+            {all ? "Show strikes near the plan" : `Show all ${rows.length.toString()} strikes`}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

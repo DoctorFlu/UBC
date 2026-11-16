@@ -4,7 +4,7 @@ import type { HedgePlan } from "@mandate/planner";
 import { MessageSquareText, ShieldQuestion } from "lucide-react";
 import { useState } from "react";
 
-import { IntentLink, MarketName } from "@/components/domain/Intent";
+import { IntentLink } from "@/components/domain/Intent";
 import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -50,8 +50,12 @@ const orderColumns: readonly Column<OrderOnChain>[] = [
   },
   {
     key: "market",
-    header: "Market",
-    cell: ({ order }) => <MarketName symbol={order.instrumentSymbol} />,
+    header: "Contract",
+    cell: ({ order }) => (
+      <span className={styles.symbol} translate="no">
+        {order.instrumentSymbol}
+      </span>
+    ),
     role: "primary",
   },
   {
@@ -202,7 +206,7 @@ function AgentPlanCard({
     <>
       <Card
         title={`${agentName}'s plan`}
-        description={`Planned ${at(view.createdAt)}${view.createdAt === view.storedAt ? "" : `, stored ${at(view.storedAt)}`}.`}
+        description={`Planned ${at(view.createdAt)}${at(view.createdAt) === at(view.storedAt) ? "" : `, stored ${at(view.storedAt)}`}.`}
         headingLevel={2}
         className={styles.planCard}
       >
