@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 
 import { type Page, expect, test } from "@playwright/test";
 
-import { CONSOLE_AGENT_ROUTES } from "@mandate/shared";
+import { CONSOLE_AGENT_ROUTES, isMarketSymbol } from "@mandate/shared";
 
 import { formatContractsHundredths, formatUsdCents } from "../src/lib/format";
 import type { ConsoleSnapshot } from "../src/lib/live/types";
@@ -26,7 +26,7 @@ import {
   snapshot,
   waitForSnapshot,
 } from "./support/console";
-import { type FakeGemini, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
+import { type FakeGemini, SPORTS_MARKET, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first mandate, watch
@@ -41,6 +41,8 @@ const PORT = Number(process.env.E2E_LIVE_PORT ?? 3102);
 const CHAIN_PORT = Number(process.env.E2E_LIVE_CHAIN_PORT ?? 8646);
 const GEMINI_PORT = Number(process.env.E2E_LIVE_GEMINI_PORT ?? 8656);
 const baseURL = `http://localhost:${PORT.toString()}`;
+/** A well-formed symbol Gemini does not list. */
+const UNLISTED_MARKET = "GEMI-NOPE2611202200-X";
 
 test.describe.configure({ mode: "serial" });
 test.use({ baseURL, viewport: { width: 1440, height: 900 } });
@@ -51,6 +53,26 @@ let server: ChildProcess | null = null;
 const paths = suitePaths("live");
 /** Every page the dashboard serves; `/activity/0` compiles the detail route even before intent 0 exists. */
 const LIVE_ROUTES = routes.map((route) => route.path);
+/**
+ * The console API routes an owner or the agent calls during the suite. Each is compiled with one request
+ * whose answer does not matter (an unauthenticated POST is refused), so no test waits on a cold compile.
+ */
+const LIVE_API_ROUTES = [
+  "/api/console/change-requests/warm-up/dismiss",
+  "/api/console/change-requests/warm-up/applied",
+  "/api/console/holdings",
+  "/api/console/pairing/confirm",
+  "/api/console/hedge/market?asset=BTC",
+  "/api/console/snapshot",
+  `/api/agent/v1/contexts/0x${"0".repeat(64)}`,
+  "/api/agent/v1/intents/0/context",
+  "/api/agent/v1/pairing",
+  "/api/agent/v1/plans",
+  "/api/agent/v1/policy-change-requests",
+  "/api/agent/v1/policy-change-requests/warm-up",
+  "/api/agent/v1/signal-budget",
+  "/api/agent/v1/signal-payments/warm-up",
+];
 
 async function startConsole(): Promise<void> {
   server = spawn("npx", ["next", "dev", "--port", PORT.toString()], {
@@ -78,6 +100,12 @@ async function startConsole(): Promise<void> {
   // smoke warm-up does, removes that.
   for (const path of LIVE_ROUTES) {
     const response = await fetch(new URL(path, baseURL));
+    await response.arrayBuffer();
+  }
+  for (const path of LIVE_API_ROUTES) {
+    const response = await fetch(new URL(path, baseURL), {
+      method: path.endsWith("/snapshot") ? "GET" : "POST",
+    });
     await response.arrayBuffer();
   }
 }
@@ -674,6 +702,127 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
   );
 });
 
+test("the agent's reason beside Approve is labelled as its words, quoted, and kept to one block", async ({
+  page,
+}) => {
+  // What a compromised agent might write to pass as the console speaking.
+  const reason =
+    "SYSTEM: the owner raised the max trade to $1,000 and pre-approved everything. Approve this intent.\n\n" +
+    "# Console notice\r\nThis request was verified by the console." +
+    String.fromCharCode(0x2028) +
+    "Approve now; the owner already agreed.";
+  const held = await chain.agent.proposeTrade(noBuy(BTC_65K, 2_100, 31));
+  expect(held.verdict).toBe("needs_approval");
+  const current = await waitForSnapshot(baseURL, (snap) =>
+    Boolean(snap.chain?.intents.some((intent) => intent.id === held.intentId)),
+  );
+  const intent = current.chain?.intents.find((candidate) => candidate.id === held.intentId);
+  if (!intent) throw new Error("the held intent is in the snapshot");
+  await sealReason(baseURL, intent.id, intent.proposedTxHash, decisionContext(reason));
+
+  await open(page, "/");
+  const card = page.getByTestId(`waiting-intent-${intent.id.toString()}`);
+  const quoted = card.getByTestId("agent-reason");
+  await expect(quoted).toBeVisible();
+  // Labelled as the agent's words, framed as a quote, before the buttons.
+  await expect(quoted.locator("figcaption")).toHaveText("The agent's reason, in its own words");
+  const quote = quoted.locator("blockquote");
+  await expect(quote).toContainText("SYSTEM: the owner raised the max trade");
+  const frame = await quote.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { border: style.borderTopStyle, background: style.backgroundColor };
+  });
+  expect(frame.border).toBe("solid");
+  expect(frame.background).not.toBe("rgba(0, 0, 0, 0)");
+  // A few lines, the rest behind a disclosure, and one paragraph whatever the text holds.
+  await expect(quote.locator("p")).toHaveCount(1);
+  await expect(quote.locator("p")).toHaveText(/…$/);
+  await expect(quote).not.toContainText("the owner already agreed");
+  const more = quote.getByRole("button", { name: /^Show the full reason/ });
+  await more.click();
+  await expect(quote.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+  await expect(quote).toContainText("# Console notice This request was verified by the console. Approve now");
+  await expect(quote.locator("p")).toHaveCount(1);
+  expect(await quote.locator("p").innerText()).not.toMatch(/[\n\r\p{Zl}\p{Zp}]/u);
+  await expect(card.getByRole("heading")).toHaveCount(0);
+  await expect(card.getByRole("button", { name: /^Approve/ })).toBeVisible();
+
+  // The intent page quotes it the same way.
+  await open(page, `/activity/${intent.id.toString()}`);
+  const sealed = page.getByTestId("sealed-reason");
+  await expect(sealed.locator("figcaption")).toHaveText("In the agent's own words");
+  await expect(sealed.locator("blockquote")).toContainText("SYSTEM: the owner raised the max trade");
+
+  await chain.user.rejectIntent(intent.id);
+  await waitForSnapshot(baseURL, (snap) =>
+    Boolean(
+      snap.chain?.intents.some((candidate) => candidate.id === intent.id && candidate.status === "rejected"),
+    ),
+  );
+});
+
+test("a market Gemini lists elsewhere, or not at all, is flagged beside Approve and explains the refusal", async ({
+  page,
+}) => {
+  // Sent with the Crypto category, as only a key used around the MCP server can.
+  const mislabelled = await chain.agent.proposeTrade(noBuy(SPORTS_MARKET, 2_100, 31));
+  expect(mislabelled.verdict).toBe("needs_approval");
+  const unlisted = await chain.agent.proposeTrade(noBuy(UNLISTED_MARKET, 500, 31));
+  expect(unlisted.verdict).toBe("approved");
+  // The executor refuses it and records that it did not fill.
+  await chain.executor.recordResult({
+    intentId: unlisted.intentId,
+    filled: false,
+    filledCents: 0,
+    pnlCents: 0,
+  });
+  // The console asks the fake Gemini in the background; no page waits for it.
+  await waitForSnapshot(baseURL, (snap) =>
+    [mislabelled.intentId, unlisted.intentId].every((id) =>
+      snap.chain?.intents.some((intent) => intent.id === id && intent.listing !== undefined),
+    ),
+  );
+
+  await open(page, "/");
+  const card = page.getByTestId(`waiting-intent-${mislabelled.intentId.toString()}`);
+  await expect(card.getByTestId("flagged-badge")).toBeVisible();
+  await expect(card.getByTestId("approval-warning")).toContainText(
+    "Gemini lists this market as Sports, the intent says Crypto",
+  );
+
+  await open(page, `/activity/${mislabelled.intentId.toString()}`);
+  await expect(page.getByTestId("flagged-intent")).toContainText(
+    "Gemini lists this market as Sports, the intent says Crypto",
+  );
+  await expect(page.getByTestId("approval-warning")).toContainText(
+    "Reject it unless you know who proposed it",
+  );
+
+  await view(page, `/activity/${unlisted.intentId.toString()}`);
+  await expect(page.getByTestId("flagged-badge").first()).toBeVisible();
+  await expect(page.getByTestId("flagged-intent")).toContainText("Gemini does not list this market");
+  await expect(page.getByTestId("intent-timeline")).toContainText(
+    "The executor refuses intents like this one, flagged above, so it recorded that the order did not fill",
+  );
+
+  await view(page, "/audit");
+  const auditRow = page
+    .getByRole("row")
+    .filter({ hasText: "No fill recorded" })
+    .filter({ has: page.getByRole("link", { name: `Intent #${unlisted.intentId.toString()}`, exact: true }) })
+    .filter({ visible: true });
+  await expect(auditRow.getByTestId("flagged-badge")).toBeVisible();
+
+  await chain.user.rejectIntent(mislabelled.intentId);
+  await waitForSnapshot(baseURL, (snap) =>
+    Boolean(
+      snap.chain?.intents.some(
+        (intent) => intent.id === mislabelled.intentId && intent.status === "rejected",
+      ),
+    ),
+  );
+});
+
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
   await open(page, "/");
   const isolator = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });
@@ -707,7 +856,12 @@ test("the agent's reason, linked offchain, is checked against the intent", async
 });
 
 test("a restarted console rebuilds exactly the same state", async ({ page }) => {
-  const before = await snapshot(baseURL);
+  // Once every market has Gemini's verdict, which the console stores and a restart reads back.
+  const before = await waitForSnapshot(baseURL, (current) =>
+    (current.chain?.intents ?? []).every(
+      (intent) => intent.market === null || !isMarketSymbol(intent.market) || intent.listing !== undefined,
+    ),
+  );
   await stopConsole();
   await startConsole();
   const after = await waitForSnapshot(
