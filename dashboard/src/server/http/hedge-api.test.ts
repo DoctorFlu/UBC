@@ -58,7 +58,11 @@ function quotesFor(gemini: ReturnType<typeof fakeGemini>, clock = { now: NOW }) 
     baseUrl: "https://gemini.test",
     fetch: gemini.fetch,
     now: () => clock.now,
-    sleep: () => Promise.resolve(),
+    // The Gemini client's rate limiter waits on this clock: waiting moves it, at once.
+    sleep: (ms) => {
+      clock.now += ms;
+      return Promise.resolve();
+    },
   });
 }
 
@@ -79,11 +83,36 @@ const RULES: PolicyRules = {
 };
 
 describe("GET /api/console/hedge/market", () => {
-  it("refuses an asset or event that is not a ticker", async () => {
+  it("refuses an asset Gemini does not list, without asking Gemini", async () => {
     const service = makeService();
-    const quotes = quotesFor(fakeGemini());
-    expect((await getHedgeMarket(get("asset=bitcoin!"), service, quotes)).status).toBe(422);
-    expect((await getHedgeMarket(get("asset=BTC&event=a%20b"), service, quotes)).status).toBe(422);
+    const gemini = fakeGemini();
+    const quotes = quotesFor(gemini);
+    for (const asset of ["bitcoin!", "DOGE", "AAAA", ""]) {
+      const response = await getHedgeMarket(get(`asset=${encodeURIComponent(asset)}`), service, quotes);
+      expect(response.status).toBe(422);
+    }
+    expect(gemini.state.requests).toEqual([]);
+    expect(quotes.size).toBe(0);
+  });
+
+  it("refuses any event but the stored plan's, without asking Gemini", async () => {
+    const service = makeService();
+    const gemini = fakeGemini();
+    const quotes = quotesFor(gemini);
+    // No plan stored: no event is acceptable, not even a real one.
+    expect((await getHedgeMarket(get(`asset=BTC&event=${RECORDED_EVENT}`), service, quotes)).status).toBe(
+      422,
+    );
+    for (let index = 0; index < 50; index += 1) {
+      const response = await getHedgeMarket(
+        get(`asset=BTC&event=BTC26112022${index.toString()}`),
+        service,
+        quotes,
+      );
+      expect(response.status).toBe(422);
+    }
+    expect(gemini.state.requests).toEqual([]);
+    expect(quotes.size).toBe(0);
   });
 
   it("answers live quotes, highest strike first, and says why there is no preview", async () => {
@@ -144,6 +173,11 @@ describe("GET /api/console/hedge/market", () => {
     expect(body.eventTicker).toBe(plan.eventTicker);
     expect(body.preview).toEqual({ status: "not_requested" });
     expect(gemini.state.requests.some((path) => path.includes(`/events/${plan.eventTicker}`))).toBe(true);
+
+    // Naming the stored plan's event is accepted; any other is not.
+    const named = await getHedgeMarket(get(`asset=BTC&event=${plan.eventTicker}`), service, quotes);
+    expect(named.status).toBe(200);
+    expect((await getHedgeMarket(get("asset=BTC&event=ETH2611202200"), service, quotes)).status).toBe(422);
   });
 
   it("reports Gemini being down as part of the answer, and caches the failure briefly", async () => {
@@ -166,6 +200,35 @@ describe("GET /api/console/hedge/market", () => {
     const recovered = await read(await getHedgeMarket(get("asset=BTC"), service, quotes));
     expect(recovered.error).toBeNull();
     expect(recovered.quotes?.eventTicker).toBe(RECORDED_EVENT);
+  });
+
+  it("keeps at most its cap of ladders, dropping expired ones first and then the oldest", async () => {
+    const gemini = fakeGemini();
+    const clock = { now: NOW };
+    const quotes = new MarketQuotes({
+      baseUrl: "https://gemini.test",
+      fetch: gemini.fetch,
+      now: () => clock.now,
+      sleep: (ms) => {
+        clock.now += ms;
+        return Promise.resolve();
+      },
+      maxEntries: 3,
+    });
+    // Unknown events fail at Gemini (404), which is enough to fill the cache with distinct keys.
+    for (const event of ["E1", "E2", "E3", "E4", "E5"]) await quotes.ladder("BTC", event);
+    expect(quotes.size).toBe(3);
+    const asked = gemini.state.requests.length;
+    await quotes.ladder("BTC", "E5");
+    expect(gemini.state.requests.length).toBe(asked);
+    await quotes.ladder("BTC", "E1");
+    expect(gemini.state.requests.length).toBeGreaterThan(asked);
+    expect(quotes.size).toBe(3);
+
+    // Once everything has expired, a new key leaves only itself.
+    clock.now += 60_000;
+    await quotes.ladder("BTC", null);
+    expect(quotes.size).toBe(1);
   });
 
   it("shares one Gemini request between callers inside the cache window", async () => {

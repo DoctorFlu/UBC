@@ -1,5 +1,6 @@
 "use client";
 
+import { KNOWN_ASSETS } from "@mandate/gemini";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import type { HedgeMarketResponse } from "@/lib/hedge/types";
@@ -9,6 +10,8 @@ export const QUOTES_REFRESH_MS = 15_000;
 
 export type HedgeMarketState =
   | { status: "off" }
+  /** Gemini lists no ladders for this asset, so the console does not ask. */
+  | { status: "unsupported" }
   | { status: "loading" }
   /** The console did not answer (it is down or restarting); Gemini's own failures arrive in `data.error`. */
   | { status: "error"; message: string }
@@ -21,12 +24,14 @@ export type HedgeMarketState =
  */
 export function useHedgeMarket(input: {
   asset: string;
+  /** The stored plan's event; part of the cache key only, so a new plan asks again at once. */
   eventTicker: string | null;
   preview: boolean;
   /** Changes whenever the preview's inputs (holdings, rules, committed budget) change, to ask again at once. */
   inputsKey: string;
   enabled: boolean;
 }): HedgeMarketState {
+  const supported = (KNOWN_ASSETS as readonly string[]).includes(input.asset);
   const query = useQuery({
     queryKey: [
       "hedge-market",
@@ -37,13 +42,13 @@ export function useHedgeMarket(input: {
     ],
     // Keep the last answer on screen while a new key loads, so a refresh never blanks the ladder.
     placeholderData: keepPreviousData,
-    enabled: input.enabled,
+    enabled: input.enabled && supported,
     refetchInterval: QUOTES_REFRESH_MS,
     refetchOnWindowFocus: false,
     retry: false,
     queryFn: async ({ signal }): Promise<HedgeMarketResponse> => {
       const params = new URLSearchParams({ asset: input.asset });
-      if (input.eventTicker) params.set("event", input.eventTicker);
+      // No `event`: the console asks for the event of the plan it stores, and refuses any other.
       if (input.preview) params.set("preview", "1");
       const response = await fetch(`/api/console/hedge/market?${params.toString()}`, {
         signal,
@@ -54,6 +59,7 @@ export function useHedgeMarket(input: {
     },
   });
   if (!input.enabled) return { status: "off" };
+  if (!supported) return { status: "unsupported" };
   if (query.data) return { status: "ready", data: query.data, updatedAt: query.dataUpdatedAt };
   if (query.isError) {
     return { status: "error", message: "The console did not answer. It tries again in a few seconds." };

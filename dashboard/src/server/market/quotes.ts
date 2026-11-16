@@ -27,6 +27,8 @@ export interface MarketQuotesOptions {
   ttlMs?: number;
   /** How long a failure is reused before Gemini is asked again. */
   errorTtlMs?: number;
+  /** Most ladders kept at once; the oldest goes first. */
+  maxEntries?: number;
 }
 
 export type LadderLookup = { ok: true; ladder: Ladder } | { ok: false; error: MarketDataError };
@@ -39,6 +41,8 @@ interface Entry {
 
 const DEFAULT_TTL_MS = 10_000;
 const DEFAULT_ERROR_TTL_MS = 5_000;
+/** The route only asks for known assets and stored plans' events, so a handful of keys is the norm. */
+const DEFAULT_MAX_ENTRIES = 32;
 
 export class MarketQuotes {
   readonly baseUrl: string;
@@ -46,6 +50,8 @@ export class MarketQuotes {
   private readonly now: () => number;
   private readonly ttlMs: number;
   private readonly errorTtlMs: number;
+  private readonly maxEntries: number;
+  /** Insertion order is age order: a refreshed key is deleted and set again. */
   private readonly cache = new Map<string, Entry>();
 
   constructor(options: MarketQuotesOptions = {}) {
@@ -53,6 +59,7 @@ export class MarketQuotes {
     this.now = options.now ?? Date.now;
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.errorTtlMs = options.errorTtlMs ?? DEFAULT_ERROR_TTL_MS;
+    this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES);
     this.client = createGeminiClient({
       baseUrl: this.baseUrl,
       now: this.now,
@@ -91,8 +98,27 @@ export class MarketQuotes {
           return { ok: false, error: describeFailure(error) };
         },
       );
-    this.cache.set(key, entry);
+    this.remember(key, entry, time);
     return entry.result;
+  }
+
+  /** How many ladders are cached; for tests. */
+  get size(): number {
+    return this.cache.size;
+  }
+
+  /** Stores an entry after dropping expired ones, then the oldest beyond the cap. */
+  private remember(key: string, entry: Entry, time: number): void {
+    this.cache.delete(key);
+    for (const [cachedKey, cached] of this.cache) {
+      if (time - cached.at >= cached.ttl) this.cache.delete(cachedKey);
+    }
+    while (this.cache.size >= this.maxEntries) {
+      const oldest = this.cache.keys().next();
+      if (oldest.done) break;
+      this.cache.delete(oldest.value);
+    }
+    this.cache.set(key, entry);
   }
 }
 

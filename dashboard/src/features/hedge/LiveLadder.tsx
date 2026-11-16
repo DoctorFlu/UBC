@@ -95,6 +95,13 @@ export function LiveLadder({
   bought: ReadonlyMap<string, number>;
   planLabel: string;
 }) {
+  if (market.status === "unsupported") {
+    return (
+      <p className={styles.ladderNote} data-testid="quotes-error">
+        Gemini lists no prediction-market ladders for {asset}, so there are no quotes to show.
+      </p>
+    );
+  }
   if (market.status === "off") {
     return <p className={styles.ladderNote}>Live quotes are not loaded in a preview of this page.</p>;
   }

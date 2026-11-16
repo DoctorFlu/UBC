@@ -1,5 +1,7 @@
 import "server-only";
 
+import { KNOWN_ASSETS } from "@mandate/gemini";
+
 import type { HedgeMarketResponse, PreviewState } from "@/lib/hedge/types";
 
 import type { ConsoleService } from "../console-service";
@@ -7,16 +9,20 @@ import { type MarketQuotes, ladderQuotes } from "../market/quotes";
 import { previewPlan } from "../market/preview";
 import { apiError, json } from "./responses";
 
-const ASSET = /^[A-Z0-9]{2,10}$/;
-const EVENT = /^[A-Za-z0-9._-]{1,80}$/;
+const ASSETS: ReadonlySet<string> = new Set(KNOWN_ASSETS);
 
 /**
  * GET /api/console/hedge/market?asset=BTC[&event=BTC2611202200][&preview=1]
  *
- * Live quotes for the ladder a plan is on (the agent's latest plan for the asset, unless `event` names
- * another), and with `preview=1` a preview plan for an asset the agent has not planned. Read-only: it
- * changes nothing and needs no signature, like the snapshot. Gemini failing is part of the answer, not
- * an error status, so the view can keep showing the stored plan.
+ * Live quotes for the ladder the agent's latest plan for the asset is on (or the soonest weekly ladder
+ * when it has none), and with `preview=1` a preview plan for an asset the agent has not planned.
+ * Read-only: it changes nothing and needs no signature, like the snapshot. Gemini failing is part of the
+ * answer, not an error status, so the view can keep showing the stored plan.
+ *
+ * It is public once the console is hosted, and every distinct question costs a Gemini request from the
+ * shared rate limit. So a caller cannot choose what is asked: the asset must be one Gemini lists, and
+ * `event`, when given, must be the event of the plan the console stores for that asset. Anything else is
+ * refused before Gemini is called.
  */
 export async function getHedgeMarket(
   request: Request,
@@ -25,16 +31,24 @@ export async function getHedgeMarket(
 ): Promise<Response> {
   const url = new URL(request.url);
   const asset = (url.searchParams.get("asset") ?? "").toUpperCase();
-  if (!ASSET.test(asset)) {
-    return apiError(422, "invalid_parameter", "asset must be a ticker such as BTC.");
-  }
-  const event = url.searchParams.get("event");
-  if (event !== null && !EVENT.test(event)) {
-    return apiError(422, "invalid_parameter", "event must be a Gemini event ticker.");
+  if (!ASSETS.has(asset)) {
+    return apiError(
+      422,
+      "invalid_parameter",
+      `asset must be one Gemini lists ladders for: ${KNOWN_ASSETS.join(", ")}.`,
+    );
   }
   const snapshot = service.snapshot();
   const agentPlan = snapshot.offchain.plans.find((plan) => plan.asset === asset) ?? null;
-  const eventTicker = event ?? agentPlan?.plan.eventTicker ?? null;
+  const event = url.searchParams.get("event");
+  if (event !== null && event !== agentPlan?.plan.eventTicker) {
+    return apiError(
+      422,
+      "invalid_parameter",
+      `event must be the event of the agent's stored plan for ${asset}, or left out.`,
+    );
+  }
+  const eventTicker = agentPlan?.plan.eventTicker ?? null;
   const wantsPreview = url.searchParams.get("preview") === "1" && agentPlan === null;
 
   const lookup = await quotes.ladder(asset, eventTicker);
