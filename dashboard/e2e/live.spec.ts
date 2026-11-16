@@ -3,6 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { type Page, expect, test } from "@playwright/test";
 
 import type { ConsoleSnapshot } from "../src/lib/live/types";
+import { routes } from "./routes";
 import {
   BTC_64K,
   BTC_65K,
@@ -34,8 +35,8 @@ test.use({ baseURL, viewport: { width: 1440, height: 900 } });
 let chain: TestChain;
 let server: ChildProcess | null = null;
 const paths = suitePaths("live");
-/** Every page the tests below open; `/activity/0` compiles the detail route even before intent 0 exists. */
-const LIVE_ROUTES = ["/", "/activity", "/activity/0", "/mandate"];
+/** Every page the dashboard serves; `/activity/0` compiles the detail route even before intent 0 exists. */
+const LIVE_ROUTES = routes.map((route) => route.path);
 
 async function startConsole(): Promise<void> {
   server = spawn("npx", ["next", "dev", "--port", PORT.toString()], {
@@ -56,8 +57,10 @@ async function startConsole(): Promise<void> {
     },
   });
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
-  // `next dev` compiles a route on its first request and then tells open pages to reload, which can
-  // abort a navigation the test is making. Compiling the routes the tests visit first removes that race.
+  // `next dev` compiles a route on its first request and then tells open pages to reload. With a
+  // Turbopack cache left by an earlier run (the smoke suite compiles every route), a page that connects
+  // before those routes are compiled again reloads over and over. Compiling every route first, as the
+  // smoke warm-up does, removes that.
   for (const path of LIVE_ROUTES) {
     const response = await fetch(new URL(path, baseURL));
     await response.arrayBuffer();
