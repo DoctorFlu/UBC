@@ -68,6 +68,10 @@ The logic is in `src/executor.ts`, with the venue injectable so tests run withou
 It deletes the file when it stops, since the chain's state goes with it.
 `DEVCHAIN_PORT` changes the port.
 
+`npm run ensure-deployment -w @mandate/devchain` is the deploy-once step of the hosted demo chain (see [docs/hosting.md](../docs/hosting.md)).
+It reads `DEVCHAIN_RPC_URL`, `POLICY_DEPLOYMENT_FILE` and `DEVCHAIN_CONTRACT` (`reference` by default), refuses a chain whose id is not 5042002, and reuses the deployment file when the chain still has that contract.
+Otherwise it deploys, sets the demo rules and rewrites the file, which is what happens on the first start or after the chain lost its state.
+
 Accounts are anvil's public test accounts: 0 is the user (deployer), 1 the agent, 2 the executor.
 Their keys are public, so never use them on Arc testnet.
 
