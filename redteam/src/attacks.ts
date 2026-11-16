@@ -981,7 +981,7 @@ export function attacks(amounts: Amounts): Attack[] {
     },
     {
       id: "chain.amount-edges",
-      name: "Zero, overflow-sized and just-over amounts",
+      name: "Zero and just-over amounts (2^256 - 1 is in chain.poison-readers)",
       surface: "chain",
       tried: `proposeTrade with 0, and with the max trade size plus one cent.`,
       expected: "Zero is rejected with `zero amount`, the other with `over max trade size`.",
