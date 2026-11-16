@@ -62,12 +62,13 @@ export function PolicyReview({ open, onClose, next, title, onSigned }: PolicyRev
       setSignedAgainst(undefined);
       return;
     }
-    await onSigned?.(result.hash);
+    // The rules are on the chain once the transaction lands: say so then, not after the follow-up.
     toast({
       title: current ? "Mandate updated" : "Mandate set",
       description: "The Policy contract checks every new intent against these rules.",
       tone: "success",
     });
+    await onSigned?.(result.hash);
   };
 
   return (
