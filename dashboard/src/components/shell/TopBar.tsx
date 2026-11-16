@@ -49,7 +49,7 @@ export function TopBar({ navCounts, schedule }: TopBarProps) {
             onClick={() => setMenuOpen(true)}
           />
         </span>
-        <span className={styles.mobileOnly}>
+        <span className={`${styles.mobileOnly} ${styles.brandTop}`}>
           <Brand showTag={false} nameClassName={styles.brandNameTop} />
         </span>
         <span className={styles.desktopOnly}>
