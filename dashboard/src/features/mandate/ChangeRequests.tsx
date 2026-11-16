@@ -170,7 +170,8 @@ function RequestCard({
           )}
         </div>
       </Card>
-      {next && pendingRequest ? (
+      {/* Stays mounted after the request closes, so the owner sees the signed step and its Done button. */}
+      {next && (pendingRequest || reviewing) ? (
         <PolicyReview
           open={reviewing}
           onClose={() => setReviewing(false)}
