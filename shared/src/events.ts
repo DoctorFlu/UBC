@@ -1,7 +1,7 @@
 import { isAddressEqual, parseEventLogs, type Address, type Log } from "viem";
 import { policyAbi } from "./abi";
 import type { EventMeta, PolicyEvent, PolicyRules } from "./types";
-import { toSafeNumber } from "./units";
+import { chainNumber, toSafeNumber, UnitError } from "./units";
 
 export interface DecodeOptions {
   /** Only decode logs emitted by this contract. Recommended whenever logs may come from other contracts. */
@@ -11,6 +11,12 @@ export interface DecodeOptions {
    * `PolicyClient.getEvents` fills this in automatically.
    */
   blockTimestamps?: ReadonlyMap<bigint, number>;
+  /**
+   * Called for a Policy log whose values offchain code cannot represent (today only rules above 2^53 - 1,
+   * which the owner key sets). With it, that log is skipped and reported here, so a reader that must keep
+   * moving (the console's scanner) can say so instead of stopping. Without it, decoding throws.
+   */
+  onUndecodable?: (log: Log, error: UnitError) => void;
 }
 
 export class EventDecodeError extends Error {
@@ -22,11 +28,21 @@ export class EventDecodeError extends Error {
  * Logs that are not Policy events are skipped. Raw RPC logs must be formatted with viem's `formatLog` first.
  */
 export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = {}): PolicyEvent[] {
-  const { address, blockTimestamps } = options;
+  const { address, blockTimestamps, onUndecodable } = options;
   const relevant = address ? logs.filter((log) => isAddressEqual(log.address, address)) : logs;
   const parsed = parseEventLogs({ abi: policyAbi, logs: [...relevant], strict: true });
 
-  return parsed.map((log): PolicyEvent => {
+  return parsed.flatMap((log): PolicyEvent[] => {
+    try {
+      return [decodeOne(log)];
+    } catch (error) {
+      if (onUndecodable === undefined || !(error instanceof UnitError)) throw error;
+      onUndecodable(log, error);
+      return [];
+    }
+  });
+
+  function decodeOne(log: (typeof parsed)[number]): PolicyEvent {
     const timestamp = log.blockTimestamp ?? null;
     const seconds = timestamp !== null ? Number(timestamp) : blockTimestamps?.get(log.blockNumber);
     if (seconds === undefined) {
@@ -41,6 +57,11 @@ export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = 
       logIndex: log.logIndex,
     };
 
+    // Amounts, prices and results are written by the agent and executor keys, so they may not fit a
+    // number. They decode to null with the exact value in `outOfRange`; the event is always kept.
+    const outOfRange: Record<string, string> = {};
+    const flagged = () => (Object.keys(outOfRange).length > 0 ? { outOfRange } : {});
+
     switch (log.eventName) {
       case "IntentProposed":
         return {
@@ -52,9 +73,10 @@ export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = 
           category: log.args.category,
           outcome: log.args.outcome,
           isBuy: log.args.isBuy,
-          amountCents: toSafeNumber(log.args.amountCents, "amountCents"),
-          limitPrice: toSafeNumber(log.args.limitPrice, "limitPrice"),
+          amountCents: chainNumber(log.args.amountCents, "amountCents", outOfRange),
+          limitPrice: chainNumber(log.args.limitPrice, "limitPrice", outOfRange),
           contextHash: log.args.contextHash,
+          ...flagged(),
         };
       case "IntentApproved":
         return {
@@ -64,8 +86,9 @@ export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = 
           market: log.args.market,
           outcome: log.args.outcome,
           isBuy: log.args.isBuy,
-          amountCents: toSafeNumber(log.args.amountCents, "amountCents"),
-          limitPrice: toSafeNumber(log.args.limitPrice, "limitPrice"),
+          amountCents: chainNumber(log.args.amountCents, "amountCents", outOfRange),
+          limitPrice: chainNumber(log.args.limitPrice, "limitPrice", outOfRange),
+          ...flagged(),
         };
       case "IntentRejected":
         return {
@@ -79,7 +102,8 @@ export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = 
           ...meta,
           type: "IntentNeedsApproval",
           intentId: toSafeNumber(log.args.intentId, "intentId"),
-          amountCents: toSafeNumber(log.args.amountCents, "amountCents"),
+          amountCents: chainNumber(log.args.amountCents, "amountCents", outOfRange),
+          ...flagged(),
         };
       case "ResultRecorded":
         return {
@@ -87,15 +111,16 @@ export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = 
           type: "ResultRecorded",
           intentId: toSafeNumber(log.args.intentId, "intentId"),
           filled: log.args.filled,
-          filledCents: toSafeNumber(log.args.filledCents, "filledCents"),
-          pnlCents: toSafeNumber(log.args.pnlCents, "pnlCents"),
+          filledCents: chainNumber(log.args.filledCents, "filledCents", outOfRange),
+          pnlCents: chainNumber(log.args.pnlCents, "pnlCents", outOfRange),
+          ...flagged(),
         };
       case "PolicyUpdated":
         return { ...meta, type: "PolicyUpdated", rules: rulesFromChain(log.args) };
       case "Paused":
         return { ...meta, type: "Paused", paused: log.args.paused };
     }
-  });
+  }
 }
 
 /** The rules as the contract returns or emits them, with uint256 fields as bigints. */

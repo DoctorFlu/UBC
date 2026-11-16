@@ -1,13 +1,19 @@
-import { type IntentView, isValidLimitPrice, quantityFromAmount } from "@mandate/shared";
-
+import { type IntentView, intentAnomalies, isValidLimitPrice, quantityFromAmount } from "@mandate/shared";
+import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
-import { formatUsdCents } from "@/lib/format";
+import { StatusChip } from "@/components/ui/StatusChip";
+
+import { formatCount, formatUsdCents } from "@/lib/format";
 import { categoryName, describeMarket } from "@/lib/markets";
 
 import styles from "./domain.module.css";
 
-/** A market as the owner reads it: "BTC $65,000 or above", then the settle time and the exact symbol. */
+/**
+ * A market as the owner reads it: "BTC $65,000 or above", then the settle time and the exact symbol.
+ * Text that is not a Gemini symbol (only a stolen agent key can store one) is never shown raw here: it
+ * reads "Not a Gemini market" with its length and a short quoted preview; the intent page has the rest.
+ */
 export function MarketName({ symbol, category }: { symbol: string | null; category?: number | null }) {
   if (symbol === null) {
     return (
@@ -19,6 +25,22 @@ export function MarketName({ symbol, category }: { symbol: string | null; catego
   }
   const market = describeMarket(symbol);
   const kind = category == null ? null : categoryName(category);
+  if (!market.isSymbol) {
+    const size = `${formatCount(market.length)} ${market.length === 1 ? "character" : "characters"}`;
+    return (
+      <span className={styles.market} data-suspect="">
+        <span className={styles.marketTitle}>{market.title}</span>
+        <span className={styles.marketMeta}>{[size, kind].filter(Boolean).join(" · ")}</span>
+        {market.preview ? (
+          <span className={styles.marketPreview} translate="no">
+            {market.length === 0 ? "(empty)" : `“${market.preview}”`}
+          </span>
+        ) : (
+          <span className={styles.marketPreview}>(empty)</span>
+        )}
+      </span>
+    );
+  }
   const sub = [market.settles ? `Settles ${market.settles}` : null, kind].filter(Boolean).join(" · ");
   return (
     <span className={styles.market}>
@@ -33,7 +55,7 @@ export function MarketName({ symbol, category }: { symbol: string | null; catego
   );
 }
 
-type OrderFields = Pick<IntentView, "isBuy" | "outcome" | "amountCents" | "limitPrice">;
+type OrderFields = Pick<IntentView, "isBuy" | "outcome" | "amountCents" | "limitPrice" | "outOfRange">;
 
 /** "40" for whole contracts, "29.30" otherwise. */
 function contracts(amountCents: number, limitPrice: number): string {
@@ -41,18 +63,32 @@ function contracts(amountCents: number, limitPrice: number): string {
   return Number.isInteger(quantity) ? quantity.toString() : quantity.toFixed(2);
 }
 
+/** " YES", " NO", nothing when unknown, or a description of anything else (never its text). */
+function outcomeText(outcome: string | null): string {
+  if (outcome === null) return "";
+  return outcome === "YES" || outcome === "NO" ? ` ${outcome}` : " (outcome not YES or NO)";
+}
+
+function isOutOfRange(intent: OrderFields, field: "amountCents" | "limitPrice"): boolean {
+  return intent.outOfRange?.[field] !== undefined;
+}
+
 /** "Buy NO, 40 at 31¢": the side, outcome, contracts the amount buys at the limit, and the limit. */
 export function OrderSummary({ intent }: { intent: OrderFields }) {
-  if (intent.isBuy === null || intent.amountCents === null || intent.limitPrice === null) {
+  const amountKnown = intent.amountCents !== null || isOutOfRange(intent, "amountCents");
+  const limitKnown = intent.limitPrice !== null || isOutOfRange(intent, "limitPrice");
+  if (intent.isBuy === null || !amountKnown || !limitKnown) {
     return <span className={styles.orderUnknown}>Order not recorded</span>;
   }
   const side = intent.isBuy ? "Buy" : "Sell";
-  const outcome = intent.outcome ? ` ${intent.outcome}` : "";
-  if (!isValidLimitPrice(intent.limitPrice)) {
+  const outcome = outcomeText(intent.outcome);
+  if (intent.amountCents === null || intent.limitPrice === null || !isValidLimitPrice(intent.limitPrice)) {
+    const limit =
+      intent.limitPrice === null ? "a limit too large to show" : `limit ${intent.limitPrice.toString()}`;
     return (
       <span className="num">
         {side}
-        {outcome} at limit {intent.limitPrice.toString()}
+        {outcome} at {limit}
       </span>
     );
   }
@@ -64,16 +100,56 @@ export function OrderSummary({ intent }: { intent: OrderFields }) {
   );
 }
 
+/** An amount as text: dollars, "Out of range" for a value too large for offchain code, or "Unknown". */
+export function amountLabel(intent: Pick<OrderFields, "amountCents" | "outOfRange">): string {
+  if (intent.amountCents !== null) return formatUsdCents(intent.amountCents);
+  return intent.outOfRange?.["amountCents"] === undefined ? "Unknown" : "Out of range";
+}
+
 /** Amount over order, for tables short on width: "$12.40" over "Buy NO, 40 at 31¢". */
 export function OrderAmount({ intent }: { intent: OrderFields }) {
   return (
     <span className={styles.orderAmount}>
-      <span className="num">
-        {intent.amountCents === null ? "Unknown" : formatUsdCents(intent.amountCents)}
-      </span>
+      <span className="num">{amountLabel(intent)}</span>
       <span className={styles.orderLine}>
         <OrderSummary intent={intent} />
       </span>
+    </span>
+  );
+}
+
+/**
+ * What about an intent the agent's MCP server could never have sent ("outcome is not YES or NO"), for the
+ * badge and the intent page. Each clause describes an onchain value; none quotes it.
+ */
+export function intentFlags(
+  intent: Pick<IntentView, "market" | "outcome" | "category" | "limitPrice" | "outOfRange">,
+): string[] {
+  return intentAnomalies(intent).map((anomaly) => anomaly.text);
+}
+
+/**
+ * Marks an intent the MCP server could not have sent: the agent key was used around it. Reads "Flagged",
+ * and says why to assistive technology and on hover.
+ */
+export function FlaggedBadge({ flags }: { flags: readonly string[] }) {
+  if (flags.length === 0) return null;
+  const why = flags.join("; ");
+  return (
+    <span className={styles.flagged} title={`Not sent by the MCP server: ${why}`} data-testid="flagged-badge">
+      <ShieldAlert aria-hidden className={styles.flaggedIcon} strokeWidth={2} />
+      Flagged
+      <span className="visually-hidden">: not sent by the MCP server, {why}</span>
+    </span>
+  );
+}
+
+/** The contract's verdict, then "Flagged" beside it when the MCP server could not have sent the intent. */
+export function IntentVerdict({ intent }: { intent: IntentView }) {
+  return (
+    <span className={styles.verdict}>
+      <StatusChip status={intent.status} reason={intent.reason} />
+      <FlaggedBadge flags={intentFlags(intent)} />
     </span>
   );
 }

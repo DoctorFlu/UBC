@@ -32,6 +32,13 @@ export const txHashSchema = bytes32Schema;
 
 export const ZERO_HASH: Hex = `0x${"0".repeat(64)}`;
 
+/**
+ * Onchain integers that do not fit a JavaScript safe integer, by field name, as exact decimal strings.
+ * The field itself is null: an out-of-range value is never clamped into a number that reads as real.
+ */
+export const outOfRangeSchema = z.record(z.string(), z.string().regex(/^-?\d+$/));
+export type OutOfRange = z.infer<typeof outOfRangeSchema>;
+
 // ------------------------------------------------------------------ rules
 
 /** The contract's `PolicyRules` struct (the spec calls it `Policy`). */
@@ -73,6 +80,15 @@ export type TradeIntentInput = z.input<typeof tradeIntentSchema>;
 
 export const intentStatusSchema = z.enum(INTENT_STATUSES);
 
+/**
+ * Amounts and prices as the chain stores them: the number, or null when it does not fit a safe integer
+ * (the exact value is then in `outOfRange`). Only the agent key (amount, limit price) and the executor key
+ * (fill, profit and loss) can write such values; this server never does.
+ */
+const chainCentsSchema = centsSchema.nullable();
+const chainSignedCentsSchema = signedCentsSchema.nullable();
+const chainLimitPriceSchema = z.int().nonnegative().nullable();
+
 /** An intent as the contract stores it (`getIntent`), with its id. Field order follows the struct. */
 export const intentSchema = z.object({
   id: intentIdSchema,
@@ -80,14 +96,16 @@ export const intentSchema = z.object({
   category: anyCategorySchema,
   outcome: z.string(),
   isBuy: z.boolean(),
-  amountCents: centsSchema,
-  limitPrice: z.int().nonnegative(),
+  amountCents: chainCentsSchema,
+  limitPrice: chainLimitPriceSchema,
   status: intentStatusSchema,
   /** Unix seconds of the block that stored the proposal. */
   proposedAt: z.int().nonnegative(),
   /** 0 until a result is recorded, and 0 for a failed order. */
-  filledCents: centsSchema,
-  pnlCents: signedCentsSchema,
+  filledCents: chainCentsSchema,
+  pnlCents: chainSignedCentsSchema,
+  /** Present only when a field above is null because its onchain value is out of range. */
+  outOfRange: outOfRangeSchema.optional(),
 });
 export type Intent = z.infer<typeof intentSchema>;
 
@@ -120,9 +138,10 @@ export const policyEventSchema = z.discriminatedUnion("type", [
     category: anyCategorySchema,
     outcome: z.string(),
     isBuy: z.boolean(),
-    amountCents: centsSchema,
-    limitPrice: z.int().nonnegative(),
+    amountCents: chainCentsSchema,
+    limitPrice: chainLimitPriceSchema,
     contextHash: bytes32Schema,
+    outOfRange: outOfRangeSchema.optional(),
   }),
   eventMetaSchema.extend({
     type: z.literal("IntentApproved"),
@@ -130,8 +149,9 @@ export const policyEventSchema = z.discriminatedUnion("type", [
     market: z.string(),
     outcome: z.string(),
     isBuy: z.boolean(),
-    amountCents: centsSchema,
-    limitPrice: z.int().nonnegative(),
+    amountCents: chainCentsSchema,
+    limitPrice: chainLimitPriceSchema,
+    outOfRange: outOfRangeSchema.optional(),
   }),
   eventMetaSchema.extend({
     type: z.literal("IntentRejected"),
@@ -141,15 +161,17 @@ export const policyEventSchema = z.discriminatedUnion("type", [
   eventMetaSchema.extend({
     type: z.literal("IntentNeedsApproval"),
     intentId: intentIdSchema,
-    amountCents: centsSchema,
+    amountCents: chainCentsSchema,
+    outOfRange: outOfRangeSchema.optional(),
   }),
   eventMetaSchema.extend({
     type: z.literal("ResultRecorded"),
     intentId: intentIdSchema,
     filled: z.boolean(),
     /** The amount actually used: 0 whenever `filled` is false. */
-    filledCents: centsSchema,
-    pnlCents: signedCentsSchema,
+    filledCents: chainCentsSchema,
+    pnlCents: chainSignedCentsSchema,
+    outOfRange: outOfRangeSchema.optional(),
   }),
 ]);
 export type PolicyEvent = z.infer<typeof policyEventSchema>;

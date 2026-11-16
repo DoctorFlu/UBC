@@ -6,4 +6,5 @@ export * from "./accounts";
 export * from "./anvil";
 export * from "./deploy";
 export * from "./devchain";
+export * from "./executor";
 export * from "./foundry";

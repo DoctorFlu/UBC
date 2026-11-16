@@ -4,7 +4,15 @@ import type { IntentView } from "@mandate/shared";
 import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
-import { IntentLink, MarketName, OrderSummary } from "@/components/domain/Intent";
+import {
+  IntentLink,
+  MarketName,
+  OrderSummary,
+  amountLabel,
+  FlaggedBadge,
+  intentFlags,
+  IntentVerdict,
+} from "@/components/domain/Intent";
 import { RulesSchedule } from "@/components/domain/RulesSchedule";
 import { ChainUnavailable, NoPolicyYet } from "@/components/states/ChainStates";
 import { ArrowLink } from "@/components/ui/ArrowLink";
@@ -13,7 +21,6 @@ import { HexValue } from "@/components/ui/HexValue";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
-import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
@@ -47,14 +54,15 @@ const recentColumns: readonly Column<IntentView>[] = [
   {
     key: "amount",
     header: "Amount",
-    cell: (intent) => (intent.amountCents === null ? "Unknown" : <Money cents={intent.amountCents} />),
+    cell: (intent) =>
+      intent.amountCents === null ? amountLabel(intent) : <Money cents={intent.amountCents} />,
     align: "end",
     nowrap: true,
   },
   {
     key: "verdict",
     header: "Verdict",
-    cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
+    cell: (intent) => <IntentVerdict intent={intent} />,
   },
 ];
 
@@ -140,6 +148,7 @@ export function OverviewView({ preview }: { preview?: ConsoleSnapshot }) {
                     className={styles.heldItem}
                     data-testid={`waiting-intent-${intent.id.toString()}`}
                   >
+                    <FlaggedBadge flags={intentFlags(intent)} />
                     <div className={styles.heldHead}>
                       <MarketName symbol={intent.market} />
                       {intent.amountCents === null ? null : (

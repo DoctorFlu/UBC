@@ -1,12 +1,19 @@
 "use client";
 
-import { type LadderSummary, type PolicyEvent, describeReason } from "@mandate/shared";
+import {
+  type IntentView,
+  type LadderSummary,
+  type PolicyEvent,
+  describeReason,
+  isMarketSymbol,
+} from "@mandate/shared";
 import { ArrowLeft, SearchX, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import Link from "next/link";
+import { Fragment } from "react";
 import type { Hex } from "viem";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
-import { MarketName, OrderSummary } from "@/components/domain/Intent";
+import { amountLabel, FlaggedBadge, intentFlags, MarketName, OrderSummary } from "@/components/domain/Intent";
 import { SimulatedFill } from "@/components/domain/SimulatedFill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { ArrowLink } from "@/components/ui/ArrowLink";
@@ -114,7 +121,9 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
           // The contract only knows that the executor recorded a result, not where the order went.
           title: event.filled ? "Filled" : "Did not fill",
           detail: event.filled
-            ? `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
+            ? event.filledCents === null
+              ? "The executor recorded a fill too large to show."
+              : `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
             : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
           simulated: simulated && event.filled,
@@ -303,6 +312,85 @@ function SealedReasonCard({
   );
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  amountCents: "Amount (cents)",
+  limitPrice: "Limit price",
+  filledCents: "Filled (cents)",
+  pnlCents: "Profit and loss (cents)",
+};
+
+/** Onchain text in full, folded away: it can be any length and was written by whoever held the agent key. */
+function RawText({ what, value }: { what: string; value: string }) {
+  const length = Array.from(value).length;
+  if (length === 0) return <span className={styles.rawEmpty}>Empty</span>;
+  return (
+    <details className={styles.raw}>
+      <summary className={styles.rawSummary}>
+        Show the full {what} ({formatCount(length)} {length === 1 ? "character" : "characters"})
+      </summary>
+      <pre className={styles.rawText} translate="no" data-testid={`raw-${what}`}>
+        {value}
+      </pre>
+    </details>
+  );
+}
+
+/**
+ * Why the MCP server could not have sent this intent, and every odd value exactly as stored onchain. The
+ * contract still applied the amount rules; what it does not check (market, outcome, price, category) is here.
+ */
+function FlaggedCard({ intent, flags }: { intent: IntentView; flags: readonly string[] }) {
+  const outOfRange = Object.entries(intent.outOfRange ?? {});
+  const oddMarket = intent.market !== null && !isMarketSymbol(intent.market) ? intent.market : null;
+  const oddOutcome =
+    intent.outcome !== null && intent.outcome !== "YES" && intent.outcome !== "NO" ? intent.outcome : null;
+  return (
+    <Card title="Not sent by the MCP server" headingLevel={2} tone="attention">
+      <div className={styles.flagged} data-testid="flagged-intent">
+        <p className={styles.flaggedText}>
+          The MCP server checks every proposal before it reaches the contract, so this one was sent with the
+          agent&apos;s key directly. The contract still applied the amount rules, but it does not check the
+          market, outcome, price or category, and the executor refuses to trade an intent like this. If you
+          did not send it, pause the mandate and set a new agent key.
+        </p>
+        <ul className={styles.flaggedList}>
+          {flags.map((flag) => (
+            <li key={flag}>{flag}</li>
+          ))}
+        </ul>
+        {oddMarket !== null || oddOutcome !== null || outOfRange.length > 0 ? (
+          <dl className={styles.facts}>
+            {oddMarket !== null ? (
+              <>
+                <dt>Market as stored</dt>
+                <dd>
+                  <RawText what="market" value={oddMarket} />
+                </dd>
+              </>
+            ) : null}
+            {oddOutcome !== null ? (
+              <>
+                <dt>Outcome as stored</dt>
+                <dd>
+                  <RawText what="outcome" value={oddOutcome} />
+                </dd>
+              </>
+            ) : null}
+            {outOfRange.map(([field, digits]) => (
+              <Fragment key={field}>
+                <dt>{FIELD_LABELS[field] ?? field}</dt>
+                <dd className={styles.digits} translate="no">
+                  {digits}
+                </dd>
+              </Fragment>
+            ))}
+          </dl>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 /** One intent with every onchain step, its links, and the agent's sealed reason checked against the chain. */
 export function IntentDetailView({ intentId, preview }: { intentId: number; preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
@@ -330,6 +418,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
   const market = intent.market ? describeMarket(intent.market) : null;
   const simulated = fillsAreSimulated(snapshot.network);
   const timeline = steps(chain, intent.id, simulated);
+  const flags = intentFlags(intent);
 
   return (
     <div className={styles.view}>
@@ -343,6 +432,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
         meta={
           <>
             <StatusChip status={intent.status} reason={intent.reason} />
+            <FlaggedBadge flags={flags} />
             <span>
               Proposed {formatDateUtc(isoFromUnix(intent.proposedAt))},{" "}
               {formatTimeUtc(isoFromUnix(intent.proposedAt))}
@@ -353,6 +443,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
 
       <div className={styles.layout}>
         <div className={styles.main}>
+          {flags.length > 0 ? <FlaggedCard intent={intent} flags={flags} /> : null}
           <Card title="Order" headingLevel={2}>
             <dl className={styles.facts}>
               <dt>Market</dt>
@@ -366,7 +457,9 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                 <OrderSummary intent={intent} />
               </dd>
               <dt>Amount</dt>
-              <dd>{intent.amountCents === null ? "Unknown" : <Money cents={intent.amountCents} />}</dd>
+              <dd>
+                {intent.amountCents === null ? amountLabel(intent) : <Money cents={intent.amountCents} />}
+              </dd>
               {intent.filledCents !== null ? (
                 <>
                   <dt>Filled</dt>
@@ -376,7 +469,15 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                   </dd>
                   <dt>Realized P&amp;L</dt>
                   <dd>
-                    <Money cents={intent.pnlCents ?? 0} sign="always" />
+                    {intent.pnlCents === null ? (
+                      intent.outOfRange?.["pnlCents"] === undefined ? (
+                        "Not recorded"
+                      ) : (
+                        "Out of range"
+                      )
+                    ) : (
+                      <Money cents={intent.pnlCents} sign="always" />
+                    )}
                   </dd>
                 </>
               ) : null}

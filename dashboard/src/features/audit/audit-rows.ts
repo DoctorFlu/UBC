@@ -10,6 +10,7 @@ import {
   categoriesFromMask,
   describeReason,
   eventKey,
+  intentAnomalies,
 } from "@mandate/shared";
 import type { Hex } from "viem";
 
@@ -46,6 +47,11 @@ export interface AuditRow {
   summary: string;
   status: StatusKind | null;
   reason: string | null;
+  /**
+   * Why the MCP server could not have sent this row's intent ("outcome is not YES or NO"); empty for a
+   * normal intent and for rows about no intent. Describes the onchain values, never quotes them.
+   */
+  flags: string[];
   txHash: Hex;
 }
 
@@ -61,8 +67,24 @@ export type AuditOrder = "newest" | "oldest";
 
 const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 
-function order(event: { isBuy: boolean; outcome: string; market: string; amountCents: number }): string {
-  return `${event.isBuy ? "Buy" : "Sell"} ${event.outcome} on ${describeMarket(event.market).title}, ${formatUsdCents(event.amountCents)}`;
+/** A dollar amount, or a plain statement when the onchain value is too large for offchain code. */
+function amount(cents: number | null): string {
+  return cents === null ? "an amount too large to show" : formatUsdCents(cents);
+}
+
+/**
+ * "Buy NO on BTC $65,000 or above, $12.40". Onchain text that is not a Gemini symbol or a YES/NO outcome
+ * is described, never quoted: it was written by whoever held the agent key and lands in exports too.
+ */
+function order(event: {
+  isBuy: boolean;
+  outcome: string;
+  market: string;
+  amountCents: number | null;
+}): string {
+  const outcome =
+    event.outcome === "YES" || event.outcome === "NO" ? event.outcome : "an outcome not YES or NO";
+  return `${event.isBuy ? "Buy" : "Sell"} ${outcome} on ${describeMarket(event.market).title}, ${amount(event.amountCents)}`;
 }
 
 type Described = Pick<AuditRow, "group" | "label" | "summary" | "status" | "reason" | "intentId">;
@@ -130,7 +152,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
       return {
         group: "verdict",
         label: "Held for approval",
-        summary: `${formatUsdCents(event.amountCents)} is above the approval threshold: waiting for the owner`,
+        summary: `${amount(event.amountCents)} is above the approval threshold: waiting for the owner`,
         status: "needs_approval",
         reason: null,
         intentId: event.intentId,
@@ -140,7 +162,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
         group: "result",
         label: event.filled ? "Fill recorded" : "No fill recorded",
         summary: event.filled
-          ? `The executor recorded a fill of ${formatUsdCents(event.filledCents)}, realized ${formatUsdCentsDelta(event.pnlCents)}`
+          ? `The executor recorded a fill of ${amount(event.filledCents)}, realized ${event.pnlCents === null ? "an amount too large to show" : formatUsdCentsDelta(event.pnlCents)}`
           : "The executor recorded that the order did not fill",
         status: event.filled ? "executed" : "failed",
         reason: null,
@@ -150,7 +172,12 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
 }
 
 /** Every event as an audit row, oldest first (chain order). */
-export function auditRows(chain: Pick<ChainView, "events">): AuditRow[] {
+export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRow[] {
+  const flagsOf = new Map<number, string[]>();
+  for (const intent of chain.intents) {
+    const flags = intentAnomalies(intent).map((anomaly) => anomaly.text);
+    if (flags.length > 0) flagsOf.set(intent.id, flags);
+  }
   const heldIn = new Map<number, Hex>();
   let version = 0;
   return chain.events.map((event) => {
@@ -167,6 +194,7 @@ export function auditRows(chain: Pick<ChainView, "events">): AuditRow[] {
       logIndex: event.logIndex,
       event: event.type,
       txHash: event.transactionHash,
+      flags: intentId === null ? [] : (flagsOf.get(intentId) ?? []),
       ...describe(event, held, version),
     };
   });
@@ -205,6 +233,7 @@ const EXPORT_COLUMNS = [
   "intent",
   "status",
   "reason",
+  "flags",
   "summary",
   "tx_hash",
   "explorer_url",
@@ -223,6 +252,7 @@ export function exportRecord(row: AuditRow, explorerUrl: string | null): AuditEx
     intent: row.intentId,
     status: row.status,
     reason: row.reason,
+    flags: row.flags.length === 0 ? null : row.flags.join("; "),
     summary: row.summary,
     tx_hash: row.txHash,
     explorer_url: explorerUrl ? `${explorerUrl}/tx/${row.txHash}` : null,

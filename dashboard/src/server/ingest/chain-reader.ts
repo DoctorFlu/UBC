@@ -42,7 +42,43 @@ export class LogScanner {
     return decodePolicyLogs(logs, {
       address: this.address,
       blockTimestamps: await blockTimestamps(this.client, logs),
+      onUndecodable: (log) => {
+        this.skipped.note(log);
+      },
     });
+  }
+
+  /** Policy events this scanner had to skip because offchain code cannot represent their values. */
+  readonly skipped = new SkippedLogs();
+}
+
+/**
+ * Policy logs a reader skipped so it could keep reading: the cursor always advances, and what was skipped
+ * is counted here for the feed status instead of being lost silently.
+ */
+export class SkippedLogs {
+  private readonly keys = new Set<string>();
+  private firstBlock: bigint | null = null;
+
+  note(log: Pick<Log, "transactionHash" | "logIndex" | "blockNumber">): void {
+    const key = `${log.transactionHash ?? ""}:${String(log.logIndex)}`;
+    if (this.keys.has(key)) return;
+    this.keys.add(key);
+    if (log.blockNumber !== null && (this.firstBlock === null || log.blockNumber < this.firstBlock)) {
+      this.firstBlock = log.blockNumber;
+    }
+  }
+
+  get count(): number {
+    return this.keys.size;
+  }
+
+  /** "2 Policy events (first in block 1,204) ...", or null when nothing was skipped. */
+  describe(): string | null {
+    if (this.keys.size === 0) return null;
+    const events = this.keys.size === 1 ? "1 Policy event" : `${this.keys.size.toString()} Policy events`;
+    const where = this.firstBlock === null ? "" : ` (first in block ${this.firstBlock.toString()})`;
+    return `${events}${where} hold values too large for offchain code and were skipped, so totals may be incomplete. The console keeps reading.`;
   }
 }
 

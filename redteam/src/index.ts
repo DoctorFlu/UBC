@@ -36,9 +36,10 @@ export async function runRedTeam(
     reader: target.reader,
     owner: target.owner,
     executor: target.executor,
+    venue: target.venue,
     outsider: devAccount("outsider").address,
     serverLogs: target.target === "self" ? target.serverLogs : null,
-    state: { heldIntentId: null, heldIntentIds: [], approved: [], injectionIntentId: null },
+    state: { heldIntentId: null, heldIntentIds: [], approved: [], injectionIntentId: null, untradeable: [] },
   };
   const before = {
     intents: await target.reader.getIntentCount(),
