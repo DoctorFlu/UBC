@@ -217,4 +217,4 @@ Every secret lives in `.env`, which is git-ignored.
 | x402 signal payments | Live on Arc testnet with testnet USDC through Circle Gateway. |
 | Console | Live against the chain; any view not yet backed by a real source is marked "Sample data" on screen. |
 | QuickNode Stream | Filter, configuration, management script and verified webhook receiver are in the repo; the Stream is switched on once the contract is on Arc testnet. |
-| Order placement on Gemini | Simulated: the local executor records a fill for every approved intent and marks it "Simulated fill". No real order is placed. |
+| Order placement on Gemini | Simulated: the local executor checks each approved intent against Gemini's listing, records a fill for the valid ones and marks it "Simulated fill", and records the rest as not filled. No real order is placed. |

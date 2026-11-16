@@ -45,13 +45,19 @@ Keep the tunnel in its own terminal: its address survives a restart of the stack
 ```bash
 npm run dev:chain                         # terminal 1: anvil on 127.0.0.1:8545, Policy.sol deployed
 npm run dev:chain -- --contract reference # or the reference contract with the additions
-npm run dev:executor                      # terminal 2: SIMULATED executor, fills every approved intent
+npm run dev:executor                      # terminal 2: SIMULATED executor, fills approved intents it can check
 npm run dev:propose -- --amount 10        # terminal 3: propose as the agent
 npm run dev:propose -- --amount 22        # waits for the user's approval
 npm run dev:propose -- --amount 30        # over max trade size
 npm run dev:propose -- --category Sports  # category not allowed
 npm run dev:propose -- --amount 22 --preview
 ```
+
+The simulated executor never places an order, but it checks every approved intent the way a real executor must before it records a fill.
+It refuses an intent and records it as not filled when the market is not a Gemini symbol, the outcome is not YES or NO, the limit price is outside 1 to 99, Gemini does not list the market, or Gemini lists it under another category than the intent's.
+The contract approves all of these when they come from the agent key, so this is the only offchain check between a stolen key and an order.
+It reads Gemini's public market data for the listing; when Gemini cannot be reached it fills nothing and tries again every 15 seconds, leaving the intent approved.
+The logic is in `src/executor.ts`, with the venue injectable so tests run without the network.
 
 `dev:chain` writes `devchain/deployments/local.json` (git-ignored), which `resolvePolicyDeployment()` in `@mandate/shared/node` reads when `POLICY_ADDRESS` is unset.
 It deletes the file when it stops, since the chain's state goes with it.

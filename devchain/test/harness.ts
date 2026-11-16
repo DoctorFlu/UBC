@@ -4,6 +4,7 @@ import {
   intentsMissingDetails,
   listIntents,
   mergeIntentDetails,
+  policyBaseAbi,
   type PolicyClient,
   type PolicyViewState,
 } from "@mandate/shared";
@@ -120,4 +121,36 @@ export function seededRandom(seed: number) {
     return item;
   };
   return { next, int, chance, pick };
+}
+
+/** A proposal with any values the ABI can carry, as a stolen agent key would send it. */
+export interface RawProposal {
+  market: string;
+  category: number;
+  outcome: string;
+  isBuy: boolean;
+  amountCents: bigint;
+  limitPrice: bigint;
+}
+
+/**
+ * Sends `proposeTrade` with the agent's key and no offchain validation, the way an attacker holding the
+ * key would. `PolicyClient.proposeTrade` refuses such values before sending, so it cannot be used here.
+ * Returns the new intent's id.
+ */
+export async function proposeRaw(agent: PolicyClient, p: RawProposal): Promise<number> {
+  const wallet = agent.walletClient;
+  if (!wallet) throw new Error("the agent client has no wallet");
+  const id = await agent.getIntentCount();
+  const hash = await wallet.writeContract({
+    address: agent.address,
+    abi: policyBaseAbi,
+    functionName: "proposeTrade",
+    args: [p.market, p.category, p.outcome, p.isBuy, p.amountCents, p.limitPrice],
+    account: wallet.account,
+    chain: wallet.chain,
+  });
+  const receipt = await agent.publicClient.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+  if (receipt.status !== "success") throw new Error(`proposeTrade ${hash} reverted`);
+  return id;
 }
