@@ -284,6 +284,13 @@ async function main(): Promise<void> {
     "--port",
     String(consolePort),
   ];
+  if (!values.prod) {
+    // `next dev` keeps a compile cache between runs. After a pull that changes many modules or a
+    // reinstall, a stale cache made Turbopack restart a chunk on every page load, so every page
+    // reloaded in a loop (seen on 2026-11-15). Each run starts a new dev server anyway, so start it
+    // clean: the cost is a few seconds of compiling, which the warm-up below already waits for.
+    rmSync(join(ROOT, "dashboard", ".next", "dev"), { recursive: true, force: true });
+  }
   if (values.prod) {
     console.log("dev:stack: building the console (about a minute)...");
     const build = spawn("npm", ["run", "build", "-w", "@mandate/dashboard"], {
