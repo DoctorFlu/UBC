@@ -1,6 +1,9 @@
-import type { FeedHealth, FeedSource } from "@/lib/live/types";
+"use client";
+
+import { useAdvanced } from "@/lib/advanced/Advanced";
 import { cx } from "@/lib/cx";
 import { formatTimeUtc } from "@/lib/format";
+import type { FeedHealth, FeedSource } from "@/lib/live/types";
 
 import styles from "./LiveIndicator.module.css";
 
@@ -28,7 +31,10 @@ export interface LiveIndicatorProps {
   className?: string;
 }
 
-/** Where the console's events come from right now (the Stream webhook or the RPC poller) and whether it is healthy. */
+/**
+ * Whether the console's events are current: a lamp and one word. Advanced view also names where they
+ * come from right now (the Stream webhook or the RPC poller); the tooltip always says it.
+ */
 export function LiveIndicator({
   source,
   health,
@@ -37,8 +43,9 @@ export function LiveIndicator({
   compact = false,
   className,
 }: LiveIndicatorProps) {
+  const { advanced } = useAdvanced();
   const sourceName = sourceNames[source];
-  const title = [detail, lastEventAt ? `Last event ${formatTimeUtc(lastEventAt)}.` : null]
+  const title = [`${healthWords[health]} via the ${sourceName}.`, detail, lastEventAt ? `Last event ${formatTimeUtc(lastEventAt)}.` : null]
     .filter(Boolean)
     .join(" ");
   return (
@@ -51,7 +58,7 @@ export function LiveIndicator({
     >
       <span className={styles.lamp} aria-hidden />
       <span>{healthWords[health]}</span>
-      <span className={styles.detail}>{sourceName}</span>
+      {advanced ? <span className={styles.detail}>{sourceName}</span> : null}
       <span className="visually-hidden">. {detail}</span>
     </span>
   );
