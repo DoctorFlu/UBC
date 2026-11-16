@@ -121,6 +121,36 @@ Each is pinned by a test that runs against `Policy.sol`, so a deliberate change 
    `@mandate/shared` instead keeps a typed ABI that CI proves equal to the forge output, and reads the address from `POLICY_ADDRESS` (plus optional `POLICY_DEPLOY_BLOCK`).
    Please post the Arc testnet address and deploy block once deployed.
 
+## 5. Red-team findings for the contract owner
+
+`npm run redteam` attacks the mandate with the agent's own key, through the MCP server and straight at the contract.
+The full record, with transaction hashes, is in [redteam/REPORT.md](../redteam/REPORT.md).
+No attack changed a rule, a role, the pause switch or the budget, and every owner-only and executor-only call from the agent key reverted.
+The four points below are things the contract allows today that the owner of a mandate would probably not expect.
+None is fixed offchain, because only the contract can enforce them against a stolen agent key.
+They are listed with the smallest change that would close each one, most valuable first.
+
+1. **Splitting gets around the per-order rules** (`mcp.split-order`).
+   A $30 order is rejected, but two $15 orders are approved without the owner, because the max trade size and the approval threshold apply to each order alone.
+   Only the lifetime budget bounds the total.
+   A rolling cap would close it: for example, hold for approval once the buys approved without the owner in the last 24 hours exceed the approval threshold.
+2. **Sells have no cumulative cap** (`mcp.sell-outside-budget`, `chain.sells-past-budget`).
+   Sells do not count against the budget, so any number of them are approved, even with the budget used up, each up to the max trade size.
+   Only losses recorded later by the executor stop them, through the daily loss limit.
+   Smallest change: reject a sell unless the agent holds a filled buy on the same market and outcome of at least that size, or count sells against a separate cap.
+3. **The contract trusts the category argument** (`chain.mislabel-category`).
+   A Sports market sent with category 0 (Crypto) is approved.
+   Through the MCP server the category comes from Gemini, so this needs a stolen key, but then nothing onchain stops it.
+   A full fix needs a market registry or an attestation; the cheap mitigation is for the executor to refuse any intent whose category does not match the venue's listing, which we are adding offchain (issue #64).
+4. **Market, outcome and limit price are not validated** (`chain.limit-price-edges`, `chain.market-strings`; item 10 in section 3).
+   Empty and 16 KiB markets, an outcome of `MAYBE`, and limit prices of 0, 100 and 1,000,000 are all approved and stored.
+   Smallest change: require `1 <= limitPrice <= 99`, an outcome of `YES` or `NO`, and a market length between 1 and 128 bytes, and reject the rest with a reason string.
+   Without it a stolen key can also write arbitrary text into the audit log; the MCP server withholds such text from the model and the console is being hardened to flag it (issue #64).
+
+One more observation, not a contract bug: refused owner-only calls revert, so they leave a mined transaction but no event.
+The console's activity feed, which is built from events, therefore cannot show them.
+An `Unauthorized(address caller, bytes4 selector)` event is not possible on a revert, so this stays a report-only record unless the functions are changed to record and return instead of reverting.
+
 ## Conventions
 
 | Thing | Convention |

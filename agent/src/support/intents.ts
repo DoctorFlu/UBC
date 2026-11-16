@@ -6,6 +6,7 @@ import {
   type Intent,
   type IntentView,
 } from "@mandate/shared";
+import { isGeminiSymbol } from "../markets/gemini";
 import type { IntentRecord } from "../state/ledger";
 import { isoFromUnix } from "./format";
 import { reasonCode } from "./rules";
@@ -29,6 +30,21 @@ export const IntentRowSchema = z.object({
 });
 export type IntentRow = z.infer<typeof IntentRowSchema>;
 
+/**
+ * The market and outcome strings stored onchain are whatever the holder of the agent key sent. This
+ * server only ever sends Gemini symbols and YES or NO, so anything else was written around it (a
+ * stolen key) and may be text aimed at the model. It is withheld, never relayed.
+ */
+export function shownMarket(market: string): string {
+  return isGeminiSymbol(market)
+    ? market
+    : `(withheld: a ${Array.from(market).length}-character market that is not a Gemini symbol)`;
+}
+
+export function shownOutcome(outcome: string): string {
+  return outcome === "YES" || outcome === "NO" ? outcome : "(withheld: not YES or NO)";
+}
+
 /** One intent, merged from storage (authoritative), the event log (reason) and this server's memory (context). */
 export function intentRow(
   intent: Intent,
@@ -39,9 +55,9 @@ export function intentRow(
   const rejectionReason = intent.status === "rejected" ? (view?.reason ?? null) : null;
   return {
     id: intent.id,
-    market: intent.market,
+    market: shownMarket(intent.market),
     category: categoryLabel(intent.category),
-    outcome: intent.outcome,
+    outcome: shownOutcome(intent.outcome),
     side: intent.isBuy ? "buy" : "sell",
     amountCents: intent.amountCents,
     limitPrice: intent.limitPrice,

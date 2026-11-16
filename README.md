@@ -67,6 +67,7 @@ The agent talks only to the MCP server, the MCP server can only propose, and not
 | `streams/` | The QuickNode Stream: filter, configuration, management script, payload parser. |
 | `dashboard/` | The owner's console (Next.js). |
 | `devchain/` | A local chain with Arc's chain id, the simulated executor, and `npm run dev:stack`. |
+| `redteam/` | A scripted adversary that attacks the mandate through the MCP server and with the agent key. |
 | `shared/` | Types, the contract ABI, the TypeScript copy of the rules, and the API contracts between services. |
 | `docs/` | Design notes and verified findings for each integration. |
 
@@ -112,6 +113,7 @@ Enforced by the contract, for every proposal, whatever the agent says or is told
 
 Three roles, three keys: the **owner** sets rules and approves, the **agent** only proposes, the **executor** only places approved orders and records results.
 A stolen agent key gives an attacker nothing beyond what the mandate already allows.
+The red team (`npm run redteam`) attacks that claim and records what it finds in [redteam/REPORT.md](redteam/REPORT.md): with a stolen key the attacker cannot change a rule or role, but can mislabel a market's category, pick any limit price, and keep selling once the budget is used.
 
 Enforced by the MCP server, as a second layer:
 
@@ -199,6 +201,7 @@ Without Grok Bot, `npm run mcp:e2e` drives the same tools end to end with a scri
 npm run check     # lint, format, types and unit tests
 npm run mcp:e2e   # the agent flow against a real local chain, both contract variants
 npm run e2e       # the console in a real browser against a real local chain
+npm run redteam   # a scripted adversary attacks the mandate, both contract variants
 ```
 
 Configuration is described in [docs/configuration.md](docs/configuration.md).

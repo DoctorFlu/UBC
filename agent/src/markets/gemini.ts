@@ -24,6 +24,13 @@ export interface ResolvedMarket {
 /** Gemini symbols are `GEMI-<event ticker>-<contract ticker>`, and event tickers may contain dashes. */
 const SYMBOL = /^GEMI-[A-Za-z0-9._-]+$/;
 const MAX_RESOLVE_ATTEMPTS = 4;
+/** The longest market the trade tools accept (`tradeArgs.market`). */
+const MAX_SYMBOL_LENGTH = 128;
+
+/** Whether a string has the shape of a Gemini instrument symbol, the only markets this server proposes. */
+export function isGeminiSymbol(value: string): boolean {
+  return value.length <= MAX_SYMBOL_LENGTH && SYMBOL.test(value);
+}
 
 /**
  * Candidate event tickers for a symbol, longest first: the contract ticker is the last segment
