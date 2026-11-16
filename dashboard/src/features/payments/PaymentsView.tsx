@@ -182,7 +182,7 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
           />
         </StatGroup>
         <p className={styles.note}>
-          Paid by <HexValue value={budget.buyerAddress} kind="address" />, separate from the trading budget.
+          <HexValue label="Buyer wallet" value={budget.buyerAddress} kind="address" />
         </p>
       </Card>
     </div>
