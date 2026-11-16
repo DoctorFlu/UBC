@@ -16,8 +16,14 @@ const plan = {
   ...sampleHedgePlan,
   signal: { ...signalUse(), receiptId: RECEIPT.toUpperCase().replace("0X", "0x") },
 };
-const view = { planId: plan.planId, plan };
-const unsignedView = { planId: sampleHedgePlan.planId, plan: { ...sampleHedgePlan, signal: undefined } };
+// The test chain's blocks start at 2026-11-15T13:20:11Z: the plan is made just before.
+const made = { createdAt: "2026-11-15T13:19:00.000Z", storedAt: "2026-11-15T13:19:01.000Z" };
+const view = { planId: plan.planId, plan, ...made };
+const unsignedView = {
+  planId: sampleHedgePlan.planId,
+  plan: { ...sampleHedgePlan, signal: undefined },
+  ...made,
+};
 
 function signalUse() {
   return {
@@ -271,6 +277,17 @@ describe("evidenceChain", () => {
       0: verified("plan_someone_else"),
     });
     expect(evidenceChain(view, chain, [payment]).intents).toEqual([]);
+  });
+
+  it("does not take an unsealed intent proposed before the plan was made, however well it matches", () => {
+    const chain = chainOf([{ market: order(0).instrumentSymbol, amountCents: order(0).amountCents }]);
+    const later = { ...view, createdAt: "2026-11-15T14:00:00.000Z", storedAt: "2026-11-15T14:00:01.000Z" };
+    const evidence = evidenceChain(later, chain, [payment]);
+    expect(evidence.intents).toEqual([]);
+    expect(evidence.status).toBe("not_executed");
+    // A wrong clock on one side never hides an intent: the earlier of the two times counts.
+    const skewed = { ...later, createdAt: "2026-11-15T13:00:00.000Z" };
+    expect(evidenceChain(skewed, chain, [payment]).intents).toHaveLength(1);
   });
 
   it("flags reasons that do not name the plan's paid signal", () => {

@@ -7,8 +7,8 @@
  * "verified" only when every intent in it has such a reason, and each names the plan's paid signal too
  * when the plan was built on one. Everything short of that is shown as it is, never smoothed over:
  * - a reason whose stored document no longer hashes (`tampered`) and claims this plan breaks the chain;
- * - an intent with no checkable reason that matches one of the plan's orders by market and amount
- *   leaves it unproven;
+ * - an intent with no checkable reason, proposed after the plan was made, that matches one of its
+ *   orders by market and amount leaves it unproven;
  * - a verified reason that does not name the plan's receipt leaves the signal unlinked;
  * - a plan no intent carried out has nothing to verify yet.
  *
@@ -28,7 +28,8 @@ export type SealState = "verified" | "tampered" | "not_stored" | "none";
  * Why an intent is in this plan's chain:
  * - `cites`: its verified reason names the plan.
  * - `claims`: its stored reason names the plan but no longer hashes, so the claim proves nothing.
- * - `matches`: it has no reason the console can check, and its market and amount match an order.
+ * - `matches`: it has no reason the console can check, it was proposed after the plan was made, and its
+ *   market and amount match an order.
  */
 export type Attribution = "cites" | "claims" | "matches";
 
@@ -162,8 +163,17 @@ function eventsByIntent(events: readonly PolicyEvent[]): Map<number, PolicyEvent
   return byIntent;
 }
 
+/**
+ * When the plan existed, in unix seconds: the earlier of the agent's own time and the console's, so a
+ * wrong clock on either side never hides an intent. Null when neither parses.
+ */
+function planMadeAt(view: Pick<AgentPlanView, "createdAt" | "storedAt">): number | null {
+  const times = [Date.parse(view.createdAt), Date.parse(view.storedAt)].filter(Number.isFinite);
+  return times.length === 0 ? null : Math.floor(Math.min(...times) / 1000);
+}
+
 export function evidenceChain(
-  view: Pick<AgentPlanView, "planId" | "plan">,
+  view: Pick<AgentPlanView, "planId" | "plan" | "createdAt" | "storedAt">,
   chain: Pick<ChainView, "intents" | "events" | "sealed"> | null,
   payments: readonly SignalPaymentView[],
 ): EvidenceChain {
@@ -182,6 +192,7 @@ export function evidenceChain(
     receipts: string[] | null;
   }[] = [];
   const unchecked: IntentView[] = [];
+  const madeAt = planMadeAt(view);
   for (const intent of intents) {
     const reason = sealed[intent.id];
     if (reason?.status === "verified") {
@@ -197,7 +208,8 @@ export function evidenceChain(
       if (reason.claims.planId === planId) {
         named.push({ intent, attribution: "claims", seal: "tampered", receipts: null });
       }
-    } else {
+    } else if (madeAt === null || intent.proposedAt >= madeAt) {
+      // An intent proposed before the plan existed cannot have carried it out.
       unchecked.push(intent);
     }
   }
