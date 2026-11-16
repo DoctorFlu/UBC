@@ -63,6 +63,8 @@ for (const scheme of schemes) {
             expect(clipped).toEqual([]);
           }
           if (route.console) {
+            // The page reports that it hydrated; until it does, the phone menu waits (lib/page-hydration.ts).
+            await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
             // The badge renders once for wide screens and once for phones; one of them shows.
             await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toHaveCount(1);
           } else {

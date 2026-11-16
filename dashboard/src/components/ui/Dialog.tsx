@@ -20,6 +20,7 @@ import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
+import { usePageHydrated } from "@/lib/page-hydration";
 
 import styles from "./Dialog.module.css";
 
@@ -38,9 +39,13 @@ export interface DialogProps {
   className?: string;
 }
 
-/** A modal for tasks that need protected focus: the page goes inert and focus returns to the opener. */
+/**
+ * A modal for tasks that need protected focus: the page goes inert and focus returns to the opener.
+ * One asked to open before the page below has hydrated (the phone menu, the wallet details) opens as
+ * soon as it has, never earlier: see lib/page-hydration.ts.
+ */
 export function Dialog({
-  open,
+  open: wanted,
   onClose,
   title,
   description,
@@ -50,6 +55,8 @@ export function Dialog({
   lightDismiss = true,
   className,
 }: DialogProps) {
+  const pageHydrated = usePageHydrated();
+  const open = wanted && pageHydrated;
   const onOpenChange = (next: boolean) => {
     if (!next) onClose();
   };
