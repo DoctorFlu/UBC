@@ -1,0 +1,107 @@
+.view {
+  display: flex;
+  flex-direction: column;
+}
+
+.needs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Held intents: white schedule cards, two up when there is room. */
+.heldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.held {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.held > [data-testid="flagged-badge"] {
+  align-self: flex-start;
+}
+
+.heldHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.heldAmount {
+  flex: none;
+  font-size: var(--text-lg);
+  font-stretch: var(--stretch-condensed);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1.2;
+}
+
+.heldMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.held > :last-child {
+  margin-top: var(--space-2);
+}
+
+/* Other things waiting: one quiet row each, with the action that opens the page that signs it. */
+.tasks {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.task {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5);
+}
+
+.task + .task {
+  border-top: 1px solid var(--color-rule);
+}
+
+.taskIcon {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  color: var(--color-text-muted);
+}
+
+.taskText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.taskTitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.taskMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

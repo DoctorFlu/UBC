@@ -16,7 +16,7 @@
 }
 
 .title {
-  font-size: var(--text-2xl);
+  font-size: var(--text-xl);
   font-stretch: var(--stretch-condensed);
   font-weight: var(--weight-semibold);
   letter-spacing: -0.015em;

@@ -3,6 +3,7 @@ import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
 import { StatusChip } from "@/components/ui/StatusChip";
+import { Advanced } from "@/lib/advanced/Advanced";
 
 import { formatCount, formatUsdCents } from "@/lib/format";
 import { categoryName, describeMarket } from "@/lib/markets";
@@ -10,7 +11,7 @@ import { categoryName, describeMarket } from "@/lib/markets";
 import styles from "./domain.module.css";
 
 /**
- * A market as the owner reads it: "BTC $65,000 or above", then the settle time and the exact symbol.
+ * A market as the owner reads it: "BTC $65,000 or above", then the settle time; Advanced view adds the exact symbol.
  * Text that is not a Gemini symbol (only a stolen agent key can store one) is never shown raw here: it
  * reads "Not a Gemini market" with its length and a short quoted preview; the intent page has the rest.
  */
@@ -47,9 +48,11 @@ export function MarketName({ symbol, category }: { symbol: string | null; catego
       <span className={styles.marketTitle}>{market.title}</span>
       {sub ? <span className={styles.marketMeta}>{sub}</span> : null}
       {market.title === symbol ? null : (
-        <span className={styles.marketSymbol} translate="no">
-          {symbol}
-        </span>
+        <Advanced>
+          <span className={styles.marketSymbol} translate="no">
+            {symbol}
+          </span>
+        </Advanced>
       )}
     </span>
   );
