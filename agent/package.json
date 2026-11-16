@@ -5,7 +5,8 @@
   "type": "module",
   "description": "MCP server that Grok Bot connects to.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./testing/fake-console.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

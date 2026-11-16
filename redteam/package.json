@@ -1,0 +1,22 @@
+{
+  "name": "@mandate/redteam",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scripted adversary that attacks the mandate through the MCP server and with the agent key.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.8",
+    "@mandate/agent": "*",
+    "@mandate/devchain": "*",
+    "@mandate/gemini": "*",
+    "@mandate/shared": "*",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "viem": "^2.57.20"
+  }
+}
