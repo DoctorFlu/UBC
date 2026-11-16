@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { type Page, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { createPublicClient, http, isAddressEqual } from "viem";
 
 import { auditRows } from "../src/features/audit/audit-rows";
@@ -9,12 +9,7 @@ import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
 import { DEMO_RECEIPT, snapshot } from "./support/console";
-
-/**
- * Chrome's "preloaded but not used within a few seconds" hint is a timing report, not a defect:
- * it fires when a loaded machine makes `next dev` slow to serve a page. Everything else counts.
- */
-const timingHint = /was preloaded using link preload but not used within a few seconds/;
+import { watchConsole } from "./support/problems";
 
 /** The cells of one CSV line, with RFC 4180 quoting (the audit export has no line breaks in cells). */
 function csvCells(line: string): string[] {
@@ -37,19 +32,6 @@ function csvCells(line: string): string[] {
   }
   cells.push(cell);
   return cells;
-}
-
-/** Collects console errors, warnings (hydration mismatches are warnings) and uncaught errors. */
-function watchConsole(page: Page) {
-  const problems: string[] = [];
-  page.on("console", (message) => {
-    if (timingHint.test(message.text())) return;
-    if (message.type() === "error" || message.type() === "warning") {
-      problems.push(`${message.type()}: ${message.text()}`);
-    }
-  });
-  page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
-  return problems;
 }
 
 for (const scheme of schemes) {
@@ -444,7 +426,7 @@ test.describe("seeded demo", () => {
     await expect(shown.nth(1)).toContainText("Rejected by owner Intent #3");
 
     const download = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export 2 rows as CSV" }).click();
+    await page.getByRole("button", { name: "Export CSV, 2 rows" }).click();
     const file = await (await download).path();
     const lines = (await readFile(file, "utf8")).trimEnd().split("\r\n");
     expect(lines).toHaveLength(3);
