@@ -1,14 +1,13 @@
 import { CATEGORY_LABELS, type IntentView, categoriesFromMask } from "@mandate/shared";
 import type { Address } from "viem";
 
-import { MarketName } from "@/components/domain/Intent";
+import { MarketName, amountLabel, IntentVerdict } from "@/components/domain/Intent";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
-import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import {
   formatCount,
@@ -53,14 +52,15 @@ const columns: readonly Column<IntentView>[] = [
   {
     key: "amount",
     header: "Amount",
-    cell: (intent) => (intent.amountCents === null ? "Unknown" : <Money cents={intent.amountCents} />),
+    cell: (intent) =>
+      intent.amountCents === null ? amountLabel(intent) : <Money cents={intent.amountCents} />,
     align: "end",
     nowrap: true,
   },
   {
     key: "verdict",
     header: "Verdict",
-    cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
+    cell: (intent) => <IntentVerdict intent={intent} />,
   },
   {
     key: "tx",

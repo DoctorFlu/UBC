@@ -2,7 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Category } from "@mandate/shared";
+import { DEMO_POLICY } from "@mandate/devchain";
+import { Category, policyBaseAbi, rulesToChain } from "@mandate/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { ConsoleSnapshot } from "@/lib/live/types";
@@ -190,6 +191,69 @@ describe("ConsoleService when the deployment changes", () => {
     } finally {
       await service.stop();
       await second?.stop();
+    }
+  }, 60_000);
+});
+
+describe("ConsoleService with onchain values offchain code cannot hold", () => {
+  it("keeps reading past them: intents are kept and flagged, an undecodable rules event is skipped and reported", async () => {
+    const chain = await startTestChain({ contract: "production" });
+    const dataDir = mkdtempSync(join(tmpdir(), "mandate-console-"));
+    const service = startService(chain, dataDir);
+    const max = 2n ** 256n - 1n;
+    const write = async (client: TestChain["agent"], call: { functionName: string; args: unknown[] }) => {
+      const wallet = client.walletClient;
+      if (!wallet) throw new Error("no wallet");
+      const hash = await wallet.writeContract({
+        address: chain.address,
+        abi: policyBaseAbi,
+        account: wallet.account,
+        chain: wallet.chain,
+        ...call,
+      } as never);
+      await client.publicClient.waitForTransactionReceipt({ hash });
+    };
+    try {
+      await caughtUp(service, chain);
+      // With a stolen agent key: a sell at limit 2^256 - 1 (approved) and a buy of 2^256 - 1 cents (rejected).
+      const sellId = await chain.agent.getIntentCount();
+      await write(chain.agent, {
+        functionName: "proposeTrade",
+        args: [BTC_ABOVE_65K, Category.Crypto, "NO", false, 100n, max],
+      });
+      await write(chain.agent, {
+        functionName: "proposeTrade",
+        args: [BTC_ABOVE_65K, Category.Crypto, "NO", true, max, 31n],
+      });
+      const flagged = await caughtUp(service, chain);
+      expect(flagged.chain?.intents.find((intent) => intent.id === sellId)).toMatchObject({
+        status: "approved",
+        limitPrice: null,
+        outOfRange: { limitPrice: max.toString() },
+      });
+      expect(flagged.chain?.intents.find((intent) => intent.id === sellId + 1)).toMatchObject({
+        status: "rejected",
+        amountCents: null,
+        outOfRange: { amountCents: max.toString() },
+      });
+
+      // Rules only the owner sets: such an event cannot be represented, so it is skipped and said, and the
+      // scanner still moves on to the next proposal.
+      await write(chain.user, {
+        functionName: "setPolicy",
+        args: [{ ...rulesToChain(DEMO_POLICY), budgetCents: max }],
+      });
+      const next = await chain.agent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 500 });
+      await expect
+        .poll(() => service.snapshot().chain?.intents.some((intent) => intent.id === next.intentId), {
+          timeout: 15_000,
+        })
+        .toBe(true);
+      await expect.poll(() => service.snapshot().feed.health).toBe("lagging");
+      expect(service.snapshot().feed.detail).toContain("1 Policy event");
+    } finally {
+      await service.stop();
+      await chain.stop();
     }
   }, 60_000);
 });

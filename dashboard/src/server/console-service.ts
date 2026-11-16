@@ -335,6 +335,12 @@ export class ConsoleService {
           ? "No Stream delivery yet. The RPC poller keeps the console current every 15 s."
           : "No Stream delivery for over 30 s. The RPC poller keeps the console current every 15 s.";
     }
+    const skipped = this.session?.scanner.skipped.describe() ?? null;
+    if (skipped !== null) {
+      // Up to date, but not every event could be read: shown, never silent.
+      health = "lagging";
+      detail = skipped;
+    }
     this.setFeed({ health, detail, lastSyncAt: new Date().toISOString(), syncedBlock: block });
   }
 
@@ -373,6 +379,9 @@ export class ConsoleService {
       const events = decodePolicyLogs(logs, {
         address: session.deployment.address,
         blockTimestamps: await blockTimestamps(session.client, logs),
+        onUndecodable: (log) => {
+          session.scanner.skipped.note(log);
+        },
       });
       const added = this.events.insert(session.id, events, "stream");
       stored = added.length;

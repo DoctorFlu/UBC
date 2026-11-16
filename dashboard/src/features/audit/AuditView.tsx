@@ -4,7 +4,7 @@ import { describeReason } from "@mandate/shared";
 import { ScrollText } from "lucide-react";
 import { useState } from "react";
 
-import { IntentLink } from "@/components/domain/Intent";
+import { FlaggedBadge, IntentLink } from "@/components/domain/Intent";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Field";
@@ -65,7 +65,12 @@ const columns: readonly Column<AuditRow>[] = [
             </>
           )}
         </span>
-        <span>{row.summary}</span>
+        <span className={styles.summary}>{row.summary}</span>
+        {row.flags.length > 0 ? (
+          <span className={styles.flagged}>
+            <FlaggedBadge flags={row.flags} />
+          </span>
+        ) : null}
         <span className={`mono ${styles.eventCode}`}>{row.event}</span>
       </span>
     ),

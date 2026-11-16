@@ -26,6 +26,15 @@
   font-weight: var(--weight-semibold);
 }
 
+/* Summaries are built from onchain values: a long symbol must wrap, never widen the table. */
+.summary {
+  overflow-wrap: anywhere;
+}
+
+.flagged {
+  display: flex;
+}
+
 /* The contract's own event name, for matching a row against the explorer's decoded logs. */
 .eventCode {
   font-size: var(--text-xs);

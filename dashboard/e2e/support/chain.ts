@@ -17,7 +17,7 @@ import {
   startAnvil,
   writeDeploymentFile,
 } from "@mandate/devchain";
-import { Category, type PolicyClient, type TradeIntentInput } from "@mandate/shared";
+import { Category, type PolicyClient, type TradeIntentInput, policyBaseAbi } from "@mandate/shared";
 import type { Address } from "viem";
 
 export const DASHBOARD_DIR = fileURLToPath(new URL("../..", import.meta.url));
@@ -91,6 +91,37 @@ export function noBuy(
     amountCents,
     limitPrice,
   } satisfies TradeIntentInput;
+}
+
+/** A proposal with any values the ABI can carry, as a stolen agent key would send it. */
+export interface HostileProposal {
+  market: string;
+  category: number;
+  outcome: string;
+  isBuy: boolean;
+  amountCents: bigint;
+  limitPrice: bigint;
+}
+
+/**
+ * Sends `proposeTrade` with the agent's key and none of the MCP server's checks, the way an attacker
+ * holding the key would (`PolicyClient.proposeTrade` refuses such values before sending). Returns the id.
+ */
+export async function proposeHostile(chain: TestChain, p: HostileProposal): Promise<number> {
+  const wallet = chain.agent.walletClient;
+  if (!wallet) throw new Error("the agent client has no wallet");
+  const id = await chain.agent.getIntentCount();
+  const hash = await wallet.writeContract({
+    address: chain.address,
+    abi: policyBaseAbi,
+    functionName: "proposeTrade",
+    args: [p.market, p.category, p.outcome, p.isBuy, p.amountCents, p.limitPrice],
+    account: wallet.account,
+    chain: wallet.chain,
+  });
+  const receipt = await chain.agent.publicClient.waitForTransactionReceipt({ hash, pollingInterval: 50 });
+  if (receipt.status !== "success") throw new Error(`proposeTrade ${hash} reverted`);
+  return id;
 }
 
 /**
