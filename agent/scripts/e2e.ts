@@ -4,11 +4,11 @@
  *
  * For each contract it starts a local chain (anvil, a fresh Policy contract with the demo rules),
  * an in-memory console on a free port, and the real MCP server as a child process on another
- * free port (never 8787, 8788 or 3000). It then drives the server over HTTP with the official MCP
+ * free port (never 8545, 8787, 8788 or 3000, so a live local stack keeps running alongside). It then drives the server over HTTP with the official MCP
  * SDK client, opening a fresh session for every tool call as Grok Bot does, against live public
  * Gemini market data. It checks the three demo cases (approved, blocked with the contract's
- * reason, waiting for the owner), the sealed decision contexts, and that nothing secret reaches
- * the server's logs.
+ * reason, waiting for the owner), whole-contract sizing of a single trade, the sealed decision
+ * contexts, and that nothing secret reaches the server's logs.
  *
  * Every key here is a public anvil test key or a random token made for this run; the token is
  * written to a temporary env file (mode 600) and never printed or passed on a command line.
@@ -37,7 +37,7 @@ import { ENV_KEYS } from "../src/config";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
 
 const AGENT_DIR = fileURLToPath(new URL("..", import.meta.url));
-const RESERVED_PORTS = new Set([8787, 8788, 3000]);
+const RESERVED_PORTS = new Set([8545, 8787, 8788, 3000]);
 
 type Structured = Record<string, unknown>;
 interface CallResult {
@@ -345,6 +345,42 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
         `${label}: contextHashRecorded is ${String(extended)}`,
       );
     }
+
+    process.stdout.write("\n-- whole contracts\n");
+    const odd = { ...trade, limitPrice: 30, amountCents: 1_000 };
+    const preview = await run("simulate_trade", {
+      market: odd.market,
+      outcome: odd.outcome,
+      limitPrice: odd.limitPrice,
+      amountCents: odd.amountCents,
+    });
+    check(
+      field(preview.structuredContent, "simulation", "trade", "amountCents") === 990 &&
+        field(preview.structuredContent, "sizing", "contracts") === 33,
+      "simulate_trade sizes $10.00 at 30c as 33 whole contracts, $9.90",
+    );
+    const rounded = await run("propose_trade", { ...odd, reason: "Owner asked for $10 at 30c." });
+    check(
+      field(rounded.structuredContent, "proposal", "trade", "amountCents") === 990 &&
+        field(rounded.structuredContent, "sizing", "roundedDown") === true,
+      "propose_trade rounds $10.00 at 30c down to $9.90 and says so",
+    );
+    const onchain = (await publicClient.readContract({
+      address: chain.deployment.address,
+      abi: policyAbi,
+      functionName: "getIntent",
+      args: [BigInt(Number(field(rounded.structuredContent, "proposal", "intentId")))],
+    })) as { amountCents: bigint; limitPrice: bigint };
+    check(
+      onchain.amountCents === 990n && onchain.amountCents % onchain.limitPrice === 0n,
+      `the intent onchain is a whole-contract amount (${onchain.amountCents} cents at ${onchain.limitPrice}c)`,
+    );
+    const tiny = await run("propose_trade", { ...odd, amountCents: 20, reason: "Owner asked for 20 cents." });
+    check(
+      field(tiny.structuredContent, "reasons", 0, "code") === "BELOW_ONE_CONTRACT" &&
+        field(tiny.structuredContent, "proposal") === null,
+      "less than one contract is not proposed",
+    );
 
     process.stdout.write("\n-- execute the plan (a different MCP session from plan_hedge)\n");
     if (
