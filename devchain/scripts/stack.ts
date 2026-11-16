@@ -6,7 +6,8 @@
  *   2. the paid signal API,
  *   3. the console,
  *   4. the MCP server, acting as the devchain agent account,
- *   5. the simulated executor, which fills approved intents.
+ *   5. the simulated executor, which fills approved intents,
+ *   6. the landing page, which links to this console.
  *
  * Everything the processes must agree on (contract address, RPC, the console's service token, the
  * agent key) is passed to them in their environment, so nothing has to be edited in `.env` to try the
@@ -17,11 +18,14 @@
  *   --contract reference|production  Which Policy contract to deploy (default reference: it has the
  *                                    requested extensions, so reasons are sealed onchain).
  *   --blank                          Deploy without rules, to rehearse creating the first mandate.
- *   --prod                           Build the console and serve the build instead of `next dev`.
+ *   --prod                           Build the console and the landing page and serve the builds instead
+ *                                    of `next dev`.
  *   --no-executor                    Do not start the simulated executor.
+ *   --no-site                        Do not start the landing page.
  *   --watch                          Restart the MCP server when its code changes. The chain and the console
  *                                    keep their state; the server forgets its plans, like any restart.
  *   --console-port <port>            Console port (default 3000).
+ *   --site-port <port>               Landing page port (default 3001).
  *   --mcp-public-url <url>           Public address of the MCP server (the tunnel), shown on the console's
  *                                    Setup page. Defaults to MCP_PUBLIC_URL.
  *
@@ -61,8 +65,10 @@ const { values } = parseArgs({
     blank: { type: "boolean", default: false },
     prod: { type: "boolean", default: false },
     "no-executor": { type: "boolean", default: false },
+    "no-site": { type: "boolean", default: false },
     watch: { type: "boolean", default: false },
     "console-port": { type: "string", default: "3000" },
+    "site-port": { type: "string", default: "3001" },
     "mcp-public-url": { type: "string" },
   },
 });
@@ -76,10 +82,14 @@ if (!isPolicyContractKind(values.contract)) {
   fail(`--contract must be one of ${POLICY_CONTRACTS.join(", ")}, got "${values.contract}"`);
 }
 const contract: PolicyContractKind = values.contract;
-const consolePort = Number(values["console-port"]);
-if (!Number.isInteger(consolePort) || consolePort < 1 || consolePort > 65_535) {
-  fail("--console-port must be a TCP port");
+function tcpPort(option: "console-port" | "site-port"): number {
+  const port = Number(values[option]);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) fail(`--${option} must be a TCP port`);
+  return port;
 }
+const consolePort = tcpPort("console-port");
+const sitePort = tcpPort("site-port");
+const withSite = !values["no-site"];
 
 // The same file the MCP server and the signal API read, so the ports below are the ones they will use.
 loadEnv();
@@ -95,6 +105,7 @@ if (mcpPublicUrl !== undefined && !URL.canParse(mcpPublicUrl)) fail("--mcp-publi
 const consoleUrl = `http://localhost:${String(consolePort)}`;
 const mcpUrl = `http://127.0.0.1:${String(mcpPort)}`;
 const signalsUrl = `http://localhost:${String(signalsPort)}`;
+const siteUrl = `http://localhost:${String(sitePort)}`;
 
 function portInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -120,6 +131,7 @@ const ports = [
   { name: "the signal API", port: signalsPort },
   { name: "the console", port: consolePort },
   { name: "the MCP server", port: mcpPort },
+  ...(withSite ? [{ name: "the landing page", port: sitePort }] : []),
 ];
 for (const { name, port } of ports) {
   if (await portInUse(port)) {
@@ -318,10 +330,33 @@ async function main(): Promise<void> {
     start("executor", ["run", "executor", "-w", "@mandate/devchain"], localChain);
   }
 
+  if (withSite) {
+    // Its links point at this console and at this chain's agent, whose public scorecard it shows.
+    const siteEnv = { NEXT_PUBLIC_APP_URL: consoleUrl, NEXT_PUBLIC_SCORECARD_AGENT: record.agent };
+    if (values.prod) {
+      console.log("dev:stack: building the landing page...");
+      const build = spawn("npm", ["run", "build", "-w", "@mandate/site"], {
+        cwd: ROOT,
+        env: { ...process.env, ...siteEnv },
+        stdio: "inherit",
+      });
+      const code = await new Promise<number | null>((resolve) => build.once("exit", resolve));
+      if (code !== 0) throw new Error(`the landing page build failed with code ${String(code)}`);
+      start("site", ["run", "serve", "-w", "@mandate/site", "--", "--port", String(sitePort)], {});
+    } else {
+      start(
+        "site",
+        ["exec", "-w", "@mandate/site", "--", "next", "dev", "--port", String(sitePort)],
+        siteEnv,
+      );
+    }
+  }
+
   const asAgent = { headers: { authorization: `Bearer ${serviceToken}` } };
   await Promise.all([
     waitFor("the signal API", `${signalsUrl}/health`),
     waitFor("the MCP server", `${mcpUrl}/health`),
+    ...(withSite ? [waitFor("the landing page", `${siteUrl}/`)] : []),
     // `next dev` compiles a route on its first request; do that now so the agent's first calls are fast.
     waitFor("the console", `${consoleUrl}/api/console/snapshot`).then(() =>
       Promise.all([
@@ -341,6 +376,7 @@ async function main(): Promise<void> {
   console.log(`
 Mandate local stack is running (development only).
   Console     ${consoleUrl}  (owner signs with the test signer, anvil account 0)
+  Site        ${withSite ? siteUrl : "not started"}
   MCP server  ${mcpUrl}/mcp  (${reach})
   Signal API  ${signalsUrl}
   Chain       ${record.rpcUrl}  Policy ${record.address} (${record.contract})
