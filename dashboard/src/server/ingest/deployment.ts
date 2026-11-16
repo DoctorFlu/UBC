@@ -42,6 +42,21 @@ export function deploymentFileStamp(env: EnvVars = process.env): number | null {
 }
 
 /**
+ * `CONSOLE_BROWSER_RPC_URL`: where the browser reaches the local devchain when that is not the address the
+ * deployment file records. On a laptop the browser uses the same loopback RPC as the server; on a host the
+ * server reaches anvil on a private network, and the browser goes through the console's reverse proxy.
+ * Throws on a value that is not an http(s) URL, so a typo is reported instead of breaking the wallet.
+ */
+function browserRpcUrl(env: EnvVars): string | null {
+  const value = env.CONSOLE_BROWSER_RPC_URL?.trim();
+  if (!value) return null;
+  if (!URL.canParse(value) || !/^https?:$/.test(new URL(value).protocol)) {
+    throw new Error("CONSOLE_BROWSER_RPC_URL must be an http(s) URL");
+  }
+  return value;
+}
+
+/**
  * Which Policy contract the console reads, by the same rules every package uses
  * (`resolvePolicyDeployment`): `POLICY_ADDRESS` means Arc testnet, otherwise the devchain's deployment
  * file. The browser gets Arc's public RPC, never `ARC_RPC_URL`, which may carry a provider key.
@@ -74,7 +89,7 @@ export function resolveDeployment(env: EnvVars = process.env): DeploymentResolut
         kind: "local",
         chainId: deployment.chain.id,
         name: "Local dev chain",
-        rpcUrl: deployment.rpcUrl,
+        rpcUrl: browserRpcUrl(env) ?? deployment.rpcUrl,
         explorerUrl: null,
       },
     };
