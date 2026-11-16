@@ -5,7 +5,18 @@
  */
 import { type Chain, defineChain } from "viem";
 
-import type { ConsoleNetwork } from "@/lib/live/types";
+import type { ConsoleNetwork, NetworkKind } from "@/lib/live/types";
+
+/** The short tag beside the logo, from the chain the console actually resolved. */
+export const NETWORK_TAGS: Record<NetworkKind, string> = { local: "Local", "arc-testnet": "Arc testnet" };
+
+/**
+ * Whether fills are simulated. On the local devchain the executor is the devchain's simulator, so a
+ * recorded fill never touched an exchange; elsewhere the contract only knows the executor recorded it.
+ */
+export function fillsAreSimulated(network: Pick<ConsoleNetwork, "kind">): boolean {
+  return network.kind === "local";
+}
 
 /** A viem chain for the network: the RPC the browser may use and, on Arc, the explorer. */
 export function viemChain(network: ConsoleNetwork): Chain {

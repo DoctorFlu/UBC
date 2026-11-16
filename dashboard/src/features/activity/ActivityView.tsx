@@ -5,6 +5,7 @@ import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { IntentLink, MarketName, OrderAmount } from "@/components/domain/Intent";
+import { SimulatedFill } from "@/components/domain/SimulatedFill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
@@ -18,6 +19,7 @@ import { formatCount, formatTimeUtc, formatUsdCents } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, countByStatus, isoFromUnix, newestFirst, todayUsage } from "@/lib/live/derive";
 import type { ConsoleSnapshot } from "@/lib/live/types";
+import { fillsAreSimulated } from "@/lib/network";
 
 import styles from "./activity.module.css";
 
@@ -112,6 +114,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
     (sum, intent) => sum + (intent.status === "executed" ? (intent.filledCents ?? 0) : 0),
     0,
   );
+  const executed = countByStatus(intents, ["executed"]);
 
   const tabs: TabItem[] = filters.map((filter) => {
     const rows = intents.filter((intent) => filter.statuses.includes(intent.status));
@@ -159,9 +162,16 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           hint={`${formatCount(countByStatus(intents, ["rejected"]))} rejected in all`}
         />
         <Stat
-          label="Filled on Gemini"
+          label="Filled"
           value={formatUsdCents(filledCents)}
-          hint={`${formatCount(countByStatus(intents, ["executed"]))} orders`}
+          hint={
+            <>
+              {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded`}
+              {fillsAreSimulated(snapshot.network) && executed > 0 ? (
+                <SimulatedFill className={styles.statMarker} />
+              ) : null}
+            </>
+          }
         />
       </StatGroup>
 

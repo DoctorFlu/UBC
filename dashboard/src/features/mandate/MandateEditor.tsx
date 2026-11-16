@@ -18,6 +18,7 @@ import { Field, Input } from "@/components/ui/Field";
 import { Toggle } from "@/components/ui/Toggle";
 import { formatUsdCents, parseUsdToCents } from "@/lib/format";
 import { ownerBlockedReason, useOwnerAccess } from "@/lib/owner/access";
+import { useHydrated } from "@/lib/useHydrated";
 
 import styles from "./mandate.module.css";
 import { PolicyReview } from "./PolicyReview";
@@ -74,6 +75,7 @@ export interface MandateEditorProps {
 export function MandateEditor({ rules, version }: MandateEditorProps) {
   const access = useOwnerAccess();
   const blocked = ownerBlockedReason(access);
+  const hydrated = useHydrated();
   const base = rules ?? FIRST_MANDATE;
   const [draft, setDraft] = useState(() => draftFrom(base));
   // The review dialog's title, fixed when it opens: signing a first mandate must not retitle the
@@ -200,7 +202,7 @@ export function MandateEditor({ rules, version }: MandateEditorProps) {
               type="submit"
               variant="primary"
               icon={<PenLine aria-hidden />}
-              disabled={changes.length === 0 || hasErrors}
+              disabled={!hydrated || changes.length === 0 || hasErrors}
             >
               Review and sign
             </Button>

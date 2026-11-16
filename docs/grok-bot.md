@@ -44,7 +44,14 @@ It is created by asking a Bot to save a process as a named skill, and it is shar
 A useful skill states when to use it, required inputs and access, the sequence of work, how to validate the result, what to return, and what requires approval.
 Source: https://docs.x.ai/grok-bot/skills-routines-and-automations.md
 
-We ship the text of our skill in the repo (issue #12) and ask the Bot to save it.
+We ship the text of our skill in the repo (`agent/grok/skill.md`, issue #12).
+
+Checked live on 2026-11-15:
+
+- A skill can also be created by hand under Settings, Skills, New Skill. The form takes a name in kebab case, a description and Markdown instructions; pasted Markdown is rendered as headings and lists.
+- The Grok Bot chat thread does not see that skill. Asked directly, the Bot answered that its skill list was empty.
+- A new automation lists the skill and selects it by default, next to the Mandate connector.
+- So in chat the Bot works from the MCP server's `instructions` and the tool descriptions only. Anything it must do in chat belongs in `agent/src/instructions.ts`; the skill serves the routine.
 
 ## Routines
 
@@ -88,11 +95,22 @@ What exists:
 Open question for the sponsor: which export format the Grok Bot bounty accepts.
 Fallbacks: ask the Bot to write the full conversation to a file and download it, or capture the chat as a PDF.
 
-## Still to verify by hand (issue #4)
+## Verified by hand (issue #4)
 
-1. The custom connector saves and lists our tools.
-2. A tool call reaches the server through the tunnel, and how it is shown in chat.
-3. Whether Auto Review asks before calling our tools, and how to allow them.
-4. Tool result size limits and timeouts.
-5. A webhook-triggered routine receives our JSON body.
-6. The export method.
+Checked on 2026-11-15 against our server through a Cloudflare quick tunnel.
+
+- The custom connector saves and lists our tools. The header value is entered once in the dialog.
+- The tool list is read only when the connector is added. Clients `connectors-manager` and `grok-validator` call `initialize` and `tools/list` at that moment; a tool call later sends `initialize`, `notifications/initialized` and `tools/call`, never `tools/list`.
+- After the server grew from 3 to 16 tools, the Bot kept seeing 3. Adding the connector again under the same URL did not help. Adding it under a changed URL (`/mcp?v=2`) with a smaller list (output schemas off, 17.5 kB instead of 61 kB) showed all 16. Which of the two changes fixed it is not isolated.
+- Working rule: freeze the tool names and input schemas before the final connector is added, and after any change add the connector again under a new query string.
+- Every tool call is a fresh MCP session, about 3 seconds apart. The Bot does not retry a failed call on its own.
+- In chat, no approval card was shown for any of our tools, including `buy_signal`, `propose_trade`, `execute_plan` and `request_policy_change`.
+- Results are shown to the Bot as the text summary plus the structured JSON. Results up to 4 kB and calls up to 9 seconds worked.
+- Typing into the chat box through browser automation can drop spaces; the Bot still understood the message.
+
+## Still to verify by hand
+
+1. Whether Auto Review asks before a write tool on a scheduled or webhook run.
+2. Tool result size limits and timeouts beyond what we have seen.
+3. A webhook-triggered routine receives our JSON body.
+4. The export method.

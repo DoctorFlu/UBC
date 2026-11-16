@@ -25,6 +25,7 @@ import { describeMarket } from "@/lib/markets";
 
 import styles from "./hedge.module.css";
 import { HoldingsEditor } from "./HoldingsEditor";
+import { notCoveredSentence } from "./not-covered";
 
 const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 
@@ -125,13 +126,6 @@ function PayoffBands({ bands }: { bands: readonly Band[] }) {
   );
 }
 
-/** What the plan leaves exposed, in words: the first drop before the top rung, and anything under the floor. */
-function notCovered(plan: HedgePlan): string {
-  const range = plan.totals.protectedRange;
-  if (!range) return "Nothing: the plan buys no contracts.";
-  return `The first drop from ${usd(plan.spotCents)} to ${usd(range.fromCents)}, and any fall below ${usd(range.toCents)}, where the payout stops growing.`;
-}
-
 /**
  * The owner's holdings (real, signed by the owner) and the hedge the agent plans for them. The plan
  * and its payoff are sample data until the agent's plans are shown here (#17).
@@ -178,7 +172,7 @@ export function HedgeView({ preview }: { preview?: ConsoleSnapshot }) {
             />
           </StatGroup>
           <p className={styles.notCovered}>
-            <strong>Not covered.</strong> {notCovered(plan)}
+            <strong>Not covered.</strong> {notCoveredSentence(plan)}
           </p>
         </Card>
       </div>

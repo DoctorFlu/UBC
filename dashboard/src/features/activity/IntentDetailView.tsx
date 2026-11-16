@@ -1,12 +1,13 @@
 "use client";
 
-import { type PolicyEvent, describeReason } from "@mandate/shared";
+import { type LadderSummary, type PolicyEvent, describeReason } from "@mandate/shared";
 import { ArrowLeft, SearchX, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import Link from "next/link";
 import type { Hex } from "viem";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { MarketName, OrderSummary } from "@/components/domain/Intent";
+import { SimulatedFill } from "@/components/domain/SimulatedFill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
@@ -15,11 +16,12 @@ import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip, statusDescriptions } from "@/components/ui/StatusChip";
-import { formatCount, formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { formatContractPrice, formatCount, formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents, isoFromUnix } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
 import { categoryName, describeMarket } from "@/lib/markets";
+import { fillsAreSimulated } from "@/lib/network";
 
 import styles from "./detail.module.css";
 
@@ -28,12 +30,14 @@ interface Step {
   title: string;
   detail: string | null;
   tone: "neutral" | "good" | "attention" | "bad";
+  /** A fill recorded by the local devchain's simulated executor. */
+  simulated?: boolean;
   timestamp: number;
   blockNumber: number;
   txHash: Hex;
 }
 
-function steps(chain: ChainView, intentId: number): Step[] {
+function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
   const events = intentEvents(chain, intentId);
   const intent = chain.intents.find((candidate) => candidate.id === intentId);
   const out: Step[] = [];
@@ -99,11 +103,13 @@ function steps(chain: ChainView, intentId: number): Step[] {
       case "ResultRecorded":
         out.push({
           ...meta(event),
-          title: event.filled ? "Filled on Gemini" : "Did not fill",
+          // The contract only knows that the executor recorded a result, not where the order went.
+          title: event.filled ? "Filled" : "Did not fill",
           detail: event.filled
-            ? `The executor reported a fill of ${(event.filledCents / 100).toFixed(2)} USD.`
-            : "The executor reported the order did not fill; its amount went back to the budget.",
+            ? `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
+            : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
+          simulated: simulated && event.filled,
         });
         break;
       default:
@@ -111,6 +117,54 @@ function steps(chain: ChainView, intentId: number): Step[] {
     }
   }
   return out;
+}
+
+/** A YES price from the agent's document, which is untrusted: shown as-is when it is not a valid price. */
+function yesPrice(cents: number | null): string {
+  if (cents === null) return "-";
+  return Number.isInteger(cents) && cents >= 0 && cents <= 100
+    ? formatContractPrice(cents)
+    : cents.toString();
+}
+
+/** The order book the agent saw, one row per strike, with the rung this intent trades marked. */
+function PricesSeen({ ladder, market }: { ladder: LadderSummary; market: string | null }) {
+  if (ladder.rungs.length === 0) return null;
+  return (
+    <div className={styles.prices} role="region" aria-labelledby="prices-seen" tabIndex={0}>
+      <table className={styles.pricesTable} data-testid="prices-seen">
+        <caption id="prices-seen" className={styles.pricesCaption}>
+          Prices seen at {formatTimeUtc(ladder.observedAt)}, {formatDateUtc(ladder.observedAt)}
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Strike</th>
+            <th scope="col" className={styles.num}>
+              YES bid
+            </th>
+            <th scope="col" className={styles.num}>
+              YES ask
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {ladder.rungs.map((rung) => {
+            const traded = rung.instrumentSymbol === market;
+            return (
+              <tr key={rung.instrumentSymbol} data-traded={traded || undefined}>
+                <th scope="row">
+                  {rung.label}
+                  {traded ? <span className={styles.tradedTag}>This intent</span> : null}
+                </th>
+                <td className={styles.num}>{yesPrice(rung.yesBidCents)}</td>
+                <td className={styles.num}>{yesPrice(rung.yesAskCents)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 const SOURCE_BADGES = { onchain: "Sealed onchain", offchain: "Recorded offchain" } as const;
@@ -124,7 +178,7 @@ const SOURCE_TEXT = {
  * The agent's reason, resolved by the console: the onchain `contextHash` when the contract records one,
  * otherwise the agent's offchain link, otherwise none. The document is checked with `verifyContext`.
  */
-function SealedReasonCard({ sealed }: { sealed: SealedReason | undefined }) {
+function SealedReasonCard({ sealed, market }: { sealed: SealedReason | undefined; market: string | null }) {
   if (!sealed) {
     return (
       <Card title="The agent's reason" headingLevel={2}>
@@ -194,16 +248,6 @@ function SealedReasonCard({ sealed }: { sealed: SealedReason | undefined }) {
             <dd className="mono">
               {doc.planId}, rung {(doc.rungIndex + 1).toString()}
             </dd>
-            <dt>Prices seen</dt>
-            <dd>
-              {doc.ladderSummary.rungs
-                .map(
-                  (rung) =>
-                    `${rung.label}: YES ${rung.yesBidCents?.toString() ?? "-"}/${rung.yesAskCents?.toString() ?? "-"}¢`,
-                )
-                .join("; ")}{" "}
-              at {formatTimeUtc(doc.ladderSummary.observedAt)}
-            </dd>
             <dt>Paid signals</dt>
             <dd>{doc.signalReceiptIds.length === 0 ? "None" : doc.signalReceiptIds.join(", ")}</dd>
             <dt>Hash</dt>
@@ -211,6 +255,7 @@ function SealedReasonCard({ sealed }: { sealed: SealedReason | undefined }) {
               <HexValue value={sealed.hash} kind="hash" />
             </dd>
           </dl>
+          <PricesSeen ladder={doc.ladderSummary} market={market} />
         </div>
       </div>
     </Card>
@@ -242,7 +287,8 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
     );
   }
   const market = intent.market ? describeMarket(intent.market) : null;
-  const timeline = steps(chain, intent.id);
+  const simulated = fillsAreSimulated(snapshot.network);
+  const timeline = steps(chain, intent.id, simulated);
 
   return (
     <div className={styles.view}>
@@ -283,8 +329,9 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               {intent.filledCents !== null ? (
                 <>
                   <dt>Filled</dt>
-                  <dd>
+                  <dd className={styles.filled}>
                     <Money cents={intent.filledCents} />
+                    {simulated && intent.status === "executed" ? <SimulatedFill /> : null}
                   </dd>
                   <dt>Realized P&amp;L</dt>
                   <dd>
@@ -308,7 +355,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             ) : null}
           </Card>
 
-          <SealedReasonCard sealed={chain.sealed[intent.id]} />
+          <SealedReasonCard sealed={chain.sealed[intent.id]} market={intent.market} />
         </div>
 
         <Card
@@ -321,7 +368,10 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               <li key={step.key} className={styles.step} data-tone={step.tone}>
                 <span className={styles.stepDot} aria-hidden />
                 <div className={styles.stepBody}>
-                  <p className={styles.stepTitle}>{step.title}</p>
+                  <p className={styles.stepTitle}>
+                    {step.title}
+                    {step.simulated ? <SimulatedFill /> : null}
+                  </p>
                   {step.detail ? <p className={styles.stepDetail}>{step.detail}</p> : null}
                   <p className={styles.stepMeta}>
                     <span>

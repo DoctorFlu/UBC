@@ -25,7 +25,14 @@ function consoleEnv(): EnvVars {
   if (process.env.POLICY_DEPLOYMENT_FILE?.trim()) return process.env;
   return {
     ...process.env,
-    POLICY_DEPLOYMENT_FILE: resolve(process.cwd(), "..", "devchain", "deployments", "local.json"),
+    // Read at runtime, not bundled: `turbopackIgnore` keeps the bundler from tracing it.
+    POLICY_DEPLOYMENT_FILE: resolve(
+      /* turbopackIgnore: true */ process.cwd(),
+      "..",
+      "devchain",
+      "deployments",
+      "local.json",
+    ),
   };
 }
 

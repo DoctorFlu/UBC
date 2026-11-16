@@ -10,3 +10,8 @@
   border-radius: var(--radius-md);
   background: var(--color-surface);
 }
+
+/* The simulated-fill marker after the fills hint, on the local devchain. */
+.statMarker {
+  margin-inline-start: var(--space-2);
+}

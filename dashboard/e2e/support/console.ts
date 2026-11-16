@@ -73,10 +73,22 @@ export function decisionContext(reason: string): DecisionContext {
       observedAt: "2026-11-15T13:24:30.000Z",
       rungs: [
         {
+          instrumentSymbol: "GEMI-BTC2611202200-HI66000",
+          label: "$66,000 or above",
+          yesBidCents: 41,
+          yesAskCents: 43,
+        },
+        {
           instrumentSymbol: "GEMI-BTC2611202200-HI65000",
           label: "$65,000 or above",
           yesBidCents: 68,
           yesAskCents: 69,
+        },
+        {
+          instrumentSymbol: "GEMI-BTC2611202200-HI64000",
+          label: "$64,000 or above",
+          yesBidCents: 84,
+          yesAskCents: null,
         },
       ],
     },
