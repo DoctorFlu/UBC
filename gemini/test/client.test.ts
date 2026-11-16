@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GeminiError, isGeminiError, type FetchLike } from "../src/index";
+import { eventPath, GeminiError, isGeminiError, type FetchLike } from "../src/index";
 import { fakeClock, fixture, json, recordedApi, routedFetch, testClient } from "./helpers";
 
 async function caught(promise: Promise<unknown>): Promise<GeminiError> {
@@ -210,6 +210,16 @@ describe("retries, timeouts and errors", () => {
     expect(api.count()).toBe(3);
     // random() is 0.5, base delay 500 ms: 0.5 * 500, then 0.5 * 1000.
     expect(clock.sleeps).toEqual([250, 500]);
+  });
+
+  it("reports each request it sends, retries included, and none for a cached answer", async () => {
+    const api = flaky([() => json({ error: "busy" }, 503), () => json(fixture("event-BTC2611202200.json"))]);
+    const sent: string[] = [];
+    const client = testClient(api.fetch, fakeClock(), { onRequest: (path) => sent.push(path) });
+    await client.getEvent("BTC2611202200");
+    await client.getEvent("BTC2611202200");
+    expect(sent).toEqual([eventPath("BTC2611202200"), eventPath("BTC2611202200")]);
+    expect(api.count()).toBe(2);
   });
 
   it("honours Retry-After on 429", async () => {
