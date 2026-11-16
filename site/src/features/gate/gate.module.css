@@ -1,0 +1,579 @@
+/* The gate: one schedule card from the board. Controls on top, the breakers in contract order wired by
+   one bus line, and the verdict lamp at the foot. Colour appears only in lamps and tripped handles. */
+
+.gate {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5) 0;
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+}
+
+.sample {
+  color: var(--color-text-subtle);
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------------------------ controls */
+
+.controls {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.sliderField {
+  display: grid;
+}
+
+.slider {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.sliderHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.amount {
+  font-size: var(--text-2xl);
+  font-stretch: var(--stretch-condensed);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+
+.sliderControl {
+  display: flex;
+  align-items: center;
+  height: var(--tap-target);
+  touch-action: none;
+  cursor: pointer;
+}
+
+.track {
+  position: relative;
+  width: 100%;
+  height: 0.375rem;
+  border-radius: var(--radius-round);
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-control-border);
+}
+
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-text);
+}
+
+.thumb {
+  width: 1.375rem;
+  height: 1.375rem;
+  border: 2px solid var(--color-text);
+  border-radius: var(--radius-round);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-raised);
+  transition-property: scale;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+.thumb:has(:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .thumb[data-dragging] {
+    scale: 1.1;
+  }
+}
+
+/* Graduations under the track, like a meter scale, and the two lines that change the answer. */
+.scale {
+  position: relative;
+  height: 1.75rem;
+  margin-inline: 0.6875rem;
+}
+
+.graduation,
+.mark {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  translate: -50% 0;
+  background: var(--color-control-border);
+}
+
+.graduation {
+  height: 0.375rem;
+}
+
+.mark {
+  height: 0.625rem;
+  background: var(--color-text);
+}
+
+.markLabel {
+  position: absolute;
+  top: 0.75rem;
+  left: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  translate: -50% 0;
+}
+
+/* The two marks sit $5 apart: one label hangs left of its line and the other right, so they never meet. */
+.mark:nth-last-child(2) .markLabel {
+  padding-inline-end: var(--space-1);
+  translate: -100% 0;
+}
+
+.mark:last-child .markLabel {
+  padding-inline-start: var(--space-1);
+  translate: 0 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 1fr) auto auto;
+  align-items: end;
+  gap: var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.numberGroup {
+  display: flex;
+  height: 2.5rem;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+}
+
+.numberGroup:has(:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.number {
+  width: 100%;
+  min-width: 0;
+  padding-inline: var(--space-3);
+  border: 0;
+  background: transparent;
+  font-size: var(--text-base);
+  outline: none;
+}
+
+.segmented {
+  position: relative;
+  display: inline-flex;
+  height: 2.5rem;
+  padding: 3px;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+}
+
+.segmentedIndicator {
+  position: absolute;
+  top: var(--segmented-control-indicator-top);
+  left: 0;
+  translate: var(--segmented-control-indicator-left) 0;
+  width: var(--segmented-control-indicator-width);
+  height: var(--segmented-control-indicator-height);
+  border-radius: var(--radius-xs);
+  background: var(--color-text);
+}
+
+.segment {
+  position: relative;
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  transition-property: color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease;
+}
+
+.segment[data-checked] {
+  color: var(--color-on-ink);
+}
+
+@media (hover: hover) {
+  .segment[data-unchecked]:hover {
+    color: var(--color-text);
+  }
+}
+
+.switchField {
+  justify-items: start;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 3rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* The track is drawn on ::before so the hit area stays a full 40px tall. */
+.switch::before {
+  content: "";
+  width: 100%;
+  height: 1.625rem;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-round);
+  background: var(--color-surface-sunken);
+  transition-property: background-color, border-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease;
+}
+
+.switch[data-checked]::before {
+  border-color: var(--color-paused-bg);
+  background: var(--color-paused-bg);
+}
+
+.switch:focus-visible {
+  outline: none;
+}
+
+.switch:focus-visible::before {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.switchThumb {
+  position: absolute;
+  top: 50%;
+  left: 0.25rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  translate: 0 -50%;
+  border-radius: var(--radius-round);
+  background: var(--color-text-muted);
+  transition-property: translate, background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+/* Paused is the isolator off: the console's safety-yellow marker on an inverse plate. */
+.switchThumb[data-checked] {
+  translate: 1.375rem -50%;
+  border-radius: 3px;
+  background: var(--color-paused-marker);
+}
+
+:dir(rtl) .switchThumb[data-checked] {
+  translate: -1.375rem -50%;
+}
+
+@container (width < 34rem) {
+  .row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .row > .field:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ------------------------------------------------------------------ the circuit */
+
+.circuit {
+  padding: var(--space-4) var(--space-5) var(--space-2);
+}
+
+.circuitTitle {
+  margin-bottom: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.schedule {
+  display: grid;
+}
+
+.rule {
+  --wire: var(--color-text);
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.25rem 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 2.75rem;
+  border-top: 1px solid var(--color-rule);
+}
+
+.rule:first-child {
+  border-top: 0;
+}
+
+/* The bus: one line through every breaker, live until the first trip. */
+.rule::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(0.625rem - 0.75px);
+  width: 1.5px;
+  background: var(--wire);
+  transition-property: background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease;
+}
+
+.rule[data-state="tripped"]::before {
+  bottom: 50%;
+}
+
+.rule[data-state="idle"] {
+  --wire: var(--color-rule-strong);
+}
+
+.ruleName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.rating {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+.ruleState {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: end;
+}
+
+.rule[data-state="tripped"] .ruleState {
+  color: var(--color-rejected-text);
+  font-weight: var(--weight-semibold);
+}
+
+.rule[data-state="held"] .ruleState {
+  color: var(--color-held-text);
+  font-weight: var(--weight-semibold);
+}
+
+.rule[data-state="idle"] .ruleName,
+.rule[data-state="idle"] .ruleState {
+  color: var(--color-text-subtle);
+}
+
+.breaker {
+  position: relative;
+  width: 1.25rem;
+  height: 1.5rem;
+  overflow: visible;
+}
+
+.breaker rect:first-child {
+  fill: var(--color-surface);
+  stroke: var(--color-text);
+  stroke-width: 1.5;
+}
+
+.handle {
+  fill: var(--color-text);
+  stroke: var(--color-text);
+  stroke-width: 1.5;
+}
+
+.breaker[data-state="tripped"] .handle {
+  translate: 0 7px;
+  fill: var(--color-rejected-lamp);
+  stroke: var(--color-rejected-lamp);
+}
+
+.breaker[data-state="held"] .handle {
+  translate: 0 3.5px;
+  fill: var(--color-held-lamp);
+  stroke: var(--color-held-lamp);
+}
+
+.breaker[data-state="idle"] rect:first-child {
+  stroke: var(--color-rule-strong);
+}
+
+.breaker[data-state="idle"] .handle {
+  fill: transparent;
+  stroke: var(--color-rule-strong);
+}
+
+/* The handle's throw is a state change the visitor caused: a short transform transition. */
+@media (prefers-reduced-motion: no-preference) {
+  .handle {
+    transition-property: translate, fill, stroke;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
+  }
+}
+
+/* ------------------------------------------------------------------ verdict */
+
+.verdict {
+  --lamp: var(--color-approved-lamp);
+  --tone: var(--color-approved-text);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-3);
+  margin: 0 var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-rule);
+}
+
+.verdict[data-tone="held"] {
+  --lamp: var(--color-held-lamp);
+  --tone: var(--color-held-text);
+}
+
+.verdict[data-tone="rejected"] {
+  --lamp: var(--color-rejected-lamp);
+  --tone: var(--color-rejected-text);
+}
+
+.lamp {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.3rem;
+  border-radius: var(--radius-round);
+  background: var(--lamp);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--lamp) 22%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, black 12%, transparent);
+  transition-property: background-color, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease;
+}
+
+.verdictText {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.verdictTitle {
+  color: var(--tone);
+  font-size: var(--text-xl);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+}
+
+.verdictDetail {
+  font-size: var(--text-base);
+}
+
+.reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.reason code {
+  padding: 0.125rem var(--space-1-5);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  color: var(--color-text);
+}
+
+.footnote {
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+@container (width < 26rem) {
+  .head,
+  .controls,
+  .circuit {
+    padding-inline: var(--space-4);
+  }
+
+  .verdict {
+    margin-inline: var(--space-2);
+    padding: var(--space-3);
+  }
+
+  .footnote {
+    padding-inline: var(--space-4);
+  }
+
+  .ruleState {
+    font-size: var(--text-xs);
+  }
+}
+
+@media (forced-colors: active) {
+  .lamp,
+  .fill,
+  .segmentedIndicator {
+    background: CanvasText;
+  }
+
+  .segment[data-checked] {
+    color: Canvas;
+  }
+
+  .breaker[data-state="tripped"] .handle,
+  .breaker[data-state="held"] .handle {
+    fill: Highlight;
+    stroke: Highlight;
+  }
+}
