@@ -66,6 +66,7 @@ The agent talks only to the MCP server, the MCP server can only propose, and not
 | `signals/` | The paid signal API (x402, Circle Nanopayments on Arc). |
 | `streams/` | The QuickNode Stream: filter, configuration, management script, payload parser. |
 | `dashboard/` | The owner's console (Next.js). |
+| `brand/` | Design tokens and the two self-hosted fonts, shared by every web app. |
 | `devchain/` | A local chain with Arc's chain id, the simulated executor, and `npm run dev:stack`. |
 | `redteam/` | A scripted adversary that attacks the mandate through the MCP server and with the agent key. |
 | `shared/` | Types, the contract ABI, the TypeScript copy of the rules, and the API contracts between services. |

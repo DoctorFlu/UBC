@@ -1,6 +1,6 @@
 @layer ui-sdk;
 
-@import "../styles/tokens.css";
+@import "@mandate/brand/tokens.css";
 
 @layer ui-sdk {
   :where([data-slot][hidden]:not([hidden="until-found"])) {
