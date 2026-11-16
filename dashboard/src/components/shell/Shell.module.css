@@ -240,7 +240,11 @@
   width: 100%;
   max-width: var(--content-max);
   padding: var(--space-8);
-  outline: none;
+}
+
+/* Reached through the skip link: the global ring, drawn inside so the page never clips it. */
+.content:focus-visible {
+  outline-offset: -2px;
 }
 
 /* Isolator labels: the long one on wide screens, the short one on phones. */

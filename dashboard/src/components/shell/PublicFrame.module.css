@@ -40,7 +40,10 @@
   max-width: 68rem;
   margin-inline: auto;
   padding: var(--space-8) var(--space-6) var(--space-16);
-  outline: none;
+}
+
+.main:focus-visible {
+  outline-offset: -2px;
 }
 
 @media (width < 40rem) {
