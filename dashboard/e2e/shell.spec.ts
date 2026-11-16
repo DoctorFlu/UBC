@@ -210,5 +210,30 @@ for (const scheme of schemes) {
         expect(violations).toEqual([]);
       });
     }
+
+    test("hedge has no axe violations while the live ladder is still loading", async ({ page }) => {
+      // Hold the quotes back so the loading state is what axe checks, not whatever timing leaves on screen.
+      let release = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route("**/api/console/hedge/market?*", async (route) => {
+        await held;
+        await route.continue().catch(() => {});
+      });
+      await page.goto("/hedge");
+      await expect(page.getByRole("heading", { level: 1, name: "Hedge" })).toBeVisible();
+      await expect(page.getByTestId("ladder-loading")).toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "Loading live quotes" })).toBeAttached();
+      const results = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+        .analyze();
+      release();
+      const violations = results.violations.map((violation) => ({
+        id: violation.id,
+        targets: violation.nodes.map((node) => node.target.join(" ")),
+      }));
+      expect(violations).toEqual([]);
+    });
   });
 }
