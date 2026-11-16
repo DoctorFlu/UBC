@@ -1,7 +1,9 @@
 /**
  * `npm run dev:propose -- [options]`: submits one trade intent as the agent, for manual testing.
  *
- *   --market   Gemini instrumentSymbol      (default GEMI-BTC2611202200-HI65000)
+ *   --market   Gemini instrumentSymbol      (default: the strike nearest spot on the soonest open
+ *              weekly BTC ladder Gemini lists now, read from Gemini's public API
+ *              or GEMINI_API_URL)
  *   --category Crypto, Sports, ... or an id  (default Crypto)
  *   --outcome  YES or NO                     (default YES)
  *   --sell     propose a sell instead of a buy
@@ -9,6 +11,8 @@
  *   --price    limit price in cents, 1 to 99 (default 65)
  *   --preview  only report what the contract would decide, without sending a transaction (uses the
  *              contract's previewTrade when it has one, otherwise the offchain evaluator)
+ *
+ * Without --market it exits when Gemini cannot be reached, rather than propose a market it could not check.
  *
  * Uses the devchain agent account, or AGENT_PRIVATE_KEY when POLICY_ADDRESS points at Arc testnet.
  */
@@ -30,12 +34,19 @@ import {
   type ChainVerdict,
   type Outcome,
 } from "@mandate/shared";
+import { GeminiError } from "@mandate/gemini";
 import { createPolicyClient, resolvePolicyDeployment } from "@mandate/shared/node";
-import { devAccount } from "../src";
+import {
+  DEFAULT_MARKET_ASSET,
+  DEFAULT_MARKET_HORIZON,
+  devAccount,
+  devGeminiClient,
+  resolveDefaultMarket,
+} from "../src";
 
 const { values } = parseArgs({
   options: {
-    market: { type: "string", default: "GEMI-BTC2611202200-HI65000" },
+    market: { type: "string" },
     category: { type: "string", default: "Crypto" },
     outcome: { type: "string", default: "YES" },
     sell: { type: "boolean", default: false },
@@ -66,6 +77,30 @@ function describe(verdict: ChainVerdict): string {
   return `${label}: ${reasonLabel} (${verdict.reason}). ${explanation}`;
 }
 
+/** The market from --market, or a strike Gemini lists now. Exits when Gemini cannot say which. */
+async function chooseMarket(): Promise<string> {
+  if (values.market !== undefined) return values.market;
+  try {
+    const picked = await resolveDefaultMarket(devGeminiClient());
+    console.log(
+      `No --market given, so picked ${picked.market}: the strike nearest spot ${formatCents(picked.spotCents)} ` +
+        `on Gemini's soonest open ${DEFAULT_MARKET_HORIZON} ${DEFAULT_MARKET_ASSET} ladder ${picked.eventTicker}, ` +
+        `which settles ${picked.expiry}`,
+    );
+    return picked.market;
+  } catch (error) {
+    const reason =
+      error instanceof GeminiError && error.code !== "no_ladder"
+        ? `could not reach Gemini to pick a listed market (${error.code}: ${error.message})`
+        : `could not pick a listed market: ${error instanceof Error ? error.message : String(error)}`;
+    console.error(
+      `Error: no --market given and ${reason}. Nothing was proposed. ` +
+        "Pass --market with a Gemini instrumentSymbol to choose one yourself.",
+    );
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const deployment = resolvePolicyDeployment();
   let account;
@@ -81,9 +116,10 @@ async function main(): Promise<void> {
     account = privateKeyToAccount(key as `0x${string}`);
   }
   const client = createPolicyClient({ account, deployment });
+  const market = await chooseMarket();
 
   const intent = {
-    market: values.market,
+    market,
     category: parseCategory(values.category),
     outcome: parseOutcome(values.outcome),
     isBuy: !values.sell,

@@ -53,6 +53,11 @@ npm run dev:propose -- --category Sports  # category not allowed
 npm run dev:propose -- --amount 22 --preview
 ```
 
+Without `--market`, `dev:propose` asks Gemini's public API for the soonest open weekly BTC ladder and proposes the open strike nearest spot, and prints which one it picked.
+A fixed symbol would stop working once its ladder settles, and the simulated executor refuses a market Gemini no longer lists.
+When Gemini cannot be reached it says so and exits without proposing anything.
+Pass `--market` with an `instrumentSymbol` from the MCP server's `list_markets` or `get_ladder` to choose the market yourself; that needs no call to Gemini.
+
 The simulated executor never places an order, but it checks every approved intent the way a real executor must before it records a fill.
 It refuses an intent and records it as not filled when the market is not a Gemini symbol, the outcome is not YES or NO, the limit price is outside 1 to 99, Gemini does not list the market, or Gemini lists it under another category than the intent's.
 The contract approves all of these when they come from the agent key, so this is the only offchain check between a stolen key and an order.
