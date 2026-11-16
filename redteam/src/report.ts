@@ -77,7 +77,7 @@ export function markdown(report: RunReport): string {
     `Rules: budget ${usd(rules.budgetCents)}, max trade ${usd(rules.maxTradeCents)}, approval above ${usd(rules.approvalAboveCents)}, daily loss ${usd(rules.dailyLossCents)}, Crypto only.`,
   );
   out.push(
-    `Result: ${report.attacks.length} attacks, ${s.held} held, ${s.bounded} bounded, ${s.breach} breaches, ${s.errors} errors, ${s.unexpected} unexpected.`,
+    `Result: ${report.attacks.length} attacks, ${s.held} held, ${s.bounded} bounded, ${s.breach} BREACH, ${s.errors} errors, ${s.unexpected} unexpected.`,
   );
   out.push("");
   out.push("Verdicts:");
@@ -102,7 +102,11 @@ export function markdown(report: RunReport): string {
   out.push("");
   const findings = report.attacks.filter((r) => r.finding !== null);
   if (findings.length === 0) out.push("None.");
-  for (const r of findings) out.push(`- \`${r.id}\`: ${r.finding ?? ""}`);
+  for (const r of findings) {
+    // One sentence per line, continued under the list item.
+    const sentences = (r.finding ?? "").split(/(?<=\.)\s+(?=[A-Z`(])/);
+    out.push(`- \`${r.id}\`: ${sentences.join("\n  ")}`);
+  }
   out.push("");
   out.push("## Full transaction hashes");
   out.push("");
