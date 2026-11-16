@@ -20,6 +20,7 @@ import type { AgentPolicy } from "../services";
 import { PLAN_EXECUTABLE_FOR_MS, type OrderOutcome, type StoredPlan } from "../state/plans";
 import { notConfigured, unavailableFor, type Failure } from "../support/failures";
 import { AFTER_REJECTION } from "../support/rules";
+import { linkPending, relinkContext } from "../trading/context";
 import { proposeIntent } from "../trading/propose";
 import { decisionReasonArg, signalReceiptIdsArg } from "./propose-trade";
 
@@ -38,6 +39,10 @@ const OrderRowSchema = z.object({
   reason: z.string().nullable().describe("The contract's rejection reason or an error code"),
   txHash: z.string().nullable(),
   contextHash: z.string().nullable(),
+  contextLinked: z
+    .boolean()
+    .nullable()
+    .describe("The console links the intent to its context. False: not yet or refused; null: no console"),
 });
 
 const ExecutionSchema = z.object({
@@ -91,6 +96,8 @@ async function runOrders(
 ): Promise<{ failure: Failure | null; recorded: boolean | null; outOfTime: boolean }> {
   const started = Date.now();
   let recorded: boolean | null = null;
+  // Once the console failed to take a link, later orders only queue theirs instead of waiting again.
+  let consoleDown = false;
   const { plan } = stored;
   while (stored.stoppedAt === null && stored.outcomes.length < plan.orders.length) {
     if (Date.now() - started > EXECUTION_BUDGET_MS) return { failure: null, recorded, outOfTime: true };
@@ -120,8 +127,9 @@ async function runOrders(
         signalReceiptIds: citedReceipts(plan.signal, input.signalReceiptIds),
         reason: input.reason,
       },
+      { linkContext: !consoleDown },
     );
-    const base: Omit<OrderOutcome, "decision" | "intentId" | "reason" | "txHash"> = {
+    const base: Omit<OrderOutcome, "decision" | "intentId" | "reason" | "txHash" | "contextLinked"> = {
       orderIndex,
       rungIndex,
       instrumentSymbol: order.instrumentSymbol,
@@ -139,22 +147,38 @@ async function runOrders(
           intentId: null,
           reason: "TX_UNCONFIRMED",
           txHash: null,
+          contextLinked: null,
         });
         stored.stoppedAt = orderIndex;
       }
       return { failure: outcome.failure, recorded, outOfTime: false };
     }
     recorded = outcome.result.contextHashRecorded;
+    const contextLinked = outcome.proposal.context?.contextLinked ?? null;
+    if (contextLinked === false && linkPending(ctx, outcome.result.intentId)) consoleDown = true;
     stored.outcomes.push({
       ...base,
       decision: outcome.result.verdict,
       intentId: outcome.result.intentId,
       reason: outcome.result.verdict === "rejected" ? outcome.result.reason : null,
       txHash: outcome.result.txHash,
+      contextLinked,
     });
     if (outcome.result.verdict === "rejected") stored.stoppedAt = orderIndex;
   }
   return { failure: null, recorded, outOfTime: false };
+}
+
+/**
+ * Retries the console links that earlier calls for this plan could not make, in order, stopping at
+ * the first the console still cannot take. Orders already sent are never sent again.
+ */
+async function relinkOrders(ctx: ToolContext, stored: StoredPlan): Promise<void> {
+  for (const outcome of stored.outcomes) {
+    if (outcome.intentId === null || outcome.contextLinked !== false) continue;
+    outcome.contextLinked = await relinkContext(ctx, outcome.intentId, false);
+    if (outcome.contextLinked === false && linkPending(ctx, outcome.intentId)) return;
+  }
 }
 
 function verdictFor(
@@ -267,6 +291,7 @@ export const executePlan = defineTool({
     }
 
     return ctx.plans.exclusive(stored.plan.planId, async () => {
+      await relinkOrders(ctx, stored);
       const already = stored.stoppedAt !== null || stored.outcomes.length === stored.plan.orders.length;
       const run =
         already || !fresh

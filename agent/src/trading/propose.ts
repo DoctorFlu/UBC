@@ -23,7 +23,7 @@ import {
   RuleHitSchema,
   type RuleHit,
 } from "../support/rules";
-import { sealContext, type SealedContext } from "./context";
+import { linkContext, sealContext, type SealedContext } from "./context";
 
 export interface TradeSpec {
   market: string;
@@ -49,6 +49,12 @@ export const ContextReceiptSchema = z.object({
   contextHashRecorded: z
     .boolean()
     .describe("The hash is onchain with the intent. False when the deployed contract cannot record it"),
+  contextLinked: z
+    .boolean()
+    .nullable()
+    .describe(
+      "The console links the intent to this document, so the owner sees why. False: not yet (the server retries) or refused; null: no console or no intent",
+    ),
 });
 
 export const ProposalSchema = z.object({
@@ -83,17 +89,27 @@ export function tradeView(trade: TradeSpec): z.infer<typeof TradeSchema> {
   };
 }
 
-/** Seals the context, proposes, and maps the contract's answer. Never throws for an expected failure. */
+/**
+ * Seals the context, proposes, links the new intent to its context in the console, and maps the
+ * contract's answer. Never throws for an expected failure. `linkContext: false` only queues the link,
+ * for a caller that just saw the console fail and must not wait for it again.
+ */
 export async function proposeIntent(
   ctx: ToolContext,
   policy: AgentPolicy,
   trade: TradeSpec,
   context: Omit<DecisionContext, "version" | "createdAt">,
+  options: { linkContext?: boolean } = {},
 ): Promise<ProposalOutcome> {
   const sealed = await sealContext(ctx, context);
   const base = {
     trade: tradeView(trade),
-    context: { hash: sealed.hash, stored: sealed.stored, contextHashRecorded: false },
+    context: {
+      hash: sealed.hash,
+      stored: sealed.stored,
+      contextHashRecorded: false,
+      contextLinked: null as boolean | null,
+    },
   };
 
   let result: ProposeResult;
@@ -120,6 +136,7 @@ export async function proposeIntent(
     contextHash: sealed.hash,
     contextStored: sealed.stored,
     contextHashRecorded: result.contextHashRecorded,
+    contextLinked: ctx.console === undefined ? null : false,
     planId: context.planId,
     reason: context.reason,
   });
@@ -129,6 +146,13 @@ export async function proposeIntent(
     contextHashRecorded: result.contextHashRecorded,
     contextStored: sealed.stored,
   });
+  // After the transaction is confirmed and the id is known. Best effort: it never changes the verdict.
+  const contextLinked = await linkContext(
+    ctx,
+    result.intentId,
+    { hash: sealed.hash, txHash: result.txHash },
+    { attempt: options.linkContext !== false },
+  );
 
   const rule = await ruleFor(policy, result, trade);
   const proposal: Proposal = {
@@ -138,7 +162,7 @@ export async function proposeIntent(
     rule,
     txHash: result.txHash,
     explorerUrl: policy.explorerTxUrl(result.txHash),
-    context: { ...base.context, contextHashRecorded: result.contextHashRecorded },
+    context: { ...base.context, contextHashRecorded: result.contextHashRecorded, contextLinked },
   };
   return { kind: "submitted", proposal, result, verdict: verdictOf(result, rule) };
 }

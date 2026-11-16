@@ -76,6 +76,24 @@ describe("HttpConsoleClient against the wire contract", () => {
     expect(fake.state.requests).toContain(`GET ${CONSOLE_AGENT_ROUTES.holdings}`);
   });
 
+  it("links an intent to its context idempotently and maps a different hash to conflict", async () => {
+    const fake = createFakeConsole({ token: TOKEN });
+    const c = client(fake.clientFetch);
+    const hash = hashContext(document);
+    const txHash = `0x${"c".repeat(64)}` as const;
+
+    expect(await c.putIntentContext(3, { hash, txHash })).toMatchObject({ intentId: 3, hash, txHash });
+    expect(await c.putIntentContext(3, { hash, txHash })).toMatchObject({ intentId: 3, hash });
+    expect(fake.state.requests).toContain(`PUT ${CONSOLE_AGENT_ROUTES.intentContext(3)}`);
+    await expect(c.putIntentContext(3, { hash: `0x${"d".repeat(64)}`, txHash })).rejects.toMatchObject({
+      constructor: ConsoleClientError,
+      kind: "conflict",
+      status: 409,
+      code: "conflict",
+    });
+    expect(fake.state.intentContexts.get(3)?.hash).toBe(hash);
+  });
+
   it("sends the bearer token and maps 401 to unauthorized", async () => {
     const fake = createFakeConsole({ token: TOKEN });
     await expect(client(fake.clientFetch, "wrong-token").getHoldings()).rejects.toMatchObject({

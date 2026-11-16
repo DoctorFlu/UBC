@@ -9,21 +9,25 @@ import {
   consoleErrorSchema,
   contextResponseSchema,
   holdingsResponseSchema,
+  intentContextResponseSchema,
   pairingResponseSchema,
   planResponseSchema,
   policyChangeRequestSchema,
   postPlanRequestSchema,
   postPolicyChangeRequestSchema,
   putContextRequestSchema,
+  putIntentContextRequestSchema,
   putPairingRequestSchema,
   type ContextResponse,
   type DecisionContext,
   type HoldingsResponse,
+  type IntentContextResponse,
   type PairingResponse,
   type PlanResponse,
   type PolicyChangeRequest,
   type PostPlanRequest,
   type PostPolicyChangeRequest,
+  type PutIntentContextRequest,
   type PutPairingRequest,
 } from "@mandate/shared";
 import type { Config } from "../config";
@@ -35,15 +39,17 @@ import type { ConsoleClient } from "../services";
  * - `unreachable`: no answer (console down, wrong URL, timeout).
  * - `unauthorized`: 401, the service tokens on the two sides differ.
  * - `rejected`: 422, the console refused the body; `code` and `message` come from the console.
+ * - `conflict`: 409, the console already holds a different record under this key; `code` and
+ *   `message` come from the console. Repeating the call cannot succeed.
  * - `bad_response`: an answer that does not match the wire contract, or an unexpected status.
  */
-export type ConsoleFailure = "unreachable" | "unauthorized" | "rejected" | "bad_response";
+export type ConsoleFailure = "unreachable" | "unauthorized" | "rejected" | "conflict" | "bad_response";
 
 export class ConsoleClientError extends Error {
   override readonly name = "ConsoleClientError";
   readonly kind: ConsoleFailure;
   readonly status: number | undefined;
-  /** The console's own error code, for `rejected`. */
+  /** The console's own error code, for `rejected` and `conflict`. */
   readonly code: string | undefined;
 
   constructor(
@@ -92,6 +98,18 @@ export class HttpConsoleClient implements ConsoleClient {
     return this.#call("GET", CONSOLE_AGENT_ROUTES.context(hash), contextResponseSchema, {
       signal,
       notFoundAsNull: true,
+    });
+  }
+
+  async putIntentContext(
+    intentId: number,
+    request: PutIntentContextRequest,
+    signal?: AbortSignal,
+  ): Promise<IntentContextResponse> {
+    const body = putIntentContextRequestSchema.parse(request);
+    return this.#call("PUT", CONSOLE_AGENT_ROUTES.intentContext(intentId), intentContextResponseSchema, {
+      body,
+      signal,
     });
   }
 
@@ -174,12 +192,15 @@ export class HttpConsoleClient implements ConsoleClient {
         },
       );
     }
-    if (response.status === 422) {
+    if (response.status === 422 || response.status === 409) {
       const parsed = consoleErrorSchema.safeParse(payload);
+      const kind = response.status === 422 ? "rejected" : "conflict";
       throw new ConsoleClientError(
-        "rejected",
-        parsed.success ? parsed.data.error.message : `${method} ${path}: the console refused the request`,
-        { status: 422, ...(parsed.success ? { code: parsed.data.error.code } : {}) },
+        kind,
+        parsed.success
+          ? parsed.data.error.message
+          : `${method} ${path}: the console ${kind === "rejected" ? "refused" : "has a conflicting record for"} the request`,
+        { status: response.status, ...(parsed.success ? { code: parsed.data.error.code } : {}) },
       );
     }
     if (response.status < 200 || response.status >= 300) {

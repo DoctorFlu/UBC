@@ -5,7 +5,8 @@
  *
  * It behaves like the contract describes: bearer auth (401), schema validation (422 with a
  * `consoleErrorSchema` body), hash verification of decision contexts (422 `hash_mismatch`),
- * idempotent plan and pairing writes, and 404 for anything unknown.
+ * idempotent plan, pairing and intent-link writes (a different hash for a linked intent is 409
+ * `conflict`), and 404 for anything unknown.
  */
 import { Hono, type Context } from "hono";
 import type * as z from "zod";
@@ -15,9 +16,11 @@ import {
   postPlanRequestSchema,
   postPolicyChangeRequestSchema,
   putContextRequestSchema,
+  putIntentContextRequestSchema,
   putPairingRequestSchema,
   type ConsoleHolding,
   type ContextResponse,
+  type IntentContextResponse,
   type PairingResponse,
   type PolicyChangeRequest,
   type PostPlanRequest,
@@ -27,6 +30,8 @@ export interface FakeConsoleState {
   holdings: ConsoleHolding[];
   holdingsUpdatedAt: string | null;
   contexts: Map<string, ContextResponse>;
+  /** Intent id to the decision context that explains it. */
+  intentContexts: Map<number, IntentContextResponse>;
   plans: Map<string, PostPlanRequest & { storedAt: string }>;
   changeRequests: Map<string, PolicyChangeRequest>;
   pairing: PairingResponse | null;
@@ -56,7 +61,7 @@ export interface FakeConsole {
   readonly setDown: (down: boolean) => void;
 }
 
-function fail(c: Context, status: 401 | 404 | 422, code: string, message: string): Response {
+function fail(c: Context, status: 401 | 404 | 409 | 422, code: string, message: string): Response {
   return c.json({ error: { code, message } }, status);
 }
 
@@ -82,6 +87,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     holdings: options.holdings ?? [],
     holdingsUpdatedAt: options.holdings === undefined ? null : now().toISOString(),
     contexts: new Map(),
+    intentContexts: new Map(),
     plans: new Map(),
     changeRequests: new Map(),
     pairing: null,
@@ -124,6 +130,28 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
   api.get("/contexts/:hash", (c) => {
     const stored = state.contexts.get(c.req.param("hash").toLowerCase());
     return stored === undefined ? fail(c, 404, "not_found", "No context under this hash.") : c.json(stored);
+  });
+
+  api.put("/intents/:intentId/context", async (c) => {
+    const raw = c.req.param("intentId");
+    if (!/^(0|[1-9]\d{0,15})$/.test(raw)) {
+      return fail(c, 422, "invalid_parameter", "The intent id must be a whole number, starting at 0.");
+    }
+    const intentId = Number(raw);
+    const parsed = await body(c, putIntentContextRequestSchema);
+    if (parsed instanceof Response) return parsed;
+    const existing = state.intentContexts.get(intentId);
+    if (existing !== undefined) {
+      if (existing.hash.toLowerCase() === parsed.hash.toLowerCase()) return c.json(existing);
+      return fail(c, 409, "conflict", `Intent ${raw} is already linked to another context.`);
+    }
+    const link: IntentContextResponse = { intentId, ...parsed, linkedAt: now().toISOString() };
+    state.intentContexts.set(intentId, link);
+    return c.json(link, 201);
+  });
+  api.get("/intents/:intentId/context", (c) => {
+    const link = state.intentContexts.get(Number(c.req.param("intentId")));
+    return link === undefined ? fail(c, 404, "not_found", "No linked context.") : c.json(link);
   });
 
   api.post("/plans", async (c) => {

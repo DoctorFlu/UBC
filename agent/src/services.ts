@@ -23,6 +23,7 @@ import type {
   HedgeSignalQuery,
   HoldingsResponse,
   Intent,
+  IntentContextResponse,
   IntentView,
   PairingResponse,
   PlanResponse,
@@ -32,6 +33,7 @@ import type {
   PostPolicyChangeRequest,
   PreviewResult,
   ProposeResult,
+  PutIntentContextRequest,
   PutPairingRequest,
   Roles,
   RuleInput,
@@ -116,6 +118,15 @@ export interface ConsoleClient {
   putContext(hash: `0x${string}`, document: DecisionContext, signal?: AbortSignal): Promise<ContextResponse>;
   /** The stored document, or null when the console has none under this hash. */
   getContext(hash: `0x${string}`, signal?: AbortSignal): Promise<ContextResponse | null>;
+  /**
+   * Links an intent to the decision context that explains it (idempotent). A different hash for an
+   * intent that already has one throws `conflict`.
+   */
+  putIntentContext(
+    intentId: number,
+    request: PutIntentContextRequest,
+    signal?: AbortSignal,
+  ): Promise<IntentContextResponse>;
   postPlan(request: PostPlanRequest, signal?: AbortSignal): Promise<PlanResponse>;
   postPolicyChangeRequest(
     request: PostPolicyChangeRequest,

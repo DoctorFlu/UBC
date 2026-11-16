@@ -23,7 +23,7 @@ Set `MCP_ERA=auto` to negotiate the 2026-07-28 protocol instead of the 2025 `ini
 `npm run mcp:e2e` runs the whole agent flow against a real chain in one command, with nothing to configure and no `.env` read.
 For each Policy contract it starts anvil with a fresh deployment and the demo rules, an in-memory console backend (`testing/fake-console.ts`), and the real server as a child process, each on a free port.
 It then drives the server over HTTP with the official MCP SDK client, opening a new session for every call as Grok Bot does, against live public Gemini market data.
-The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts, `get_intent`, `get_activity` and `request_policy_change`.
+The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts and each intent's link to its context in the console, `get_intent`, `get_activity` and `request_policy_change`.
 It also checks that no key or token reaches the server's logs.
 Pass `-- --contract production` or `-- --contract reference` to run one contract; the default runs both.
 On the reference contract, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain.
@@ -166,6 +166,13 @@ Every proposal carries a decision-context document (the request, the reasons, th
 When the contract has the 7-argument `proposeTrade`, the hash is also recorded onchain and the result says `contextHashRecorded: true`.
 On the production contract the result says `contextHashRecorded: false` and the document lives only offchain.
 If the console is down, documents wait in an in-process outbox and are sent with later proposals.
+
+Once the proposal transaction is confirmed and the intent id is known, the server links the intent to its document in the console (`PUT /api/agent/v1/intents/<intentId>/context` with the hash and the proposal transaction), for every single trade and every order of a plan.
+Without this link the console cannot show why the agent acted on the production contract, where no event carries the hash.
+Linking is best effort and never changes or delays a verdict beyond a short bound: each attempt has a 3 s timeout, an unanswered attempt is retried once, and the result says `contextLinked: true` when the console has the link, `false` when it does not (yet), and `null` without a console.
+A link the console could not take waits in an in-process outbox and is sent with the next proposal, or when the same `propose_trade` or `execute_plan` call is retried.
+During `execute_plan`, once one link fails the remaining orders only queue theirs, so a console outage costs one bounded wait per call.
+A 409 `conflict` (the intent is already linked to another document) is final: it is logged as an error and not retried.
 
 ## Buying signals
 
