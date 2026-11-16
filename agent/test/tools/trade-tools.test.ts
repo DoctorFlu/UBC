@@ -101,6 +101,9 @@ describe("propose_trade", () => {
       nextAction: { actor: "agent", hint: expect.stringContaining("get_intent") as unknown },
     });
     expect(ok.summary).toMatch(/^Intent #0 approved: buy NO GEMI-BTC2611202200-HI63000 for \$10.00 at 30c/);
+    // The executor may be the simulated one on the devchain: never claim where an order was placed.
+    expect(ok.summary).toContain("The executor places approved orders.");
+    expect(`${ok.summary} ${JSON.stringify(ok.structured["nextAction"])}`).not.toMatch(/on Gemini/);
 
     const wait = await proposeTrade.run({ ...args, amountCents: 2_200 }, h.ctx);
     expect(wait.structured).toMatchObject({
@@ -278,6 +281,123 @@ describe("decision context (issue #33)", () => {
   });
 });
 
+describe("intent to context links in the console", () => {
+  const args = { ...trade, amountCents: 1_000, reason: "Owner asked for protection." };
+  const contextOf = (structured: Row) => (structured["proposal"] as Row)["context"] as Row;
+
+  it("links every proposed intent to its context hash and proposal transaction", async () => {
+    const h = harness();
+    const approved = await proposeTrade.run(args, h.ctx);
+    const rejected = await proposeTrade.run({ ...args, amountCents: 3_000, reason: "Too big." }, h.ctx);
+    for (const [intentId, result] of [
+      [0, approved],
+      [1, rejected],
+    ] as const) {
+      const context = contextOf(result.structured);
+      expect(context["contextLinked"]).toBe(true);
+      expect(h.console.state.intentContexts.get(intentId)).toMatchObject({
+        intentId,
+        hash: context["hash"],
+        txHash: (result.structured["proposal"] as Row)["txHash"],
+      });
+    }
+    expect(h.ctx.ledger.lookup(0)?.contextLinked).toBe(true);
+  });
+
+  it("still trades when the console is down, and links on the retried call", async () => {
+    const h = harness();
+    h.console.setDown(true);
+    const first = await proposeTrade.run(args, h.ctx);
+    expect(first.structured).toMatchObject({
+      status: "approved",
+      proposal: { intentId: 0, context: { contextLinked: false } },
+    });
+    expect(h.console.state.intentContexts.size).toBe(0);
+    // One attempt and one retry, both bounded.
+    const puts = h.console.state.requests.filter((r) => r === "PUT /api/agent/v1/intents/0/context");
+    expect(puts).toHaveLength(2);
+
+    h.console.setDown(false);
+    const again = await proposeTrade.run(args, h.ctx);
+    expect(again.structured).toMatchObject({
+      status: "approved",
+      replayed: true,
+      proposal: { intentId: 0, context: { contextLinked: true } },
+    });
+    expect(h.policy.proposed).toHaveLength(1);
+    expect(h.console.state.intentContexts.get(0)?.hash).toBe(contextOf(first.structured)["hash"]);
+    expect(h.ctx.ledger.pendingLinks()).toEqual([]);
+  });
+
+  it("sends a link that waited in the outbox with the next proposal", async () => {
+    const h = harness();
+    h.console.setDown(true);
+    await proposeTrade.run(args, h.ctx);
+    h.console.setDown(false);
+    const next = await proposeTrade.run({ ...args, reason: "Next leg." }, h.ctx);
+    expect(contextOf(next.structured)["contextLinked"]).toBe(true);
+    expect([...h.console.state.intentContexts.keys()].sort()).toEqual([0, 1]);
+  });
+
+  it("reports a conflicting link as not linked, keeps the verdict, and does not retry it", async () => {
+    const h = harness();
+    h.console.state.intentContexts.set(0, {
+      intentId: 0,
+      hash: `0x${"e".repeat(64)}`,
+      txHash: `0x${"f".repeat(64)}`,
+      linkedAt: "2026-11-15T11:00:00.000Z",
+    });
+    const first = await proposeTrade.run(args, h.ctx);
+    expect(first.structured).toMatchObject({
+      status: "approved",
+      proposal: { intentId: 0, context: { contextLinked: false } },
+    });
+    expect(h.ctx.ledger.pendingLinks()).toEqual([]);
+    const before = h.console.state.requests.length;
+    const again = await proposeTrade.run(args, h.ctx);
+    expect(again.structured).toMatchObject({
+      replayed: true,
+      proposal: { context: { contextLinked: false } },
+    });
+    expect(h.console.state.requests.slice(before)).not.toContain("PUT /api/agent/v1/intents/0/context");
+    expect(h.console.state.intentContexts.get(0)?.hash).toBe(`0x${"e".repeat(64)}`);
+  });
+
+  it("answers null when no console is configured", async () => {
+    const h = harness({ console: false });
+    const { structured } = await proposeTrade.run(args, h.ctx);
+    expect(structured).toMatchObject({ status: "approved", proposal: { context: { contextLinked: null } } });
+  });
+
+  it("links every order of a plan, and finishes the links on a retried execute_plan", async () => {
+    const h = harness();
+    const { structured: planned } = await planHedge.run(
+      { asset: "BTC", floorCents: 6_200_000, maxCostCents: 5_000, requestText: "Protect my BTC." },
+      h.ctx,
+    );
+    const planId = (planned["plan"] as Row)["planId"] as string;
+    h.console.setDown(true);
+    const first = await executePlan.run({ planId, reason: "Go." }, h.ctx);
+    const orders = (first.structured["execution"] as { orders: Row[] }).orders;
+    expect(orders.length).toBeGreaterThan(1);
+    expect(orders.every((o) => o["contextLinked"] === false)).toBe(true);
+    // Only the first order waited for the console; the rest queued their links.
+    const puts = h.console.state.requests.filter((r) => /^PUT \/api\/agent\/v1\/intents\//.test(r));
+    expect(puts).toHaveLength(2);
+
+    h.console.setDown(false);
+    const again = await executePlan.run({ planId, reason: "Go." }, h.ctx);
+    const relinked = (again.structured["execution"] as { orders: Row[] }).orders;
+    expect(relinked.every((o) => o["contextLinked"] === true)).toBe(true);
+    for (const order of relinked) {
+      expect(h.console.state.intentContexts.get(order["intentId"] as number)?.hash).toBe(
+        order["contextHash"],
+      );
+    }
+    expect(h.policy.proposed).toHaveLength(orders.length);
+  });
+});
+
 describe("get_intent", () => {
   it("returns status, reason and next step, and unavailable for an unknown id", async () => {
     const h = harness();
@@ -370,6 +490,9 @@ describe("execute_plan", () => {
       );
     }
     expect(summary).toContain(`${total} of ${total} orders submitted`);
+    expect(structured).toMatchObject({
+      nextAction: { hint: expect.stringMatching(/^The executor places approved orders\./) as unknown },
+    });
 
     const again = await executePlan.run({ planId, reason: "Owner approved the plan." }, h.ctx);
     expect(h.policy.proposed).toHaveLength(total);

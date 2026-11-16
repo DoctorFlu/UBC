@@ -10,6 +10,8 @@ import type { DecisionContext } from "@mandate/shared";
  * - Decision contexts: which document belongs to which intent, so `get_intent` can show it even
  *   when the contract cannot record the hash.
  * - Outbox: documents the console did not accept yet (it was down), retried on later proposals.
+ * - Link outbox: intent-to-context links the console did not take yet, retried on later proposals
+ *   and when a proposal is replayed.
  */
 
 export const REPLAY_WINDOW_MS = 10 * 60_000;
@@ -26,8 +28,20 @@ export interface IntentRecord {
   contextStored: boolean;
   /** Whether the hash is onchain with the intent. */
   contextHashRecorded: boolean;
+  /**
+   * Whether the console links this intent to its document. False while the link waits in the outbox
+   * or after the console refused it; null when no console is configured.
+   */
+  contextLinked: boolean | null;
   planId: string;
   reason: string;
+}
+
+/** What the console needs to link an intent to its decision context. */
+export interface ContextLink {
+  hash: `0x${string}`;
+  /** The transaction that proposed the intent. */
+  txHash: `0x${string}`;
 }
 
 export interface Replayed<T> {
@@ -42,6 +56,7 @@ export class ProposalLedger {
   readonly #replays = new Map<string, ReplayEntry<unknown>>();
   readonly #intents = new Map<number, IntentRecord>();
   readonly #outbox = new Map<`0x${string}`, DecisionContext>();
+  readonly #links = new Map<number, ContextLink>();
 
   /**
    * Runs `work` once per `key` inside the replay window. `keep` decides whether a finished result
@@ -108,6 +123,34 @@ export class ProposalLedger {
   /** Forgets a queued document the console will never accept. */
   dropContext(hash: `0x${string}`): void {
     this.#outbox.delete(hash);
+  }
+
+  /** Keeps a link the console has not taken yet. */
+  queueLink(intentId: number, link: ContextLink): void {
+    this.#links.set(intentId, link);
+    for (const key of this.#links.keys()) {
+      if (this.#links.size <= MAX_ENTRIES) break;
+      this.#links.delete(key);
+    }
+  }
+
+  /** The queued link of one intent, if it still waits for the console. */
+  pendingLink(intentId: number): ContextLink | undefined {
+    return this.#links.get(intentId);
+  }
+
+  pendingLinks(): [number, ContextLink][] {
+    return [...this.#links.entries()];
+  }
+
+  /**
+   * Records the console's final answer for a queued link: linked, or refused for good (a conflict).
+   * Either way the link leaves the outbox.
+   */
+  settleLink(intentId: number, linked: boolean): void {
+    this.#links.delete(intentId);
+    const record = this.#intents.get(intentId);
+    if (record !== undefined) record.contextLinked = linked;
   }
 
   #prune(nowMs: number): void {

@@ -7,8 +7,8 @@
  * free port (never 8787, 8788 or 3000). It then drives the server over HTTP with the official MCP
  * SDK client, opening a fresh session for every tool call as Grok Bot does, against live public
  * Gemini market data. It checks the three demo cases (approved, blocked with the contract's
- * reason, waiting for the owner), the sealed decision contexts, and that nothing secret reaches
- * the server's logs.
+ * reason, waiting for the owner), the sealed decision contexts and each intent's link to its context
+ * in the console, and that nothing secret reaches the server's logs.
  *
  * Every key here is a public anvil test key or a random token made for this run; the token is
  * written to a temporary env file (mode 600) and never printed or passed on a command line.
@@ -344,6 +344,15 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
         field(result.structuredContent, "proposal", "context", "contextHashRecorded") === extended,
         `${label}: contextHashRecorded is ${String(extended)}`,
       );
+      const intentId = Number(field(result.structuredContent, "proposal", "intentId"));
+      const link = fake.state.intentContexts.get(intentId);
+      check(
+        field(result.structuredContent, "proposal", "context", "contextLinked") === true &&
+          link?.hash.toLowerCase() === hash.toLowerCase() &&
+          link.txHash.toLowerCase() ===
+            String(field(result.structuredContent, "proposal", "txHash")).toLowerCase(),
+        `${label}: the console links intent #${String(intentId)} to its context and proposal transaction`,
+      );
     }
 
     process.stdout.write("\n-- execute the plan (a different MCP session from plan_hedge)\n");
@@ -355,6 +364,22 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
       check(
         field(executed.structuredContent, "execution", "remaining") === 0,
         "execute_plan answered every order or stopped at a rejection",
+      );
+      const orders = (field(executed.structuredContent, "execution", "orders") ?? []) as {
+        intentId: number | null;
+        contextHash: string | null;
+        contextLinked: boolean | null;
+      }[];
+      check(
+        orders.length > 0 &&
+          orders.every(
+            (order) =>
+              order.intentId !== null &&
+              order.contextLinked === true &&
+              fake.state.intentContexts.get(order.intentId)?.hash.toLowerCase() ===
+                order.contextHash?.toLowerCase(),
+          ),
+        `the console links each of the plan's ${String(orders.length)} intents to its context`,
       );
       const again = await run("execute_plan", { planId, reason: "The owner agreed to the plan." });
       check(

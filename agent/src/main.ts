@@ -56,6 +56,9 @@ function main(): void {
       });
     },
   );
+  // Deliver signal payments and the budget the console has not recorded yet, then keep retrying.
+  const stopPaymentReports = server.context.paymentReports?.start();
+
   listener.on("error", (error: Error) => {
     logger.error("server.listen_failed", { name: error.name, message: error.message });
     process.exit(1);
@@ -69,6 +72,7 @@ function main(): void {
     }
     shuttingDown = true;
     logger.info("server.shutting_down", { signal });
+    stopPaymentReports?.();
     setTimeout(() => {
       logger.warn("server.shutdown_timeout", { graceMs: SHUTDOWN_GRACE_MS });
       process.exit(1);

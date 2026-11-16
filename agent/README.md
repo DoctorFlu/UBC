@@ -23,7 +23,7 @@ Set `MCP_ERA=auto` to negotiate the 2026-07-28 protocol instead of the 2025 `ini
 `npm run mcp:e2e` runs the whole agent flow against a real chain in one command, with nothing to configure and no `.env` read.
 For each Policy contract it starts anvil with a fresh deployment and the demo rules, an in-memory console backend (`testing/fake-console.ts`), and the real server as a child process, each on a free port.
 It then drives the server over HTTP with the official MCP SDK client, opening a new session for every call as Grok Bot does, against live public Gemini market data.
-The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts, `get_intent`, `get_activity` and `request_policy_change`.
+The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts and each intent's link to its context in the console, `get_intent`, `get_activity` and `request_policy_change`.
 It also checks that no key or token reaches the server's logs.
 Pass `-- --contract production` or `-- --contract reference` to run one contract; the default runs both.
 On the reference contract, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain.
@@ -114,8 +114,8 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 | `POLICY_ADDRESS` | unset | policy reads and trades |
 | `AGENT_PRIVATE_KEY` | unset | trades |
 | `POLICY_DEPLOY_BLOCK` | unset | rejection reasons in `get_intent` and `get_activity` (scans the last 200,000 blocks when unset) |
-| `CONSOLE_URL` | `http://localhost:3000` | holdings, pairing, plans, decision contexts and change requests |
-| `CONSOLE_SERVICE_TOKEN` | unset | holdings, pairing, plans, decision contexts and change requests |
+| `CONSOLE_URL` | `http://localhost:3000` | holdings, pairing, plans, decision contexts, intent links, change requests and signal payment reports |
+| `CONSOLE_SERVICE_TOKEN` | unset | holdings, pairing, plans, decision contexts, intent links, change requests and signal payment reports |
 | `SIGNALS_URL` | `http://localhost:4021` | buying signals |
 | `X402_BUYER_PRIVATE_KEY` | unset | buying signals (pays from its Circle Gateway balance) |
 | `SIGNAL_DAILY_BUDGET_USDC` | `0.02` | buying signals: most spent per UTC day |
@@ -167,6 +167,13 @@ When the contract has the 7-argument `proposeTrade`, the hash is also recorded o
 On the production contract the result says `contextHashRecorded: false` and the document lives only offchain.
 If the console is down, documents wait in an in-process outbox and are sent with later proposals.
 
+Once the proposal transaction is confirmed and the intent id is known, the server links the intent to its document in the console (`PUT /api/agent/v1/intents/<intentId>/context` with the hash and the proposal transaction), for every single trade and every order of a plan.
+Without this link the console cannot show why the agent acted on the production contract, where no event carries the hash.
+Linking is best effort and never changes or delays a verdict beyond a short bound: each attempt has a 3 s timeout, an unanswered attempt is retried once, and the result says `contextLinked: true` when the console has the link, `false` when it does not (yet), and `null` without a console.
+A link the console could not take waits in an in-process outbox and is sent with the next proposal, or when the same `propose_trade` or `execute_plan` call is retried.
+During `execute_plan`, once one link fails the remaining orders only queue theirs, so a console outage costs one bounded wait per call.
+A 409 `conflict` (the intent is already linked to another document) is final: it is logged as an error and not retried.
+
 ## Buying signals
 
 `buy_signal` pays the signal API (`signals/`) a fraction of a cent from the buyer's Circle Gateway balance for a hedge signal on one Gemini ladder, and returns a compact signal plus its `receiptId`, the nonce of the payment authorization.
@@ -183,6 +190,20 @@ An exhausted budget, a price above the maximum, a seller refusal and a Gateway r
 The spend ledger (`<AGENT_DATA_DIR>/signal-spend.jsonl`) is an append-only file written with `fsync`, so the budget survives a restart; a payment whose outcome is unknown stays counted against the budget.
 Purchased signals live in `<AGENT_DATA_DIR>/signals/<receiptId>.json`, so a later tool call in a fresh session can use a signal by receipt id: `services.payments.purchasedSignal(receiptId)` returns `{ receiptId, signal }` ready for the planner's `signal` input.
 The server never deposits into Gateway.
+
+### Payment reports to the console
+
+The console shows what the agent bought, for how much, when and with which settlement reference, plus today's budget use and the Gateway balance (issue #22).
+The server reports this best effort through two routes in `@mandate/shared` `console-api.ts`:
+
+- `PUT /api/agent/v1/signal-payments/<receiptId>` records one payment, right after a successful `buy_signal`; the console keeps the first write for a receipt id.
+- `PUT /api/agent/v1/signal-budget` replaces the budget snapshot (daily budget, spent today, maximum price, reset time, Gateway balance when it can be read, buyer address); it is sent when the server starts and after each purchase.
+
+`buy_signal` answers `paymentRecorded: true` when the console has the payment, `false` when it does not yet, and `null` when nothing was paid or no console is configured; the purchase result never depends on it.
+Each request has a 3 s timeout and one retry, and the balance read is bounded the same way.
+The spend ledger is the outbox: on start, and every minute while something is pending, the server sends every paid entry the console has not confirmed in this process, and the console's idempotency keeps that free of duplicates.
+A console that does not serve these routes yet answers 404, which counts as "not recorded yet" and is logged at debug level only.
+Only public data is sent: amounts in USDC atomic units, times, addresses, the receipt id (the payment nonce), Gateway's settlement reference and a summary of the signal; never a key or the payment signature.
 
 `ENV_FILE=/path/to/.env npm run signal:e2e` runs the whole flow once on Arc testnet: it starts the signal API and this server on free ports, calls `buy_signal` with the SDK client over HTTP, plans a hedge with and without the signal, and looks the payment up in Gateway's transfer history.
 It spends the signal price (0.001 USDC by default) per run and keeps its data in `.data/signal-e2e`.
@@ -204,7 +225,7 @@ src/
   mcp/               tool framework, verdict envelope, untrusted text, MCP endpoint
   tools/             one file per tool, plus index.ts, the registry
   chain/             the agent's view of the Policy contract and the event index
-  console/           HTTP client for the console's agent API
+  console/           HTTP client for the console's agent API, signal payment reports
   markets/           Gemini market data and symbol resolution
   planning/          the hedge planner
   trading/           proposals and decision contexts

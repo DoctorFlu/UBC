@@ -5,7 +5,7 @@ import { defineTool } from "../mcp/tool";
 import type { DecisionContext } from "@mandate/shared";
 import { notConfigured, unavailableFor } from "../support/failures";
 import { tradeArgs } from "../support/format";
-import { DIRECT_PLAN_ID, ladderSummaryFromEvent } from "../trading/context";
+import { DIRECT_PLAN_ID, ladderSummaryFromEvent, relinkContext } from "../trading/context";
 import { resolveTradeMarket } from "../trading/market";
 import { proposeIntent, ProposalSchema, type Proposal, type ProposalOutcome } from "../trading/propose";
 
@@ -40,7 +40,7 @@ function describe(proposal: Proposal, verdict: Verdict): string {
         : " Decision context stored offchain only (this contract cannot record its hash).";
   switch (proposal.decision) {
     case "approved":
-      return `Intent #${proposal.intentId ?? "?"} approved: ${what}. The executor places it on Gemini.${context}`;
+      return `Intent #${proposal.intentId ?? "?"} approved: ${what}. The executor places approved orders.${context}`;
     case "needs_approval":
       return `Intent #${proposal.intentId ?? "?"} is waiting for the owner's approval: ${what}. ${proposal.rule?.detail ?? ""}${context}`.trim();
     case "rejected":
@@ -131,6 +131,11 @@ export const proposeTrade = defineTool({
         structured: { ...outcome.verdict, proposal: null, replayed },
         summary: summarizeVerdict(outcome.verdict),
       };
+    }
+    // A replay sends nothing new to the chain, but may finish linking the intent in the console.
+    const { proposal } = outcome;
+    if (replayed && proposal.intentId !== null && proposal.context?.contextLinked === false) {
+      proposal.context.contextLinked = await relinkContext(ctx, proposal.intentId, false);
     }
     const verdict = outcome.kind === "submitted" ? outcome.verdict : unavailableFor(outcome.failure);
     const again = replayed

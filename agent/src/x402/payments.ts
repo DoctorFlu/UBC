@@ -53,6 +53,18 @@ export interface BudgetState {
   resetsAt: string;
 }
 
+/** One signal payment as the spend ledger records it. */
+export interface PaidSignalEntry {
+  /** The payment nonce. */
+  receiptId: string;
+  /** USDC base units paid. */
+  amount: bigint;
+  /** When the payment was recorded as paid. */
+  paidAt: string;
+  /** The paid URL. */
+  url: string;
+}
+
 export type BuySignalOutcome =
   | { kind: "bought"; purchase: SignalPurchase; budget: BudgetState }
   /** Today's budget cannot cover the price (or is used up). Nothing was signed. */
@@ -109,6 +121,27 @@ export class SignalPayments {
     const next = new Date(`${day}T00:00:00.000Z`);
     next.setUTCDate(next.getUTCDate() + 1);
     return { day, dailyBudget: this.options.dailyBudget, spent, remaining, resetsAt: next.toISOString() };
+  }
+
+  /** Every signal payment in the spend ledger, oldest first. */
+  paidSignals(): PaidSignalEntry[] {
+    return this.options.ledger.paidEntries().flatMap((entry) =>
+      entry.nonce === null
+        ? []
+        : [
+            {
+              receiptId: entry.nonce,
+              amount: entry.amount,
+              paidAt: entry.paidAt ?? entry.reservedAt,
+              url: entry.url,
+            },
+          ],
+    );
+  }
+
+  /** The buyer's available Circle Gateway balance, in base units. Throws when it cannot be read. */
+  gatewayBalance(): Promise<bigint> {
+    return this.options.buyer.gatewayBalance();
   }
 
   /** The purchase stored under a receipt id, if any. */

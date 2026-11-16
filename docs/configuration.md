@@ -76,4 +76,5 @@ Create both keys with `npm run x402:keygen`.
 | `AGENT_DATA_DIR` | no | Where the MCP server keeps its signal spend ledger and purchased signals. Defaults to `.data/agent`, which is git-ignored. |
 
 The MCP server reads `X402_BUYER_PRIVATE_KEY` too: with it, `buy_signal` pays from that wallet's Circle Gateway balance; without it, `buy_signal` answers `unavailable`.
+With `CONSOLE_SERVICE_TOKEN` set as well, the MCP server reports each payment and the signal budget to the console (see [agent/README.md](../agent/README.md#payment-reports-to-the-console)).
 The server never deposits; top the Gateway balance up as described in [x402.md](x402.md).

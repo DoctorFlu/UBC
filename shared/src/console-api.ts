@@ -38,6 +38,13 @@ export const CONSOLE_AGENT_ROUTES = {
   policyChangeRequest: (id: string) => `${CONSOLE_AGENT_API_BASE}/policy-change-requests/${id}`,
   /** PUT announces the agent to the console (idempotent); GET returns the pairing state. */
   pairing: `${CONSOLE_AGENT_API_BASE}/pairing`,
+  /**
+   * PUT records one x402 payment for a signal under its receipt id (idempotent: the first write wins).
+   * Issue #22.
+   */
+  signalPayment: (receiptId: string) => `${CONSOLE_AGENT_API_BASE}/signal-payments/${receiptId}`,
+  /** PUT replaces the snapshot of the agent's signal budget and Gateway balance (latest `asOf` wins). Issue #22. */
+  signalBudget: `${CONSOLE_AGENT_API_BASE}/signal-budget`,
 } as const;
 
 const isoDateTime = z.iso.datetime({ offset: true });
@@ -187,3 +194,108 @@ export const pairingResponseSchema = z.strictObject({
   isContractAgent: z.boolean(),
 });
 export type PairingResponse = z.infer<typeof pairingResponseSchema>;
+
+// Signal payments (x402, issue #22)
+//
+// The MCP server pays the signal API per request from the agent's Circle Gateway balance and keeps the
+// truth in its spend ledger. It reports two things here, best effort:
+// - each payment, once, under its receipt id (`signalPayment`), resent until the console answers 2xx;
+// - a snapshot of the budget (`signalBudget`), sent when the server starts and after each purchase.
+// They are separate because a payment is an immutable fact while the budget is state that changes
+// without a payment (a new UTC day, a restart with other settings, a Gateway deposit). Both routes
+// answer 404 until the console implements them; the server treats that as "not recorded yet".
+
+/**
+ * A USDC amount in atomic units (6 decimals) as a plain decimal string, for example "1000" for
+ * 0.001 USDC. Never a float and never a formatted amount.
+ */
+export const usdcAtomicSchema = z.string().regex(/^(0|[1-9]\d{0,29})$/, {
+  message: "amount must be a whole number of USDC atomic units (6 decimals) as a decimal string",
+});
+
+/** What a payment bought: the hedge signal, as the seller served it. */
+export const paidSignalSchema = z.strictObject({
+  /** keccak256 of the signal document (its `signalId`). */
+  signalId: bytes32Schema,
+  asset: z.string().min(1).max(10),
+  eventTicker: z.string().min(1).max(40),
+  /** Ladder kind, for example `weekly`. */
+  horizon: z.string().min(1).max(20),
+  /** When the ladder settles. */
+  expiry: isoDateTime,
+  /** When the seller computed the signal. */
+  asOf: isoDateTime,
+  /** Strikes per verdict. */
+  counts: z.strictObject({
+    cheap: z.int().nonnegative(),
+    fair: z.int().nonnegative(),
+    expensive: z.int().nonnegative(),
+    noOffer: z.int().nonnegative(),
+  }),
+});
+export type PaidSignal = z.infer<typeof paidSignalSchema>;
+
+/**
+ * PUT body for one x402 payment the agent made for a signal, keyed in the path by its receipt id
+ * (the 32-byte nonce of the payment authorization, which Gateway's transfer history is searchable by).
+ * Payments are immutable facts: the first write wins, and repeating a receipt id stores nothing new.
+ * It carries no key and no payment signature.
+ */
+export const putSignalPaymentRequestSchema = z.strictObject({
+  /** USDC paid, in atomic units. */
+  amount: usdcAtomicSchema,
+  /** When the paid response arrived. */
+  paidAt: isoDateTime,
+  /** Path and query of the paid resource on the signal API, for example `/v1/signal/hedge?asset=BTC&horizon=weekly`. */
+  resource: z.string().startsWith("/").max(500),
+  /** CAIP-2 network of the payment, for example `eip155:5042002` (Arc testnet). */
+  network: z.string().min(1).max(64),
+  /** The agent's buyer wallet. */
+  payer: addressSchema,
+  /** The seller's address, or null when the server no longer has the receipt. */
+  payee: addressSchema.nullable(),
+  /** Circle Gateway settlement reference from the seller's answer (not an onchain hash), or null when none was given. */
+  settlementId: z.string().min(1).max(500).nullable(),
+  /** What was bought, or null when the seller's answer was not a valid signal (the payment still happened). */
+  signal: paidSignalSchema.nullable(),
+});
+export type PutSignalPaymentRequest = z.infer<typeof putSignalPaymentRequestSchema>;
+
+export const signalPaymentResponseSchema = z.strictObject({
+  receiptId: bytes32Schema,
+  /** When the console first recorded it. */
+  recordedAt: isoDateTime,
+});
+export type SignalPaymentResponse = z.infer<typeof signalPaymentResponseSchema>;
+
+/**
+ * PUT body: the signal budget as the MCP server enforces it right now. A whole replacement; the
+ * console keeps the snapshot with the latest `asOf` and ignores an older one. The server sends it when
+ * it starts and after every purchase, so the console is right after a restart even when the owner
+ * changed the budget settings, and before the first purchase of the day.
+ * After `resetsAt` the snapshot's `spentToday` no longer applies: show 0 of `dailyBudget` spent until
+ * the next snapshot arrives.
+ */
+export const putSignalBudgetRequestSchema = z.strictObject({
+  /** The wallet whose Circle Gateway balance pays for signals. */
+  buyerAddress: addressSchema,
+  /** UTC day the numbers are for, `YYYY-MM-DD`. */
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Most the agent may spend on signals per UTC day, in USDC atomic units. */
+  dailyBudget: usdcAtomicSchema,
+  /** Counted against today's budget: paid, plus payments whose outcome is unknown. Atomic units. */
+  spentToday: usdcAtomicSchema,
+  /** Most the agent pays for one signal, in USDC atomic units. */
+  maxPricePerPurchase: usdcAtomicSchema,
+  /** When the next day's budget starts (00:00 UTC). */
+  resetsAt: isoDateTime,
+  /** Available Circle Gateway balance of the buyer, in atomic units, or null when it could not be read. */
+  gatewayBalance: usdcAtomicSchema.nullable(),
+  /** When the server took this snapshot. */
+  asOf: isoDateTime,
+});
+export type PutSignalBudgetRequest = z.infer<typeof putSignalBudgetRequestSchema>;
+
+/** The snapshot the console now holds (the request's or a newer one), with when it stored it. */
+export const signalBudgetResponseSchema = putSignalBudgetRequestSchema.extend({ storedAt: isoDateTime });
+export type SignalBudgetResponse = z.infer<typeof signalBudgetResponseSchema>;
