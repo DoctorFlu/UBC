@@ -23,7 +23,7 @@ Set `MCP_ERA=auto` to negotiate the 2026-07-28 protocol instead of the 2025 `ini
 `npm run mcp:e2e` runs the whole agent flow against a real chain in one command, with nothing to configure and no `.env` read.
 For each Policy contract it starts anvil with a fresh deployment and the demo rules, an in-memory console backend (`testing/fake-console.ts`), and the real server as a child process, each on a free port.
 It then drives the server over HTTP with the official MCP SDK client, opening a new session for every call as Grok Bot does, against live public Gemini market data.
-The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts, `get_intent`, `get_activity` and `request_policy_change`.
+The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, a $10.00 trade at 30 cents proposed as 33 whole contracts ($9.90, read back from the chain) and one below a contract refused, the stored decision contexts, `get_intent`, `get_activity` and `request_policy_change`.
 It also checks that no key or token reaches the server's logs.
 Pass `-- --contract production` or `-- --contract reference` to run one contract; the default runs both.
 On the reference contract, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain.
@@ -138,9 +138,9 @@ Grok Bot is told the order of work in `src/instructions.ts`; every result carrie
 | `get_portfolio` | The holdings the owner entered in the console, valued at Gemini spot. |
 | `list_markets` | Open Gemini events in the categories the mandate allows, by volume. |
 | `get_ladder` | One asset's strike ladder for a horizon, the rungs nearest spot first. |
-| `plan_hedge` | A hedge plan of NO buys for a holding and a drop, with payoffs and the verdict each order is expected to get; the plan is kept in the server and posted to the console. |
-| `simulate_trade` | The verdict a trade would get, from the contract's `previewTrade` when it has one and the server's copy of the rules otherwise, naming the rule. |
-| `propose_trade` | Proposes one trade with its decision context; the contract approves, rejects with a reason, or holds it for the owner. Safe to retry. |
+| `plan_hedge` | A hedge plan of NO buys in whole contracts for a holding and a drop, with payoffs and the verdict each order is expected to get; the plan is kept in the server and posted to the console. |
+| `simulate_trade` | The verdict a trade would get, sized as `propose_trade` would size it, from the contract's `previewTrade` when it has one and the server's copy of the rules otherwise, naming the rule. |
+| `propose_trade` | Proposes one trade in whole contracts with its decision context; the contract approves, rejects with a reason, or holds it for the owner. Safe to retry. |
 | `execute_plan` | Proposes a plan's orders in order, stops at the first rejection, and reports each rung. Safe to retry and resumable. |
 | `get_intent` | One intent's status, reason, fill and decision context, checked against its hash. |
 | `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged. |
@@ -149,6 +149,14 @@ Grok Bot is told the order of work in `src/instructions.ts`; every result carrie
 | `ping`, `whoami` | Liveness and the agent's address. |
 
 Amounts are integer cents, prices are 1 to 99 cents, `market` is a Gemini instrument symbol, and hedges buy NO.
+
+Gemini contracts are whole, so every order is `contracts x limitPrice` cents.
+`simulate_trade` and `propose_trade` size a trade in one place (`src/trading/sizing.ts`): `contracts = floor(amountCents / limitPrice)`, and the rules are checked on, and the contract receives, `contracts x limitPrice`.
+Both results carry `sizing` (`requestedAmountCents`, `contracts`, `amountCents`, `roundedDown`) and say it in the text, for example "for $21.75 at 29c (75 contracts; rounded down from $22.00 because contracts are whole)".
+Buys and sells follow the same rule.
+An amount below one contract is not checked or proposed: the result is `unavailable` with `BELOW_ONE_CONTRACT` and a `nextAction` naming the smallest valid amount.
+A retry of the same requested amount is the same call, so it replays the first result.
+`plan_hedge` orders whole contracts too (each order has `contracts`), and `execute_plan` proposes the plan's amounts unchanged.
 The category of a market is derived from Gemini, never taken from the agent.
 
 The agent key can only propose: no code path calls an owner or executor function, and `test/no-owner-calls.test.ts` proves it structurally.

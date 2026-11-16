@@ -12,7 +12,7 @@ Order of work:
 5. get_intent or get_activity to follow up and report fills.
 
 Rules:
-- Money is in integer US cents (1000 = $10.00). limitPrice is cents per $1 contract, 1 to 99. market is the instrumentSymbol exactly as a tool returned it. A hedge buys NO.
+- Money is in integer US cents (1000 = $10.00). limitPrice is cents per $1 contract, 1 to 99. Contracts are whole: an amount is rounded down to a multiple of limitPrice. market is the instrumentSymbol exactly as a tool returned it. A hedge buys NO.
 - Every result has a status. "approved": accepted. "held": waiting for the owner, usually an approval in the console; tell them and wait. "rejected": a final verdict from the mandate, not an error. Never retry, resize, split or reword a rejected trade to get around a rule. Tell the owner which rule stopped it, with the numbers given. Only the owner can change a rule; if they want to, call request_policy_change with their reason. "ok": done. "unavailable": the server cannot do it right now (a setup step is missing or a service did not answer); follow nextAction and tell the owner.
 - Always follow nextAction: it says who acts next (you or the owner) and how.
 - If a call fails with a transport or network error, retry it once. propose_trade and execute_plan are safe to retry: they never trade twice. If it fails again, tell the owner.
