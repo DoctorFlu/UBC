@@ -15,7 +15,32 @@ Foundry comes from npm (`@foundry-rs/anvil`, `@foundry-rs/forge`), so `npm insta
 
 The production build writes only to `devchain/out/production` and `devchain/cache/production`; nothing under `/contracts` changes.
 
-## Run it
+## Run the whole product: `npm run dev:stack`
+
+One command starts the devchain, the paid signal API, the console, the MCP server and the simulated executor, already wired to each other.
+Nothing has to be edited in `.env` beyond what the MCP server and the signal API already need (`MCP_AUTH_TOKEN` and the x402 keys).
+
+```bash
+npm run dev:stack                                    # reference contract, demo rules, `next dev` console
+npm run dev:stack -- --blank                         # no rules yet: rehearse creating the first mandate
+npm run dev:stack -- --prod                          # build the console and serve the build
+npm run dev:stack -- --watch                         # restart the MCP server when its code changes
+npm run dev:stack -- --mcp-public-url https://<tunnel>/mcp
+npm run dev:tunnel                                   # another terminal: a public address for Grok Bot
+```
+
+What it passes to the processes, in their environment only:
+
+- the MCP server gets the devchain agent key (anvil account 1, public), the loopback RPC and the deployed address, so no trade can reach a shared network;
+- the console and the MCP server share a service token generated for the run, which is never printed;
+- the console gets the test signer (`NEXT_PUBLIC_DEV_SIGNER=1`), so the owner signs as anvil account 0.
+
+The chain and the console's store (`dashboard/.data/stack`) are new on every run, so holdings are entered again under Hedge.
+It refuses to start if port 8545, 3000, `MCP_PORT` or `SIGNALS_PORT` is taken.
+Ctrl+C stops everything.
+Keep the tunnel in its own terminal: its address survives a restart of the stack, so the Grok Bot connector stays valid.
+
+## Run the pieces
 
 ```bash
 npm run dev:chain                         # terminal 1: anvil on 127.0.0.1:8545, Policy.sol deployed
