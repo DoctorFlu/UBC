@@ -27,27 +27,35 @@ It cannot approve its own orders, change a rule, unpause, or touch the exchange 
 ## How it fits together
 
 ```mermaid
-flowchart TB
-    owner(["Owner"])
-    grok["Grok Bot<br/>the agent"]
-    mcp["MCP server<br/>tools, hedge planner, spend limits"]
-    signals["Signal API<br/>paid per request over x402"]
-    gemini[("Gemini<br/>prediction markets")]
-    policy{{"Policy contract on Arc<br/>approves, holds or rejects"}}
-    console["Console<br/>rules, approvals, audit trail"]
-    executor["Executor<br/>holds the exchange key"]
+sequenceDiagram
+    actor Owner
+    participant Grok as Grok Bot
+    participant MCP as MCP server
+    participant Policy as Policy contract on Arc
+    participant Console
+    participant Executor
+    participant Gemini
 
-    owner -- "chats" --> grok
-    owner -- "signs rules, approvals, pause" --> console
-    grok -- "tool calls" --> mcp
-    mcp -- "USDC" --> signals
-    mcp -- "reads prices" --> gemini
-    mcp -- "proposes every order" --> policy
-    console -- "owner transactions" --> policy
-    policy -- "events, QuickNode Stream" --> console
-    policy -- "approved orders only" --> executor
-    executor -- "places orders" --> gemini
+    Owner->>Console: set the mandate
+    Console->>Policy: owner-signed rules
+    Owner->>Grok: "Protect my BTC below $60,000"
+    Grok->>MCP: read rules, holding and prices
+    MCP->>Gemini: market data
+    Grok->>MCP: buy a signal (x402, USDC) and plan
+    Grok->>Owner: plan, cost and cover
+    Owner->>Grok: yes
+    Grok->>MCP: execute the plan
+    MCP->>Policy: propose each order (agent key)
+    Policy-->>MCP: approved, held or rejected with the rule
+    Policy-->>Console: events through a QuickNode Stream
+    Owner->>Console: approve or reject held orders
+    Policy-->>Executor: approved orders only
+    Executor->>Gemini: place the order
+    Executor->>Policy: record the result
 ```
+
+One order, start to finish.
+The agent talks only to the MCP server, the MCP server can only propose, and nothing reaches the exchange without the contract's approval.
 
 | Folder | What it is |
 | --- | --- |
