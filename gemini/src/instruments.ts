@@ -3,19 +3,15 @@
  * dashes. One definition for every package that must tell a real symbol from arbitrary text, such as a
  * market string read from the chain.
  */
+import { isMarketSymbol, MAX_MARKET_SYMBOL_LENGTH } from "@mandate/shared";
 import { isGeminiError } from "./errors";
 import type { MarketContract, MarketEvent } from "./types";
 
-/** The longest instrument symbol accepted anywhere; every listed symbol is far shorter. */
-export const MAX_INSTRUMENT_SYMBOL_LENGTH = 128;
+/** The shape rule lives in `@mandate/shared`, next to the readers that flag onchain text. */
+export const MAX_INSTRUMENT_SYMBOL_LENGTH = MAX_MARKET_SYMBOL_LENGTH;
+export const isInstrumentSymbol = isMarketSymbol;
 
-const SYMBOL = /^GEMI-[A-Za-z0-9._-]+$/;
 const MAX_RESOLVE_ATTEMPTS = 4;
-
-/** Whether a string has the shape of a Gemini instrument symbol. It says nothing about whether it is listed. */
-export function isInstrumentSymbol(value: string): boolean {
-  return value.length <= MAX_INSTRUMENT_SYMBOL_LENGTH && SYMBOL.test(value);
-}
 
 /**
  * Candidate event tickers for a symbol, longest first: the contract ticker is the last segment in every
