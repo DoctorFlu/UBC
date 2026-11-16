@@ -1,0 +1,255 @@
+.skip {
+  position: absolute;
+  z-index: 10;
+  top: var(--space-2);
+  left: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  translate: 0 -200%;
+}
+
+.skip:focus-visible {
+  translate: 0;
+}
+
+.header {
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  max-width: var(--page-max);
+  min-height: 4rem;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.brandMark {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.brandName {
+  font-size: var(--text-lg);
+  font-stretch: var(--stretch-condensed);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+
+.links {
+  display: flex;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+}
+
+.links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  transition-property: color, background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease;
+}
+
+@media (hover: hover) {
+  .links a:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+}
+
+/* The primary action is ink, never a brand hue, as in the console. */
+.launch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding-inline: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  font-size: var(--text-sm);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+  transition-property: background-color, scale;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+@media (hover: hover) {
+  .launch:hover {
+    background: var(--color-ink-hover);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .launch:active {
+    scale: 0.96;
+  }
+}
+
+@media (pointer: coarse) {
+  .launch {
+    min-height: var(--tap-target);
+  }
+}
+
+@media (width < 52rem) {
+  .links {
+    display: none;
+  }
+
+  .launch {
+    margin-inline-start: auto;
+  }
+}
+
+/* ------------------------------------------------------------------ footer */
+
+.footer {
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding: var(--space-12) var(--gutter) 0;
+  overflow: hidden;
+}
+
+.footerRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6) var(--space-12);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--color-rule);
+}
+
+.footerBrand {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 32rem;
+}
+
+.footerNote {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.footerLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  padding-inline: var(--space-2);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.themeToggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  padding-inline: var(--space-3);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition-property: background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease;
+}
+
+@media (hover: hover) {
+  .themeToggle:hover {
+    background: var(--color-surface-hover);
+  }
+}
+
+.themeToggle > span {
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.themeToggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.toDark {
+  display: flex;
+}
+
+.toLight {
+  display: none;
+}
+
+:root[data-theme="dark"] .toDark {
+  display: none;
+}
+
+:root[data-theme="dark"] .toLight {
+  display: flex;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .toDark {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .toLight {
+    display: flex;
+  }
+}
+
+/* The maker's plate on the enclosure door: the name, engraved large and quiet. */
+.wordmark {
+  margin-top: var(--space-10);
+  margin-bottom: -0.2em;
+  color: var(--color-panel);
+  font-size: clamp(5rem, 1rem + 19vw, 17rem);
+  font-stretch: 125%;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.8;
+  text-align: center;
+  white-space: nowrap;
+  user-select: none;
+}
+
+@media (forced-colors: active) {
+  .wordmark {
+    color: GrayText;
+  }
+}

@@ -1,0 +1,321 @@
+/* The anthracite band: the board in its dark finish, in either theme. The tokens use light-dark(), so
+   setting the scheme here re-resolves every colour inside the band. */
+
+.band {
+  color-scheme: dark;
+  margin-top: var(--section-space);
+  padding-block: var(--section-space);
+  background: var(--color-panel);
+  color: var(--color-text);
+  border-block: 1px solid var(--color-rule);
+}
+
+.inner {
+  display: grid;
+  gap: var(--space-10);
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.intro {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 44rem;
+}
+
+.lede {
+  color: var(--color-text-muted);
+  font-size: var(--lede);
+  line-height: var(--leading-snug);
+}
+
+.columns {
+  display: grid;
+  gap: var(--space-8) var(--space-12);
+}
+
+@media (width >= 52rem) {
+  .columns {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  }
+}
+
+.columnTitle {
+  margin-bottom: var(--space-4);
+  font-size: var(--text-lg);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+}
+
+.tools {
+  display: grid;
+  align-content: start;
+}
+
+.group {
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--color-rule);
+}
+
+@media (width >= 36rem) {
+  .group {
+    grid-template-columns: 6rem 1fr;
+    align-items: baseline;
+  }
+}
+
+.groupTitle {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.toolList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.toolList code {
+  display: inline-block;
+  padding: 0.1875rem var(--space-2);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+}
+
+.owner {
+  align-self: start;
+  padding: var(--space-5);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.ownerList {
+  display: grid;
+}
+
+/* Each owner power is a breaker the wallet holds: a small plate with a handle. */
+.ownerList li {
+  position: relative;
+  padding-block: var(--space-2-5);
+  padding-inline-start: var(--space-6);
+  border-top: 1px solid var(--color-rule);
+}
+
+.ownerList li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.ownerList li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(var(--space-2-5) + 0.35em);
+  width: 0.625rem;
+  height: 0.75rem;
+  border: 1.5px solid var(--color-text);
+  border-radius: 2px;
+  background: linear-gradient(var(--color-text), var(--color-text)) 50% 2px / 0.25rem 0.3rem no-repeat;
+}
+
+.ownerList li:first-child::before {
+  top: 0.35em;
+}
+
+/* ------------------------------------------------------------------ the exchange */
+
+.exchange {
+  display: grid;
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.exchangeHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.exchangeTitle {
+  font-weight: var(--weight-semibold);
+}
+
+.tabList {
+  position: relative;
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+}
+
+.tabIndicator {
+  position: absolute;
+  top: var(--active-tab-top);
+  left: 0;
+  width: var(--active-tab-width);
+  height: var(--active-tab-height);
+  translate: var(--active-tab-left) 0;
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-raised);
+  box-shadow: inset 0 0 0 1px var(--color-rule-strong);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tabIndicator:not([data-activation-direction="none"]) {
+    transition-property: translate, width;
+    transition-duration: var(--duration-base);
+    transition-timing-function: var(--ease-out);
+  }
+}
+
+.tab {
+  --lamp: var(--color-approved-lamp);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.25rem;
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  transition-property: color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease;
+}
+
+.tab[data-tone="held"] {
+  --lamp: var(--color-held-lamp);
+}
+
+.tab[data-tone="rejected"] {
+  --lamp: var(--color-rejected-lamp);
+}
+
+.tab[data-selected] {
+  color: var(--color-text);
+}
+
+@media (hover: hover) {
+  .tab:not([data-selected]):hover {
+    color: var(--color-text);
+  }
+}
+
+@media (pointer: coarse) {
+  .tab {
+    min-height: var(--tap-target);
+  }
+}
+
+.tabLamp {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-round);
+  background: var(--lamp);
+}
+
+.panel {
+  padding: var(--space-5);
+}
+
+.panel:focus-visible {
+  outline-offset: -4px;
+}
+
+.turns {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.turn {
+  display: grid;
+  gap: var(--space-1-5);
+}
+
+@media (width >= 52rem) {
+  .turn {
+    grid-template-columns: 10rem minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+}
+
+.turn dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  padding-top: 0.125rem;
+}
+
+.turn dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.you {
+  font-size: var(--text-md);
+}
+
+.call {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-rule);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.result {
+  --lamp: var(--color-approved-lamp);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.result::before {
+  content: "";
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-top: 0.45em;
+  border-radius: var(--radius-round);
+  background: var(--lamp);
+}
+
+.result[data-tone="held"] {
+  --lamp: var(--color-held-lamp);
+}
+
+.result[data-tone="rejected"] {
+  --lamp: var(--color-rejected-lamp);
+}
+
+@media (forced-colors: active) {
+  .tabLamp,
+  .tabIndicator {
+    background: CanvasText;
+  }
+
+  .ownerList li::before {
+    background: CanvasText;
+  }
+}
