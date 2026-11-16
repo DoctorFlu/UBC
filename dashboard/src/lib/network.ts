@@ -5,7 +5,10 @@
  */
 import { type Chain, defineChain } from "viem";
 
-import type { ConsoleNetwork } from "@/lib/live/types";
+import type { ConsoleNetwork, NetworkKind } from "@/lib/live/types";
+
+/** The short tag beside the logo, from the chain the console actually resolved. */
+export const NETWORK_TAGS: Record<NetworkKind, string> = { local: "Local", "arc-testnet": "Arc testnet" };
 
 /**
  * Whether fills are simulated. On the local devchain the executor is the devchain's simulator, so a

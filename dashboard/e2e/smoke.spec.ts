@@ -102,6 +102,12 @@ test.describe("public pages", () => {
 });
 
 test.describe("seeded demo", () => {
+  test("the tag beside the logo names the chain the console resolved", async ({ page }) => {
+    await page.goto("/setup");
+    await expect(page.getByTestId("network-tag").filter({ visible: true })).toHaveText("Local");
+    await expect(page.locator("main").getByText("Local dev chain", { exact: true })).toBeVisible();
+  });
+
   test("the reason the agent linked offchain checks out", async ({ page }) => {
     await page.goto("/activity/0");
     const sealed = page.getByTestId("sealed-reason");
