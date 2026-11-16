@@ -437,7 +437,8 @@ test.describe("seeded demo", () => {
     // The owner's own decisions: in the seed, intent 2 approved and intent 3 rejected after a hold.
     await page.getByRole("tab", { name: /Owner decisions/ }).click();
     await expect(table().locator("tbody tr")).toHaveCount(2);
-    await page.getByRole("combobox", { name: "Order of events" }).selectOption("oldest");
+    await page.getByRole("combobox", { name: "Order of events" }).click();
+    await page.getByRole("option", { name: "Oldest first" }).click();
     const shown = table().locator("tbody tr");
     await expect(shown.nth(0)).toContainText("Approved by owner Intent #2");
     await expect(shown.nth(1)).toContainText("Rejected by owner Intent #3");

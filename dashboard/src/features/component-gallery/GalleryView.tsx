@@ -120,6 +120,7 @@ export function GalleryView() {
   const [dialog, setDialog] = useState<"dialog" | "sheet" | "drawer" | null>(null);
   const [toggle, setToggle] = useState(true);
   const [amount, setAmount] = useState("50");
+  const [category, setCategory] = useState<"crypto" | "macro">("crypto");
   const amountInvalid = !/^\d+(\.\d{1,2})?$/.test(amount);
 
   return (
@@ -318,27 +319,20 @@ export function GalleryView() {
             hint="Larger intents are rejected."
             error={amountInvalid ? "Enter a dollar amount, like 50 or 50.25." : undefined}
           >
-            {(control) => (
-              <Input
-                {...control}
-                prefix="$"
-                suffix="USDC"
-                inputMode="decimal"
-                value={amount}
-                onChange={(event) => setAmount(event.target.value)}
-              />
-            )}
+            <Input prefix="$" suffix="USDC" inputMode="decimal" value={amount} onValueChange={setAmount} />
           </Field>
           <Field label="Market category" optional>
-            {(control) => (
-              <Select {...control} defaultValue="crypto">
-                <option value="crypto">Crypto</option>
-                <option value="macro">Macro</option>
-              </Select>
-            )}
+            <Select
+              options={[
+                { value: "crypto", label: "Crypto" },
+                { value: "macro", label: "Macro" },
+              ]}
+              value={category}
+              onChange={setCategory}
+            />
           </Field>
           <Field label="Disabled">
-            {(control) => <Input {...control} value="Locked while paused" disabled readOnly />}
+            <Input value="Locked while paused" disabled readOnly />
           </Field>
           <div className={styles.toggles}>
             <Toggle
@@ -452,7 +446,7 @@ export function GalleryView() {
       <Section
         id="overlays"
         title="Overlays"
-        note="Native dialogs: focus is trapped, Escape closes, and focus returns to the trigger."
+        note="Modal dialogs: focus is trapped, Escape closes, and focus returns to the trigger."
       >
         <Specimen label="Dialog, sheet, drawer">
           <Button onClick={() => setDialog("dialog")}>Open dialog</Button>

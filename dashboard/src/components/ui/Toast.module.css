@@ -1,13 +1,28 @@
 .region {
   position: fixed;
-  z-index: 50;
+  z-index: 70;
+  inset: auto;
   inset-block-end: max(var(--space-4), env(safe-area-inset-bottom));
   inset-inline-end: var(--space-4);
-  display: flex;
-  flex-direction: column-reverse;
-  gap: var(--space-2);
   width: min(24rem, calc(100vw - 2 * var(--space-4)));
+  height: auto;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  list-style: none;
   pointer-events: none;
+}
+
+.region > ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .toast {
@@ -16,26 +31,36 @@
   align-items: start;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
-  border: 1px solid var(--color-rule);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: var(--color-surface-raised);
   color: var(--color-text);
-  box-shadow: var(--shadow-float);
+  box-shadow: var(--shadow-border), var(--shadow-float);
   pointer-events: auto;
+  user-select: none;
+  translate: var(--toast-swipe-x, 0px) 0;
   transition-property: opacity, translate;
-  transition-duration: var(--duration-slow);
+  transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-out);
+}
 
-  @starting-style {
-    opacity: 0;
-  }
+.toast:is([data-starting-style], [data-ending-style]) {
+  opacity: 0;
+}
+
+.toast[data-swiping] {
+  transition: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .toast[data-starting-style] {
+    translate: 0 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
   .toast {
-    @starting-style {
-      translate: 0 0.75rem;
-    }
+    transition-property: opacity;
   }
 }
 
@@ -44,23 +69,23 @@
   height: 0.5rem;
   margin-top: 0.4375rem;
   border-radius: var(--radius-round);
-  background: var(--toast-lamp, var(--color-text-subtle));
+  background: var(--color-text-subtle);
 }
 
-.success {
-  --toast-lamp: var(--color-approved-lamp);
+.toast[data-type="success"] .lamp {
+  background: var(--color-approved-lamp);
 }
 
-.held {
-  --toast-lamp: var(--color-held-lamp);
+.toast[data-type="warning"] .lamp {
+  background: var(--color-held-lamp);
 }
 
-.danger {
-  --toast-lamp: var(--color-rejected-lamp);
+.toast[data-type="error"] .lamp {
+  background: var(--color-rejected-lamp);
 }
 
-.info {
-  --toast-lamp: var(--color-filled-lamp);
+.toast[data-type="info"] .lamp {
+  background: var(--color-filled-lamp);
 }
 
 .text {
@@ -92,6 +117,10 @@
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--color-text-muted);
+  cursor: pointer;
+  transition-property: background-color, color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
 }
 
 .close svg {

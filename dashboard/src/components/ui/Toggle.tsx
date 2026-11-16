@@ -1,6 +1,8 @@
 "use client";
 
-import { type ReactNode, useId } from "react";
+import { Field, FieldDescription, FieldLabel } from "@ui-sdk/react/field";
+import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
+import type { ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
 
@@ -12,36 +14,39 @@ export interface ToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
+  /** "compact" sets the label in the small muted style of the sidebar's footer. */
+  size?: "default" | "compact";
   className?: string;
+  "data-testid"?: string;
 }
 
-/**
- * An on/off switch: a native checkbox with role="switch", so it keeps form semantics, Space to
- * toggle, and the right announcement. Use it for settings that apply at once, not for form fields.
- */
-export function Toggle({ label, description, checked, onChange, disabled = false, className }: ToggleProps) {
-  const id = useId();
-  const descriptionId = description !== undefined ? `${id}-description` : undefined;
+/** An on/off switch for a setting that applies at once. Pressing the label toggles it too. */
+export function Toggle({
+  label,
+  description,
+  checked,
+  onChange,
+  disabled = false,
+  size = "default",
+  className,
+  "data-testid": testId,
+}: ToggleProps) {
   return (
-    <label className={cx(styles.toggle, className)} htmlFor={id} data-disabled={disabled || undefined}>
+    <Field className={cx(styles.toggle, size === "compact" && styles.compact, className)} disabled={disabled}>
       <span className={styles.text}>
-        <span className={styles.label}>{label}</span>
+        <FieldLabel className={styles.label}>{label}</FieldLabel>
         {description !== undefined ? (
-          <span id={descriptionId} className={styles.description}>
-            {description}
-          </span>
+          <FieldDescription className={styles.description}>{description}</FieldDescription>
         ) : null}
       </span>
-      <input
-        id={id}
-        type="checkbox"
-        role="switch"
+      <Switch
         className={styles.switch}
         checked={checked}
-        disabled={disabled}
-        aria-describedby={descriptionId}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
+        onCheckedChange={(next) => onChange(next)}
+        data-testid={testId}
+      >
+        <SwitchThumb className={styles.thumb} />
+      </Switch>
+    </Field>
   );
 }

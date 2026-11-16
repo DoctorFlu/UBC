@@ -1,4 +1,12 @@
+@layer ui-sdk;
+
 @import "../styles/tokens.css";
+
+@layer ui-sdk {
+  :where([data-slot][hidden]:not([hidden="until-found"])) {
+    display: none !important;
+  }
+}
 
 *,
 *::before,

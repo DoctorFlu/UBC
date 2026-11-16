@@ -118,7 +118,12 @@
   --radius-lg: 14px;
   --radius-round: 999px;
 
-  /* Elevation, only for things that float above the board */
+  /* Elevation, only for things that float above the board. --shadow-border is a hairline ring that
+     reads as an edge in both themes; pair it with a transparent border for forced-colors mode. */
+  --shadow-border:
+    0 0 0 1px light-dark(oklch(0 0 0 / 0.08), oklch(1 0 0 / 0.08)),
+    0 1px 2px -1px light-dark(oklch(0 0 0 / 0.08), transparent),
+    0 2px 4px light-dark(oklch(0 0 0 / 0.04), transparent);
   --shadow-raised: 0 1px 2px rgb(16 20 22 / 0.06), 0 1px 1px rgb(16 20 22 / 0.04);
   --shadow-float:
     0 12px 32px -8px light-dark(rgb(16 20 22 / 0.22), rgb(0 0 0 / 0.55)),
@@ -131,9 +136,9 @@
   --duration-slow: 300ms;
 
   /* Layout */
-  --sidebar-width: 16.5rem;
+  --sidebar-width: 15rem;
   --topbar-height: 3.5rem;
-  --content-max: 82rem;
+  --content-max: 75rem;
   --tap-target: 2.75rem;
 }
 

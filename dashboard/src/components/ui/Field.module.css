@@ -52,16 +52,19 @@
   transition-timing-function: ease-out;
 }
 
-.control:focus-within {
+.control:has(input:focus-visible),
+.control:focus-visible {
   border-color: var(--color-focus);
   box-shadow: 0 0 0 1px var(--color-focus);
+  outline: none;
 }
 
-.control[data-invalid] {
+.field[data-invalid] .control,
+.control[aria-invalid="true"] {
   border-color: var(--color-danger);
 }
 
-.control[data-disabled] {
+.control:is([data-disabled], :has(input:disabled)) {
   opacity: 0.55;
 }
 
@@ -101,24 +104,90 @@
   outline: none;
 }
 
-.select {
-  appearance: none;
-  padding-inline-end: var(--space-8);
-  background-image:
-    linear-gradient(45deg, transparent 50%, currentColor 50%),
-    linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position:
-    calc(100% - 1.125rem) 50%,
-    calc(100% - 0.8125rem) 50%;
-  background-size:
-    0.3125rem 0.3125rem,
-    0.3125rem 0.3125rem;
-  background-repeat: no-repeat;
+/* Select: the trigger shares the input's frame; its list floats in the top layer. */
+.selectTrigger {
+  gap: var(--space-2);
+  padding: 0 var(--space-2-5) 0 var(--space-3);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-sm);
   cursor: pointer;
+}
+
+.selectValue {
+  flex: 1;
+  text-align: start;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-text-muted);
+}
+
+.selectContent {
+  min-width: var(--anchor-width);
+  max-height: var(--available-height);
+  padding: var(--space-1);
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-sm) + var(--space-1));
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  box-shadow: var(--shadow-border), var(--shadow-float);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  outline: none;
+  transform-origin: var(--transform-origin);
+  transition-property: opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+.selectContent:is([data-starting-style], [data-ending-style]) {
+  opacity: 0;
+}
+
+.selectItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 2rem;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  outline: none;
+}
+
+.selectItem[data-highlighted] {
+  background: var(--color-surface-hover);
+}
+
+.selectCheck {
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  visibility: hidden;
+}
+
+.selectCheck[data-selected] {
+  visibility: visible;
+}
+
+.selectCheck svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 @media (pointer: coarse) {
   .control {
+    min-height: var(--tap-target);
+  }
+
+  .selectItem {
     min-height: var(--tap-target);
   }
 

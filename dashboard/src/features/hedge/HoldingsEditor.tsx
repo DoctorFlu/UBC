@@ -138,37 +138,27 @@ export function HoldingsEditor({
             const quantity = shown(row, index, "quantity");
             const message = asset ?? quantity;
             const messageId = `${idBase}-${row.key.toString()}-error`;
-            const invalid = (error: string | undefined) => ({
-              "aria-invalid": error !== undefined ? (true as const) : undefined,
-              "aria-describedby": error !== undefined ? messageId : undefined,
-            });
             return (
               <li key={row.key} className={styles.holdingRow} data-testid="holding-row">
-                <Field label="Asset">
-                  {(control) => (
-                    <Input
-                      {...control}
-                      {...invalid(asset)}
-                      value={row.asset}
-                      autoComplete="off"
-                      spellCheck={false}
-                      maxLength={10}
-                      onChange={(event) => update(row, "asset", event.target.value.toUpperCase())}
-                    />
-                  )}
+                <Field label="Asset" invalid={asset !== undefined}>
+                  <Input
+                    aria-describedby={asset !== undefined ? messageId : undefined}
+                    value={row.asset}
+                    autoComplete="off"
+                    spellCheck={false}
+                    maxLength={10}
+                    onValueChange={(value) => update(row, "asset", value.toUpperCase())}
+                  />
                 </Field>
-                <Field label="Quantity">
-                  {(control) => (
-                    <Input
-                      {...control}
-                      {...invalid(quantity)}
-                      value={row.quantity}
-                      inputMode="decimal"
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(event) => update(row, "quantity", event.target.value)}
-                    />
-                  )}
+                <Field label="Quantity" invalid={quantity !== undefined}>
+                  <Input
+                    aria-describedby={quantity !== undefined ? messageId : undefined}
+                    value={row.quantity}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    spellCheck={false}
+                    onValueChange={(value) => update(row, "quantity", value)}
+                  />
                 </Field>
                 <Button
                   variant="ghost"
