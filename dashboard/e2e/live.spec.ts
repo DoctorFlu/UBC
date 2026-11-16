@@ -524,6 +524,92 @@ test("a signal payment the agent records appears live, linked to the intent that
   await expect(page.getByTestId("budget-note")).toContainText("A new day started");
 });
 
+test("a plan's evidence chain says plainly when it breaks, and hostile strings never widen a page", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const stored = (await snapshot(baseURL)).offchain.plans[0];
+  if (!stored) throw new Error("the hedge test posted a plan");
+  const { plan } = stored;
+
+  // The hedge test carried out the plan's cheapest order with a reason naming the plan: verified.
+  await page.goto(`/hedge/plans/${encodeURIComponent(plan.planId)}`);
+  const status = page.getByTestId("chain-status");
+  await expect(status).toHaveAttribute("data-status", "verified");
+  await expect(page.getByTestId("evidence-intent")).toHaveCount(1);
+  await expect(page.getByTestId("evidence-signal")).toContainText("None. The plan used Gemini's quotes only");
+
+  // The agent proposes another of the plan's orders without sealing a reason: the chain turns
+  // unproven, live, and says which intent and why.
+  const cheapest = [...plan.orders].sort((a, b) => a.amountCents - b.amountCents)[0];
+  const other = plan.orders.find(
+    (order) => order !== cheapest && order.amountCents !== cheapest?.amountCents,
+  );
+  if (!other) throw new Error("the plan has a second order");
+  const unsealed = await chain.agent.proposeTrade(
+    noBuy(other.instrumentSymbol, other.amountCents, other.limitPriceCents),
+  );
+  await expect(status).toHaveAttribute("data-status", "not_stored");
+  await expect(status).toContainText("Unproven");
+  await expect(page.getByTestId("chain-gaps")).toContainText(
+    "1 intent matches an order of this plan by market and amount but has no sealed reason",
+  );
+  const unproven = page.getByTestId("evidence-intent").filter({
+    has: page.getByRole("link", { name: `Intent #${unsealed.intentId.toString()}`, exact: true }),
+  });
+  await expect(unproven.getByTestId("intent-seal")).toHaveText("No reason");
+  expect(await overflowsViewport(page)).toBe(false);
+
+  // A hostile agent: a 16 KiB market on the chain and a 2,000-character request with no spaces.
+  const hostileMarket = `GEMI-${"W".repeat(16 * 1024)}`;
+  const hostile = {
+    intentId: await proposeHostile(chain, {
+      market: hostileMarket,
+      category: 0,
+      outcome: "NO",
+      isBuy: true,
+      amountCents: 300n,
+      limitPrice: 31n,
+    }),
+  };
+  await waitForSnapshot(baseURL, (current) =>
+    Boolean(current.chain?.intents.some((intent) => intent.id === hostile.intentId)),
+  );
+  const state = await snapshot(baseURL);
+  const rules = state.chain?.rules;
+  if (!rules) throw new Error("no mandate");
+  // Block times have whole seconds, so the new plan is made in a later second than every intent so far:
+  // none of them can have carried it out.
+  const lastProposed = Math.max(...(state.chain?.intents.map((intent) => intent.proposedAt) ?? [0]));
+  await expect.poll(() => Date.now() / 1000, { timeout: 5_000 }).toBeGreaterThan(lastProposed + 1);
+  const request = await recordedPlanRequest({
+    quantity: "0.05",
+    dropPercent: 7,
+    maxCostCents: 4_000,
+    maxTradeCents: rules.maxTradeCents,
+    remainingBudgetCents: rules.budgetCents - (state.chain?.committedCents ?? 0),
+    requestText: "W".repeat(2_000),
+  });
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.plans, "POST", request);
+  await page.goto(`/hedge/plans/${encodeURIComponent(request.plan.planId)}`);
+  await expect(page.getByTestId("chain-status")).toHaveAttribute("data-status", "not_executed");
+  await expect(page.getByTestId("evidence-request")).toContainText("W".repeat(100));
+  expect(await overflowsViewport(page)).toBe(false);
+
+  // The public scorecard stays phone-wide with the hostile intent on it.
+  await page.goto(`/agent/${AGENT_ADDRESS}`);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  // The public scorecard names it "Not a Gemini market", flagged, and never prints the text itself.
+  const hostileRow = page
+    .getByRole("row")
+    .filter({ has: page.getByText(`Intent #${hostile.intentId.toString()}`, { exact: true }) });
+  await expect(hostileRow.first()).toContainText("Not a Gemini market");
+  await expect(hostileRow.first().getByTestId("flagged-badge")).toBeVisible();
+  expect(await overflowsViewport(page)).toBe(false);
+  const html = await (await fetch(new URL(`/agent/${AGENT_ADDRESS}`, baseURL))).text();
+  expect(html).not.toContain("W".repeat(1_000));
+});
+
 /**
  * Whether the page scrolls sideways (onchain text must wrap or truncate, never widen the page). False, or
  * the widest elements past the right edge, so a failure names the culprit.

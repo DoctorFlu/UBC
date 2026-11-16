@@ -8,8 +8,12 @@ import { previewState } from "@/lib/preview";
 export const metadata: Metadata = { title: "Hedge" };
 
 export default async function HedgePage({ searchParams }: PageProps<"/hedge">) {
-  const preview = previewState(await searchParams);
+  const params = await searchParams;
+  const preview = previewState(params);
+  const asset = typeof params.asset === "string" ? params.asset.slice(0, 16).toUpperCase() : undefined;
   if (preview === "loading") return <ViewSkeleton title="Hedge" />;
   if (preview === "error") return <ViewError title="Hedge" view="The hedge" />;
-  return <HedgeView {...(preview === "empty" ? { preview: emptyFixtureSnapshot } : {})} />;
+  return (
+    <HedgeView initialAsset={asset} {...(preview === "empty" ? { preview: emptyFixtureSnapshot } : {})} />
+  );
 }

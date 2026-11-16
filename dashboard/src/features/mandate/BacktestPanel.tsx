@@ -13,14 +13,24 @@ import type { ChainView } from "@/lib/live/types";
 import { type ReplayedIntent, type Verdict, type VerdictCounts, backtest } from "./backtest";
 import styles from "./mandate.module.css";
 
+/**
+ * A verdict at proposal. "Held" rather than the live "Waiting": the owner may since have approved and
+ * the executor filled it, which a replay of the rules does not decide.
+ */
 function chip(verdict: Verdict | null) {
   if (!verdict) return <span className={styles.muted}>Unknown</span>;
   const status: StatusKind =
     verdict.kind === "approved" ? "approved" : verdict.kind === "held" ? "needs_approval" : "rejected";
-  return <StatusChip status={status} reason={verdict.kind === "rejected" ? verdict.reason : null} />;
+  return (
+    <StatusChip
+      status={status}
+      reason={verdict.kind === "rejected" ? verdict.reason : null}
+      label={verdict.kind === "held" ? "Held for you" : undefined}
+    />
+  );
 }
 
-const columns: readonly Column<ReplayedIntent>[] = [
+const columnsFor = (subject: string): readonly Column<ReplayedIntent>[] => [
   { key: "id", header: "Intent", cell: (intent) => <IntentLink id={intent.id} />, nowrap: true },
   {
     key: "market",
@@ -35,8 +45,8 @@ const columns: readonly Column<ReplayedIntent>[] = [
     align: "end",
     nowrap: true,
   },
-  { key: "was", header: "The contract said", cell: (intent) => chip(intent.actual) },
-  { key: "draft", header: "The draft says", cell: (intent) => chip(intent.draft) },
+  { key: "was", header: "Verdict at proposal", cell: (intent) => chip(intent.actual) },
+  { key: "draft", header: `At proposal, under ${subject}`, cell: (intent) => chip(intent.draft) },
 ];
 
 const KINDS: readonly { key: keyof VerdictCounts; label: string }[] = [
@@ -108,7 +118,7 @@ export function BacktestPanel({
           <Table
             caption={`Intents whose verdict changes under ${subject}`}
             captionHidden
-            columns={columns}
+            columns={columnsFor(subject)}
             rows={result.changed}
             rowKey={(intent) => intent.id.toString()}
           />

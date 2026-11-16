@@ -10,6 +10,13 @@ Every view shows real data.
 The hedge view shows the agent's latest stored plan per asset, which intents carried it out, and Gemini's live ladder, which the console fetches from Gemini's public read-only API and caches for 10 seconds; the browser never calls Gemini.
 With no plan it says how to get one and shows a preview from the same planner, labelled as a preview.
 The payments view shows the signal payments and the signal budget the MCP server reports.
+Each plan has an evidence chain at `/hedge/plans/[planId]`, reached from the hedge page and from an intent's sealed reason.
+It links, in order, the owner's request, the paid signal, the plan, and each intent with the contract's verdict, the owner's decision and the fill.
+It is "verified" only when every intent's stored reason hashes to the chain and names the plan and its signal; a tampered reason, an intent with no checkable reason, or a reason that does not name the signal is said in plain words instead.
+
+The public scorecard shows the mandate, intents by verdict at proposal, blocked attempts by rule, the owner's approvals and rejections, fills and the realized result.
+Every number is computed from the Policy contract's events, matches the audit trail (a unit test and the smoke test hold it to that), and lists the transactions behind it.
+It gets nothing offchain (no holdings, plans, reasons or payments), links nowhere into the console, clips onchain strings, and is computed once per chain update however often it is loaded.
 
 ## Stack
 
@@ -84,6 +91,7 @@ src/
   app/
     (console)/            owner views, inside the shell, the live snapshot and the wallet provider
       <view>/page.tsx     one route folder per view
+      hedge/plans/[planId]/   one plan's evidence chain
     (public)/agent/[address]/   the public scorecard, no wallet
     api/agent/v1/         the agent API (bearer token), see shared/src/console-api.ts
     api/console/          snapshot, server-sent events and owner-signed offchain writes

@@ -29,18 +29,20 @@ export interface StatusChipProps {
   status: StatusKind;
   /** The contract's reason string for a rejection, shown after the label exactly as emitted. */
   reason?: string | null | undefined;
+  /** Words for the chip in place of the status's own, where the context changes what it means. */
+  label?: string | undefined;
   className?: string;
 }
 
 /** The one way a verdict is shown anywhere in the console: a lamp, a word, and the contract's reason. */
-export function StatusChip({ status, reason, className }: StatusChipProps) {
+export function StatusChip({ status, reason, label, className }: StatusChipProps) {
   const title = reason
     ? `${statusDescriptions[status]} ${describeReason(reason).explanation}`
     : statusDescriptions[status];
   return (
     <span className={cx(styles.chip, styles[status], className)} title={title} data-status={status}>
       <span className={styles.lamp} aria-hidden />
-      <span>{statusLabels[status]}</span>
+      <span>{label ?? statusLabels[status]}</span>
       {reason ? (
         <span className={styles.code}>
           <span className="visually-hidden">, reason </span>

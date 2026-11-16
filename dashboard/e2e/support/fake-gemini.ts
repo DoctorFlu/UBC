@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { type Ladder, createGeminiClient } from "@mandate/gemini";
-import { type HedgePlan, planHedge } from "@mandate/planner";
+import { type HedgePlan, type PaidSignal, planHedge } from "@mandate/planner";
 
 const FIXTURES = fileURLToPath(new URL("../../../gemini/test/fixtures/", import.meta.url));
 
@@ -77,6 +77,8 @@ export async function recordedPlanRequest(options: {
   maxTradeCents: number;
   remainingBudgetCents: number;
   requestText: string;
+  /** A paid signal to plan with, as the agent passes the one it bought. */
+  signal?: PaidSignal;
 }): Promise<{ planId: string; asset: string; requestText: string; createdAt: string; plan: HedgePlan }> {
   const plan = planHedge({
     holding: { asset: "BTC", quantity: options.quantity },
@@ -88,6 +90,7 @@ export async function recordedPlanRequest(options: {
       remainingBudgetCents: options.remainingBudgetCents,
       categoryAllowed: true,
     },
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   return {
     planId: plan.planId,
@@ -95,6 +98,29 @@ export async function recordedPlanRequest(options: {
     requestText: options.requestText,
     createdAt: new Date().toISOString(),
     plan,
+  };
+}
+
+/**
+ * A paid hedge signal for the recorded ladder, under `receiptId`: its model values each strike's NO
+ * contract one cent above the recorded NO ask, about the planner's limit price, so every rung rates
+ * fair and the signal changes no order.
+ */
+export async function recordedSignal(receiptId: string): Promise<PaidSignal> {
+  const ladder = await recordedLadder();
+  return {
+    receiptId,
+    signal: {
+      signalId: `0x${"4e".repeat(32)}`,
+      asset: ladder.asset,
+      eventTicker: ladder.eventTicker,
+      model: { fairBandBps: 300 },
+      strikes: ladder.rungs.flatMap((rung) =>
+        rung.noBuyCents === null
+          ? []
+          : [{ strikeCents: rung.strikeCents, modelYesBps: 10_000 - (rung.noBuyCents + 1) * 100 }],
+      ),
+    },
   };
 }
 
