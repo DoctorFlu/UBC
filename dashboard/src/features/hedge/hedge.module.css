@@ -89,6 +89,12 @@
   font-size: var(--text-base);
 }
 
+/* The owner's request as the agent reported it: any length, any characters, never wider than the card. */
+.request p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .request svg {
   flex: none;
   width: 1rem;
