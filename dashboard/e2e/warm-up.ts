@@ -11,6 +11,7 @@ import {
   decisionContext,
   recordSignalPayment,
   reportSignalBudget,
+  saveHoldingsAsOwner,
   sealReason,
   waitForSnapshot,
 } from "./support/console";
@@ -22,7 +23,8 @@ const DEMO_INTENTS = 7;
 /**
  * Runs once the demo chain and the console are up (the live suite starts its own and skips this):
  * 1. Waits until the console has read the whole demo history from the chain.
- * 2. Plays the agent's MCP server once: announces the agent, seals the reason for intent 0 and posts a
+ * 2. Saves the owner's 0.05 BTC holding (signed with the dev owner key) and plays the agent's MCP server
+ *    once: announces the agent, seals the reason for intent 0 and posts a
  *    hedge plan made by the real planner on the recorded Gemini ladder the fake Gemini serves, and
  *    reports one signal payment (cited by intent 0's reason) and its signal budget.
  * 3. `next dev` compiles each route on its first request. Tests that hit a cold route in parallel can
@@ -49,6 +51,8 @@ export default async function warmUp(config: FullConfig) {
   }
   await recordSignalPayment(baseURL, DEMO_RECEIPT, new Date().toISOString(), AGENT_ADDRESS);
   await reportSignalBudget(baseURL, AGENT_ADDRESS);
+  // The holding the plan below is sized for, so the hedge page agrees with itself.
+  await saveHoldingsAsOwner(baseURL, [{ asset: "BTC", quantity: "0.05", note: "Cold wallet" }]);
   const committed = ready.chain?.committedCents ?? 0;
   await agentApi(
     baseURL,

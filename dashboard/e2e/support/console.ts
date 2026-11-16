@@ -2,8 +2,16 @@
  * Talking to a running console from the end-to-end tests: the agent API (as the MCP server would, with
  * the service token) and the snapshot the browser receives.
  */
-import { type DecisionContext, CONSOLE_AGENT_ROUTES, hashContext } from "@mandate/shared";
+import { devAccount } from "@mandate/devchain";
+import {
+  type ConsoleHolding,
+  type DecisionContext,
+  CONSOLE_AGENT_ROUTES,
+  hashContext,
+} from "@mandate/shared";
 import type { Hex } from "viem";
+
+import { newNonce, ownerRequestMessage } from "../../src/lib/owner-request";
 
 import type { ConsoleSnapshot } from "../../src/lib/live/types";
 
@@ -151,6 +159,36 @@ export async function reportSignalBudget(
     gatewayBalance: "4999000",
     asOf: now.toISOString(),
   });
+}
+
+/**
+ * Saves holdings as the owner does from the hedge page: the payload signed by the contract's `user()`
+ * (anvil account 0, a public test key), bound to this contract and chain.
+ */
+export async function saveHoldingsAsOwner(baseURL: string, holdings: ConsoleHolding[]): Promise<void> {
+  const current = await snapshot(baseURL);
+  const policyAddress = current.contract?.address;
+  if (!policyAddress) throw new Error("the console follows no Policy contract yet");
+  const payload = { holdings };
+  const issuedAt = new Date().toISOString();
+  const nonce = newNonce();
+  const signature = await devAccount("user").signMessage({
+    message: ownerRequestMessage({
+      action: "holdings.save",
+      payload,
+      policyAddress,
+      chainId: current.network.chainId,
+      issuedAt,
+      nonce,
+    }),
+  });
+  const response = await fetch(new URL("/api/console/holdings", baseURL), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ payload, auth: { issuedAt, nonce, signature } }),
+  });
+  if (!response.ok)
+    throw new Error(`saving holdings answered ${response.status.toString()}: ${await response.text()}`);
 }
 
 /** Stores the agent's decision context, then links it to the intent its transaction proposed. */
