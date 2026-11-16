@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { SearchX } from "lucide-react";
 
 import { ViewError, ViewSkeleton } from "@/components/states/ViewStates";
+import { ArrowLink } from "@/components/ui/ArrowLink";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { EmptyState } from "@/components/ui/States";
 import { EvidenceView } from "@/features/evidence";
 import { previewState } from "@/lib/preview";
 import { getConsoleService } from "@/server/console";
@@ -32,6 +35,20 @@ export default async function PlanEvidencePage({ params, searchParams }: PagePro
     // Not percent-encoded: the id as given.
   }
   const view = storedPlan(id) ?? (id === planId ? null : storedPlan(planId));
-  if (!view) notFound();
+  if (!view) {
+    return (
+      <div>
+        <PageHeader title="Evidence chain" />
+        <EmptyState
+          icon={<SearchX strokeWidth={1.75} />}
+          title="No plan with this id"
+          action={<ArrowLink href="/hedge">Hedge</ArrowLink>}
+        >
+          The console stores every plan the agent posts, and none has this id. An intent&apos;s reason can
+          name a plan the agent never posted; its chain cannot be checked here.
+        </EmptyState>
+      </div>
+    );
+  }
   return <EvidenceView view={view} />;
 }

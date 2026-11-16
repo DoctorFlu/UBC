@@ -39,7 +39,7 @@ const at = (iso: string) => `${formatDateUtc(iso)}, ${formatTimeUtc(iso)}`;
 /** Agent-supplied and onchain strings are clipped to these lengths; the full value stays copyable. */
 const MAX_SYMBOL = 64;
 const MAX_ID = 48;
-const MAX_TEXT = 600;
+const MAX_TEXT = 2_000;
 
 const STATUS: Record<ChainStatus, { label: string; tone: "good" | "bad" | "attention" | "muted" }> = {
   verified: { label: "Verified", tone: "good" },
