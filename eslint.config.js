@@ -20,6 +20,9 @@ export default tseslint.config(
       "dashboard/next-env.d.ts",
       "dashboard/playwright-report/**",
       "dashboard/test-results/**",
+      "site/next-env.d.ts",
+      "site/playwright-report/**",
+      "site/test-results/**",
     ],
   },
   js.configs.recommended,
@@ -41,16 +44,16 @@ export default tseslint.config(
       ],
     },
   },
-  // The dashboard is a Next.js app: browser globals, Next.js rules (Core Web Vitals set) and
-  // the React Hooks rules, on top of the shared strict TypeScript rules above.
+  // The dashboard and the landing page are Next.js apps: browser globals, Next.js rules (Core Web
+  // Vitals set) and the React Hooks rules, on top of the shared strict TypeScript rules above.
   {
-    files: ["dashboard/**/*.{ts,tsx}"],
+    files: ["{dashboard,site}/**/*.{ts,tsx}"],
     plugins: {
       "@next/next": nextPlugin,
       "react-hooks": reactHooks,
     },
     settings: {
-      next: { rootDir: "dashboard/" },
+      next: { rootDir: ["dashboard/", "site/"] },
     },
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },

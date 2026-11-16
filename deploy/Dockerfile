@@ -43,6 +43,7 @@ COPY devchain/package.json devchain/
 COPY streams/package.json streams/
 COPY redteam/package.json redteam/
 COPY dashboard/package.json dashboard/
+COPY site/package.json site/
 
 # Everything, development tools included: the console build, forge and tsx need them.
 # `npm ci`, never `npm install`: it installs exactly the lockfile, native bindings for this platform included.
