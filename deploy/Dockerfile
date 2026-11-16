@@ -33,6 +33,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
 # The workspace manifests first, so the install layer is reused until a manifest or the lockfile changes.
 FROM base AS manifests
 COPY package.json package-lock.json ./
+COPY brand/package.json brand/
 COPY shared/package.json shared/
 COPY gemini/package.json gemini/
 COPY planner/package.json planner/

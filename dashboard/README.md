@@ -24,7 +24,7 @@ It gets nothing offchain (no holdings, plans, reasons or payments), links nowher
 - It runs as a long-lived Node server (`next start`), not a static export: it polls the chain, receives the QuickNode Stream webhook and holds server-sent event connections.
 - SQLite through Node's built-in `node:sqlite` for the console's store (events, decision contexts, holdings, hedge plans, pairing, change requests, signal payments and the signal budget).
 - wagmi and viem with the injected connector, on Arc testnet or a local anvil chain.
-- CSS Modules on top of one token file, `src/styles/tokens.css`.
+- CSS Modules on top of one token file, `@mandate/brand/tokens.css` (the `brand/` workspace, which also holds the fonts).
   There is no CSS framework and no component library.
 - The Next.js docs that match the installed version are in `node_modules/next/dist/docs/`.
   Read those rather than relying on memory, because Next.js 16 changed several APIs (async `params`, no `next lint`, Turbopack by default).
@@ -111,8 +111,10 @@ src/
     owner/                owner transactions and owner-signed requests
   server/                 the console backend: ingest, store, agent and owner routes
   fixtures/               typed fixtures for ?state= previews, the gallery and tests
-  styles/tokens.css       color, type, spacing, radius and motion tokens for both themes
 ```
+
+The color, type, spacing, radius and motion tokens for both themes live in `brand/tokens.css`, and the fonts in `brand/fonts/`.
+Both come from the `@mandate/brand` workspace, so every web app in the repository draws from the same source.
 
 ### Adding a view
 
@@ -135,7 +137,7 @@ The console is a distribution board for a trading agent.
 The mandate's rules are drawn as rated circuits with their load, the kill switch is the isolator in the status strip, and color is kept for the status lamps.
 Both themes are designed: switchgear grey in light, anthracite in dark.
 Type is Mona Sans (variable width) for everything, with Martian Mono only for hashes, addresses and reason codes.
-Both fonts are self-hosted under the SIL Open Font License.
+Both fonts are self-hosted under the SIL Open Font License, from `@mandate/brand/fonts`.
 
 The quality bar for every change:
 
