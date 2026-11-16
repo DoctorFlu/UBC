@@ -8,6 +8,13 @@ import { tradeArgs } from "../support/format";
 import { DIRECT_PLAN_ID, ladderSummaryFromEvent } from "../trading/context";
 import { resolveTradeMarket } from "../trading/market";
 import { proposeIntent, ProposalSchema, type Proposal, type ProposalOutcome } from "../trading/propose";
+import {
+  belowOneContract,
+  describeSizing,
+  sizeTrade,
+  SizingSchema,
+  type TradeSizing,
+} from "../trading/sizing";
 
 export const signalReceiptIdsArg = z
   .array(z.string().trim().min(1).max(200))
@@ -29,9 +36,9 @@ function keepForReplay(outcome: ProposalOutcome): boolean {
   return outcome.kind === "submitted" || outcome.failure.reason.code === "TX_UNCONFIRMED";
 }
 
-function describe(proposal: Proposal, verdict: Verdict): string {
+function describe(proposal: Proposal, verdict: Verdict, sizing: TradeSizing): string {
   const { trade } = proposal;
-  const what = `${trade.side} ${trade.outcome} ${trade.market} for ${formatCents(trade.amountCents)} at ${trade.limitPrice}c`;
+  const what = `${trade.side} ${trade.outcome} ${trade.market} for ${formatCents(trade.amountCents)} at ${trade.limitPrice}c (${describeSizing(sizing)})`;
   const context =
     proposal.context === null
       ? ""
@@ -68,16 +75,24 @@ export const proposeTrade = defineTool({
   outputSchema: verdictSchema({
     proposal: ProposalSchema.nullable(),
     replayed: z.boolean().describe("True when this repeats an identical earlier call; nothing new was sent"),
+    sizing: SizingSchema,
   }),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   timeoutMs: 60_000,
   handler: async (input, ctx) => {
+    const sizing = sizeTrade(input.amountCents, input.limitPrice);
     const policy = ctx.policy;
     if (policy === undefined || policy.agentAddress === undefined) {
       const v = unavailableFor(policy === undefined ? notConfigured.policy() : notConfigured.agentKey());
-      return { structured: { ...v, proposal: null, replayed: false }, summary: summarizeVerdict(v) };
+      return { structured: { ...v, proposal: null, replayed: false, sizing }, summary: summarizeVerdict(v) };
+    }
+    if (sizing.contracts === 0) {
+      const v = belowOneContract(input.limitPrice, input.amountCents);
+      return { structured: { ...v, proposal: null, replayed: false, sizing }, summary: summarizeVerdict(v) };
     }
     const isBuy = input.side === "buy";
+    // Keyed on the call as made: a retry of the same requested amount sizes to the same trade and
+    // replays it. The sizing is a pure function of these arguments, so it never needs storing.
     const key = JSON.stringify([
       input.market,
       input.outcome,
@@ -116,7 +131,7 @@ export const proposeTrade = defineTool({
             market: input.market,
             outcome: input.outcome,
             isBuy,
-            amountCents: input.amountCents,
+            amountCents: sizing.amountCents,
             limitPrice: input.limitPrice,
             categoryId: resolved.market.categoryId,
           },
@@ -128,7 +143,7 @@ export const proposeTrade = defineTool({
 
     if (outcome.kind === "unresolved") {
       return {
-        structured: { ...outcome.verdict, proposal: null, replayed },
+        structured: { ...outcome.verdict, proposal: null, replayed, sizing },
         summary: summarizeVerdict(outcome.verdict),
       };
     }
@@ -137,8 +152,8 @@ export const proposeTrade = defineTool({
       ? ` (Repeat of an identical call from ${Math.round((ctx.clock.now().getTime() - firstAt.getTime()) / 1000)} s ago; nothing new was sent.)`
       : "";
     return {
-      structured: { ...verdict, proposal: outcome.proposal, replayed },
-      summary: `${describe(outcome.proposal, verdict)}${again}`,
+      structured: { ...verdict, proposal: outcome.proposal, replayed, sizing },
+      summary: `${describe(outcome.proposal, verdict, sizing)}${again}`,
     };
   },
 });

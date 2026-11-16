@@ -14,6 +14,7 @@ import {
 } from "../support/rules";
 import { resolveTradeMarket } from "../trading/market";
 import { TradeSchema, tradeView } from "../trading/propose";
+import { belowOneContract, describeSizing, sizeTrade, SizingSchema } from "../trading/sizing";
 
 const SimulationSchema = z.object({
   wouldBe: z.enum(["approved", "needs_approval", "rejected"]),
@@ -56,17 +57,23 @@ export const simulateTrade = defineTool({
     amountCents: tradeArgs.amountCents,
     limitPrice: tradeArgs.limitPrice,
   }),
-  outputSchema: verdictSchema({ simulation: SimulationSchema.nullable() }),
+  outputSchema: verdictSchema({ simulation: SimulationSchema.nullable(), sizing: SizingSchema }),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   handler: async (input, ctx) => {
+    // The same sizing as propose_trade, so the rules are checked on the amount that would be proposed.
+    const sizing = sizeTrade(input.amountCents, input.limitPrice);
     if (ctx.policy === undefined) {
       const v = unavailableFor(notConfigured.policy());
-      return { structured: { ...v, simulation: null }, summary: summarizeVerdict(v) };
+      return { structured: { ...v, simulation: null, sizing }, summary: summarizeVerdict(v) };
+    }
+    if (sizing.contracts === 0) {
+      const v = belowOneContract(input.limitPrice, input.amountCents);
+      return { structured: { ...v, simulation: null, sizing }, summary: summarizeVerdict(v) };
     }
     const resolved = await resolveTradeMarket(ctx, input.market);
     if (resolved.failure !== undefined) {
       const v = unavailableFor(resolved.failure);
-      return { structured: { ...v, simulation: null }, summary: summarizeVerdict(v) };
+      return { structured: { ...v, simulation: null, sizing }, summary: summarizeVerdict(v) };
     }
     const isBuy = input.side === "buy";
     const categoryId = resolved.market.categoryId;
@@ -74,20 +81,20 @@ export const simulateTrade = defineTool({
     let snapshot: PolicySnapshot;
     try {
       [preview, snapshot] = await Promise.all([
-        ctx.policy.preview({ category: categoryId, isBuy, amountCents: input.amountCents }),
+        ctx.policy.preview({ category: categoryId, isBuy, amountCents: sizing.amountCents }),
         ctx.policy.snapshot(),
       ]);
     } catch (error) {
       const v = unavailableFor(describeFailure(error, ctx));
-      return { structured: { ...v, simulation: null }, summary: summarizeVerdict(v) };
+      return { structured: { ...v, simulation: null, sizing }, summary: summarizeVerdict(v) };
     }
 
-    const trade = { category: categoryId, isBuy, amountCents: input.amountCents };
+    const trade = { category: categoryId, isBuy, amountCents: sizing.amountCents };
     const rule: RuleHit | null =
       preview.verdict === "rejected"
         ? rejectionHit(preview.reason, { rules: snapshot.rules, state: snapshot, trade })
         : preview.verdict === "needs_approval"
-          ? approvalHit(snapshot.rules, input.amountCents)
+          ? approvalHit(snapshot.rules, sizing.amountCents)
           : null;
     const room = headroom(snapshot.rules, snapshot);
     const v = ok(rule === null ? [] : [hitReason(rule)], nextFor(preview.verdict));
@@ -110,7 +117,7 @@ export const simulateTrade = defineTool({
             market: input.market,
             outcome: input.outcome,
             isBuy,
-            amountCents: input.amountCents,
+            amountCents: sizing.amountCents,
             limitPrice: input.limitPrice,
             categoryId,
           }),
@@ -120,8 +127,9 @@ export const simulateTrade = defineTool({
             maxNextSellCents: room.maxNextSellCents,
           },
         },
+        sizing,
       },
-      summary: `Simulated with ${how}: a ${formatCents(input.amountCents)} ${input.side} ${outcome}.${
+      summary: `Simulated with ${how}: a ${formatCents(sizing.amountCents)} ${input.side} at ${input.limitPrice}c (${describeSizing(sizing)}) ${outcome}.${
         rule === null ? "" : ` ${rule.explanation}${rule.detail === null ? "" : ` ${rule.detail}`}`
       } Nothing was sent.`,
     };

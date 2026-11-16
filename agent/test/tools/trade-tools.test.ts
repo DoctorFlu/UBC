@@ -6,6 +6,7 @@ import { getIntent } from "../../src/tools/get-intent";
 import { planHedge } from "../../src/tools/plan-hedge";
 import { proposeTrade } from "../../src/tools/propose-trade";
 import { simulateTrade } from "../../src/tools/simulate-trade";
+import { sizeTrade } from "../../src/trading/sizing";
 import { FakePolicy, harness, ladderSymbol, SPORTS_SYMBOL } from "../fakes";
 
 type Row = Record<string, unknown>;
@@ -100,7 +101,9 @@ describe("propose_trade", () => {
       proposal: { intentId: 0, decision: "approved", rule: null, trade: { category: "Crypto" } },
       nextAction: { actor: "agent", hint: expect.stringContaining("get_intent") as unknown },
     });
-    expect(ok.summary).toMatch(/^Intent #0 approved: buy NO GEMI-BTC2611202200-HI63000 for \$10.00 at 30c/);
+    expect(ok.summary).toMatch(
+      /^Intent #0 approved: buy NO GEMI-BTC2611202200-HI63000 for \$9.90 at 30c \(33 contracts; rounded down from \$10.00/,
+    );
 
     const wait = await proposeTrade.run({ ...args, amountCents: 2_200 }, h.ctx);
     expect(wait.structured).toMatchObject({
@@ -201,6 +204,109 @@ describe("propose_trade", () => {
     await expect(proposeTrade.run({ ...trade, amountCents: 100 }, harness().ctx)).rejects.toMatchObject({
       code: "INVALID_INPUT",
     });
+  });
+});
+
+describe("whole contracts (issue #54)", () => {
+  const args = { market: MARKET, outcome: "NO" as const, limitPrice: 29, reason: "Owner asked for a hedge." };
+
+  it("sizes an amount as whole contracts, rounding down", () => {
+    expect(sizeTrade(2_175, 29)).toEqual({
+      requestedAmountCents: 2_175,
+      contracts: 75,
+      amountCents: 2_175,
+      roundedDown: false,
+    });
+    expect(sizeTrade(2_200, 29)).toEqual({
+      requestedAmountCents: 2_200,
+      contracts: 75,
+      amountCents: 2_175,
+      roundedDown: true,
+    });
+    expect(sizeTrade(28, 29)).toEqual({
+      requestedAmountCents: 28,
+      contracts: 0,
+      amountCents: 0,
+      roundedDown: true,
+    });
+    expect(sizeTrade(0, 29)).toMatchObject({ contracts: 0, roundedDown: false });
+    expect(() => sizeTrade(100, 0)).toThrow(RangeError);
+    expect(() => sizeTrade(10.5, 29)).toThrow(RangeError);
+  });
+
+  it("proposes an exact multiple as is", async () => {
+    const h = harness();
+    const { structured, summary } = await proposeTrade.run({ ...args, amountCents: 2_175 }, h.ctx);
+    expect(h.policy.proposed[0]?.amountCents).toBe(2_175);
+    expect(structured).toMatchObject({
+      sizing: { requestedAmountCents: 2_175, contracts: 75, amountCents: 2_175, roundedDown: false },
+      proposal: { trade: { amountCents: 2_175, limitPrice: 29 } },
+    });
+    expect(summary).toContain("for $21.75 at 29c (75 contracts)");
+  });
+
+  it("rounds a non-multiple down to whole contracts and says so", async () => {
+    const h = harness();
+    const { structured, summary } = await proposeTrade.run({ ...args, amountCents: 2_200 }, h.ctx);
+    expect(h.policy.proposed[0]?.amountCents).toBe(2_175);
+    expect(structured).toMatchObject({
+      status: "held",
+      sizing: { requestedAmountCents: 2_200, contracts: 75, amountCents: 2_175, roundedDown: true },
+      proposal: { trade: { amountCents: 2_175 } },
+    });
+    expect(summary).toContain("for $21.75 at 29c (75 contracts; rounded down from $22.00");
+  });
+
+  it("does not propose or check less than one contract, and names the smallest valid amount", async () => {
+    const h = harness();
+    for (const result of [
+      await proposeTrade.run({ ...args, amountCents: 28 }, h.ctx),
+      await simulateTrade.run({ ...args, amountCents: 28 }, h.ctx),
+    ]) {
+      expect(result.structured).toMatchObject({
+        status: "unavailable",
+        reasons: [{ code: "BELOW_ONE_CONTRACT" }],
+        nextAction: { actor: "agent", hint: expect.stringContaining("amountCents 29") as unknown },
+        sizing: { contracts: 0, amountCents: 0 },
+      });
+      expect(result.summary).toContain("BELOW_ONE_CONTRACT");
+    }
+    expect(h.policy.proposed).toHaveLength(0);
+  });
+
+  it("never trades twice for a retry of the same rounded request", async () => {
+    const h = harness();
+    const first = await proposeTrade.run({ ...args, amountCents: 2_200 }, h.ctx);
+    const again = await proposeTrade.run({ ...args, amountCents: 2_200 }, h.ctx);
+    expect(h.policy.proposed).toHaveLength(1);
+    expect(again.structured).toMatchObject({
+      replayed: true,
+      proposal: first.structured["proposal"],
+      sizing: { contracts: 75, amountCents: 2_175 },
+    });
+  });
+
+  it("simulates the amount that would be proposed, so the rules see whole contracts", async () => {
+    // $25.10 at 50c is 50 contracts, $25.00: within the $25.00 max trade, so held, not rejected.
+    const h = harness();
+    const simulated = await simulateTrade.run({ ...args, limitPrice: 50, amountCents: 2_510 }, h.ctx);
+    expect(simulated.structured).toMatchObject({
+      simulation: { wouldBe: "needs_approval", trade: { amountCents: 2_500 } },
+      sizing: { contracts: 50, amountCents: 2_500, roundedDown: true },
+    });
+    expect(simulated.summary).toContain("a $25.00 buy at 50c (50 contracts; rounded down from $25.10");
+    const proposed = await proposeTrade.run({ ...args, limitPrice: 50, amountCents: 2_510 }, h.ctx);
+    expect(proposed.structured).toMatchObject({
+      status: "held",
+      proposal: { trade: { amountCents: 2_500 } },
+    });
+  });
+
+  it("sizes a sell the same way", async () => {
+    const h = harness();
+    const { structured } = await proposeTrade.run({ ...args, side: "sell", amountCents: 1_000 }, h.ctx);
+    expect(h.policy.proposed[0]).toMatchObject({ isBuy: false, amountCents: 986 });
+    expect(structured).toMatchObject({ sizing: { contracts: 34, amountCents: 986, roundedDown: true } });
   });
 });
 

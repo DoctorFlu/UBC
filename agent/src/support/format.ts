@@ -38,6 +38,8 @@ export const tradeArgs = {
     .int()
     .min(0)
     .max(100_000_000)
-    .describe("Most to spend (buy) or the size (sell), in integer US cents: 1000 is $10.00"),
+    .describe(
+      "Most to spend (buy) or the size (sell), in integer US cents: 1000 is $10.00. Rounded down to whole contracts (a multiple of limitPrice)",
+    ),
   limitPrice: z.int().min(1).max(99).describe("Limit price in cents per $1 contract, 1 to 99"),
 };
