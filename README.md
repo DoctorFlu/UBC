@@ -27,34 +27,26 @@ It cannot approve its own orders, change a rule, unpause, or touch the exchange 
 ## How it fits together
 
 ```mermaid
-flowchart LR
-    owner([Owner]) -- "sets rules, approves, pauses" --> console
-    owner -- "chats" --> grok[Grok Bot]
+flowchart TB
+    owner(["Owner"])
+    grok["Grok Bot<br/>the agent"]
+    mcp["MCP server<br/>tools, hedge planner, spend limits"]
+    signals["Signal API<br/>paid per request over x402"]
+    gemini[("Gemini<br/>prediction markets")]
+    policy{{"Policy contract on Arc<br/>approves, holds or rejects"}}
+    console["Console<br/>rules, approvals, audit trail"]
+    executor["Executor<br/>holds the exchange key"]
 
-    subgraph offchain ["Offchain, this repo"]
-      mcp["MCP server<br/>agent/"]
-      planner["Hedge planner<br/>planner/"]
-      signals["Signal API, x402<br/>signals/"]
-      console["Console<br/>dashboard/"]
-      executor["Executor"]
-    end
-
-    grok -- "tool calls over HTTPS" --> mcp
-    mcp --> planner
-    mcp -- "pays USDC per request" --> signals
-    mcp -- "market data" --> gemini[(Gemini prediction markets)]
-    mcp -- "proposeTrade, agent key" --> policy
-
-    subgraph arc ["Arc"]
-      policy["Policy contract<br/>contracts/"]
-    end
-
-    policy -- "events through a QuickNode Stream" --> console
-    console -- "owner-signed transactions" --> policy
-    policy -- "approved intents" --> executor
-    executor -- "orders" --> gemini
-    executor -- "recordResult" --> policy
-    mcp -- "plans, reasons, payments" --> console
+    owner -- "chats" --> grok
+    owner -- "signs rules, approvals, pause" --> console
+    grok -- "tool calls" --> mcp
+    mcp -- "USDC" --> signals
+    mcp -- "reads prices" --> gemini
+    mcp -- "proposes every order" --> policy
+    console -- "owner transactions" --> policy
+    policy -- "events, QuickNode Stream" --> console
+    policy -- "approved orders only" --> executor
+    executor -- "places orders" --> gemini
 ```
 
 | Folder | What it is |
@@ -80,7 +72,7 @@ The server sends it the order of work on every connection (`agent/src/instructio
 2. **Read the rules and the holding** (`get_policy`, `get_portfolio`).
    The rules and today's usage come from the contract; the holding is what the owner entered in the console, valued at Gemini spot.
 3. **Read the market** (`get_ladder`).
-   A ladder is a set of "BTC above $K" contracts for one expiry.
+   A ladder is a set of contracts such as "BTC $63,000 or above", one per strike, for one expiry.
    Buying NO on a strike pays $1 per contract if the price ends below it, which is what offsets the loss on the holding.
 4. **Buy a signal** (`buy_signal`).
    The agent pays the signal API $0.001 in USDC over x402 for a cheap, fair or expensive rating of every strike, so the plan buys underpriced protection first.
