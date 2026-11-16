@@ -66,6 +66,7 @@ The agent talks only to the MCP server, the MCP server can only propose, and not
 | `signals/` | The paid signal API (x402, Circle Nanopayments on Arc). |
 | `streams/` | The QuickNode Stream: filter, configuration, management script, payload parser. |
 | `dashboard/` | The owner's console (Next.js). |
+| `site/` | The public landing page: a static export with a live check of a sample mandate, linking to the console. |
 | `brand/` | Design tokens and the two self-hosted fonts, shared by every web app. |
 | `devchain/` | A local chain with Arc's chain id, the simulated executor, and `npm run dev:stack`. |
 | `redteam/` | A scripted adversary that attacks the mandate through the MCP server and with the agent key. |
@@ -174,10 +175,10 @@ cd UBC
 npm ci                 # use ci, not install: it keeps the lockfile's native bindings intact
 npm run mcp:token      # writes MCP_AUTH_TOKEN into .env without printing it
 npm run x402:keygen    # writes the signal buyer and seller keys into .env, prints only addresses
-npm run dev:stack      # chain, signal API, console, MCP server and simulated executor
+npm run dev:stack      # chain, signal API, console, MCP server, simulated executor and landing page
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000 for the console, or http://localhost:3001 for the landing page.
 The stack runs a local chain with Arc's chain id, deploys the Policy contract with the demo rules above, and wires every service to it.
 The owner signs with a built-in test wallet, so no browser wallet is needed.
 
@@ -202,7 +203,7 @@ Without Grok Bot, `npm run mcp:e2e` drives the same tools end to end with a scri
 ```sh
 npm run check     # lint, format, types and unit tests
 npm run mcp:e2e   # the agent flow against a real local chain, both contract variants
-npm run e2e       # the console in a real browser against a real local chain
+npm run e2e       # the console against a real local chain, then the landing page, in a real browser
 npm run redteam   # a scripted adversary attacks the mandate, both contract variants
 ```
 
