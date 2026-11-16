@@ -89,7 +89,7 @@ else
 fi
 
 echo "-- owner routes: the owner's login"
-for path in / /hedge /setup /api/console/snapshot; do
+for path in / /hedge /hedge/plans/smoke-test /setup /api/console/snapshot; do
   expect "owner route refuses without the login" none GET "$path" 401
   has_basic_challenge || fail "the 401 on $path asks for the owner login"
 done
