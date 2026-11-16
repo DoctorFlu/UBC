@@ -11,7 +11,8 @@ import type { MarketContract, MarketEvent } from "./types";
 export const MAX_INSTRUMENT_SYMBOL_LENGTH = MAX_MARKET_SYMBOL_LENGTH;
 export const isInstrumentSymbol = isMarketSymbol;
 
-const MAX_RESOLVE_ATTEMPTS = 4;
+/** The most event tickers tried for one symbol, so the most `getEvent` calls one lookup can make. */
+export const MAX_RESOLVE_ATTEMPTS = 4;
 
 /**
  * Candidate event tickers for a symbol, longest first: the contract ticker is the last segment in every

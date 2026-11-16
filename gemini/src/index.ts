@@ -1,6 +1,7 @@
 export {
   createGeminiClient,
   DEFAULT_BASE_URL,
+  eventPath,
   type CacheTtls,
   type DepthMode,
   type GeminiClient,
@@ -16,6 +17,7 @@ export {
   findInstrument,
   isInstrumentSymbol,
   MAX_INSTRUMENT_SYMBOL_LENGTH,
+  MAX_RESOLVE_ATTEMPTS,
   type FoundInstrument,
 } from "./instruments";
 export {
@@ -31,6 +33,18 @@ export {
   parseCryptoTicker,
   summarizeEvent,
 } from "./normalize";
+export {
+  LISTING_REQUEST_BUDGET,
+  LISTING_RETRY_MS,
+  ListingChecker,
+  listingOrder,
+  worstCaseRequests,
+  type ListingAnswer,
+  type ListingCandidate,
+  type ListingCheckerOptions,
+  type ListingLookup,
+  type ListingStore,
+} from "./listings";
 export { TokenBucket, type TokenBucketOptions } from "./rate-limiter";
 export {
   candlesSchema,

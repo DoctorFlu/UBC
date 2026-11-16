@@ -266,13 +266,15 @@ describe("ConsoleService with Gemini's listing", () => {
     const unlisted = "GEMI-NOPE2611202200-X";
     let answer: "listed" | "hang" = "hang";
     const asked: string[] = [];
-    const marketLookup = (symbol: string) => {
+    const lookup = (symbol: string) => {
       asked.push(symbol);
       if (answer === "hang") return new Promise<never>(() => undefined);
-      return Promise.resolve(
-        symbol === BTC_ABOVE_65K ? Category.Crypto : symbol === sports ? Category.Sports : null,
-      );
+      return Promise.resolve({
+        category: symbol === BTC_ABOVE_65K ? Category.Crypto : symbol === sports ? Category.Sports : null,
+        requests: 1,
+      });
     };
+    const marketLookup = { lookup, attemptsPerRequest: 2 };
     const start = () => {
       const service = new ConsoleService(config(dataDir), openDatabase(dataDir), {
         env: chain.env,
@@ -296,7 +298,8 @@ describe("ConsoleService with Gemini's listing", () => {
         undefined,
       ]);
       expect(waiting.chain?.intents.flatMap((intent) => intentAnomalies(intent))).toEqual([]);
-      expect(asked).toEqual([BTC_ABOVE_65K]);
+      // One lookup in flight, and nothing else asked while it hangs.
+      expect(asked).toHaveLength(1);
       await service.stop();
 
       // A restarted console whose Gemini answers checks each market once, stores it, and flags two.
@@ -319,7 +322,8 @@ describe("ConsoleService with Gemini's listing", () => {
         ["Gemini lists this market as Sports, the intent says Crypto"],
         ["Gemini does not list this market"],
       ]);
-      expect(asked).toEqual([BTC_ABOVE_65K, sports, unlisted]);
+      // Each market once, newest first.
+      expect(asked).toEqual([unlisted, sports, BTC_ABOVE_65K]);
     } finally {
       await service.stop();
       await restarted?.stop();

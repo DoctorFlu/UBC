@@ -5,7 +5,10 @@ import {
   type FetchLike,
   type GeminiClient,
   type Ladder,
+  type ListingAnswer,
   createGeminiClient,
+  eventPath,
+  eventTickerCandidates,
   findInstrument,
   isGeminiError,
 } from "@mandate/gemini";
@@ -45,6 +48,8 @@ const DEFAULT_TTL_MS = 10_000;
 const DEFAULT_ERROR_TTL_MS = 5_000;
 /** The route only asks for known assets and stored plans' events, so a handful of keys is the norm. */
 const DEFAULT_MAX_ENTRIES = 32;
+/** A page waits on these requests: fail fast and let the next refresh try again. */
+const MAX_RETRIES = 1;
 
 export class MarketQuotes {
   readonly baseUrl: string;
@@ -55,6 +60,10 @@ export class MarketQuotes {
   private readonly maxEntries: number;
   /** Insertion order is age order: a refreshed key is deleted and set again. */
   private readonly cache = new Map<string, Entry>();
+  /** The event paths each listing lookup in flight may request, and how many requests went to them. */
+  private readonly lookups = new Set<{ paths: ReadonlySet<string>; sent: number }>();
+  /** The most times the client sends one request. */
+  static readonly ATTEMPTS_PER_REQUEST = MAX_RETRIES + 1;
 
   constructor(options: MarketQuotesOptions = {}) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
@@ -65,9 +74,11 @@ export class MarketQuotes {
     this.client = createGeminiClient({
       baseUrl: this.baseUrl,
       now: this.now,
-      // A page waits on this: fail fast and let the next refresh try again.
-      maxRetries: 1,
+      maxRetries: MAX_RETRIES,
       timeoutMs: 6_000,
+      onRequest: (path) => {
+        for (const lookup of this.lookups) if (lookup.paths.has(path)) lookup.sent += 1;
+      },
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.sleep ? { sleep: options.sleep } : {}),
     });
@@ -75,11 +86,26 @@ export class MarketQuotes {
 
   /**
    * The mandate category of the Gemini event that lists `instrumentSymbol`, or null when Gemini lists no
-   * such market. Throws when Gemini cannot answer. Uses the client's own cache of event reads.
+   * such market, with the requests the lookup sent. Throws when Gemini cannot answer. Uses the client's
+   * own cache of event reads, which the hedge view shares: a request it sends for one of these events
+   * meanwhile is counted too, so the count is never low.
    */
-  async marketCategory(instrumentSymbol: string): Promise<CategoryId | null> {
-    const found = await findInstrument((ticker) => this.client.getEvent(ticker), instrumentSymbol);
-    return found === null ? null : categoryFromGemini(found.event.category ?? "");
+  async marketCategory(instrumentSymbol: string): Promise<ListingAnswer> {
+    const candidates = eventTickerCandidates(instrumentSymbol);
+    const lookup = { paths: new Set(candidates.map(eventPath)), sent: 0 };
+    this.lookups.add(lookup);
+    try {
+      const found = await findInstrument(
+        (ticker) => this.client.getEvent(ticker),
+        instrumentSymbol,
+        candidates,
+      );
+      const category: CategoryId | null =
+        found === null ? null : categoryFromGemini(found.event.category ?? "");
+      return { category, requests: lookup.sent };
+    } finally {
+      this.lookups.delete(lookup);
+    }
   }
 
   /**

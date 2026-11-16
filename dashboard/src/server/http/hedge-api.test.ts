@@ -231,6 +231,26 @@ describe("GET /api/console/hedge/market", () => {
     expect(quotes.size).toBe(1);
   });
 
+  it("says what each listing lookup cost: every candidate tried, retries included, nothing when cached", async () => {
+    const gemini = fakeGemini();
+    const quotes = quotesFor(gemini);
+    expect(await quotes.marketCategory(`GEMI-${RECORDED_EVENT}-HI61000`)).toEqual({
+      category: Category.Crypto,
+      requests: 1,
+    });
+    // The event is in the client's cache now: another market on it costs nothing.
+    expect(await quotes.marketCategory(`GEMI-${RECORDED_EVENT}-HI61500`)).toEqual({
+      category: Category.Crypto,
+      requests: 0,
+    });
+    // An invented symbol misses every candidate ticker.
+    expect(await quotes.marketCategory("GEMI-JUNK-A-B-C-X")).toEqual({ category: null, requests: 4 });
+    gemini.state.failing = true;
+    const before = gemini.state.requests.length;
+    await expect(quotes.marketCategory("GEMI-DOWN2611202200-X")).rejects.toThrow();
+    expect(gemini.state.requests.length - before).toBe(MarketQuotes.ATTEMPTS_PER_REQUEST);
+  });
+
   it("shares one Gemini request between callers inside the cache window", async () => {
     const gemini = fakeGemini();
     const quotes = quotesFor(gemini);

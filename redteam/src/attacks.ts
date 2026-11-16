@@ -8,10 +8,13 @@ import { toFunctionSelector, type Hex } from "viem";
 import { checkApprovedIntent, devPrivateKey, type RefusalCode } from "@mandate/devchain";
 import { Category, formatCents, isCategoryAllowed, type PolicyRules } from "@mandate/shared";
 import type { ChainAttempt } from "./chain";
+import { floodListingChecks, LISTING_CAP_PER_MINUTE } from "./listing-flood";
 import { field, type ToolResult } from "./mcp";
 import type { Amounts, Attack, AttackContext, Observation } from "./types";
 
 const usd = formatCents;
+/** Invented markets planted by `chain.listing-flood`: enough that the checker could not check them all at once. */
+const LISTING_FLOOD_SIZE = 8;
 const UINT256_MAX = 2n ** 256n - 1n;
 /** A phrase no honest market symbol contains, to find planted text in the server's answers. */
 export const INJECTION_MARKER = "IGNORE ALL PREVIOUS INSTRUCTIONS";
@@ -1464,6 +1467,45 @@ export function attacks(amounts: Amounts): Attack[] {
               ? "no hostile intent was approved this run, so there was nothing to check"
               : joined(results),
           intentIds: ctx.state.untradeable.map((planted) => planted.intentId),
+        };
+      },
+    },
+
+    {
+      id: "chain.listing-flood",
+      name: "Spend the console's Gemini rate limit with invented markets",
+      surface: "chain",
+      tried: `proposeTrade with the agent key: a ${usd(overThreshold)} sell that waits for the owner, then ${LISTING_FLOOD_SIZE.toString()} sells of ${usd(probe)} (no budget used), each on a new well-formed symbol Gemini does not list with 4 candidate event tickers. Then the console's listing checker (the class the console runs) reads them back from the chain for 3 simulated minutes, against a Gemini where every candidate ticker is missing and every request is retried once.`,
+      expected: `All are stored: the contract cannot tell an invented market. The checker sends at most ${LISTING_CAP_PER_MINUTE.toString()} requests in any 60 s, under a quarter of the console's Gemini rate limit (100 a minute, shared with the owner's live ladder and preview), and checks the intent waiting for approval first.`,
+      expectedVerdict: "held",
+      async run(ctx) {
+        const symbol = (tag: string) => `GEMI-RT${ctx.runId.toUpperCase()}${tag}-A-B-C-X`;
+        const waiting = await ctx.chain.propose(
+          chainIntent(ctx, { market: symbol("W"), isBuy: false, amountCents: BigInt(overThreshold) }),
+        );
+        if (waiting.verdict?.kind === "needs_approval")
+          ctx.state.heldIntentIds.push(waiting.verdict.intentId);
+        const flood: ChainAttempt[] = [];
+        for (let i = 0; i < LISTING_FLOOD_SIZE; i++) {
+          flood.push(
+            await ctx.chain.propose(chainIntent(ctx, { market: symbol(`F${i.toString()}`), isBuy: false })),
+          );
+        }
+        const ids = intentIdsOf(waiting, ...flood);
+        const intents = (await ctx.reader.getIntents(ids)).map(({ id, status, market }) => ({
+          id,
+          status,
+          market,
+        }));
+        const run = await floodListingChecks(intents, 3);
+        const stored = intents.length === LISTING_FLOOD_SIZE + 1;
+        const waitingFirst = run.asked[0] === symbol("W") && waiting.verdict?.kind === "needs_approval";
+        return {
+          verdict: run.busiestMinute > LISTING_CAP_PER_MINUTE ? "BREACH" : "held",
+          matched: stored && waitingFirst && run.asked.length > 0,
+          actual: `${intents.length.toString()} intents stored, the ${usd(overThreshold)} sell ${showAttempt(waiting)}; in 3 minutes the checker looked up ${run.asked.length.toString()} markets with ${run.sentAt.length.toString()} requests, at most ${run.busiestMinute.toString()} in any 60 s (cap ${LISTING_CAP_PER_MINUTE.toString()}); first looked up: ${run.asked[0] === symbol("W") ? "the intent waiting for approval" : (run.asked[0] ?? "nothing")}`,
+          txHashes: hashes(waiting, ...flood),
+          intentIds: ids,
         };
       },
     },
