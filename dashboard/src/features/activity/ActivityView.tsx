@@ -14,7 +14,9 @@ import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import { type TabItem, Tabs } from "@/components/ui/Tabs";
+import { When } from "@/components/ui/When";
 import { formatCount, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { useAdvanced } from "@/lib/advanced/Advanced";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, countByStatus, isoFromUnix, newestFirst, todayUsage } from "@/lib/live/derive";
 import type { ConsoleSnapshot } from "@/lib/live/types";
@@ -27,7 +29,7 @@ const columns: readonly Column<IntentView>[] = [
   {
     key: "time",
     header: "Time",
-    cell: (intent) => formatTimeUtc(isoFromUnix(intent.proposedAt)),
+    cell: (intent) => <When at={intent.proposedAt} />,
     nowrap: true,
   },
   {
@@ -49,12 +51,6 @@ const columns: readonly Column<IntentView>[] = [
     cell: (intent) => <IntentVerdict intent={intent} />,
   },
   {
-    key: "tx",
-    header: "Proposal",
-    cell: (intent) => <HexValue value={intent.proposedTxHash} kind="tx" />,
-    nowrap: true,
-  },
-  {
     key: "actions",
     header: "Decision",
     cell: (intent) => (intent.status === "needs_approval" ? <ApprovalActions intent={intent} /> : null),
@@ -62,6 +58,13 @@ const columns: readonly Column<IntentView>[] = [
     nowrap: true,
   },
 ];
+
+const proposalColumn: Column<IntentView> = {
+  key: "tx",
+  header: "Proposal",
+  cell: (intent) => <HexValue value={intent.proposedTxHash} kind="tx" />,
+  nowrap: true,
+};
 
 interface Filter {
   id: string;
@@ -103,6 +106,7 @@ const filters: readonly Filter[] = [
 export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
+  const { advanced } = useAdvanced();
   const chain = snapshot.chain;
   if (!chain) return <ChainUnavailable snapshot={snapshot} title="Activity" />;
 
@@ -115,6 +119,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
   );
   const executed = countByStatus(intents, ["executed"]);
 
+  const shown = advanced ? [...columns.slice(0, -1), proposalColumn, ...columns.slice(-1)] : columns;
   const tabs: TabItem[] = filters.map((filter) => {
     const rows = intents.filter((intent) => filter.statuses.includes(intent.status));
     return {
@@ -125,7 +130,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
         <Table
           caption={`${filter.label} intents`}
           captionHidden
-          columns={columns}
+          columns={shown}
           rows={rows}
           rowKey={(intent) => intent.id.toString()}
           rowTone={(intent) => (intent.status === "needs_approval" ? "attention" : undefined)}
@@ -154,7 +159,6 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           value={formatCount(usage.intents)}
           hint={`${formatCount(intents.length)} in all`}
         />
-        <Stat label="Waiting for you" value={formatCount(waiting)} hint="Above the approval threshold" />
         <Stat
           label="Blocked today"
           value={formatCount(usage.blocked)}
