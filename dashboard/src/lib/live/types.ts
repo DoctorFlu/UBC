@@ -76,10 +76,19 @@ export interface ContractInfo {
  */
 export type SealedSource = "onchain" | "offchain";
 
+/**
+ * The plan and receipts a stored document names, read without trusting it (`readClaims`). Only used to
+ * say which plan's evidence a tampered document breaks; never shown as the agent's reason.
+ */
+export interface SealedClaims {
+  planId: string | null;
+  signalReceiptIds: string[];
+}
+
 /** The agent's sealed reason for one intent, checked with `verifyContext` against the hash from `source`. */
 export type SealedReason =
   | { status: "verified"; source: SealedSource; hash: Hex; document: DecisionContext; storedAt: string }
-  | { status: "tampered"; source: SealedSource; hash: Hex; storedAt: string }
+  | { status: "tampered"; source: SealedSource; hash: Hex; storedAt: string; claims: SealedClaims }
   | { status: "not_stored"; source: SealedSource; hash: Hex };
 
 export interface ChainView {
