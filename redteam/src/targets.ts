@@ -19,8 +19,10 @@ import {
   devAccount,
   devPolicyClient,
   devPrivateKey,
+  geminiVenue,
   startDevchain,
   type PolicyContractKind,
+  type Venue,
 } from "@mandate/devchain";
 import { createGeminiClient } from "@mandate/gemini";
 import {
@@ -53,6 +55,8 @@ export interface TargetHandle {
   owner: PolicyClient;
   executor: PolicyClient | null;
   markets: { crypto: string; sports: string | null };
+  /** The executor's market lookup: the recorded markets on our own chain, Gemini against the stack. */
+  venue: Venue;
   /** The server's log lines, for the self-contained run only. */
   serverLogs: string[];
   stop: () => Promise<void>;
@@ -153,6 +157,7 @@ export async function startSelf(options: {
       owner: devPolicyClient(devchain.rpcUrl, policy, "user"),
       executor: devPolicyClient(devchain.rpcUrl, policy, "executor"),
       markets: { crypto: CRYPTO_SYMBOL, sports: SPORTS_SYMBOL },
+      venue: geminiVenue(fixtureMarkets()),
       serverLogs,
       stop: async () => {
         await server.endpoint.close();
@@ -304,6 +309,7 @@ export async function connectStack(): Promise<TargetHandle> {
     owner: devPolicyClient(rpcUrl, policy, "user"),
     executor: null,
     markets: { crypto, sports },
+    venue: geminiVenue(createGeminiClient({ maxRetries: 1, timeoutMs: 8_000 })),
     serverLogs: [],
     stop: () => Promise.resolve(),
   };

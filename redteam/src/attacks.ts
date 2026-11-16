@@ -5,7 +5,7 @@
  * the test suite pins.
  */
 import { toFunctionSelector, type Hex } from "viem";
-import { devPrivateKey } from "@mandate/devchain";
+import { checkApprovedIntent, devPrivateKey, type RefusalCode } from "@mandate/devchain";
 import { Category, formatCents, isCategoryAllowed, type PolicyRules } from "@mandate/shared";
 import type { ChainAttempt } from "./chain";
 import { field, type ToolResult } from "./mcp";
@@ -793,9 +793,10 @@ export function attacks(amounts: Amounts): Attack[] {
       expected:
         "Approved: the contract stores the market string but trusts the category argument, so it cannot tell. Only the amount rules bound it.",
       expectedVerdict: "bounded",
-      limit: "the max trade size, approval threshold and budget still apply to the order",
+      limit:
+        "the max trade size, approval threshold and budget still apply to the order, and the executor refuses to trade it because Gemini lists the market under another category (`chain.executor-refuses`)",
       finding:
-        "LIMITATION: the contract cannot tell a mislabelled category. The category rule is only as honest as whoever holds the agent key. Through the MCP server the category is read from Gemini, never from the agent, so this needs a stolen key; no offchain check exists after the contract (the simulated executor fills any approved intent, and the real executor does not exist yet).",
+        "LIMITATION: the contract cannot tell a mislabelled category. The category rule is only as honest as whoever holds the agent key. Through the MCP server the category is read from Gemini, never from the agent, so this needs a stolen key; after the contract, the executor looks the market up on Gemini and refuses the intent when the categories differ, recording it as not filled.",
       async run(ctx) {
         const a = await ctx.chain.propose(
           chainIntent(ctx, {
@@ -804,8 +805,14 @@ export function attacks(amounts: Amounts): Attack[] {
             outcome: "YES",
           }),
         );
-        if (a.verdict?.kind === "approved")
+        if (a.verdict?.kind === "approved") {
           ctx.state.approved.push({ intentId: a.verdict.intentId, amountCents: probe });
+          ctx.state.untradeable.push({
+            intentId: a.verdict.intentId,
+            label: "Crypto label on a Sports market",
+            refusal: ctx.markets.sports === null ? "market_not_listed" : "category_mismatch",
+          });
+        }
         return {
           verdict: a.verdict?.kind === "approved" ? "bounded" : "held",
           matched: a.verdict?.kind === "approved",
@@ -1014,9 +1021,9 @@ export function attacks(amounts: Amounts): Attack[] {
         "All three are approved: the contract does not check the limit price. The amount rules still bound each order.",
       expectedVerdict: "bounded",
       limit:
-        "the amount rules (max trade size, approval threshold, budget); the price only matters to the executor",
+        "the amount rules (max trade size, approval threshold, budget), and the executor refuses any limit price outside 1 to 99 (`chain.executor-refuses`)",
       finding:
-        "LIMITATION: the contract does not validate limitPrice (0 and anything from 100 up are meaningless for a $1 contract). Only the MCP server's input schema enforces 1 to 99; with a stolen key, nothing does until an executor checks it.",
+        "LIMITATION: the contract does not validate limitPrice (0 and anything from 100 up are meaningless for a $1 contract). The MCP server's input schema enforces 1 to 99 before proposing, and the executor checks it again before trading, so with a stolen key such an intent is approved but never traded.",
       async run(ctx) {
         const attempts: [string, ChainAttempt][] = [];
         for (const [label, price] of [
@@ -1027,9 +1034,15 @@ export function attacks(amounts: Amounts): Attack[] {
           attempts.push([label, await ctx.chain.propose(chainIntent(ctx, { limitPrice: price }))]);
         }
         const approved = attempts.every(([, a]) => a.verdict?.kind === "approved");
-        for (const [, a] of attempts) {
-          if (a.verdict?.kind === "approved")
+        for (const [label, a] of attempts) {
+          if (a.verdict?.kind === "approved") {
             ctx.state.approved.push({ intentId: a.verdict.intentId, amountCents: probe });
+            ctx.state.untradeable.push({
+              intentId: a.verdict.intentId,
+              label: `limit ${label}`,
+              refusal: "limit_price_out_of_range",
+            });
+          }
         }
         return {
           verdict: approved ? "bounded" : "held",
@@ -1049,20 +1062,24 @@ export function attacks(amounts: Amounts): Attack[] {
         "All four are approved and stored: the contract does not validate market or outcome. The amount rules still bound each order; the attacker pays the gas.",
       expectedVerdict: "bounded",
       limit:
-        "the amount rules per order, plus gas paid by the attacker and the block gas limit for the string size",
+        "the amount rules per order, gas paid by the attacker and the block gas limit for the string size, and the executor refuses any market that is not a Gemini symbol and any outcome but YES or NO (`chain.executor-refuses`)",
       finding:
-        "LIMITATION: the contract stores any market and outcome string. With a stolen key, an attacker can plant arbitrary text (including instructions aimed at an LLM or the owner) in the audit log, and an executor must refuse unknown markets. The console shows these strings as text; the MCP server withholds them (see `mcp.chain-text-relay`).",
+        "LIMITATION: the contract stores any market and outcome string. With a stolen key, an attacker can plant arbitrary text (including instructions aimed at an LLM or the owner) in the audit log. No reader acts on it: the executor refuses the intent before trading, the console flags it and shows only a short preview (the full text folded away on the intent page), and the MCP server withholds it (see `mcp.chain-text-relay`).",
       async run(ctx) {
         const size = ctx.target === "self" ? 16 * 1024 : 1024;
-        const cases: [string, Partial<Parameters<AttackContext["chain"]["propose"]>[0]>][] = [
-          ["empty market", { market: "" }],
-          [`${size / 1024} KiB market`, { market: `GEMI-${"X".repeat(size - 5)}` }],
-          ["outcome MAYBE", { outcome: "MAYBE" }],
-          ["injection market", { market: planted(ctx).text }],
+        const cases: [string, Partial<Parameters<AttackContext["chain"]["propose"]>[0]>, RefusalCode][] = [
+          ["empty market", { market: "" }, "market_not_a_symbol"],
+          [`${size / 1024} KiB market`, { market: `GEMI-${"X".repeat(size - 5)}` }, "market_not_a_symbol"],
+          ["outcome MAYBE", { outcome: "MAYBE" }, "outcome_not_yes_no"],
+          ["injection market", { market: planted(ctx).text }, "market_not_a_symbol"],
         ];
         const attempts: [string, ChainAttempt][] = [];
-        for (const [label, overrides] of cases) {
-          attempts.push([label, await ctx.chain.propose(chainIntent(ctx, overrides))]);
+        for (const [label, overrides, refusal] of cases) {
+          const a = await ctx.chain.propose(chainIntent(ctx, overrides));
+          attempts.push([label, a]);
+          if (a.verdict?.kind === "approved") {
+            ctx.state.untradeable.push({ intentId: a.verdict.intentId, label, refusal });
+          }
         }
         const injection = attempts[3]?.[1];
         if (injection?.verdict !== null && injection?.verdict !== undefined) {
@@ -1340,13 +1357,13 @@ export function attacks(amounts: Amounts): Attack[] {
       name: "Numbers too large for the offchain readers",
       surface: "chain",
       selfOnly:
-        "it cannot be undone and would permanently stall the live console's activity feed and the simulated executor",
+        "it cannot be undone: the two intents would stay in the demo's history for good (flagged, but there)",
       tried: `With the agent key: a ${usd(probe)} sell with limit price 2^256 - 1 (approved, so the number lands in an IntentApproved event) and a buy of 2^256 - 1 cents (rejected, but stored). Then reads the history the way the console, the simulated executor and the MCP server do.`,
       expected:
-        "Onchain the mandate holds: the sell stays inside the per-order rules and the buy is rejected with `over max trade size`. The readers should keep working; today they do not (known finding, reported), so this attack is pinned as a BREACH until the shared decoder is fixed.",
-      expectedVerdict: "BREACH",
+        "Onchain the mandate holds: the sell stays inside the per-order rules and the buy is rejected with `over max trade size`. Every reader keeps working: each value too large for offchain code reads as null with its exact digits flagged beside it, never rounded or clamped, and the executor refuses the sell (`chain.executor-refuses`).",
+      expectedVerdict: "held",
       finding:
-        "FINDING (offchain, needs a human): `@mandate/shared` refuses any onchain number above 2^53 - 1 with a UnitError, in `decodePolicyLogs` and in `PolicyClient.getIntent`. One event or intent carrying such a number, which only the agent key can write and the contract accepts, makes every later read of that block range or intent throw. The MCP server's get_activity and get_intent then fail with INTERNAL for good; the console's log scanner and the simulated executor read the same decoder and cannot move past that block, so the owner's activity feed and the fills stop. The rules still hold onchain. Fix belongs in `shared/` (decode out-of-range values without throwing, or skip and flag the event), not in `contracts/`.",
+        "FIXED (issue #64): `@mandate/shared` used to refuse any onchain number above 2^53 - 1, so one such event stalled the console's scanner, the simulated executor and the MCP server's history for good. Amounts, limit prices and results now decode to null with the exact value in `outOfRange`; rules, which only the owner key sets, are still refused, and the console skips and reports such an event instead of stopping.",
       async run(ctx) {
         const sell = await ctx.chain.propose(
           chainIntent(ctx, { isBuy: false, limitPrice: UINT256_MAX, amountCents: BigInt(probe) }),
@@ -1362,18 +1379,46 @@ export function attacks(amounts: Amounts): Attack[] {
             readers.push([label, error instanceof Error ? error.name : String(error)]);
           }
         };
-        await attempt("event log decode (console scanner, executor, MCP event index)", () =>
-          ctx.reader.getEvents({ fromBlock: 0n }),
-        );
         const hugeId = huge.verdict?.intentId;
-        await attempt("getIntent", () => ctx.reader.getIntent(hugeId ?? 0));
+        const max = UINT256_MAX.toString();
+        // Each value too large for offchain code must read as null with its exact digits flagged, not clamped.
+        await attempt("event log decode (console scanner, executor, MCP event index)", async () => {
+          const events = await ctx.reader.getEvents({ fromBlock: 0n });
+          // The approval of the sell carries the limit price (the production contract emits no proposal event).
+          const sellId = sell.verdict?.intentId;
+          const flagged = events.some(
+            (e) =>
+              e.type === "IntentApproved" &&
+              e.intentId === sellId &&
+              e.limitPrice === null &&
+              e.outOfRange?.["limitPrice"] === max,
+          );
+          if (!flagged) throw Object.assign(new Error("not flagged"), { name: "NotFlagged" });
+        });
+        await attempt("getIntent", async () => {
+          const intent = await ctx.reader.getIntent(hugeId ?? 0);
+          if (intent?.amountCents !== null || intent.outOfRange?.["amountCents"] !== max) {
+            throw Object.assign(new Error("not flagged"), { name: "NotFlagged" });
+          }
+        });
         await attempt("MCP get_activity", async () => {
           const r = await ctx.mcp.call("get_activity", { limit: 5 });
           if (r.isError) throw Object.assign(new Error(r.text), { name: r.errorCode ?? "error" });
         });
+        await attempt("MCP get_intent", async () => {
+          const r = await ctx.mcp.call("get_intent", { intentId: hugeId ?? 0 });
+          if (r.isError) throw Object.assign(new Error(r.text), { name: r.errorCode ?? "error" });
+        });
+        if (sell.verdict?.kind === "approved") {
+          ctx.state.untradeable.push({
+            intentId: sell.verdict.intentId,
+            label: "sell at limit 2^256 - 1",
+            refusal: "number_out_of_range",
+          });
+        }
         const broken = readers.filter(([, error]) => error !== null);
         return {
-          verdict: wentThrough(huge) ? "BREACH" : broken.length > 0 ? "BREACH" : "bounded",
+          verdict: wentThrough(huge) || broken.length > 0 ? "BREACH" : "held",
           matched: onchainHeld,
           actual: `${joined([
             ["sell at 2^256 - 1", showAttempt(sell)],
@@ -1381,6 +1426,44 @@ export function attacks(amounts: Amounts): Attack[] {
           ])}; readers: ${readers.map(([label, error]) => `${label} ${error === null ? "ok" : `FAILS (${error})`}`).join("; ")}`,
           txHashes: hashes(sell, huge),
           intentIds: intentIdsOf(sell, huge),
+        };
+      },
+    },
+
+    {
+      id: "chain.executor-refuses",
+      name: "The executor refuses every approved intent the MCP server could not have sent",
+      surface: "chain",
+      tried:
+        "Reads back each intent this run got approved with the agent key alone (a mislabelled category, limit prices 0, 100, 1,000,000 and 2^256 - 1, an empty, oversized or instruction-carrying market, outcome MAYBE) and puts it through the executor's pre-trade check, with the venue lookup the executor uses (the recorded markets on our own chain, Gemini on the live stack).",
+      expected:
+        "Every one is refused before any order is placed, for the reason that matches what was planted. The executor then records it as not filled, which releases its budget (covered by the devchain executor tests).",
+      expectedVerdict: "held",
+      async run(ctx) {
+        const results: [string, string][] = [];
+        let traded = false;
+        let allAsPlanted = ctx.state.untradeable.length > 0;
+        for (const planted of ctx.state.untradeable) {
+          const intent = await ctx.reader.getIntent(planted.intentId);
+          if (intent === null) throw new Error(`intent ${planted.intentId.toString()} is not stored`);
+          const check = await checkApprovedIntent(intent, ctx.venue);
+          if (check.ok) {
+            traded = true;
+            allAsPlanted = false;
+            results.push([planted.label, "WOULD TRADE"]);
+          } else {
+            if (check.code !== planted.refusal) allAsPlanted = false;
+            results.push([planted.label, `refused (${check.code})`]);
+          }
+        }
+        return {
+          verdict: traded ? "BREACH" : "held",
+          matched: allAsPlanted,
+          actual:
+            results.length === 0
+              ? "no hostile intent was approved this run, so there was nothing to check"
+              : joined(results),
+          intentIds: ctx.state.untradeable.map((planted) => planted.intentId),
         };
       },
     },

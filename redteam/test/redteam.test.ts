@@ -43,9 +43,8 @@ const EXPECTED: Record<string, Verdict> = {
   "chain.trade-while-paused": "held",
   "chain.drain-budget": "bounded",
   "chain.sells-past-budget": "bounded",
-  // A known, reported gap in the offchain readers (see redteam/README.md). Flip it to "bounded" once
-  // `@mandate/shared` decodes out-of-range numbers without throwing.
-  "chain.poison-readers": "BREACH",
+  "chain.poison-readers": "held",
+  "chain.executor-refuses": "held",
   "chain.reset-daily-loss": "held",
   "mcp.secret-exfiltration": "held",
   "mcp.rate-limit-flood": "held",
@@ -61,17 +60,15 @@ async function run(contract: "production" | "reference"): Promise<RunReport> {
 }
 
 describe.each(["production", "reference"] as const)("red team against the %s contract", (contract) => {
-  it("every attack gets exactly its expected verdict, and the only breach is the known reader finding", async () => {
+  it("every attack gets exactly its expected verdict, and nothing breaches", async () => {
     const report = await run(contract);
     const unexpected = report.attacks.filter((r) => !r.asExpected);
     expect(unexpected.map((r) => `${r.id}: ${r.verdict} (${r.actual})`)).toEqual([]);
     expect(Object.fromEntries(report.attacks.map((r) => [r.id, r.verdict]))).toEqual(EXPECTED);
-    expect(report.attacks.filter((r) => r.verdict === "BREACH").map((r) => r.id)).toEqual([
-      "chain.poison-readers",
-    ]);
+    expect(report.attacks.filter((r) => r.verdict === "BREACH").map((r) => r.id)).toEqual([]);
     expect(report.aborted).toBeNull();
-    // `npm run redteam` exits non-zero while any breach stands, including the known one.
-    expect(passed(report)).toBe(false);
+    // `npm run redteam` exits zero only when every attack got its expected verdict and none breached.
+    expect(passed(report)).toBe(true);
 
     const end = report.endState;
     expect(end?.rolesUnchanged).toBe(true);
