@@ -44,6 +44,11 @@ import type {
 } from "./types";
 
 export const DEFAULT_BASE_URL = "https://api.gemini.com";
+
+/** The request path of `getEvent(eventTicker)`, as `onRequest` sees it. */
+export function eventPath(eventTicker: string): string {
+  return `/v1/prediction-markets/events/${encodeURIComponent(eventTicker)}`;
+}
 const PAGE_SIZE = 500;
 const CRYPTO_CATEGORY = "Crypto";
 
@@ -88,6 +93,8 @@ export interface GeminiClientOptions {
   /** Token bucket settings. Defaults: burst 5, 100 per minute (Gemini's public limit is 120). */
   rateLimit?: { capacity?: number; refillPerMinute?: number };
   cacheTtlMs?: Partial<CacheTtls>;
+  /** Called with the path of each request as it is sent, retries included (cached answers send none). */
+  onRequest?: (path: string) => void;
 }
 
 export interface ListEventsOptions {
@@ -165,6 +172,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     maxRetries: options.maxRetries ?? 3,
     baseDelayMs: options.baseDelayMs ?? 500,
     maxDelayMs: options.maxDelayMs ?? 8_000,
+    ...(options.onRequest ? { onRequest: options.onRequest } : {}),
   };
   const cache = new TtlCache(now);
   const isoNow = () => new Date(now()).toISOString();
@@ -209,7 +217,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
 
   async function getEvent(eventTicker: string): Promise<MarketEvent> {
     requireToken(eventTicker, "eventTicker");
-    const path = `/v1/prediction-markets/events/${encodeURIComponent(eventTicker)}`;
+    const path = eventPath(eventTicker);
     const raw = await cache.getOrLoad(path, ttl.event, () => getJson(http, path, eventSchema));
     return normalizeEvent(raw);
   }

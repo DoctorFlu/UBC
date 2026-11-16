@@ -20,6 +20,8 @@ export interface HttpOptions {
   maxRetries: number;
   baseDelayMs: number;
   maxDelayMs: number;
+  /** Called before each request is sent, retries included. */
+  onRequest?: (path: string) => void;
 }
 
 type Outcome =
@@ -36,6 +38,7 @@ export async function getJson<S extends z.ZodType>(
   let lastError: GeminiError | null = null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     await options.limiter.acquire();
+    options.onRequest?.(path);
     const outcome = await attemptOnce(options, path, attempt);
     if (outcome.kind === "ok") return parseBody(outcome.body, schema, path, attempt);
     if (outcome.kind === "fail") throw outcome.error;

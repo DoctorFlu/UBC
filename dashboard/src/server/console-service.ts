@@ -1,5 +1,6 @@
 import "server-only";
 
+import { type ListingLookup, ListingChecker, listingOrder } from "@mandate/gemini";
 import {
   type Intent,
   type IntentView,
@@ -13,7 +14,6 @@ import {
   decodePolicyLogs,
   emptyPolicyViewState,
   intentsMissingDetails,
-  isMarketSymbol,
   reduceEvents,
   toSafeNumber,
   verifyContext,
@@ -45,7 +45,6 @@ import type { Database } from "./db";
 import { type ChainClient, LogScanner, blockTimestamps, findDeployBlock } from "./ingest/chain-reader";
 import { UNCONFIGURED_NETWORK, deploymentFileStamp, resolveDeployment } from "./ingest/deployment";
 import { StreamReceiver } from "./ingest/stream";
-import { type ListingLookup, MarketListings } from "./market/listings";
 import { EventStore, type IngestSource } from "./store/events";
 import { ListingStore } from "./store/listings";
 import {
@@ -104,7 +103,7 @@ export class ConsoleService {
   readonly offchain: OffchainStore;
   readonly stream: StreamReceiver;
   /** Gemini's listing of each intent's market, when the console has a way to ask Gemini. */
-  readonly listings: MarketListings | null;
+  readonly listings: ListingChecker | null;
 
   private session: Session | null = null;
   private network: ConsoleNetwork = UNCONFIGURED_NETWORK;
@@ -130,14 +129,19 @@ export class ConsoleService {
   constructor(
     readonly config: ConsoleConfig,
     db: Database,
-    private readonly options: { env?: EnvVars; logger?: Logger; marketLookup?: ListingLookup } = {},
+    private readonly options: {
+      env?: EnvVars;
+      logger?: Logger;
+      /** How to ask Gemini about a market, and the most times its client sends one request. */
+      marketLookup?: { lookup: ListingLookup; attemptsPerRequest: number };
+    } = {},
   ) {
     this.events = new EventStore(db);
     this.offchain = new OffchainStore(db);
     this.stream = new StreamReceiver(config.streamSecurityToken);
     this.listings = options.marketLookup
-      ? new MarketListings({
-          lookup: options.marketLookup,
+      ? new ListingChecker({
+          ...options.marketLookup,
           store: new ListingStore(db),
           onChange: () => this.changed(),
           logger: this.log,
@@ -612,15 +616,13 @@ export class ConsoleService {
   }
 
   /**
-   * Each intent with Gemini's listing of its market, as stored. Never waits on Gemini: a market not
-   * checked yet is queued, and the snapshot is pushed again once its verdict is stored.
+   * Each intent with Gemini's listing of its market, as stored. Never waits on Gemini: the markets not
+   * checked yet become the checker's queue, those waiting for the owner's approval first and then the
+   * newest, and the snapshot is pushed again as each verdict is stored.
    */
   private withListings(intents: IntentView[]): IntentView[] {
     if (!this.listings) return intents;
-    const symbols = intents.flatMap((intent) =>
-      intent.market !== null && isMarketSymbol(intent.market) ? [intent.market] : [],
-    );
-    const known = this.listings.listings(symbols);
+    const known = this.listings.listings(listingOrder(intents));
     return intents.map((intent) => {
       const listing = intent.market === null ? undefined : known.get(intent.market);
       return listing ? { ...intent, listing } : intent;
