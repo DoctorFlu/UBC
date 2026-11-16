@@ -8,3 +8,4 @@ export * from "./deploy";
 export * from "./devchain";
 export * from "./executor";
 export * from "./foundry";
+export * from "./gemini";
