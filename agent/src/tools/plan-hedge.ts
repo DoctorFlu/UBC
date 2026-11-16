@@ -29,6 +29,7 @@ const PlannedOrderSchema = z.object({
   strikeCents: z.int(),
   outcome: z.literal("NO"),
   quantity: z.string().describe("Contracts, two decimals"),
+  contracts: z.int().describe("Whole contracts; amountCents is contracts x limitPrice"),
   limitPrice: z.int().describe("Cents per contract"),
   amountCents: z.int().describe("Most this order can cost"),
   expected: z
@@ -284,6 +285,7 @@ export const planHedge = defineTool({
       strikeCents: order.strikeCents,
       outcome: "NO" as const,
       quantity: order.quantity,
+      contracts: order.contracts,
       limitPrice: order.limitPriceCents,
       amountCents: order.amountCents,
       expected: expected[index]?.expected ?? "approved",

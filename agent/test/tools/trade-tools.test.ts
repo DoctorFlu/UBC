@@ -461,6 +461,12 @@ describe("execute_plan", () => {
     expect(
       h.policy.proposed.every((p) => p.outcome === "NO" && p.isBuy && p.category === Category.Crypto),
     ).toBe(true);
+    // Exactly the plan's whole-contract amounts, with no second rounding (issue #54).
+    expect(h.policy.proposed.map((p) => [p.amountCents, p.limitPrice])).toEqual(
+      stored?.plan.orders.map((o) => [o.amountCents, o.limitPriceCents]),
+    );
+    for (const order of stored?.plan.orders ?? [])
+      expect(order.amountCents).toBe(order.contracts * order.limitPriceCents);
     const hashes = (structured["execution"] as { orders: Row[] }).orders.map(
       (o) => o["contextHash"] as string,
     );

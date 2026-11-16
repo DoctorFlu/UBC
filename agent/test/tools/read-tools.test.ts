@@ -245,6 +245,7 @@ describe("plan_hedge", () => {
     for (const order of orders) {
       expect(order["outcome"]).toBe("NO");
       expect(order["amountCents"]).toBeLessThanOrEqual(2_500);
+      expect(order["amountCents"]).toBe((order["contracts"] as number) * (order["limitPrice"] as number));
       expect(order["expected"]).toMatch(/approved|needs_approval/);
     }
     expect((plan["payoff"] as Row[]).length).toBeLessThanOrEqual(8);
