@@ -1,4 +1,3 @@
-import { martianMono, monaSans } from "@mandate/brand/fonts";
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
@@ -6,6 +5,9 @@ import { InlineScript } from "@/components/shell/InlineScript";
 import { ToastProvider } from "@/components/ui/Toast";
 import { themeBootScript } from "@/lib/theme";
 
+// Imported here, after the components and before the global stylesheet, as fonts.ts was: module
+// order sets the order of the CSS chunks, and moving it changes which equal-specificity rule wins.
+import { martianMono, monaSans } from "@mandate/brand/fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
