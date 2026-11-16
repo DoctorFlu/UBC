@@ -113,7 +113,8 @@ Enforced by the contract, for every proposal, whatever the agent says or is told
 
 Three roles, three keys: the **owner** sets rules and approves, the **agent** only proposes, the **executor** only places approved orders and records results.
 A stolen agent key gives an attacker nothing beyond what the mandate already allows.
-The red team (`npm run redteam`) attacks that claim and records what it finds in [redteam/REPORT.md](redteam/REPORT.md): with a stolen key the attacker cannot change a rule or role, but can mislabel a market's category, pick any limit price, and keep selling once the budget is used.
+The red team (`npm run redteam`) attacks that claim and records what it finds in [redteam/REPORT.md](redteam/REPORT.md): with a stolen key the attacker cannot change a rule or role, but can keep selling once the budget is used, and can get intents approved that the contract does not check (a mislabelled category, any limit price, any market or outcome text).
+The executor refuses to trade those intents, the console flags them, and neither the console nor the MCP server acts on, or breaks on, the text or numbers they carry.
 
 Enforced by the MCP server, as a second layer:
 
