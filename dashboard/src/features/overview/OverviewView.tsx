@@ -3,6 +3,7 @@
 import type { IntentView } from "@mandate/shared";
 import { Inbox } from "lucide-react";
 
+import { AgentReason } from "@/components/domain/AgentReason";
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import {
   IntentLink,
@@ -161,7 +162,7 @@ export function OverviewView({ preview }: { preview?: ConsoleSnapshot }) {
                         <IntentLink id={intent.id} /> · {formatTimeUtc(isoFromUnix(intent.proposedAt))}
                       </span>
                     </div>
-                    {reason ? <p className={styles.rationale}>{reason}</p> : null}
+                    {reason ? <AgentReason text={reason} /> : null}
                     <ApprovalActions intent={intent} block />
                   </li>
                 );

@@ -4,6 +4,7 @@ import type { PolicyChangeRequest, PolicyRules } from "@mandate/shared";
 import { Check, MessageSquareDiff, X } from "lucide-react";
 import { useState } from "react";
 
+import { AgentReason } from "@/components/domain/AgentReason";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
@@ -126,12 +127,10 @@ function RequestCard({
               />
             </div>
           ) : null}
-          <blockquote className={styles.reason}>
-            <p>{request.reason}</p>
-            <footer>
-              {agentName}, {formatDateUtc(request.createdAt)} at {formatTimeUtc(request.createdAt)}
-            </footer>
-          </blockquote>
+          <AgentReason
+            text={request.reason}
+            footer={`${agentName}, ${formatDateUtc(request.createdAt)} at ${formatTimeUtc(request.createdAt)}`}
+          />
           {pendingRequest && next && changes.length > 0 ? (
             <section className={styles.requestBacktest} aria-label="Backtest of the requested rules">
               <h4 className={styles.subheading}>Backtest of the requested rules</h4>
