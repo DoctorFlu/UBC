@@ -1,12 +1,40 @@
+import { readFile } from "node:fs/promises";
+
 import { type Page, expect, test } from "@playwright/test";
+import { createPublicClient, http, isAddressEqual } from "viem";
 
 import { OWNER_ADDRESS, routes, schemes, viewports } from "./routes";
+import { suitePaths } from "./support/chain";
+import { snapshot } from "./support/console";
 
 /**
  * Chrome's "preloaded but not used within a few seconds" hint is a timing report, not a defect:
  * it fires when a loaded machine makes `next dev` slow to serve a page. Everything else counts.
  */
 const timingHint = /was preloaded using link preload but not used within a few seconds/;
+
+/** The cells of one CSV line, with RFC 4180 quoting (the audit export has no line breaks in cells). */
+function csvCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line.charAt(index);
+    if (quoted && char === '"' && line[index + 1] === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      cells.push(cell);
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  cells.push(cell);
+  return cells;
+}
 
 /** Collects console errors, warnings (hydration mismatches are warnings) and uncaught errors. */
 function watchConsole(page: Page) {
@@ -158,6 +186,55 @@ test.describe("seeded demo", () => {
   test("an intent without a link says no reason was recorded", async ({ page }) => {
     await page.goto("/activity/1");
     await expect(page.getByTestId("sealed-reason")).toContainText("No reason recorded");
+  });
+
+  test("the audit trail filters, orders and exports exactly the rows it shows", async ({ page, baseURL }) => {
+    const current = await snapshot(baseURL ?? "");
+    const events = current.chain?.events ?? [];
+    expect(events.length).toBeGreaterThan(0);
+    await page.goto("/audit");
+    const table = () => page.getByRole("region", { name: /Policy contract events/ });
+
+    // Everything the console ingested, newest first.
+    await expect(table().locator("tbody tr")).toHaveCount(events.length);
+    await expect(table().locator("tbody tr").first()).toContainText(events.at(-1)?.type ?? "");
+
+    // The owner's own decisions: in the seed, intent 2 approved and intent 3 rejected after a hold.
+    await page.getByRole("tab", { name: /Owner decisions/ }).click();
+    await expect(table().locator("tbody tr")).toHaveCount(2);
+    await page.getByRole("combobox", { name: "Order of events" }).selectOption("oldest");
+    const shown = table().locator("tbody tr");
+    await expect(shown.nth(0)).toContainText("Approved by owner #2");
+    await expect(shown.nth(1)).toContainText("Rejected by owner #3");
+
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export 2 rows as CSV" }).click();
+    const file = await (await download).path();
+    const lines = (await readFile(file, "utf8")).trimEnd().split("\r\n");
+    expect(lines).toHaveLength(3);
+    const header = csvCells(lines[0] ?? "");
+    const records = lines.slice(1).map((line) => {
+      const cells = csvCells(line);
+      return Object.fromEntries(header.map((name, index) => [name, cells[index] ?? ""]));
+    });
+    expect(records.map((record) => record.label)).toEqual(["Approved by owner", "Rejected by owner"]);
+
+    // Every exported row checks out against the chain itself: its transaction is in that block, at
+    // that time, and carries a Policy contract log at that index.
+    const deployment = JSON.parse(await readFile(suitePaths("smoke").deploymentFile, "utf8")) as {
+      rpcUrl: string;
+      address: `0x${string}`;
+    };
+    const client = createPublicClient({ transport: http(deployment.rpcUrl) });
+    for (const record of records) {
+      const receipt = await client.getTransactionReceipt({ hash: record.tx_hash as `0x${string}` });
+      expect(receipt.status).toBe("success");
+      expect(Number(receipt.blockNumber)).toBe(Number(record.block));
+      const log = receipt.logs.find((candidate) => candidate.logIndex === Number(record.log_index));
+      expect(log ? isAddressEqual(log.address, deployment.address) : false).toBe(true);
+      const block = await client.getBlock({ blockNumber: receipt.blockNumber });
+      expect(Number(block.timestamp)).toBe(Number(record.block_timestamp));
+    }
   });
 
   test("the audit counts blocked intents by the contract's reason", async ({ page }) => {

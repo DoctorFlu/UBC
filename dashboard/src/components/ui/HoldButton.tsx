@@ -89,10 +89,7 @@ export function HoldButton({
       return () => clearTimeout(timer);
     }
     if (state.phase === "armed") {
-      const timer = setTimeout(
-        () => dispatch({ type: "tick", at: performance.now() }),
-        armWindowMs + 16,
-      );
+      const timer = setTimeout(() => dispatch({ type: "tick", at: performance.now() }), armWindowMs + 16);
       return () => clearTimeout(timer);
     }
     if (state.phase === "confirmed") {
