@@ -168,6 +168,16 @@ test("a fill the executor records appears on the intent", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Intent #1" })).toBeVisible();
   await chain.executor.recordResult({ intentId: 1, filled: true, filledCents: 2_200, pnlCents: 0 });
   await expect(page.locator("main").getByText("Executed").first()).toBeVisible();
+  // The contract only knows the executor recorded a fill, and on the devchain that executor is a
+  // simulator: say exactly that, never where the order went.
+  const timeline = page.getByTestId("intent-timeline");
+  await expect(timeline).toContainText("The executor recorded a fill of $22.00.");
+  await expect(timeline.getByTestId("simulated-fill")).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Gemini");
+
+  await open(page, "/activity");
+  await expect(page.getByTestId("simulated-fill")).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("on Gemini");
 });
 
 test("a rule that blocks an intent says so on the overview", async ({ page }) => {

@@ -7,6 +7,7 @@ import type { Hex } from "viem";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { MarketName, OrderSummary } from "@/components/domain/Intent";
+import { SimulatedFill } from "@/components/domain/SimulatedFill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
@@ -15,11 +16,12 @@ import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip, statusDescriptions } from "@/components/ui/StatusChip";
-import { formatCount, formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { formatCount, formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents, isoFromUnix } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
 import { categoryName, describeMarket } from "@/lib/markets";
+import { fillsAreSimulated } from "@/lib/network";
 
 import styles from "./detail.module.css";
 
@@ -28,12 +30,14 @@ interface Step {
   title: string;
   detail: string | null;
   tone: "neutral" | "good" | "attention" | "bad";
+  /** A fill recorded by the local devchain's simulated executor. */
+  simulated?: boolean;
   timestamp: number;
   blockNumber: number;
   txHash: Hex;
 }
 
-function steps(chain: ChainView, intentId: number): Step[] {
+function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
   const events = intentEvents(chain, intentId);
   const intent = chain.intents.find((candidate) => candidate.id === intentId);
   const out: Step[] = [];
@@ -99,11 +103,13 @@ function steps(chain: ChainView, intentId: number): Step[] {
       case "ResultRecorded":
         out.push({
           ...meta(event),
-          title: event.filled ? "Filled on Gemini" : "Did not fill",
+          // The contract only knows that the executor recorded a result, not where the order went.
+          title: event.filled ? "Filled" : "Did not fill",
           detail: event.filled
-            ? `The executor reported a fill of ${(event.filledCents / 100).toFixed(2)} USD.`
-            : "The executor reported the order did not fill; its amount went back to the budget.",
+            ? `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
+            : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
+          simulated: simulated && event.filled,
         });
         break;
       default:
@@ -242,7 +248,8 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
     );
   }
   const market = intent.market ? describeMarket(intent.market) : null;
-  const timeline = steps(chain, intent.id);
+  const simulated = fillsAreSimulated(snapshot.network);
+  const timeline = steps(chain, intent.id, simulated);
 
   return (
     <div className={styles.view}>
@@ -283,8 +290,9 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               {intent.filledCents !== null ? (
                 <>
                   <dt>Filled</dt>
-                  <dd>
+                  <dd className={styles.filled}>
                     <Money cents={intent.filledCents} />
+                    {simulated && intent.status === "executed" ? <SimulatedFill /> : null}
                   </dd>
                   <dt>Realized P&amp;L</dt>
                   <dd>
@@ -321,7 +329,10 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               <li key={step.key} className={styles.step} data-tone={step.tone}>
                 <span className={styles.stepDot} aria-hidden />
                 <div className={styles.stepBody}>
-                  <p className={styles.stepTitle}>{step.title}</p>
+                  <p className={styles.stepTitle}>
+                    {step.title}
+                    {step.simulated ? <SimulatedFill /> : null}
+                  </p>
                   {step.detail ? <p className={styles.stepDetail}>{step.detail}</p> : null}
                   <p className={styles.stepMeta}>
                     <span>

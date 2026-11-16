@@ -20,8 +20,8 @@ export const statusDescriptions: Record<StatusKind, string> = {
   approved: "The Policy contract approved this intent; the executor has not reported a result yet.",
   needs_approval: "Above the approval threshold: waiting for the owner to approve or reject it.",
   rejected: "The Policy contract rejected this intent.",
-  executed: "Approved and filled on Gemini.",
-  failed: "Approved, but the order did not fill.",
+  executed: "Approved, and the executor recorded a fill.",
+  failed: "Approved, but the executor recorded that the order did not fill.",
   paused: "The mandate is paused; new intents are rejected.",
 };
 
