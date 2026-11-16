@@ -102,8 +102,9 @@ export async function recordedPlanRequest(options: {
 }
 
 /**
- * A paid hedge signal for the recorded ladder, under `receiptId`: its model values each strike at the
- * mid of the recorded YES quotes, so every rung rates fair and the signal changes no order.
+ * A paid hedge signal for the recorded ladder, under `receiptId`: its model values each strike's NO
+ * contract one cent above the recorded NO ask, about the planner's limit price, so every rung rates
+ * fair and the signal changes no order.
  */
 export async function recordedSignal(receiptId: string): Promise<PaidSignal> {
   const ladder = await recordedLadder();
@@ -115,14 +116,9 @@ export async function recordedSignal(receiptId: string): Promise<PaidSignal> {
       eventTicker: ladder.eventTicker,
       model: { fairBandBps: 300 },
       strikes: ladder.rungs.flatMap((rung) =>
-        rung.yesBidCents === null || rung.yesAskCents === null
+        rung.noBuyCents === null
           ? []
-          : [
-              {
-                strikeCents: rung.strikeCents,
-                modelYesBps: Math.round(((rung.yesBidCents + rung.yesAskCents) / 2) * 100),
-              },
-            ],
+          : [{ strikeCents: rung.strikeCents, modelYesBps: 10_000 - (rung.noBuyCents + 1) * 100 }],
       ),
     },
   };
