@@ -12,6 +12,13 @@ export {
 export { GeminiError, isGeminiError, type GeminiErrorCode } from "./errors";
 export type { FetchLike } from "./http";
 export {
+  eventTickerCandidates,
+  findInstrument,
+  isInstrumentSymbol,
+  MAX_INSTRUMENT_SYMBOL_LENGTH,
+  type FoundInstrument,
+} from "./instruments";
+export {
   buildLadder,
   classifyKind,
   depthFromBook,
