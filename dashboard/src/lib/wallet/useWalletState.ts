@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import type { Address } from "viem";
 import { useConnection, useConnectors } from "wagmi";
 
-import { targetChain } from "@/lib/chain";
+import { useNetwork } from "@/lib/live/LiveConsole";
 
 import { DEV_SIGNER_ID } from "./flags";
 
@@ -30,6 +30,7 @@ function hasInjectedProvider(): boolean {
 }
 
 export function useWalletState(): WalletState {
+  const network = useNetwork();
   const connection = useConnection();
   const connectors = useConnectors();
   // False on the server and during hydration, true afterwards: avoids a hydration mismatch.
@@ -44,7 +45,7 @@ export function useWalletState(): WalletState {
   }
 
   if (connection.status === "connected") {
-    if (connection.chainId !== targetChain.id) {
+    if (network && connection.chainId !== network.chainId) {
       return { kind: "wrong-network", address: connection.address, chainId: connection.chainId };
     }
     return {

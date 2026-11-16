@@ -4,7 +4,16 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     // The dashboard imports its own modules through the "@/" alias (see dashboard/tsconfig.json).
-    alias: [{ find: /^@\//, replacement: fileURLToPath(new URL("./dashboard/src/", import.meta.url)) }],
+    alias: [
+      { find: /^@\//, replacement: fileURLToPath(new URL("./dashboard/src/", import.meta.url)) },
+      // Next.js resolves `server-only` itself; under vitest the dashboard's server modules just load.
+      {
+        find: /^server-only$/,
+        replacement: fileURLToPath(
+          new URL("./node_modules/next/dist/compiled/server-only/empty.js", import.meta.url),
+        ),
+      },
+    ],
   },
   test: {
     include: [

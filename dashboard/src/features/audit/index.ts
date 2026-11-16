@@ -1,1 +1,1 @@
-export { AuditView, type AuditData } from "./AuditView";
+export { AuditView } from "./AuditView";

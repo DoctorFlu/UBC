@@ -169,6 +169,12 @@
   font-weight: var(--weight-medium);
 }
 
+.scheduleEmpty {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+}
+
 .scheduleRows {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -362,6 +368,11 @@
   background: var(--color-approved-lamp);
 }
 
+.walletLamp[data-owner="false"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--color-held-lamp);
+}
+
 .walletRole {
   color: var(--color-text-muted);
 }
@@ -392,6 +403,34 @@
 
 .walletDetailRows dd {
   min-width: 0;
+}
+
+.isolatorSlot {
+  display: inline-flex;
+}
+
+/* A notice under the status strip when the feed is not live: chain unreachable, no contract, syncing. */
+.feedNotice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2-5, 0.625rem) var(--space-8);
+  border-bottom: 1px solid var(--color-rule);
+  background: var(--color-held-soft);
+  color: var(--color-held-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.feedNotice[data-tone="offline"] {
+  background: var(--color-rejected-soft);
+  color: var(--color-rejected-text);
+}
+
+.feedNotice svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
 }
 
 .drawerBody {
@@ -434,6 +473,10 @@
 
   .paused {
     padding: var(--space-3) var(--space-4);
+  }
+
+  .feedNotice {
+    padding: var(--space-2-5, 0.625rem) var(--space-4);
   }
 }
 

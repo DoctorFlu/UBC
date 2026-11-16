@@ -1,0 +1,168 @@
+"use client";
+
+import type { PolicyChangeRequest, PolicyRules } from "@mandate/shared";
+import { Check, MessageSquareDiff, X } from "lucide-react";
+import { useState } from "react";
+
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { HexValue } from "@/components/ui/HexValue";
+import { EmptyState } from "@/components/ui/States";
+import { useToast } from "@/components/ui/Toast";
+import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { ownerBlockedReason } from "@/lib/owner/access";
+import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
+
+import styles from "./mandate.module.css";
+import { PolicyReview } from "./PolicyReview";
+import { rulesDiff } from "./rules-diff";
+
+async function markApplied(id: string, txHash: string): Promise<string | null> {
+  const response = await fetch(`/api/console/change-requests/${encodeURIComponent(id)}/applied`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ txHash }),
+  });
+  if (response.ok) return null;
+  try {
+    const body = (await response.json()) as { error?: { message?: string } };
+    return body.error?.message ?? `The console answered ${response.status.toString()}.`;
+  } catch {
+    return `The console answered ${response.status.toString()}.`;
+  }
+}
+
+function RequestCard({
+  request,
+  rules,
+  agentName,
+}: {
+  request: PolicyChangeRequest;
+  rules: PolicyRules | null;
+  agentName: string;
+}) {
+  const toast = useToast();
+  const { request: ownerRequest, pending, access } = useOwnerRequest();
+  const [reviewing, setReviewing] = useState(false);
+  const blocked = ownerBlockedReason(access);
+  const next: PolicyRules | null = rules ? { ...rules, ...request.proposed } : null;
+  const changes = next ? rulesDiff(rules, next) : [];
+  const summary =
+    changes.length === 0
+      ? `${agentName} asks for rules that are already in force`
+      : `${agentName} asks to change ${changes.map((change) => change.label.toLowerCase()).join(", ")}`;
+  const pendingRequest = request.status === "pending";
+
+  const dismiss = async () => {
+    const result = await ownerRequest(
+      `/api/console/change-requests/${encodeURIComponent(request.id)}/dismiss`,
+      "POST",
+      "change-request.dismiss",
+      { id: request.id },
+    );
+    toast(
+      result.ok
+        ? { title: "Request dismissed", description: "The rules stay as they are." }
+        : { title: "Not dismissed", description: result.message, tone: "danger" },
+    );
+  };
+
+  return (
+    <li data-testid="change-request" data-status={request.status}>
+      <Card tone={pendingRequest ? "attention" : "default"} title={`${summary}.`} headingLevel={3}>
+        <div className={styles.request}>
+          {changes.length > 0 ? (
+            <dl className={styles.changeList}>
+              {changes.map((change) => (
+                <div key={change.label} className={styles.change}>
+                  <dt>{change.label}</dt>
+                  <dd className="num">
+                    <span className={styles.from}>{change.from}</span> to <strong>{change.to}</strong>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          <blockquote className={styles.reason}>
+            <p>{request.reason}</p>
+            <footer>
+              {agentName}, {formatDateUtc(request.createdAt)} at {formatTimeUtc(request.createdAt)}
+            </footer>
+          </blockquote>
+          {pendingRequest ? (
+            <div className={styles.requestActions}>
+              <Button
+                variant="primary"
+                icon={<Check aria-hidden />}
+                onClick={() => setReviewing(true)}
+                disabled={!next || changes.length === 0 || blocked !== null}
+              >
+                Review and sign
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<X aria-hidden />}
+                onClick={() => void dismiss()}
+                loading={pending}
+                disabled={blocked !== null}
+              >
+                Dismiss
+              </Button>
+              {blocked && access.kind !== "loading" ? <p className={styles.blockedNote}>{blocked}</p> : null}
+            </div>
+          ) : (
+            <p className={styles.resolved}>
+              {request.status === "applied" ? "Applied" : "Dismissed"}
+              {request.resolvedAt
+                ? ` ${formatDateUtc(request.resolvedAt)} at ${formatTimeUtc(request.resolvedAt)}`
+                : ""}
+              {request.appliedTxHash ? <HexValue label="in" value={request.appliedTxHash} kind="tx" /> : null}
+            </p>
+          )}
+        </div>
+      </Card>
+      {next && pendingRequest ? (
+        <PolicyReview
+          open={reviewing}
+          onClose={() => setReviewing(false)}
+          next={next}
+          title="Apply the agent's request"
+          onSigned={async (hash) => {
+            const problem = await markApplied(request.id, hash);
+            if (problem)
+              toast({ title: "Signed, but not marked applied", description: problem, tone: "danger" });
+          }}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+/** The agent's requests to change the rules. Nothing changes until the owner signs `setPolicy`. */
+export function ChangeRequests({
+  requests,
+  rules,
+  agentName,
+}: {
+  requests: readonly PolicyChangeRequest[];
+  rules: PolicyRules | null;
+  agentName: string;
+}) {
+  if (requests.length === 0) {
+    return (
+      <Card>
+        <EmptyState icon={<MessageSquareDiff strokeWidth={1.75} />} title="No change requests">
+          When {agentName === "The agent" ? "the agent" : agentName} hits a limit it thinks is wrong, it can
+          ask you to change it. Requests wait here; the mandate never changes without your signature.
+        </EmptyState>
+      </Card>
+    );
+  }
+  return (
+    <ul className={styles.requests}>
+      {requests.map((request) => (
+        <RequestCard key={request.id} request={request} rules={rules} agentName={agentName} />
+      ))}
+    </ul>
+  );
+}

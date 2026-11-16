@@ -4,56 +4,81 @@ import { Play, Power } from "lucide-react";
 
 import { HoldButton } from "@/components/ui/HoldButton";
 import { useToast } from "@/components/ui/Toast";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import { ownerBlockedReason } from "@/lib/owner/access";
+import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 
-import { useConsoleState } from "./ConsoleState";
 import styles from "./Shell.module.css";
 
 /**
- * The kill switch, reachable from every screen. Hold to pause (or press twice). Mock for now:
- * #15 sends `setPaused` to the Policy contract and the state then comes back from chain events.
+ * The kill switch, reachable from every screen: hold to pause (or press twice). It sends the owner's
+ * `setPaused`; the paused state then comes back from the contract's `Paused` event, never from here.
  */
 export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
-  const { paused, setPaused } = useConsoleState();
+  const snapshot = useSnapshot();
   const toast = useToast();
+  const { send, working, access, state } = useOwnerTx();
+  const chain = snapshot.chain;
+  const paused = chain?.paused ?? false;
+  const blocked = chain ? ownerBlockedReason(access) : "The console has not read the Policy contract yet.";
+  const disabled = working || blocked !== null;
+  const title = working
+    ? state.phase === "signing"
+      ? "Confirm it in your wallet."
+      : "Waiting for the chain."
+    : (blocked ?? undefined);
+
+  const toggle = async (next: boolean) => {
+    const result = await send(next ? "Pause the agent" : "Resume the agent", {
+      functionName: "setPaused",
+      paused: next,
+    });
+    if (!result.ok) {
+      toast({ title: next ? "Not paused" : "Not resumed", description: result.message, tone: "danger" });
+      return;
+    }
+    toast(
+      next
+        ? {
+            title: "Agent paused",
+            description: "The Policy contract now rejects every new intent.",
+            tone: "danger",
+          }
+        : { title: "Agent resumed", description: "New intents are checked against the mandate again." },
+    );
+  };
 
   if (paused) {
     return (
-      <HoldButton
-        tone="ink"
-        size={size}
-        icon={<Play aria-hidden />}
-        confirmedLabel="Resumed"
-        onConfirm={() => {
-          setPaused(false);
-          toast({
-            title: "Agent resumed",
-            description: "New intents are checked against the mandate again.",
-          });
-        }}
-      >
-        <span className={styles.longLabel}>Resume agent</span>
-        <span className={styles.shortLabel}>Resume</span>
-      </HoldButton>
+      <span title={title} className={styles.isolatorSlot}>
+        <HoldButton
+          tone="ink"
+          size={size}
+          icon={<Play aria-hidden />}
+          confirmedLabel="Resuming"
+          disabled={disabled}
+          onConfirm={() => void toggle(false)}
+        >
+          <span className={styles.longLabel}>{working ? "Resuming agent" : "Resume agent"}</span>
+          <span className={styles.shortLabel}>Resume</span>
+        </HoldButton>
+      </span>
     );
   }
 
   return (
-    <HoldButton
-      tone="danger"
-      size={size}
-      icon={<Power aria-hidden />}
-      confirmedLabel="Paused"
-      onConfirm={() => {
-        setPaused(true);
-        toast({
-          title: "Agent paused",
-          description: "The Policy contract now rejects every new intent.",
-          tone: "danger",
-        });
-      }}
-    >
-      <span className={styles.longLabel}>Pause agent</span>
-      <span className={styles.shortLabel}>Pause</span>
-    </HoldButton>
+    <span title={title} className={styles.isolatorSlot}>
+      <HoldButton
+        tone="danger"
+        size={size}
+        icon={<Power aria-hidden />}
+        confirmedLabel="Pausing"
+        disabled={disabled}
+        onConfirm={() => void toggle(true)}
+      >
+        <span className={styles.longLabel}>{working ? "Pausing agent" : "Pause agent"}</span>
+        <span className={styles.shortLabel}>Pause</span>
+      </HoldButton>
+    </span>
   );
 }

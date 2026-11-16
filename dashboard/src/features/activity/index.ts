@@ -1,1 +1,2 @@
-export { ActivityView, type ActivityData } from "./ActivityView";
+export { ActivityView } from "./ActivityView";
+export { IntentDetailView } from "./IntentDetailView";

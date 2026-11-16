@@ -3,6 +3,7 @@
  * so that browser bundles of `@mandate/shared` never pull in `node:fs`.
  */
 import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPublicClient, createWalletClient, http, type Account, type Address, type Chain } from "viem";
 import { arcTestnet, devchain } from "./chains";
@@ -10,10 +11,29 @@ import { PolicyClient, type PolicyClientOptions } from "./client";
 import { deploymentFileSchema, type DeploymentFile } from "./deployment";
 import { addressSchema } from "./types";
 
-/** Where `npm run dev:chain` writes the local deployment. */
-export const LOCAL_DEPLOYMENT_PATH = fileURLToPath(
-  new URL("../../devchain/deployments/local.json", import.meta.url),
-);
+/**
+ * A path relative to this file. Built with `node:path` rather than `new URL(relative, import.meta.url)`,
+ * which bundlers (the dashboard's Turbopack build) read as an asset to copy into the build, while the
+ * deployment file is written as the app runs. Bundled code has no reliable location of its own, so the
+ * console passes `POLICY_DEPLOYMENT_FILE` instead of relying on this default.
+ */
+function besideThisFile(...segments: string[]): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), ...segments);
+}
+
+/** Where `npm run dev:chain` writes the local deployment, unless `POLICY_DEPLOYMENT_FILE` says otherwise. */
+export const LOCAL_DEPLOYMENT_PATH = besideThisFile("..", "..", "devchain", "deployments", "local.json");
+
+/** Environment variables to read: `process.env` or any plain map of them (tests pass their own). */
+export type EnvVars = Readonly<Record<string, string | undefined>>;
+
+/**
+ * The local deployment file to read and write: `POLICY_DEPLOYMENT_FILE` when set (tests that run their
+ * own chain point every process at their own file), otherwise `LOCAL_DEPLOYMENT_PATH`.
+ */
+export function localDeploymentPath(env: EnvVars = process.env): string {
+  return env.POLICY_DEPLOYMENT_FILE?.trim() || LOCAL_DEPLOYMENT_PATH;
+}
 
 export interface ResolvedDeployment {
   source: "env" | "devchain";
@@ -33,13 +53,13 @@ export class DeploymentNotFoundError extends Error {
 /**
  * Finds the Policy contract to talk to:
  * 1. `POLICY_ADDRESS` (Arc testnet, RPC from `ARC_RPC_URL`, optional `POLICY_DEPLOY_BLOCK`), otherwise
- * 2. the local devchain deployment file written by `npm run dev:chain`.
+ * 2. the local devchain deployment file written by `npm run dev:chain` (see `localDeploymentPath`).
  */
 export function resolvePolicyDeployment(
-  options: { env?: NodeJS.ProcessEnv; localPath?: string } = {},
+  options: { env?: EnvVars; localPath?: string } = {},
 ): ResolvedDeployment {
   const env = options.env ?? process.env;
-  const localPath = options.localPath ?? LOCAL_DEPLOYMENT_PATH;
+  const localPath = options.localPath ?? localDeploymentPath(env);
 
   const envAddress = env.POLICY_ADDRESS?.trim();
   if (envAddress) {

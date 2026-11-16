@@ -13,11 +13,13 @@ export interface RouteCase {
 export const routes: readonly RouteCase[] = [
   { name: "overview", path: "/", heading: "Overview", console: true },
   { name: "activity", path: "/activity", heading: "Activity", console: true },
+  { name: "intent", path: "/activity/0", heading: "Intent #0", console: true },
   { name: "mandate", path: "/mandate", heading: "Mandate", console: true },
   { name: "hedge", path: "/hedge", heading: "Hedge", console: true },
   { name: "payments", path: "/payments", heading: "Payments", console: true },
   { name: "audit", path: "/audit", heading: "Audit", console: true },
   { name: "setup", path: "/setup", heading: "Setup", console: true },
+  { name: "pair", path: `/setup/pair/${AGENT_ADDRESS}`, heading: "Confirm the agent", console: true },
   { name: "scorecard", path: `/agent/${AGENT_ADDRESS}`, heading: "Grok Bot", console: false },
   { name: "components", path: "/dev/components", heading: "Components", console: false },
 ];

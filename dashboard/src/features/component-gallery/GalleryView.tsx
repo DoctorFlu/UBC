@@ -23,9 +23,9 @@ import { type Column, Table } from "@/components/ui/Table";
 import { Tabs } from "@/components/ui/Tabs";
 import { type ToastTone, useToast } from "@/components/ui/Toast";
 import { Toggle } from "@/components/ui/Toggle";
-import type { Intent } from "@/lib/domain";
+import type { IntentView } from "@mandate/shared";
 import { formatContractPrice, formatPercentBps, formatUsdCents, formatUsdCentsDelta } from "@/lib/format";
-import { AGENT_ADDRESS, intents } from "@/mock";
+import { AGENT_ADDRESS, fixtureSnapshot } from "@/fixtures";
 
 import styles from "./gallery.module.css";
 
@@ -72,8 +72,8 @@ const swatches = [
   ["Approved", "--color-approved-lamp"],
   ["Held", "--color-held-lamp"],
   ["Rejected", "--color-rejected-lamp"],
-  ["Filled", "--color-filled-lamp"],
-  ["Unfilled", "--color-unfilled-lamp"],
+  ["Executed", "--color-filled-lamp"],
+  ["Failed", "--color-unfilled-lamp"],
   ["Paused", "--color-paused-marker"],
 ] as const;
 
@@ -88,19 +88,28 @@ const typeScale = [
   ["xs", "--text-xs"],
 ] as const;
 
-const tableColumns: readonly Column<Intent>[] = [
+const exampleIntents: readonly IntentView[] = [...(fixtureSnapshot.chain?.intents ?? [])]
+  .reverse()
+  .slice(0, 3);
+
+const tableColumns: readonly Column<IntentView>[] = [
   {
     key: "market",
     header: "Market",
-    cell: (intent) => <MarketName market={intent.market} />,
+    cell: (intent) => <MarketName symbol={intent.market} category={intent.category} />,
     role: "primary",
   },
   { key: "order", header: "Order", cell: (intent) => <OrderSummary intent={intent} />, nowrap: true },
-  { key: "amount", header: "Amount", cell: (intent) => <Money cents={intent.notionalCents} />, align: "end" },
+  {
+    key: "amount",
+    header: "Amount",
+    cell: (intent) => (intent.amountCents === null ? "Unknown" : <Money cents={intent.amountCents} />),
+    align: "end",
+  },
   {
     key: "verdict",
     header: "Verdict",
-    cell: (intent) => <StatusChip status={intent.status} reasonCode={intent.reasonCode} />,
+    cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
   },
 ];
 
@@ -211,18 +220,30 @@ export function GalleryView() {
         note="Every verdict and fill state. Rejections carry the contract's reason code."
       >
         <Specimen label="Status chips">
+          <StatusChip status="none" />
           <StatusChip status="approved" />
-          <StatusChip status="held" reasonCode="ABOVE_APPROVAL_THRESHOLD" />
-          <StatusChip status="rejected" reasonCode="MAX_ORDER_SIZE" />
-          <StatusChip status="filled" />
-          <StatusChip status="unfilled" />
+          <StatusChip status="needs_approval" />
+          <StatusChip status="rejected" reason="over max trade size" />
+          <StatusChip status="executed" />
+          <StatusChip status="failed" />
           <StatusChip status="paused" />
         </Specimen>
         <Specimen label="Live connection">
-          <LiveIndicator source="stream" lastEventAt="2026-11-15T14:05:40.000Z" />
-          <LiveIndicator source="poller" lastEventAt="2026-11-15T14:05:40.000Z" />
-          <LiveIndicator source="offline" />
-          <LiveIndicator source="stream" compact />
+          <LiveIndicator
+            source="stream"
+            health="live"
+            detail="Receiving Policy events from the QuickNode Stream."
+            lastEventAt="2026-11-15T14:05:40.000Z"
+          />
+          <LiveIndicator
+            source="rpc"
+            health="lagging"
+            detail="The RPC poller is behind the chain head."
+            lastEventAt="2026-11-15T14:05:40.000Z"
+          />
+          <LiveIndicator source="rpc" health="offline" detail="The chain can't be reached." />
+          <LiveIndicator source="rpc" health="disconnected" detail="Reconnecting to the console." />
+          <LiveIndicator source="stream" health="live" detail="Live." compact />
         </Specimen>
       </Section>
 
@@ -360,10 +381,10 @@ export function GalleryView() {
                     caption="Example intents"
                     captionHidden
                     columns={tableColumns}
-                    rows={intents.slice(0, 3)}
-                    rowKey={(intent) => intent.id}
+                    rows={exampleIntents}
+                    rowKey={(intent) => intent.id.toString()}
                     rowTone={(intent) =>
-                      intent.status === "held"
+                      intent.status === "needs_approval"
                         ? "attention"
                         : intent.status === "rejected"
                           ? "muted"
@@ -381,7 +402,7 @@ export function GalleryView() {
                     captionHidden
                     columns={tableColumns}
                     rows={[]}
-                    rowKey={(intent) => intent.id}
+                    rowKey={(intent) => intent.id.toString()}
                     empty={
                       <EmptyState plain title="No intents yet">
                         Rows appear here as they land.

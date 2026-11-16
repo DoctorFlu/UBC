@@ -24,6 +24,67 @@
   font-weight: var(--weight-semibold);
 }
 
+.sampleNote {
+  margin-bottom: var(--space-4);
+}
+
+.muted {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Holdings editor: one row per asset, ticker and quantity side by side. */
+.holdings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.holdingRows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.holdingRow {
+  display: grid;
+  grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-1-5) var(--space-3);
+}
+
+/* The row's message line spans the row and keeps its height when empty, so nothing below it moves. */
+.holdingError {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: calc(var(--text-xs) * var(--leading-snug));
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  color: var(--color-danger);
+}
+
+.holdingError svg {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-top: 0.0625rem;
+}
+
+/* Line the remove button up with the inputs, below their labels. */
+.removeHolding {
+  margin-top: 1.625rem;
+}
+
+.holdingActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 /* Payoff: one row per price band, bars diverging from a zero line. */
 .bands {
   display: flex;

@@ -1,40 +1,32 @@
+"use client";
+
+import { describeReason } from "@mandate/shared";
 import { ScrollText } from "lucide-react";
 
+import { IntentLink } from "@/components/domain/Intent";
+import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
-import { type AuditRecord, type ReasonCode, reasonLabels } from "@/lib/domain";
 import { formatCount, formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import type { ConsoleSnapshot } from "@/lib/live/types";
 
-import { ExportCsvButton } from "./ExportCsvButton";
+import { type AuditRow, EVENT_LABELS, auditRows } from "./audit-rows";
 import styles from "./audit.module.css";
+import { ExportCsvButton } from "./ExportCsvButton";
 
-export interface AuditData {
-  records: readonly AuditRecord[];
-  policyAddress: string;
-}
-
-const eventLabels: Record<AuditRecord["event"], string> = {
-  IntentSubmitted: "Intent submitted",
-  IntentApproved: "Intent approved",
-  IntentHeld: "Intent held",
-  IntentRejected: "Intent rejected",
-  IntentFilled: "Intent filled",
-  PolicySet: "Mandate set",
-  Paused: "Agent paused",
-};
-
-const columns: readonly Column<AuditRecord>[] = [
+const columns: readonly Column<AuditRow>[] = [
   {
     key: "when",
     header: "Time",
-    cell: (record) => (
+    cell: (row) => (
       <span className={styles.when}>
-        <span>{formatTimeUtc(record.at)}</span>
-        <span className={styles.date}>{formatDateUtc(record.at)}</span>
+        <span>{formatTimeUtc(row.at)}</span>
+        <span className={styles.date}>{formatDateUtc(row.at)}</span>
       </span>
     ),
     nowrap: true,
@@ -42,17 +34,25 @@ const columns: readonly Column<AuditRecord>[] = [
   {
     key: "block",
     header: "Block",
-    cell: (record) => formatCount(record.blockNumber),
+    cell: (row) => formatCount(row.blockNumber),
     align: "end",
     nowrap: true,
   },
   {
     key: "event",
     header: "Event",
-    cell: (record) => (
+    cell: (row) => (
       <span className={styles.event}>
-        <span className={styles.eventName}>{eventLabels[record.event]}</span>
-        <span>{record.summary}</span>
+        <span className={styles.eventName}>
+          {EVENT_LABELS[row.event]}
+          {row.intentId === null ? null : (
+            <>
+              {" "}
+              <IntentLink id={row.intentId} />
+            </>
+          )}
+        </span>
+        <span>{row.summary}</span>
       </span>
     ),
     role: "primary",
@@ -60,9 +60,9 @@ const columns: readonly Column<AuditRecord>[] = [
   {
     key: "result",
     header: "Result",
-    cell: (record) =>
-      record.status ? (
-        <StatusChip status={record.status} reasonCode={record.reasonCode} />
+    cell: (row) =>
+      row.status ? (
+        <StatusChip status={row.status} reason={row.reason} />
       ) : (
         <span className={styles.none}>None</span>
       ),
@@ -70,23 +70,21 @@ const columns: readonly Column<AuditRecord>[] = [
   {
     key: "tx",
     header: "Transaction",
-    cell: (record) => <HexValue value={record.txHash} kind="tx" />,
+    cell: (row) => <HexValue value={row.txHash} kind="tx" />,
     nowrap: true,
   },
 ];
 
-function blockedByRule(records: readonly AuditRecord[]) {
-  const counts = new Map<ReasonCode, number>();
-  for (const record of records) {
-    if (record.status === "rejected" && record.reasonCode) {
-      counts.set(record.reasonCode, (counts.get(record.reasonCode) ?? 0) + 1);
-    }
-  }
-  return [...counts].sort((a, b) => b[1] - a[1]);
-}
-
-export function AuditView({ records, policyAddress }: AuditData) {
-  const blocked = blockedByRule(records);
+/** Every decision the Policy contract made, read from its events, with the rejections by rule. */
+export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
+  const live = useSnapshot();
+  const snapshot = preview ?? live;
+  const chain = snapshot.chain;
+  if (!chain || !snapshot.contract) return <ChainUnavailable snapshot={snapshot} title="Audit" />;
+  const rows = auditRows(chain);
+  const blocked = Object.entries(chain.rejectionsByReason)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const total = blocked.reduce((sum, [, count]) => sum + count, 0);
 
   return (
@@ -94,8 +92,8 @@ export function AuditView({ records, policyAddress }: AuditData) {
       <PageHeader
         title="Audit"
         description="Every decision the Policy contract made, straight from its events. Each row links to its transaction."
-        meta={<HexValue label="Policy contract" value={policyAddress} kind="address" />}
-        actions={<ExportCsvButton records={records} />}
+        meta={<HexValue label="Policy contract" value={snapshot.contract.address} kind="address" />}
+        actions={<ExportCsvButton rows={rows} />}
       />
 
       <div className={styles.layout}>
@@ -104,9 +102,9 @@ export function AuditView({ records, policyAddress }: AuditData) {
             caption="Policy contract events, newest first"
             captionHidden
             columns={columns}
-            rows={records}
-            rowKey={(record) => record.id}
-            rowTone={(record) => (record.status === "rejected" ? "muted" : undefined)}
+            rows={rows}
+            rowKey={(row) => row.id}
+            rowTone={(row) => (row.status === "rejected" ? "muted" : undefined)}
             empty={
               <EmptyState plain icon={<ScrollText strokeWidth={1.75} />} title="No events yet">
                 The first event appears when you set a mandate. Every intent after that adds a row.
@@ -125,11 +123,11 @@ export function AuditView({ records, policyAddress }: AuditData) {
             <p className={styles.none}>Nothing blocked. Every intent so far was inside the mandate.</p>
           ) : (
             <dl className={styles.rules}>
-              {blocked.map(([code, count]) => (
-                <div key={code} className={styles.rule}>
+              {blocked.map(([reason, count]) => (
+                <div key={reason} className={styles.rule}>
                   <dt>
-                    <span className={styles.ruleLabel}>{reasonLabels[code]}</span>
-                    <span className={`mono ${styles.ruleCode}`}>{code}</span>
+                    <span className={styles.ruleLabel}>{describeReason(reason).label}</span>
+                    <span className={`mono ${styles.ruleCode}`}>{reason}</span>
                   </dt>
                   <dd className="num">{formatCount(count)}</dd>
                 </div>

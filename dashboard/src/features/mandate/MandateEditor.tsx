@@ -1,123 +1,152 @@
 "use client";
 
+import {
+  CATEGORY_IDS,
+  CATEGORY_LABELS,
+  Category,
+  type CategoryId,
+  type PolicyRules,
+  categoriesFromMask,
+  categoryMask,
+} from "@mandate/shared";
 import { PenLine, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field, Input } from "@/components/ui/Field";
-import { useToast } from "@/components/ui/Toast";
 import { Toggle } from "@/components/ui/Toggle";
-import { type Mandate, type MarketCategory, categoryLabels } from "@/lib/domain";
 import { formatUsdCents, parseUsdToCents } from "@/lib/format";
+import { ownerBlockedReason, useOwnerAccess } from "@/lib/owner/access";
+import { useHydrated } from "@/lib/useHydrated";
 
 import styles from "./mandate.module.css";
+import { PolicyReview } from "./PolicyReview";
+import { AMOUNT_LABELS, type AmountKey, rulesDiff } from "./rules-diff";
 
-type AmountKey = "totalBudgetCents" | "maxOrderCents" | "approvalThresholdCents" | "dailyLossLimitCents";
+const amountHints: Record<AmountKey, string> = {
+  budgetCents: "All the agent may ever commit to buys. It is a lifetime cap and does not reset.",
+  maxTradeCents: "Larger intents are rejected as “over max trade size”.",
+  approvalAboveCents: "Intents above this wait for your signature. 0 means never ask.",
+  dailyLossCents: "New intents stop once today’s realized losses reach it. 0 turns it off.",
+};
 
-const amountFields: readonly { key: AmountKey; label: string; hint: string }[] = [
-  { key: "totalBudgetCents", label: "Total budget", hint: "All the agent may spend under this mandate." },
-  { key: "maxOrderCents", label: "Max order size", hint: "Larger intents are rejected with MAX_ORDER_SIZE." },
-  {
-    key: "approvalThresholdCents",
-    label: "Approval threshold",
-    hint: "Intents above this wait for your signature instead of executing.",
-  },
-  {
-    key: "dailyLossLimitCents",
-    label: "Daily loss limit",
-    hint: "New intents stop once today's losses reach it.",
-  },
-];
+const AMOUNT_KEYS = Object.keys(AMOUNT_LABELS) as AmountKey[];
 
-const allCategories = Object.keys(categoryLabels) as MarketCategory[];
+/** A starting point for the first mandate: small, crypto only, and every rule on. */
+const FIRST_MANDATE: PolicyRules = {
+  budgetCents: 20_000,
+  maxTradeCents: 2_500,
+  allowedCategories: categoryMask([Category.Crypto]),
+  approvalAboveCents: 2_000,
+  dailyLossCents: 4_000,
+  paused: false,
+};
 
 function plainDollars(cents: number) {
   return formatUsdCents(cents, { trimWholeCents: true }).replace("$", "");
 }
 
+interface Draft {
+  amounts: Record<AmountKey, string>;
+  categories: readonly CategoryId[];
+}
+
+function draftFrom(rules: PolicyRules): Draft {
+  return {
+    amounts: Object.fromEntries(AMOUNT_KEYS.map((key) => [key, plainDollars(rules[key])])) as Record<
+      AmountKey,
+      string
+    >,
+    categories: categoriesFromMask(rules.allowedCategories),
+  };
+}
+
+export interface MandateEditorProps {
+  /** Rules in force, or null before the first `setPolicy`. */
+  rules: PolicyRules | null;
+  version: number;
+}
+
 /**
- * The policy editor's frame: edit a draft, see exactly what changes, then sign. Mock for now:
- * #15 encodes the draft into `setPolicy` and signs it with the owner's wallet.
+ * The policy editor: edit a draft, see exactly what changes, review it, then sign `setPolicy` with the
+ * owner's wallet. The rules shown in force always come from the contract's events, never from the draft.
  */
-export function MandateEditor({ mandate }: { mandate: Mandate }) {
-  const toast = useToast();
-  const initialAmounts = Object.fromEntries(
-    amountFields.map(({ key }) => [key, plainDollars(mandate[key])]),
-  ) as Record<AmountKey, string>;
-  const [amounts, setAmounts] = useState(initialAmounts);
-  const [categories, setCategories] = useState<readonly MarketCategory[]>(mandate.allowedCategories);
+export function MandateEditor({ rules, version }: MandateEditorProps) {
+  const access = useOwnerAccess();
+  const blocked = ownerBlockedReason(access);
+  const hydrated = useHydrated();
+  const base = rules ?? FIRST_MANDATE;
+  const [draft, setDraft] = useState(() => draftFrom(base));
+  // The review dialog's title, fixed when it opens: signing a first mandate must not retitle the
+  // dialog to "new mandate" the moment the contract's event lands.
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  // When new rules land (signed here or elsewhere), an untouched draft follows them.
+  const [baseline, setBaseline] = useState(base);
+  if (baseline !== base && JSON.stringify(baseline) !== JSON.stringify(base)) {
+    const untouched = JSON.stringify(draft) === JSON.stringify(draftFrom(baseline));
+    setBaseline(base);
+    if (untouched) setDraft(draftFrom(base));
+  }
 
   const parsed = Object.fromEntries(
-    amountFields.map(({ key }) => [key, parseUsdToCents(amounts[key])]),
+    AMOUNT_KEYS.map((key) => [key, parseUsdToCents(draft.amounts[key])]),
   ) as Record<AmountKey, number | null>;
   const errors: Partial<Record<AmountKey, string>> = {};
-  for (const { key } of amountFields) {
+  for (const key of AMOUNT_KEYS) {
     if (parsed[key] === null) errors[key] = "Enter a dollar amount, like 50 or 50.25.";
   }
   if (
-    parsed.maxOrderCents !== null &&
-    parsed.totalBudgetCents !== null &&
-    parsed.maxOrderCents > parsed.totalBudgetCents
+    parsed.maxTradeCents !== null &&
+    parsed.budgetCents !== null &&
+    parsed.maxTradeCents > parsed.budgetCents
   ) {
-    errors.maxOrderCents = "Max order size can't be more than the total budget.";
+    errors.maxTradeCents = "The max trade size can't be more than the budget.";
   }
   if (
-    parsed.approvalThresholdCents !== null &&
-    parsed.maxOrderCents !== null &&
-    parsed.approvalThresholdCents > parsed.maxOrderCents
+    parsed.approvalAboveCents !== null &&
+    parsed.maxTradeCents !== null &&
+    parsed.approvalAboveCents > parsed.maxTradeCents
   ) {
-    errors.approvalThresholdCents = "Set it at or below the max order size, or nothing will ever be held.";
+    errors.approvalAboveCents = "Set it at or below the max trade size, or 0 to never ask.";
   }
+  const hasErrors = Object.values(errors).some(Boolean) || draft.categories.length === 0;
 
-  const changes = [
-    ...amountFields.flatMap(({ key, label }) => {
-      const next = parsed[key];
-      return next !== null && next !== mandate[key]
-        ? [{ label, from: formatUsdCents(mandate[key]), to: formatUsdCents(next) }]
-        : [];
-    }),
-    ...allCategories.flatMap((category) => {
-      const was = mandate.allowedCategories.includes(category);
-      const now = categories.includes(category);
-      return was === now
-        ? []
-        : [
-            {
-              label: `${categoryLabels[category]} markets`,
-              from: was ? "Allowed" : "Blocked",
-              to: now ? "Allowed" : "Blocked",
-            },
-          ];
-    }),
-  ];
-  const hasErrors = Object.values(errors).some(Boolean) || categories.length === 0;
-
-  const reset = () => {
-    setAmounts(initialAmounts);
-    setCategories(mandate.allowedCategories);
-  };
+  const next: PolicyRules | null = hasErrors
+    ? null
+    : {
+        budgetCents: parsed.budgetCents ?? 0,
+        maxTradeCents: parsed.maxTradeCents ?? 0,
+        approvalAboveCents: parsed.approvalAboveCents ?? 0,
+        dailyLossCents: parsed.dailyLossCents ?? 0,
+        allowedCategories: categoryMask(draft.categories),
+        // setPolicy writes the pause flag too: keep it as it is; only the kill switch changes it.
+        paused: rules?.paused ?? false,
+      };
+  const changes = next ? rulesDiff(rules, next) : [];
 
   return (
     <div className={styles.editor}>
       <Card
-        title="Edit the rules"
-        description={`Version ${mandate.version.toString()} is in force. Edit a draft here; nothing changes until you sign it.`}
+        title={rules ? "Edit the rules" : "Set the first mandate"}
+        description={
+          rules
+            ? `Version ${version.toString()} is in force. Edit a draft here; nothing changes until you sign it.`
+            : "Until you sign a mandate, the Policy contract rejects every intent. These values are a starting point."
+        }
       >
         <form
           className={styles.form}
           onSubmit={(event) => {
             event.preventDefault();
-            toast({
-              title: "Draft ready to sign",
-              description: `${changes.length.toString()} ${changes.length === 1 ? "change" : "changes"}. Signing arrives with the policy editor.`,
-              tone: "info",
-            });
+            if (next && changes.length > 0) {
+              setReviewing(rules ? "Review the new mandate" : "Review the first mandate");
+            }
           }}
         >
           <div className={styles.amounts}>
-            {amountFields.map(({ key, label, hint }) => (
-              <Field key={key} label={label} hint={hint} error={errors[key]}>
+            {AMOUNT_KEYS.map((key) => (
+              <Field key={key} label={AMOUNT_LABELS[key]} hint={amountHints[key]} error={errors[key]}>
                 {(control) => (
                   <Input
                     {...control}
@@ -126,8 +155,13 @@ export function MandateEditor({ mandate }: { mandate: Mandate }) {
                     inputMode="decimal"
                     autoComplete="off"
                     spellCheck={false}
-                    value={amounts[key]}
-                    onChange={(event) => setAmounts((current) => ({ ...current, [key]: event.target.value }))}
+                    value={draft.amounts[key]}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        amounts: { ...current.amounts, [key]: event.target.value },
+                      }))
+                    }
                   />
                 )}
               </Field>
@@ -137,23 +171,26 @@ export function MandateEditor({ mandate }: { mandate: Mandate }) {
           <fieldset className={styles.categories}>
             <legend className={styles.legend}>Allowed markets</legend>
             <p className={styles.legendHint}>
-              Intents on any other category are rejected with CATEGORY_NOT_ALLOWED.
+              Intents in any other category are rejected as &ldquo;category not allowed&rdquo;.
             </p>
             <div className={styles.toggles}>
-              {allCategories.map((category) => (
+              {CATEGORY_IDS.map((category) => (
                 <Toggle
                   key={category}
-                  label={categoryLabels[category]}
-                  checked={categories.includes(category)}
+                  label={CATEGORY_LABELS[category]}
+                  checked={draft.categories.includes(category)}
                   onChange={(checked) =>
-                    setCategories((current) =>
-                      checked ? [...current, category] : current.filter((value) => value !== category),
-                    )
+                    setDraft((current) => ({
+                      ...current,
+                      categories: checked
+                        ? [...current.categories, category]
+                        : current.categories.filter((value) => value !== category),
+                    }))
                   }
                 />
               ))}
             </div>
-            {categories.length === 0 ? (
+            {draft.categories.length === 0 ? (
               <p className={styles.fieldsetError} role="alert">
                 Allow at least one category, or pause the agent instead.
               </p>
@@ -165,7 +202,7 @@ export function MandateEditor({ mandate }: { mandate: Mandate }) {
               type="submit"
               variant="primary"
               icon={<PenLine aria-hidden />}
-              disabled={changes.length === 0 || hasErrors}
+              disabled={!hydrated || changes.length === 0 || hasErrors}
             >
               Review and sign
             </Button>
@@ -173,11 +210,12 @@ export function MandateEditor({ mandate }: { mandate: Mandate }) {
               type="button"
               variant="ghost"
               icon={<RotateCcw aria-hidden />}
-              onClick={reset}
-              disabled={changes.length === 0}
+              onClick={() => setDraft(draftFrom(base))}
+              disabled={JSON.stringify(draft) === JSON.stringify(draftFrom(base))}
             >
               Discard draft
             </Button>
+            {blocked && access.kind !== "loading" ? <p className={styles.blockedNote}>{blocked}</p> : null}
           </div>
         </form>
       </Card>
@@ -186,7 +224,9 @@ export function MandateEditor({ mandate }: { mandate: Mandate }) {
         className={styles.diff}
         tone="sunken"
         title="What changes"
-        description="The draft against the version in force."
+        description={
+          rules ? "The draft against the version in force." : "The first mandate the contract will enforce."
+        }
         headingLevel={2}
       >
         {changes.length === 0 ? (
@@ -204,6 +244,15 @@ export function MandateEditor({ mandate }: { mandate: Mandate }) {
           </dl>
         )}
       </Card>
+
+      {next ? (
+        <PolicyReview
+          open={reviewing !== null}
+          onClose={() => setReviewing(null)}
+          next={next}
+          title={reviewing ?? "Review the new mandate"}
+        />
+      ) : null}
     </div>
   );
 }

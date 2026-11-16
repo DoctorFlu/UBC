@@ -1,7 +1,12 @@
+"use client";
+
+import { INTENT_STATUS_LABELS, type IntentStatus, type IntentView } from "@mandate/shared";
 import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
-import { MarketName, OrderAmount } from "@/components/domain/Intent";
+import { IntentLink, MarketName, OrderAmount } from "@/components/domain/Intent";
+import { SimulatedFill } from "@/components/domain/SimulatedFill";
+import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -10,21 +15,26 @@ import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import { type TabItem, Tabs } from "@/components/ui/Tabs";
-import type { Intent, IntentStatus } from "@/lib/domain";
 import { formatCount, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import { agentName, countByStatus, isoFromUnix, newestFirst, todayUsage } from "@/lib/live/derive";
+import type { ConsoleSnapshot } from "@/lib/live/types";
+import { fillsAreSimulated } from "@/lib/network";
 
 import styles from "./activity.module.css";
 
-export interface ActivityData {
-  intents: readonly Intent[];
-}
-
-const columns: readonly Column<Intent>[] = [
-  { key: "time", header: "Time", cell: (intent) => formatTimeUtc(intent.createdAt), nowrap: true },
+const columns: readonly Column<IntentView>[] = [
+  { key: "id", header: "Intent", cell: (intent) => <IntentLink id={intent.id} />, nowrap: true },
+  {
+    key: "time",
+    header: "Time",
+    cell: (intent) => formatTimeUtc(isoFromUnix(intent.proposedAt)),
+    nowrap: true,
+  },
   {
     key: "market",
     header: "Market",
-    cell: (intent) => <MarketName market={intent.market} />,
+    cell: (intent) => <MarketName symbol={intent.market} category={intent.category} />,
     role: "primary",
   },
   {
@@ -37,49 +47,74 @@ const columns: readonly Column<Intent>[] = [
   {
     key: "verdict",
     header: "Verdict",
-    cell: (intent) => <StatusChip status={intent.status} reasonCode={intent.reasonCode} />,
+    cell: (intent) => <StatusChip status={intent.status} reason={intent.reason} />,
   },
   {
     key: "tx",
-    header: "Transaction",
-    cell: (intent) => <HexValue value={intent.txHash} kind="tx" />,
+    header: "Proposal",
+    cell: (intent) => <HexValue value={intent.proposedTxHash} kind="tx" />,
     nowrap: true,
   },
   {
     key: "actions",
     header: "Decision",
-    cell: (intent) => (intent.status === "held" ? <ApprovalActions intent={intent} /> : null),
+    cell: (intent) => (intent.status === "needs_approval" ? <ApprovalActions intent={intent} /> : null),
     role: "actions",
     nowrap: true,
   },
 ];
 
-const filters: readonly { id: string; label: string; statuses: readonly IntentStatus[]; empty: string }[] = [
+interface Filter {
+  id: string;
+  label: string;
+  statuses: readonly IntentStatus[];
+  empty: string;
+}
+
+const filters: readonly Filter[] = [
   {
     id: "all",
     label: "All",
-    statuses: ["approved", "held", "rejected", "filled", "unfilled"],
+    statuses: ["none", "approved", "needs_approval", "rejected", "executed", "failed"],
     empty: "No intents yet",
   },
-  { id: "held", label: "Held", statuses: ["held"], empty: "Nothing needs your approval" },
+  {
+    id: "waiting",
+    label: "Waiting",
+    statuses: ["needs_approval"],
+    empty: "Nothing needs your approval",
+  },
   {
     id: "approved",
-    label: "Approved",
-    statuses: ["approved", "filled", "unfilled"],
-    empty: "No approved intents",
+    label: INTENT_STATUS_LABELS.approved,
+    statuses: ["approved"],
+    empty: "Nothing waiting to fill",
   },
-  { id: "rejected", label: "Rejected", statuses: ["rejected"], empty: "No rejections" },
+  {
+    id: "executed",
+    label: INTENT_STATUS_LABELS.executed,
+    statuses: ["executed"],
+    empty: "Nothing filled yet",
+  },
+  { id: "failed", label: INTENT_STATUS_LABELS.failed, statuses: ["failed"], empty: "No failed orders" },
+  { id: "rejected", label: INTENT_STATUS_LABELS.rejected, statuses: ["rejected"], empty: "No rejections" },
 ];
 
-function count(intents: readonly Intent[], statuses: readonly IntentStatus[]) {
-  return intents.filter((intent) => statuses.includes(intent.status)).length;
-}
+/** Every intent, live, with the contract's verdict, filters by status, and approve or reject for the waiting ones. */
+export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
+  const live = useSnapshot();
+  const snapshot = preview ?? live;
+  const chain = snapshot.chain;
+  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Activity" />;
 
-export function ActivityView({ intents }: ActivityData) {
-  const held = count(intents, ["held"]);
-  const spent = intents
-    .filter((intent) => intent.status === "filled")
-    .reduce((sum, intent) => sum + intent.notionalCents, 0);
+  const intents = newestFirst(chain);
+  const usage = todayUsage(chain);
+  const waiting = countByStatus(intents, ["needs_approval"]);
+  const filledCents = intents.reduce(
+    (sum, intent) => sum + (intent.status === "executed" ? (intent.filledCents ?? 0) : 0),
+    0,
+  );
+  const executed = countByStatus(intents, ["executed"]);
 
   const tabs: TabItem[] = filters.map((filter) => {
     const rows = intents.filter((intent) => filter.statuses.includes(intent.status));
@@ -93,12 +128,12 @@ export function ActivityView({ intents }: ActivityData) {
           captionHidden
           columns={columns}
           rows={rows}
-          rowKey={(intent) => intent.id}
-          rowTone={(intent) => (intent.status === "held" ? "attention" : undefined)}
+          rowKey={(intent) => intent.id.toString()}
+          rowTone={(intent) => (intent.status === "needs_approval" ? "attention" : undefined)}
           empty={
             <EmptyState plain icon={<Inbox strokeWidth={1.75} />} title={filter.empty}>
               {filter.id === "all"
-                ? "Intents appear here the moment the Policy contract decides them."
+                ? "Intents appear here the moment the Policy contract decides them, without a refresh."
                 : "Intents in this state appear here as they land onchain."}
             </EmptyState>
           }
@@ -111,22 +146,42 @@ export function ActivityView({ intents }: ActivityData) {
     <div className={styles.view}>
       <PageHeader
         title="Activity"
-        description="Every intent Grok Bot sent, what the Policy contract decided, and what still needs your signature."
+        description={`Every intent ${agentName(snapshot, true)} sent, what the Policy contract decided, and what still needs your signature.`}
       />
 
       <StatGroup className={styles.stats}>
-        <Stat label="Intents today" value={formatCount(intents.length)} />
-        <Stat label="Waiting for you" value={formatCount(held)} hint="Held above the approval threshold" />
-        <Stat label="Rejected by policy" value={formatCount(count(intents, ["rejected"]))} />
         <Stat
-          label="Filled on Gemini"
-          value={formatUsdCents(spent)}
-          hint={`${formatCount(count(intents, ["filled"]))} orders`}
+          label="Intents today"
+          value={formatCount(usage.intents)}
+          hint={`${formatCount(intents.length)} in all`}
+        />
+        <Stat label="Waiting for you" value={formatCount(waiting)} hint="Above the approval threshold" />
+        <Stat
+          label="Blocked today"
+          value={formatCount(usage.blocked)}
+          hint={`${formatCount(countByStatus(intents, ["rejected"]))} rejected in all`}
+        />
+        <Stat
+          label="Filled"
+          value={formatUsdCents(filledCents)}
+          hint={
+            <>
+              {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded`}
+              {fillsAreSimulated(snapshot.network) && executed > 0 ? (
+                <SimulatedFill className={styles.statMarker} />
+              ) : null}
+            </>
+          }
         />
       </StatGroup>
 
       <Card padding="flush">
-        <Tabs label="Filter intents" tabs={tabs} defaultTab={held > 0 ? "held" : "all"} inset />
+        <Tabs
+          label="Filter intents by status"
+          tabs={tabs}
+          defaultTab={waiting > 0 ? "waiting" : "all"}
+          inset
+        />
       </Card>
     </div>
   );

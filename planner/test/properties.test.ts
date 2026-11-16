@@ -117,8 +117,13 @@ function probePrices(s: Scenario, plan: ReturnType<typeof planHedge>): number[] 
 }
 
 const RUNS = { numRuns: 400 };
+/**
+ * Each property runs hundreds of plans: about a second alone, but many times that while the full suite
+ * runs anvil fuzzing in parallel, which made the default 20 s timeout flaky.
+ */
+const PROPERTY_TIMEOUT = { timeout: 120_000 };
 
-describe("hedge planner invariants", () => {
+describe("hedge planner invariants", PROPERTY_TIMEOUT, () => {
   it("never spends more than the cost cap or the remaining budget", () => {
     fc.assert(
       fc.property(scenario, (s) => {
@@ -264,7 +269,7 @@ describe("hedge planner invariants", () => {
   });
 });
 
-describe("hedge planner invariants with a paid signal", () => {
+describe("hedge planner invariants with a paid signal", PROPERTY_TIMEOUT, () => {
   const withSignal = fc
     .tuple(
       scenario,

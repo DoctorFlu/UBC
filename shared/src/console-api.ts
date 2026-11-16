@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { decisionContextSchema } from "./context";
-import { addressSchema, bytes32Schema, policyRulesSchema } from "./types";
+import { addressSchema, bytes32Schema, intentIdSchema, policyRulesSchema, txHashSchema } from "./types";
 
 /**
  * Wire contract between the agent's MCP server and the console backend.
@@ -24,6 +24,12 @@ export const CONSOLE_AGENT_ROUTES = {
   holdings: `${CONSOLE_AGENT_API_BASE}/holdings`,
   /** PUT stores a decision context under its hash; GET returns it. */
   context: (hash: string) => `${CONSOLE_AGENT_API_BASE}/contexts/${hash}`,
+  /**
+   * PUT links an intent to its decision-context hash (idempotent; a different hash is 409 `conflict`);
+   * GET returns the link. For contracts that record no `contextHash` onchain.
+   */
+  intentContext: (intentId: number | string) =>
+    `${CONSOLE_AGENT_API_BASE}/intents/${String(intentId)}/context`,
   /** POST stores a hedge plan the agent produced, so the console can draw it. */
   plans: `${CONSOLE_AGENT_API_BASE}/plans`,
   /** POST files a request to change the rules. */
@@ -81,6 +87,29 @@ export const contextResponseSchema = z.strictObject({
   storedAt: isoDateTime,
 });
 export type ContextResponse = z.infer<typeof contextResponseSchema>;
+
+// Intent to decision-context links
+
+/**
+ * PUT body. On a contract without `IntentProposed` (the production contract) no `contextHash` is onchain,
+ * so the agent tells the console which context explains which intent: the hash it stored with PUT
+ * contexts, and the transaction that proposed the intent. The console checks the document against this
+ * hash with `verifyContext` and shows it as recorded offchain. Repeating the same link is a no-op; a
+ * different hash for an intent that already has one is refused with 409 `conflict`.
+ */
+export const putIntentContextRequestSchema = z.strictObject({
+  hash: bytes32Schema,
+  txHash: txHashSchema,
+});
+export type PutIntentContextRequest = z.infer<typeof putIntentContextRequestSchema>;
+
+export const intentContextResponseSchema = z.strictObject({
+  intentId: intentIdSchema,
+  hash: bytes32Schema,
+  txHash: txHashSchema,
+  linkedAt: isoDateTime,
+});
+export type IntentContextResponse = z.infer<typeof intentContextResponseSchema>;
 
 // Hedge plans
 

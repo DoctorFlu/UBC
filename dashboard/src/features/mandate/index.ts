@@ -1,1 +1,1 @@
-export { MandateView, type MandateData } from "./MandateView";
+export { MandateView } from "./MandateView";
