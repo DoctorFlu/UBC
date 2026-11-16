@@ -36,7 +36,8 @@ export function readSignalsConfig(env: NodeJS.ProcessEnv = process.env): Signals
   return {
     sellerAddress: readSellerAddress(env),
     network: ARC_TESTNET.network,
-    facilitatorUrl: env.X402_FACILITATOR_URL ?? ARC_TESTNET.gatewayApiUrl,
+    // Blank counts as unset, like every other variable, so a template line left empty keeps the default.
+    facilitatorUrl: env.X402_FACILITATOR_URL?.trim() || ARC_TESTNET.gatewayApiUrl,
     port: readPort(env.SIGNALS_PORT),
     hedge: {
       priceUsd: readSubCentPrice(env.SIGNALS_HEDGE_PRICE_USD),
