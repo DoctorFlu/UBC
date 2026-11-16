@@ -183,7 +183,13 @@ const sealed: Record<number, SealedReason> = {
     document: fixtureContext,
     storedAt: "2026-11-15T13:24:41.000Z",
   },
-  1: { status: "tampered", source: "onchain", hash: TAMPERED_HASH, storedAt: "2026-11-15T13:25:03.000Z" },
+  1: {
+    status: "tampered",
+    source: "onchain",
+    hash: TAMPERED_HASH,
+    storedAt: "2026-11-15T13:25:03.000Z",
+    claims: { planId: fixtureContext.planId, signalReceiptIds: [] },
+  },
   6: { status: "not_stored", source: "onchain", hash: UNSTORED_HASH },
 };
 

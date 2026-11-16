@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { IntentLink } from "@/components/domain/Intent";
+import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -13,6 +14,7 @@ import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import { Tabs } from "@/components/ui/Tabs";
+import { evidenceHref } from "@/lib/evidence/chain";
 import { type OrderOnChain, executionSummary, planExecution } from "@/lib/hedge/execution";
 import type { AgentPlanView, PreviewState } from "@/lib/hedge/types";
 import {
@@ -210,6 +212,7 @@ function AgentPlanCard({
       <Card
         title={`${agentName}'s plan`}
         description={`Planned ${at(view.createdAt)}${at(view.createdAt) === at(view.storedAt) ? "" : `, stored ${at(view.storedAt)}`}.`}
+        actions={<ArrowLink href={evidenceHref(view.planId)}>Evidence chain</ArrowLink>}
         headingLevel={2}
         className={styles.planCard}
       >
@@ -386,7 +389,14 @@ function AssetHedge({
  * latest stored plan, whether it reached the chain, its payoff and the live ladder it was planned on.
  * With no plan the page says how to get one, and can show a labelled preview from the same planner.
  */
-export function HedgeView({ preview }: { preview?: ConsoleSnapshot }) {
+export function HedgeView({
+  preview,
+  initialAsset,
+}: {
+  preview?: ConsoleSnapshot;
+  /** The asset to open on, from `?asset=` (the evidence chain links back to its plan this way). */
+  initialAsset?: string | undefined;
+}) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
   const { holdings, holdingsUpdatedAt, plans } = snapshot.offchain;
@@ -394,7 +404,7 @@ export function HedgeView({ preview }: { preview?: ConsoleSnapshot }) {
     ...new Set([...plans.map((plan) => plan.asset), ...holdings.map((holding) => holding.asset)]),
   ];
   if (assets.length === 0) assets.push("BTC");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialAsset ?? null);
   const current = selected !== null && assets.includes(selected) ? selected : (assets[0] ?? "BTC");
 
   return (

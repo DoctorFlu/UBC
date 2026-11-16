@@ -3,13 +3,19 @@
  * the service token) and the snapshot the browser receives.
  */
 import { devAccount } from "@mandate/devchain";
+import type { HedgePlan } from "@mandate/planner";
 import {
   type ConsoleHolding,
   type DecisionContext,
+  type PolicyClient,
+  type ProposeResult,
   CONSOLE_AGENT_ROUTES,
+  Category,
   hashContext,
 } from "@mandate/shared";
 import type { Hex } from "viem";
+
+import { formatUsdCents } from "../../src/lib/format";
 
 import { newNonce, ownerRequestMessage } from "../../src/lib/owner-request";
 
@@ -189,6 +195,66 @@ export async function saveHoldingsAsOwner(baseURL: string, holdings: ConsoleHold
   });
   if (!response.ok)
     throw new Error(`saving holdings answered ${response.status.toString()}: ${await response.text()}`);
+}
+
+/**
+ * Plays the agent carrying out orders of a stored plan, as the MCP server does: stores each order's
+ * decision context (naming the plan and the paid signal), proposes it on the chain with the context
+ * hash, and links the hash offchain when the contract cannot record it. Returns the proposals.
+ */
+export async function carryOutPlan(
+  baseURL: string,
+  agent: PolicyClient,
+  plan: HedgePlan,
+  options: { requestText: string; receiptIds: string[]; orders: number[] },
+): Promise<ProposeResult[]> {
+  const results: ProposeResult[] = [];
+  for (const index of options.orders) {
+    const order = plan.orders[index];
+    if (!order) throw new Error(`plan ${plan.planId} has no order ${index.toString()}`);
+    const rungIndex = Math.max(
+      0,
+      plan.rungs.findIndex((rung) => rung.instrumentSymbol === order.instrumentSymbol),
+    );
+    const document: DecisionContext = {
+      version: 1,
+      requestText: options.requestText,
+      planId: plan.planId,
+      rungIndex,
+      ladderSummary: {
+        eventTicker: plan.eventTicker,
+        observedAt: new Date().toISOString(),
+        rungs: plan.rungs.map((rung) => ({
+          instrumentSymbol: rung.instrumentSymbol,
+          label: `${formatUsdCents(rung.strikeCents, { trimWholeCents: true })} or above`,
+          yesBidCents: null,
+          yesAskCents: null,
+        })),
+      },
+      signalReceiptIds: options.receiptIds,
+      reason: `Rung ${(rungIndex + 1).toString()} of the plan: it pays if BTC ends below ${formatUsdCents(order.strikeCents, { trimWholeCents: true })}.`,
+      createdAt: new Date().toISOString(),
+    };
+    const hash = hashContext(document);
+    await agentApi(baseURL, CONSOLE_AGENT_ROUTES.context(hash), "PUT", { document });
+    const proposed = await agent.proposeTrade({
+      market: order.instrumentSymbol,
+      category: Category.Crypto,
+      outcome: "NO",
+      isBuy: true,
+      amountCents: order.amountCents,
+      limitPrice: order.limitPriceCents,
+      contextHash: hash,
+    });
+    if (!proposed.contextHashRecorded) {
+      await agentApi(baseURL, CONSOLE_AGENT_ROUTES.intentContext(proposed.intentId), "PUT", {
+        hash,
+        txHash: proposed.txHash,
+      });
+    }
+    results.push(proposed);
+  }
+  return results;
 }
 
 /** Stores the agent's decision context, then links it to the intent its transaction proposed. */

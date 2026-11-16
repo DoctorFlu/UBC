@@ -36,6 +36,7 @@ import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents, isoFromUnix } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
 import { categoryName, describeMarket } from "@/lib/markets";
+import { evidenceHref } from "@/lib/evidence/chain";
 import { paymentHref } from "@/lib/payments/links";
 import { fillsAreSimulated } from "@/lib/network";
 
@@ -278,6 +279,11 @@ function SealedReasonCard({
               so the console does not show it.
             </p>
             <HexValue label="Hash" value={sealed.hash} kind="hash" />
+            {sealed.claims.planId ? (
+              <ArrowLink href={evidenceHref(sealed.claims.planId)}>
+                Evidence chain of the plan it claims
+              </ArrowLink>
+            ) : null}
           </div>
         </div>
       </Card>
@@ -297,7 +303,7 @@ function SealedReasonCard({
             <dd>{doc.requestText}</dd>
             <dt>Plan</dt>
             <dd className="mono">
-              {doc.planId}, rung {(doc.rungIndex + 1).toString()}
+              <Link href={evidenceHref(doc.planId)}>{doc.planId}</Link>, rung {(doc.rungIndex + 1).toString()}
             </dd>
             <dt>Paid signals</dt>
             <dd>

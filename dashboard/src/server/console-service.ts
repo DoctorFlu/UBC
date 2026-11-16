@@ -34,6 +34,7 @@ import type {
   SealedReason,
   SealedSource,
 } from "@/lib/live/types";
+import { readClaims } from "@/lib/evidence/claims";
 import { readHedgePlan } from "@/lib/hedge/plan-schema";
 import type { AgentPlanView } from "@/lib/hedge/types";
 import { buildChainView } from "@/lib/live/chain-view";
@@ -47,7 +48,12 @@ import { StreamReceiver } from "./ingest/stream";
 import { type ListingLookup, MarketListings } from "./market/listings";
 import { EventStore, type IngestSource } from "./store/events";
 import { ListingStore } from "./store/listings";
-import { OffchainStore, type StoredIntentContextLink, type StoredPairing } from "./store/offchain";
+import {
+  OffchainStore,
+  type StoredIntentContextLink,
+  type StoredPairing,
+  type StoredPlan,
+} from "./store/offchain";
 
 export interface Logger {
   info: (message: string) => void;
@@ -544,20 +550,9 @@ export class ConsoleService {
       : null;
     const pairing = this.offchain.latestPairing();
     const holdings = this.offchain.holdings();
-    const plans = this.offchain.latestPlans().flatMap((stored): AgentPlanView[] => {
-      const plan = readHedgePlan(stored.plan);
-      return plan
-        ? [
-            {
-              planId: stored.planId,
-              asset: stored.asset,
-              requestText: stored.requestText,
-              createdAt: stored.createdAt,
-              storedAt: stored.storedAt,
-              plan,
-            },
-          ]
-        : [];
+    const plans = this.offchain.latestPlans().flatMap((stored) => {
+      const view = toPlanView(stored);
+      return view ? [view] : [];
     });
     this.snapshotCache = {
       seq: this.seq,
@@ -580,6 +575,16 @@ export class ConsoleService {
       mcpPublicUrl: this.config.mcpPublicUrl,
     };
     return this.snapshotCache;
+  }
+
+  /**
+   * Any stored plan by id, not only the latest per asset: an intent's evidence chain names the plan it
+   * carried out, which a newer plan may have replaced on the hedge page. Null when none is stored or it
+   * cannot be read as a plan.
+   */
+  planView(planId: string): AgentPlanView | null {
+    const stored = this.offchain.plan(planId);
+    return stored ? toPlanView(stored) : null;
   }
 
   /** The pairing an agent announced from this address, as the console shows it, or null. */
@@ -655,7 +660,13 @@ export class ConsoleService {
       sealed[id] =
         document.success && verifyContext(document.data, hash)
           ? { status: "verified", source, hash, document: document.data, storedAt: context.storedAt }
-          : { status: "tampered", source, hash, storedAt: context.storedAt };
+          : {
+              status: "tampered",
+              source,
+              hash,
+              storedAt: context.storedAt,
+              claims: readClaims(context.document),
+            };
     }
     return sealed;
   }
@@ -669,6 +680,21 @@ export class ConsoleService {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/** A stored plan as the console shows it, or null when it cannot be read as a `HedgePlan`. */
+function toPlanView(stored: StoredPlan): AgentPlanView | null {
+  const plan = readHedgePlan(stored.plan);
+  return plan
+    ? {
+        planId: stored.planId,
+        asset: stored.asset,
+        requestText: stored.requestText,
+        createdAt: stored.createdAt,
+        storedAt: stored.storedAt,
+        plan,
+      }
+    : null;
+}
 
 /** Reads `signal.aborted` afresh: it can flip during any await, which control-flow narrowing ignores. */
 function isAborted(signal: AbortSignal): boolean {

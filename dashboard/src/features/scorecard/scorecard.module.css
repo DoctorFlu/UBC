@@ -2,6 +2,14 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  min-width: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-5);
 }
 
 .when {
@@ -13,4 +21,143 @@
 .date {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.market {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.intentId {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.verdict {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  padding-block: var(--space-2-5);
+  border-top: 1px solid var(--color-rule);
+  min-width: 0;
+}
+
+.row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.rowHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.rowLabel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.code {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+}
+
+.rowValue {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.rowSub {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+}
+
+.proofs {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.proofs summary {
+  width: fit-content;
+  min-height: 1.5rem;
+  cursor: pointer;
+  color: var(--color-link);
+}
+
+.proofs ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1-5);
+}
+
+.proofs li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-0-5) var(--space-3);
+  min-width: 0;
+}
+
+.proofWhat {
+  min-width: 5.5rem;
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
+.proofWhen {
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.none {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.footer {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+@media (width < 60rem) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

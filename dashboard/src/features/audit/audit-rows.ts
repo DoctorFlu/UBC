@@ -53,6 +53,12 @@ export interface AuditRow {
    */
   flags: string[];
   txHash: Hex;
+  /**
+   * A `Paused` event that left the pause state as it was when its transaction began. `setPolicy` emits
+   * one every time, after `PolicyUpdated`, so a rule change would otherwise read as "Resumed". The
+   * screen leaves these out; the exports keep them, since they are raw contract events.
+   */
+  unchanged: boolean;
 }
 
 export const GROUP_LABELS: Record<AuditGroup, string> = {
@@ -180,8 +186,21 @@ export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRo
   }
   const heldIn = new Map<number, Hex>();
   let version = 0;
+  let paused = false;
+  let txHash: string | null = null;
+  let pausedAtTxStart = false;
   return chain.events.map((event) => {
-    if (event.type === "PolicyUpdated") version += 1;
+    const tx = event.transactionHash.toLowerCase();
+    if (tx !== txHash) {
+      txHash = tx;
+      pausedAtTxStart = paused;
+    }
+    if (event.type === "PolicyUpdated") {
+      version += 1;
+      paused = event.rules.paused;
+    } else if (event.type === "Paused") {
+      paused = event.paused;
+    }
     const intentId = "intentId" in event ? event.intentId : null;
     const heldTx = intentId === null ? undefined : heldIn.get(intentId);
     const held = heldTx !== undefined && heldTx.toLowerCase() !== event.transactionHash.toLowerCase();
@@ -196,6 +215,7 @@ export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRo
       logIndex: event.logIndex,
       event: event.type,
       txHash: event.transactionHash,
+      unchanged: event.type === "Paused" && event.paused === pausedAtTxStart,
       flags,
       ...described,
       summary:
@@ -204,6 +224,11 @@ export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRo
           : described.summary,
     };
   });
+}
+
+/** The rows the audit table shows: every row but the `Paused` events that changed nothing. */
+export function onScreen(rows: readonly AuditRow[]): AuditRow[] {
+  return rows.filter((row) => !row.unchanged);
 }
 
 /** The rows a filter and an order show, in the order shown. */

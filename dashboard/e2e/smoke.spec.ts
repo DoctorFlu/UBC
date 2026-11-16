@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises";
 import { type Page, expect, test } from "@playwright/test";
 import { createPublicClient, http, isAddressEqual } from "viem";
 
+import { auditRows } from "../src/features/audit/audit-rows";
 import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "../src/lib/format";
 
-import { OWNER_ADDRESS, routes, schemes, viewports } from "./routes";
+import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
 import { DEMO_RECEIPT, snapshot } from "./support/console";
 
@@ -61,9 +62,9 @@ for (const scheme of schemes) {
       });
 
       for (const route of routes) {
-        test(`${route.name} renders cleanly`, async ({ page }) => {
+        test(`${route.name} renders cleanly`, async ({ page, baseURL }) => {
           const problems = watchConsole(page);
-          await page.goto(route.path);
+          await page.goto(await routePath(route, baseURL ?? ""));
           await expect(page.getByRole("heading", { level: 1, name: route.heading })).toBeVisible();
           // No horizontal scroll at any width.
           const overflow = await page.evaluate(
@@ -201,10 +202,11 @@ test.describe("seeded demo", () => {
     await expect(card).toContainText(formatUsdCents(plan.totals.costCents));
     await expect(card).toContainText(formatUsdCents(plan.totals.maxPayoutCents));
     await expect(card).toContainText(formatContractsHundredths(plan.totals.contractsHundredths));
+    // The warm-up carried out the first two orders, citing the plan; the executor filled the first.
     await expect(page.getByTestId("plan-execution")).toHaveText(
-      "Not executed: no intent on the chain cites this plan yet.",
+      `2 of ${plan.orders.length.toString()} orders proposed, 1 filled.`,
     );
-    await expect(page.getByTestId("plan-signal")).toContainText("None");
+    await expect(page.getByTestId("plan-signal")).toContainText("Used");
 
     // Every point of the planner's payoff table, in the chart's readout and in the table under it.
     const chart = page.getByRole("img", { name: /Payoff at settlement for BTC/ });
@@ -260,6 +262,161 @@ test.describe("seeded demo", () => {
     await expect(page.getByTestId("sealed-reason")).toContainText("No reason recorded");
   });
 
+  test("the plan's evidence chain links every record from the request to the fill, and verifies", async ({
+    page,
+    baseURL,
+  }) => {
+    const current = await snapshot(baseURL ?? "");
+    const stored = current.offchain.plans[0];
+    if (!stored) throw new Error("the warm-up posted no plan");
+    const cited = (current.chain?.intents ?? []).filter((intent) => {
+      const sealed = current.chain?.sealed[intent.id];
+      return sealed?.status === "verified" && sealed.document.planId === stored.planId;
+    });
+    expect(cited.map((intent) => intent.status)).toEqual(["executed", "approved"]);
+
+    // Reached from the hedge page.
+    await page.goto("/hedge");
+    await page.getByRole("link", { name: "Evidence chain" }).click();
+    await expect(page).toHaveURL(new RegExp(`/hedge/plans/${stored.planId}$`));
+    await expect(page.getByRole("heading", { level: 1, name: "Evidence chain" })).toBeVisible();
+    await expect(page.getByTestId("chain-status")).toHaveAttribute("data-status", "verified");
+    await expect(page.getByTestId("chain-status")).toContainText(
+      "Verified: all 2 intents' sealed reasons hash to the chain and name this plan and its paid signal.",
+    );
+    // The local chain has no explorer: hashes are there to copy, and the page says so.
+    await expect(page.getByTestId("chain-status")).toContainText("the local chain, which has no explorer");
+    await expect(page.getByRole("link", { name: /in the explorer/ })).toHaveCount(0);
+
+    // In order: the request, the signal, the plan, then each intent with its verdict and fill.
+    await expect(page.getByTestId("evidence-request")).toContainText(stored.requestText);
+    const signal = page.getByTestId("evidence-signal");
+    await expect(signal).toContainText("0.001 USDC");
+    await expect(signal).toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
+    await expect(page.getByTestId("evidence-plan")).toContainText(stored.planId);
+    const intents = page.getByTestId("evidence-intent");
+    await expect(intents).toHaveCount(2);
+    await expect(intents.getByTestId("intent-seal")).toHaveText(["Verified", "Verified"]);
+    const [filled, open] = cited;
+    if (!filled || !open) throw new Error("two intents cite the plan");
+    await expect(intents.nth(0)).toContainText(`Filled ${formatUsdCents(filled.filledCents ?? 0)}`);
+    await expect(intents.nth(1)).toContainText("No result recorded yet.");
+    await expect(intents.nth(0).getByRole("button", { name: "Copy transaction" })).toHaveCount(3);
+
+    // Each link opens its record: the intent, the payment row, and the plan on the hedge page.
+    await intents
+      .nth(0)
+      .getByRole("link", { name: `Intent #${filled.id.toString()}`, exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: `Intent #${filled.id.toString()}` }),
+    ).toBeVisible();
+    // ...and the intent page leads back to the chain of the plan its reason names.
+    await page.getByTestId("sealed-reason").getByRole("link", { name: stored.planId }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Evidence chain" })).toBeVisible();
+    await signal.getByRole("link", { name: "Payment record" }).click();
+    await expect(page).toHaveURL(new RegExp(`/payments#payment-${DEMO_RECEIPT}$`));
+    await expect(page.locator(`#payment-${DEMO_RECEIPT}`)).toBeVisible();
+    await page.goBack();
+    await page.getByTestId("evidence-plan").getByRole("link", { name: "Hedge page" }).click();
+    await expect(page).toHaveURL(/\/hedge\?asset=BTC$/);
+    await expect(page.getByTestId("agent-plan")).toHaveAttribute("data-plan-id", stored.planId);
+  });
+
+  test("a plan the console does not store says so", async ({ page }) => {
+    const problems = watchConsole(page);
+    // Intent 0's reason names plan_e2e, which the agent never posted.
+    await page.goto("/activity/0");
+    await page.getByTestId("sealed-reason").getByRole("link", { name: "plan_e2e" }).click();
+    await expect(page).toHaveURL(/\/hedge\/plans\/plan_e2e$/);
+    await expect(page.getByText("No plan with this id")).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+
+  test("the public scorecard counts exactly what the audit trail shows, and nothing private", async ({
+    page,
+    baseURL,
+  }) => {
+    const current = await snapshot(baseURL ?? "");
+    const events = current.chain?.events ?? [];
+    const rows = auditRows({ events, intents: current.chain?.intents ?? [] });
+    const count = (keep: (row: (typeof rows)[number]) => boolean) => rows.filter(keep).length.toString();
+
+    const response = await page.goto(`/agent/${AGENT_ADDRESS}`);
+    expect(response?.ok()).toBe(true);
+    const html = await response?.text();
+    const expected: Record<string, string> = {
+      "count-proposed": String(current.chain?.intents.length ?? 0),
+      "count-approved": count((row) => row.event === "IntentApproved" && row.group === "verdict"),
+      "count-held": count((row) => row.event === "IntentNeedsApproval"),
+      "count-rejected": count((row) => row.event === "IntentRejected" && row.group === "verdict"),
+      "count-owner-approved": count((row) => row.label === "Approved by owner"),
+      "count-owner-rejected": count((row) => row.label === "Rejected by owner"),
+      "count-filled": count((row) => row.label === "Fill recorded"),
+      "count-not-filled": count((row) => row.label === "No fill recorded"),
+    };
+    for (const [testId, value] of Object.entries(expected)) {
+      await expect(page.getByTestId(testId)).toHaveAttribute("data-count", value);
+    }
+
+    // Blocked by rule: the same numbers as the audit page's own card.
+    const scorecardBlocked = await page
+      .getByTestId("count-blocked")
+      .evaluateAll((items) =>
+        items.map((item) => [
+          item.querySelector(".mono")?.textContent ?? "",
+          item.getAttribute("data-count"),
+        ]),
+      );
+    await page.goto("/audit");
+    const auditBlocked = await page
+      .getByTestId("blocked-by-rule")
+      .locator("div:not(:last-child)")
+      .evaluateAll((items) =>
+        items.map((item) => [
+          item.querySelector(".mono")?.textContent ?? "",
+          item.querySelector("dd")?.textContent ?? "",
+        ]),
+      );
+    expect(scorecardBlocked).toEqual(auditBlocked);
+    expect(scorecardBlocked.length).toBeGreaterThan(0);
+
+    // Each number lists the transactions behind it, and every one is a Policy contract event.
+    await page.goto(`/agent/${AGENT_ADDRESS}`);
+    const approved = page.getByTestId("count-approved");
+    await approved.locator("summary").click();
+    const listed = await approved
+      .locator("li")
+      .evaluateAll((items) =>
+        items.map((item) => item.querySelector("[title^='0x']")?.getAttribute("title") ?? ""),
+      );
+    const eventTxs = new Set(events.map((event) => event.transactionHash));
+    expect(listed.length).toBeGreaterThan(0);
+    for (const tx of listed) expect(eventTxs.has(tx as `0x${string}`)).toBe(true);
+
+    // Public: no wallet, no owner controls, no way into the console, no form, nothing offchain.
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
+    await expect(page.locator("form")).toHaveCount(0);
+    const internal = await page
+      .locator("a[href]")
+      .evaluateAll((links) =>
+        links.map((link) => link.getAttribute("href") ?? "").filter((href) => href.startsWith("/")),
+      );
+    expect(internal).toEqual([]);
+    const stored = current.offchain.plans[0];
+    for (const secret of [
+      "Cold wallet",
+      "The $65,000 rung pays first",
+      stored?.requestText ?? "",
+      stored?.planId ?? "",
+      DEMO_RECEIPT,
+      "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+    ]) {
+      expect(secret.length).toBeGreaterThan(0);
+      expect(html).not.toContain(secret);
+    }
+  });
+
   test("the audit trail filters, orders and exports exactly the rows it shows", async ({ page, baseURL }) => {
     const current = await snapshot(baseURL ?? "");
     const events = current.chain?.events ?? [];
@@ -267,9 +424,15 @@ test.describe("seeded demo", () => {
     await page.goto("/audit");
     const table = () => page.getByRole("region", { name: /Policy contract events/ });
 
-    // Everything the console ingested, newest first.
-    await expect(table().locator("tbody tr")).toHaveCount(events.length);
+    // Everything the console ingested, newest first, except the Paused event setPolicy emits without
+    // changing the pause state (the exports keep it).
+    const unchanged = auditRows({ events, intents: current.chain?.intents ?? [] }).filter(
+      (row) => row.unchanged,
+    );
+    expect(unchanged.map((row) => row.event)).toEqual(["Paused"]);
+    await expect(table().locator("tbody tr")).toHaveCount(events.length - unchanged.length);
     await expect(table().locator("tbody tr").first()).toContainText(events.at(-1)?.type ?? "");
+    await expect(page.getByText(/Resumed/)).toHaveCount(0);
 
     // The owner's own decisions: in the seed, intent 2 approved and intent 3 rejected after a hold.
     await page.getByRole("tab", { name: /Owner decisions/ }).click();

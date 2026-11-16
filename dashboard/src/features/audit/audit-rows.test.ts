@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { fixtureSnapshot } from "@/fixtures";
 
-import { auditRows, blockedByRule, toCsv, toJson, visibleRows } from "./audit-rows";
+import type { PolicyEvent } from "@mandate/shared";
+
+import { auditRows, blockedByRule, onScreen, toCsv, toJson, visibleRows } from "./audit-rows";
 
 const chain = fixtureSnapshot.chain;
 if (!chain) throw new Error("the fixture snapshot has a chain");
@@ -36,9 +38,44 @@ describe("audit rows", () => {
     });
   });
 
-  it("numbers mandate versions and names the kill switch", () => {
-    expect(rows[0]).toMatchObject({ label: "Mandate set", group: "mandate" });
-    expect(rows[1]).toMatchObject({ label: "Resumed", group: "pause" });
+  it("numbers mandate versions and keeps setPolicy's own Paused event off the screen", () => {
+    expect(rows[0]).toMatchObject({ label: "Mandate set", group: "mandate", unchanged: false });
+    // setPolicy emits Paused(false) after PolicyUpdated: nothing was paused, so nothing "resumed".
+    expect(rows[1]).toMatchObject({ event: "Paused", unchanged: true });
+    expect(onScreen(rows).some((row) => row.event === "Paused")).toBe(false);
+  });
+
+  it("shows a pause row only when the transaction changed the pause state", () => {
+    const rules = chain.rules;
+    if (!rules) throw new Error("the fixture has a mandate");
+    let block = 100;
+    const at = (tx: string) => ({
+      blockNumber: (block += 1),
+      blockTimestamp: 1_800_000_000 + block,
+      logIndex: 0,
+      transactionHash: `0x${tx.repeat(64)}` as const,
+    });
+    const events: PolicyEvent[] = [
+      { type: "PolicyUpdated", rules: { ...rules, paused: false }, ...at("1") },
+      { type: "Paused", paused: false, ...at("1") },
+      { type: "Paused", paused: true, ...at("2") },
+      // setPolicy while paused, keeping it paused: no change.
+      { type: "PolicyUpdated", rules: { ...rules, paused: true }, ...at("3") },
+      { type: "Paused", paused: true, ...at("3") },
+      // setPolicy that resumes: a real change.
+      { type: "PolicyUpdated", rules: { ...rules, paused: false }, ...at("4") },
+      { type: "Paused", paused: false, ...at("4") },
+      // setPaused(false) while running: no change.
+      { type: "Paused", paused: false, ...at("5") },
+    ];
+    const pauses = auditRows({ events, intents: [] }).filter((row) => row.event === "Paused");
+    expect(pauses.map((row) => [row.label, row.unchanged])).toEqual([
+      ["Resumed", true],
+      ["Paused", false],
+      ["Paused", true],
+      ["Resumed", false],
+      ["Resumed", true],
+    ]);
   });
 
   it("filters by kind and orders either way", () => {
