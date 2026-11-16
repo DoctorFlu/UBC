@@ -1,6 +1,6 @@
 "use client";
 
-import { type PolicyEvent, describeReason } from "@mandate/shared";
+import { type LadderSummary, type PolicyEvent, describeReason } from "@mandate/shared";
 import { ArrowLeft, SearchX, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import Link from "next/link";
 import type { Hex } from "viem";
@@ -16,7 +16,7 @@ import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip, statusDescriptions } from "@/components/ui/StatusChip";
-import { formatCount, formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { formatContractPrice, formatCount, formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents, isoFromUnix } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
@@ -119,6 +119,54 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
   return out;
 }
 
+/** A YES price from the agent's document, which is untrusted: shown as-is when it is not a valid price. */
+function yesPrice(cents: number | null): string {
+  if (cents === null) return "-";
+  return Number.isInteger(cents) && cents >= 0 && cents <= 100
+    ? formatContractPrice(cents)
+    : cents.toString();
+}
+
+/** The order book the agent saw, one row per strike, with the rung this intent trades marked. */
+function PricesSeen({ ladder, market }: { ladder: LadderSummary; market: string | null }) {
+  if (ladder.rungs.length === 0) return null;
+  return (
+    <div className={styles.prices} role="region" aria-labelledby="prices-seen" tabIndex={0}>
+      <table className={styles.pricesTable} data-testid="prices-seen">
+        <caption id="prices-seen" className={styles.pricesCaption}>
+          Prices seen at {formatTimeUtc(ladder.observedAt)}, {formatDateUtc(ladder.observedAt)}
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Strike</th>
+            <th scope="col" className={styles.num}>
+              YES bid
+            </th>
+            <th scope="col" className={styles.num}>
+              YES ask
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {ladder.rungs.map((rung) => {
+            const traded = rung.instrumentSymbol === market;
+            return (
+              <tr key={rung.instrumentSymbol} data-traded={traded || undefined}>
+                <th scope="row">
+                  {rung.label}
+                  {traded ? <span className={styles.tradedTag}>This intent</span> : null}
+                </th>
+                <td className={styles.num}>{yesPrice(rung.yesBidCents)}</td>
+                <td className={styles.num}>{yesPrice(rung.yesAskCents)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const SOURCE_BADGES = { onchain: "Sealed onchain", offchain: "Recorded offchain" } as const;
 
 const SOURCE_TEXT = {
@@ -130,7 +178,7 @@ const SOURCE_TEXT = {
  * The agent's reason, resolved by the console: the onchain `contextHash` when the contract records one,
  * otherwise the agent's offchain link, otherwise none. The document is checked with `verifyContext`.
  */
-function SealedReasonCard({ sealed }: { sealed: SealedReason | undefined }) {
+function SealedReasonCard({ sealed, market }: { sealed: SealedReason | undefined; market: string | null }) {
   if (!sealed) {
     return (
       <Card title="The agent's reason" headingLevel={2}>
@@ -200,16 +248,6 @@ function SealedReasonCard({ sealed }: { sealed: SealedReason | undefined }) {
             <dd className="mono">
               {doc.planId}, rung {(doc.rungIndex + 1).toString()}
             </dd>
-            <dt>Prices seen</dt>
-            <dd>
-              {doc.ladderSummary.rungs
-                .map(
-                  (rung) =>
-                    `${rung.label}: YES ${rung.yesBidCents?.toString() ?? "-"}/${rung.yesAskCents?.toString() ?? "-"}¢`,
-                )
-                .join("; ")}{" "}
-              at {formatTimeUtc(doc.ladderSummary.observedAt)}
-            </dd>
             <dt>Paid signals</dt>
             <dd>{doc.signalReceiptIds.length === 0 ? "None" : doc.signalReceiptIds.join(", ")}</dd>
             <dt>Hash</dt>
@@ -217,6 +255,7 @@ function SealedReasonCard({ sealed }: { sealed: SealedReason | undefined }) {
               <HexValue value={sealed.hash} kind="hash" />
             </dd>
           </dl>
+          <PricesSeen ladder={doc.ladderSummary} market={market} />
         </div>
       </div>
     </Card>
@@ -316,7 +355,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             ) : null}
           </Card>
 
-          <SealedReasonCard sealed={chain.sealed[intent.id]} />
+          <SealedReasonCard sealed={chain.sealed[intent.id]} market={intent.market} />
         </div>
 
         <Card

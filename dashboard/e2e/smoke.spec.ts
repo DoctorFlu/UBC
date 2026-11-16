@@ -114,6 +114,14 @@ test.describe("seeded demo", () => {
     await expect(page.getByText("Recorded offchain", { exact: true })).toBeVisible();
     await expect(sealed).toContainText("Verified");
     await expect(sealed).toContainText("The $65,000 rung pays first");
+    // The order book the agent saw is a table, one row per strike, with the traded rung marked.
+    const prices = page.getByTestId("prices-seen");
+    await expect(prices.locator("caption")).toContainText("Prices seen at 13:24");
+    await expect(prices.locator("tbody tr")).toHaveCount(3);
+    const traded = prices.locator("tbody tr[data-traded]");
+    await expect(traded).toHaveCount(1);
+    await expect(traded).toContainText("$65,000 or above");
+    await expect(traded).toContainText("68¢");
   });
 
   test("a holdings row shows its error only once edited, and nothing moves when it does", async ({
