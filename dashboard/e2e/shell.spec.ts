@@ -79,6 +79,37 @@ test.describe("Advanced view", () => {
   });
 });
 
+test.describe("phone menu on a slow device", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test("a tap on the menu while the page is still hydrating opens it, without a hydration error", async ({
+    page,
+  }) => {
+    const problems = watchConsole(page);
+    // A slow phone: the shell hydrates first and the page's own boundary later, which leaves a window in
+    // which the menu button works but the page below it has not hydrated yet.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 20 });
+    await page.goto("/", { waitUntil: "commit" });
+    const menu = page.getByRole("button", { name: "Open menu" });
+    const drawer = page.getByRole("dialog");
+    // Tap as early as the button exists, and again until a tap lands after the shell hydrated. A tap that
+    // the shell queued until the page hydrated opens the drawer later, which makes the button inert, so
+    // tap only while the drawer is still closed.
+    await expect(async () => {
+      if (!(await drawer.isVisible())) await menu.tap({ timeout: 2_000 });
+      await expect(drawer).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 45_000, intervals: [0] });
+    // The drawer opens only once the page has hydrated, so any hydration error is already in `problems`.
+    await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeAttached();
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    expect(problems).toEqual([]);
+  });
+});
+
 test.describe("keyboard", () => {
   test("the Advanced view switch toggles with Space", async ({ page }) => {
     await page.goto("/");
