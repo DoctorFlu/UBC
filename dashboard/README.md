@@ -6,13 +6,16 @@ It also serves a public, wallet-free scorecard at `/agent/[address]`.
 It reads the Policy contract's events into a durable store, pushes every change to the browser over server-sent events, and serves the agent API the MCP server calls (`shared/src/console-api.ts`).
 The owner signs the mandate, approvals, rejections and the kill switch with their own wallet; the console never holds a key.
 
-Views not yet backed by a real source (the hedge plan and payoff, payments, the backtest) show fixtures marked "Sample data" on screen.
+Every view shows real data.
+The hedge view shows the agent's latest stored plan per asset, which intents carried it out, and Gemini's live ladder, which the console fetches from Gemini's public read-only API and caches for 10 seconds; the browser never calls Gemini.
+With no plan it says how to get one and shows a preview from the same planner, labelled as a preview.
+The payments view shows the signal payments and the signal budget the MCP server reports.
 
 ## Stack
 
 - Next.js 16 (App Router, Turbopack), React 19, TypeScript in strict mode.
 - It runs as a long-lived Node server (`next start`), not a static export: it polls the chain, receives the QuickNode Stream webhook and holds server-sent event connections.
-- SQLite through Node's built-in `node:sqlite` for the console's store (events, decision contexts, holdings, pairing, change requests).
+- SQLite through Node's built-in `node:sqlite` for the console's store (events, decision contexts, holdings, hedge plans, pairing, change requests, signal payments and the signal budget).
 - wagmi and viem with the injected connector, on Arc testnet or a local anvil chain.
 - CSS Modules on top of one token file, `src/styles/tokens.css`.
   There is no CSS framework and no component library.
@@ -113,7 +116,7 @@ src/
    Format it with `src/lib/format.ts` or the `Money` component, never with floating point.
 
 Every view handles the states the chain can be in: still reading history, no Policy contract configured, the chain unreachable, no mandate yet, nothing to show yet, and a wallet that is not the owner.
-Fixtures only ever appear in previews, the gallery, tests, and blocks marked "Sample data".
+Fixtures only ever appear in previews, the gallery and tests.
 
 ## Design
 

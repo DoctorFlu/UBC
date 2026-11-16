@@ -103,6 +103,56 @@ export function decisionContext(reason: string): DecisionContext {
   };
 }
 
+/** The receipt id of the signal payment the demo agent made. */
+export const DEMO_RECEIPT = `0x${"5d".repeat(32)}`;
+
+/** Plays the MCP server reporting one signal purchase (amounts in USDC atomic units). */
+export async function recordSignalPayment(
+  baseURL: string,
+  receiptId: string,
+  paidAt: string,
+  payer: string,
+): Promise<void> {
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalPayment(receiptId), "PUT", {
+    amount: "1000",
+    paidAt,
+    resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+    network: "eip155:5042002",
+    payer,
+    payee: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    settlementId: "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+    signal: {
+      signalId: `0x${"4e".repeat(32)}`,
+      asset: "BTC",
+      eventTicker: "BTC2611202200",
+      horizon: "weekly",
+      expiry: "2026-11-20T22:00:00.000Z",
+      asOf: paidAt,
+      counts: { cheap: 3, fair: 15, expensive: 3, noOffer: 0 },
+    },
+  });
+}
+
+/** Plays the MCP server reporting its signal budget for today. */
+export async function reportSignalBudget(
+  baseURL: string,
+  buyerAddress: string,
+  overrides: { spentToday?: string; resetsAt?: string } = {},
+): Promise<void> {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalBudget, "PUT", {
+    buyerAddress,
+    day: now.toISOString().slice(0, 10),
+    dailyBudget: "20000",
+    spentToday: overrides.spentToday ?? "1000",
+    maxPricePerPurchase: "5000",
+    resetsAt: overrides.resetsAt ?? tomorrow.toISOString(),
+    gatewayBalance: "4999000",
+    asOf: now.toISOString(),
+  });
+}
+
 /** Stores the agent's decision context, then links it to the intent its transaction proposed. */
 export async function sealReason(
   baseURL: string,

@@ -53,6 +53,9 @@ const NBA = "GEMI-NBA2611161900-LAL";
 /** 2026-11-15 13:20:00 UTC. */
 const START = 1_794_748_800;
 
+/** The receipt id (the x402 authorization nonce) of the signal the fixture's agent paid for. */
+export const FIXTURE_RECEIPT = `0x${"7c".repeat(32)}` as const;
+
 export const fixtureContext: DecisionContext = {
   version: 1,
   requestText: "Protect my 0.05 BTC below $66,000 this week.",
@@ -67,7 +70,7 @@ export const fixtureContext: DecisionContext = {
       { instrumentSymbol: BTC_64K, label: "$64,000 or above", yesBidCents: 75, yesAskCents: 76 },
     ],
   },
-  signalReceiptIds: ["rcpt_btc_iv_30d"],
+  signalReceiptIds: [FIXTURE_RECEIPT],
   reason: "The $66,000 rung pays first if BTC falls this week, and costs the least per dollar covered.",
   createdAt: "2026-11-15T13:24:40.000Z",
 };
@@ -247,6 +250,39 @@ export const fixtureSnapshot: ConsoleSnapshot = {
         plan: sampleHedgePlan,
       },
     ],
+    signalPayments: [
+      {
+        receiptId: FIXTURE_RECEIPT,
+        amount: "1000",
+        paidAt: "2026-11-15T13:24:21.000Z",
+        resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+        network: "eip155:5042002",
+        payer: AGENT_ADDRESS,
+        payee: EXECUTOR_ADDRESS,
+        settlementId: "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+        signal: {
+          signalId: `0x${"4e".repeat(32)}`,
+          asset: "BTC",
+          eventTicker: "BTC2611202200",
+          horizon: "weekly",
+          expiry: "2026-11-20T22:00:00.000Z",
+          asOf: "2026-11-15T13:24:00.000Z",
+          counts: { cheap: 3, fair: 15, expensive: 3, noOffer: 0 },
+        },
+        recordedAt: "2026-11-15T13:24:22.000Z",
+      },
+    ],
+    signalBudget: {
+      buyerAddress: AGENT_ADDRESS,
+      day: "2026-11-15",
+      dailyBudget: "20000",
+      spentToday: "1000",
+      maxPricePerPurchase: "5000",
+      resetsAt: "2026-11-16T00:00:00.000Z",
+      gatewayBalance: "4999000",
+      asOf: "2026-11-15T13:24:22.000Z",
+      storedAt: "2026-11-15T13:24:23.000Z",
+    },
   },
   mcpPublicUrl: "https://mandate-mcp.example.dev/mcp",
 };
@@ -262,5 +298,7 @@ export const emptyFixtureSnapshot: ConsoleSnapshot = {
     pairing: null,
     changeRequests: [],
     plans: [],
+    signalPayments: [],
+    signalBudget: null,
   },
 };

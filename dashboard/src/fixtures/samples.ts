@@ -1,12 +1,10 @@
 /**
- * Sample data for views whose real source lands in a later issue: the hedge ladder and payoff (#17)
- * and x402 payments (#22). Views that show these mark them "Sample data" on screen.
+ * A hedge plan for fixtures, previews and tests (the fixture snapshot stores it as the agent's plan).
  *
- * The hedge plan is not hand-written: the real planner (@mandate/planner) plans it from a recorded-shape
+ * It is not hand-written: the real planner (@mandate/planner) plans it from a recorded-shape
  * BTC ladder, so the numbers on screen are exactly what the agent would get for these quotes.
  */
 import { type HedgePlan, planHedge } from "@mandate/planner";
-import type { Hex } from "viem";
 
 type Ladder = Parameters<typeof planHedge>[0]["ladder"];
 
@@ -54,45 +52,3 @@ export const sampleHedgePlan: HedgePlan = planHedge({
   maxCostCents: 6_000,
   limits: { maxTradeCents: 2_500, remainingBudgetCents: 20_000, categoryAllowed: true },
 });
-
-export interface SamplePayment {
-  id: string;
-  at: string;
-  item: string;
-  provider: string;
-  priceCents: number;
-  settlementTx: Hex;
-}
-
-export const samplePayments: readonly SamplePayment[] = [
-  {
-    id: "pay-0003",
-    at: "2026-11-15T13:24:21.000Z",
-    item: "BTC implied volatility, 30 day",
-    provider: "signals.example",
-    priceCents: 5,
-    settlementTx: "0x4246bf7d9b5481255a9b0c8d9752e90fa5bbca7e8952be641682a71c9bb10dc3",
-  },
-  {
-    id: "pay-0002",
-    at: "2026-11-15T13:24:18.000Z",
-    item: "Funding rates, top 5 venues",
-    provider: "signals.example",
-    priceCents: 3,
-    settlementTx: "0xf2fa238b6083c1097c6904eadab5584ba62bca4c77df09489558e124266b3553",
-  },
-  {
-    id: "pay-0001",
-    at: "2026-11-15T13:21:31.000Z",
-    item: "Gemini order book snapshot",
-    provider: "signals.example",
-    priceCents: 2,
-    settlementTx: "0x2e957a3574673bec0d4111bdb00f5e3bba82da87adb315c06edcc6ad2a870c96",
-  },
-];
-
-export const samplePaymentsSummary = {
-  spentTodayCents: 10,
-  toolBudgetCents: 200,
-  gatewayBalanceCents: 1_990,
-};

@@ -432,6 +432,97 @@ test("the hedge view: an honest empty state and preview, then the agent's plan, 
   }
 });
 
+test("a signal payment the agent records appears live, linked to the intent that used it", async ({
+  page,
+}) => {
+  const receipt = `0x${"5d".repeat(32)}`;
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const budget = {
+    buyerAddress: AGENT_ADDRESS,
+    day: today,
+    dailyBudget: "20000",
+    spentToday: "1000",
+    maxPricePerPurchase: "5000",
+    resetsAt: `${tomorrow}T00:00:00.000Z`,
+    gatewayBalance: "4999000",
+    asOf: new Date().toISOString(),
+  };
+
+  await open(page, "/payments");
+  await expect(page.getByText("No purchases yet")).toBeVisible();
+  await expect(page.getByText("Not reported yet")).toBeVisible();
+
+  // The MCP server reports its budget, then a purchase: both appear without a refresh.
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalBudget, "PUT", budget);
+  const meter = page.getByRole("meter", { name: "Spent" });
+  await expect(meter).toHaveAttribute("aria-valuetext", "0.001 USDC of 0.02 USDC of today's budget");
+  await expect(page.getByText("4.999 USDC")).toBeVisible();
+  await expect(page.getByTestId("budget-note")).toContainText("At most 0.005 USDC per purchase.");
+
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalPayment(receipt), "PUT", {
+    amount: "1000",
+    paidAt: new Date().toISOString(),
+    resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+    network: "eip155:5042002",
+    payer: AGENT_ADDRESS,
+    payee: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    settlementId: "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+    signal: {
+      signalId: `0x${"4e".repeat(32)}`,
+      asset: "BTC",
+      eventTicker: "BTC2611202200",
+      horizon: "weekly",
+      expiry: "2026-11-20T22:00:00.000Z",
+      asOf: new Date().toISOString(),
+      counts: { cheap: 3, fair: 15, expensive: 3, noOffer: 0 },
+    },
+  });
+  const payment = page.locator(`#payment-${receipt}`);
+  await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
+  await expect(payment).toContainText("3 cheap, 15 fair, 3 expensive");
+  await expect(payment).toContainText("0.001 USDC");
+  await expect(payment).toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
+  await expect(payment).toContainText("No intent cites it");
+
+  // An intent whose sealed reason cites the receipt links to it, and back.
+  const proposed = await chain.agent.proposeTrade(noBuy(BTC_65K, 500, 31));
+  const intent = (
+    await waitForSnapshot(baseURL, (current) =>
+      Boolean(current.chain?.intents.some((candidate) => candidate.id === proposed.intentId)),
+    )
+  ).chain?.intents.find((candidate) => candidate.id === proposed.intentId);
+  if (!intent) throw new Error("the proposal did not reach the console");
+  await sealReason(baseURL, intent.id, intent.proposedTxHash, {
+    ...decisionContext("Bought on the paid signal's cheapest rung."),
+    signalReceiptIds: [receipt],
+  });
+  const used = payment.getByRole("link", { name: `Intent #${intent.id.toString()}`, exact: true });
+  await expect(used).toBeVisible();
+  await used.click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Intent #${intent.id.toString()}` }),
+  ).toBeVisible();
+  await page
+    .getByTestId("sealed-reason")
+    .getByRole("link", { name: /^0x5d5d/ })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/payments#payment-${receipt}$`));
+  await expect(page.locator(`#payment-${receipt}`)).toBeVisible();
+
+  // A newer snapshot from a day that is over: its spend no longer counts.
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.signalBudget, "PUT", {
+    ...budget,
+    resetsAt: new Date(Date.now() - 60_000).toISOString(),
+    asOf: new Date().toISOString(),
+  });
+  await expect(page.getByRole("meter", { name: "Spent" })).toHaveAttribute(
+    "aria-valuetext",
+    "0.00 USDC of 0.02 USDC of today's budget",
+  );
+  await expect(page.getByTestId("budget-note")).toContainText("A new day started");
+});
+
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
   await open(page, "/");
   const isolator = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });

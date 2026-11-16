@@ -2,6 +2,7 @@
 
 import type { HedgePlan } from "@mandate/planner";
 import { MessageSquareText, ShieldQuestion } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { IntentLink } from "@/components/domain/Intent";
@@ -20,10 +21,12 @@ import {
   formatDateUtc,
   formatTimeUtc,
   formatUsdCents,
+  shortenHex,
 } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { describeMarket } from "@/lib/markets";
+import { paymentHref } from "@/lib/payments/links";
 
 import styles from "./hedge.module.css";
 import { HoldingsEditor } from "./HoldingsEditor";
@@ -231,7 +234,14 @@ function AgentPlanCard({
                     : "Used; the orders are the same as without it."
                   : `Bought but ignored, because ${SIGNAL_IGNORED[signal.ignoredBecause ?? ""] ?? "it did not fit this ladder"}.`}{" "}
                 <span className={styles.receipt}>
-                  Receipt <code>{signal.receiptId}</code>
+                  Receipt{" "}
+                  {snapshot.offchain.signalPayments.some(
+                    (payment) => payment.receiptId === signal.receiptId.toLowerCase(),
+                  ) ? (
+                    <Link href={paymentHref(signal.receiptId)}>{shortenHex(signal.receiptId, 10, 6)}</Link>
+                  ) : (
+                    <code>{shortenHex(signal.receiptId, 10, 6)}</code>
+                  )}
                 </span>
               </>
             ) : (

@@ -7,7 +7,7 @@ import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "
 
 import { OWNER_ADDRESS, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
-import { snapshot } from "./support/console";
+import { DEMO_RECEIPT, snapshot } from "./support/console";
 
 /**
  * Chrome's "preloaded but not used within a few seconds" hint is a timing report, not a defect:
@@ -239,6 +239,20 @@ test.describe("seeded demo", () => {
     await expect(ladder.getByTestId("bought-rung")).toHaveText(
       bought.map((rung) => `${formatContractsHundredths(rung.quantityHundredths)} NO`),
     );
+  });
+
+  test("the payments panel shows the agent's reported purchase, budget and balance", async ({ page }) => {
+    await page.goto("/payments");
+    const payment = page.locator(`#payment-${DEMO_RECEIPT}`);
+    await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
+    await expect(payment).toContainText("0.001 USDC");
+    await expect(payment.getByRole("link", { name: "Intent #0", exact: true })).toBeVisible();
+    await expect(page.getByRole("meter", { name: "Spent" })).toHaveAttribute(
+      "aria-valuetext",
+      "0.001 USDC of 0.02 USDC of today's budget",
+    );
+    await expect(page.getByText("4.999 USDC")).toBeVisible();
+    await expect(page.getByTestId("sample-data")).toHaveCount(0);
   });
 
   test("an intent without a link says no reason was recorded", async ({ page }) => {
