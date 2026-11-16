@@ -220,9 +220,9 @@
   overflow-wrap: anywhere;
 }
 
+/* The value wraps inside its own box, so its copy button always stays beside it. */
 .copyable {
   display: inline-flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
   max-width: 100%;
@@ -232,6 +232,10 @@
 .copyable > :global(.mono) {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.copyable > :not(:global(.mono)) {
+  flex: none;
 }
 
 .muted {
