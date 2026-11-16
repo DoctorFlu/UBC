@@ -169,6 +169,14 @@ function consoleFailure(error: ConsoleClientError): Failure {
         reason: reason("CONSOLE_REJECTED", error.message),
         nextAction: { actor: "agent", hint: "Fix the arguments the console named and call the tool again." },
       };
+    case "conflict":
+      return {
+        reason: reason("CONSOLE_CONFLICT", error.message),
+        nextAction: {
+          actor: "owner",
+          hint: "The console already holds a different record for this; check it in the console.",
+        },
+      };
     case "bad_response":
       return {
         reason: reason(

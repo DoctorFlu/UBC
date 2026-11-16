@@ -112,12 +112,37 @@ describe("ProposalLedger", () => {
       contextHash: hash,
       contextStored: false,
       contextHashRecorded: false,
+      contextLinked: false,
       planId: "direct",
       reason: "r",
     });
     ledger.contextStored(hash);
     expect(ledger.pendingContexts()).toEqual([]);
     expect(ledger.lookup(0)?.contextStored).toBe(true);
+  });
+
+  it("keeps an intent's console link queued until the console answers for good", () => {
+    const ledger = new ProposalLedger();
+    const link = { hash: `0x${"a".repeat(64)}`, txHash: `0x${"b".repeat(64)}` } as const;
+    const record = {
+      contextHash: link.hash,
+      contextStored: true,
+      contextHashRecorded: false,
+      contextLinked: false,
+      planId: "direct",
+      reason: "r",
+    };
+    ledger.remember(0, { ...record });
+    ledger.remember(1, { ...record });
+    ledger.queueLink(0, link);
+    ledger.queueLink(1, link);
+    expect(ledger.pendingLinks().map(([id]) => id)).toEqual([0, 1]);
+
+    ledger.settleLink(0, true);
+    ledger.settleLink(1, false);
+    expect(ledger.pendingLinks()).toEqual([]);
+    expect(ledger.pendingLink(0)).toBeUndefined();
+    expect([ledger.lookup(0)?.contextLinked, ledger.lookup(1)?.contextLinked]).toEqual([true, false]);
   });
 });
 

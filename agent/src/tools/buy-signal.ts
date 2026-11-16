@@ -86,6 +86,12 @@ const OutputSchema = verdictSchema({
   priceUsdc: z.string().nullable().describe("What the signal cost, or would have cost"),
   budget: BudgetSchema,
   signal: SignalSchema.nullable(),
+  paymentRecorded: z
+    .boolean()
+    .nullable()
+    .describe(
+      "The console has this payment on record. False: not yet (the server keeps sending it); null: nothing was paid or no console",
+    ),
 });
 type Output = z.input<typeof OutputSchema>;
 
@@ -149,11 +155,19 @@ export const buySignal = defineTool({
         throw new ToolError("UPSTREAM_ERROR", error.message, { cause: error });
       throw error;
     }
-    return fromOutcome(outcome);
+    // Best effort and bounded: the console being down never changes the purchase result.
+    const reports = ctx.paymentReports;
+    let paymentRecorded: boolean | null = null;
+    if (outcome.kind === "bought" && reports !== undefined) {
+      paymentRecorded = await reports.reportPurchase(outcome.purchase.receiptId);
+    } else if (outcome.kind === "payment_unknown" && reports !== undefined) {
+      await reports.syncBudget();
+    }
+    return fromOutcome(outcome, paymentRecorded);
   },
 });
 
-function fromOutcome(outcome: BuySignalOutcome) {
+function fromOutcome(outcome: BuySignalOutcome, paymentRecorded: boolean | null) {
   const budget = budgetView(outcome.budget);
   const left = `${budget.remainingUsdc} of ${budget.dailyUsdc} USDC left in today's signal budget`;
   switch (outcome.kind) {
@@ -172,6 +186,7 @@ function fromOutcome(outcome: BuySignalOutcome) {
           priceUsdc: purchase.receipt.amountUsdc,
           budget,
           signal,
+          paymentRecorded,
         },
         `Bought the ${signal.asset} ${signal.horizon} hedge signal for ${purchase.receipt.amountUsdc} USDC (receipt ${purchase.receiptId}). ${describeSignal(signal)} ${left}.`,
       );
@@ -271,9 +286,13 @@ function fromOutcome(outcome: BuySignalOutcome) {
   }
 }
 
-function result(v: Verdict, fields: Omit<Output, keyof Verdict>, summary?: string) {
+function result(
+  v: Verdict,
+  fields: Omit<Output, keyof Verdict | "paymentRecorded"> & { paymentRecorded?: boolean | null },
+  summary?: string,
+) {
   return {
-    structured: { ...v, ...fields },
+    structured: { ...v, paymentRecorded: null, ...fields },
     summary: summary ?? `${summarizeVerdict(v)} ${budgetSentence(fields.budget)}`,
   };
 }

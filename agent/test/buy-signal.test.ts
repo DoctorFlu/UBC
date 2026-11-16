@@ -5,11 +5,17 @@ import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { verifyHedgeSignal } from "@mandate/shared";
 import { recordedSignalsApp } from "@mandate/signals/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { HttpConsoleClient } from "../src/console/client";
+import { Secret } from "../src/secret";
 import { X402Buyer } from "../src/x402/buyer";
 import { SignalPayments } from "../src/x402/payments";
 import { SignalStore } from "../src/x402/signal-store";
 import { SpendLedger } from "../src/x402/spend-ledger";
+import { createFakeConsole } from "../testing/fake-console";
 import { connectClient, TEST_BUYER_ADDRESS, TEST_BUYER_KEY, testServer } from "./helpers";
+
+const CONSOLE_TOKEN = "console-token-for-payment-reports";
+const GATEWAY_AVAILABLE = 4_999_000n;
 
 const SIGNALS_URL = "http://signals.test";
 const DAY = "2026-11-15";
@@ -20,7 +26,14 @@ const DAY = "2026-11-15";
  * Global fetch is routed into the signal API, so nothing leaves the process.
  */
 async function setup(
-  options: { dailyBudget?: bigint; maxPrice?: bigint; priceUsd?: string; dataDir?: string } = {},
+  options: {
+    dailyBudget?: bigint;
+    maxPrice?: bigint;
+    priceUsd?: string;
+    dataDir?: string;
+    /** Wire an in-memory console, as the server does when CONSOLE_SERVICE_TOKEN is set. */
+    console?: boolean;
+  } = {},
 ) {
   const seller = recordedSignalsApp({ priceUsd: options.priceUsd ?? "0.0005" });
   const seen: { url: string; paymentSignature: string | null }[] = [];
@@ -33,6 +46,20 @@ async function setup(
   });
   const client = new GatewayClient({ chain: "arcTestnet", privateKey: TEST_BUYER_KEY });
   const sign = vi.spyOn(client.account, "signTypedData");
+  // Never ask Circle for the balance in a test.
+  const balances = vi.spyOn(client, "getBalances").mockResolvedValue({
+    wallet: { balance: 0n, formatted: "0" },
+    gateway: {
+      total: GATEWAY_AVAILABLE,
+      available: GATEWAY_AVAILABLE,
+      withdrawing: 0n,
+      withdrawable: 0n,
+      formattedTotal: "4.999",
+      formattedAvailable: "4.999",
+      formattedWithdrawing: "0",
+      formattedWithdrawable: "0",
+    },
+  });
   const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), "mandate-signals-"));
   const ledger = SpendLedger.open(join(dataDir, "signal-spend.jsonl"));
   const payments = new SignalPayments({
@@ -43,7 +70,17 @@ async function setup(
     dailyBudget: options.dailyBudget ?? 1_000n,
     maxPrice: options.maxPrice ?? 500n,
   });
-  const mcp = await connectClient(testServer({ services: { payments } }));
+  const fake = createFakeConsole({ token: CONSOLE_TOKEN });
+  const consoleClient =
+    options.console === true
+      ? new HttpConsoleClient({
+          baseUrl: "http://console.test",
+          token: new Secret(CONSOLE_TOKEN),
+          fetch: fake.clientFetch,
+        })
+      : undefined;
+  const server = testServer({ services: { payments, console: consoleClient } });
+  const mcp = await connectClient(server);
   const buy = async (args: Record<string, unknown> = { asset: "BTC" }) => {
     const result = await mcp.callTool({ name: "buy_signal", arguments: args });
     const content = result.content as { type: string; text?: string }[] | undefined;
@@ -56,11 +93,12 @@ async function setup(
         receiptId: string | null;
         budget: { dailyUsdc: string; spentTodayUsdc: string; remainingUsdc: string; resetsAt: string };
         signal: { strikes: unknown[]; eventTicker: string; counts: Record<string, number> } | null;
+        paymentRecorded: boolean | null;
       },
       text: content?.[0]?.text ?? "",
     };
   };
-  return { seller, seen, network, sign, dataDir, ledger, payments, buy };
+  return { seller, seen, network, sign, balances, dataDir, ledger, payments, buy, fake, server };
 }
 
 afterEach(() => {
@@ -259,5 +297,120 @@ describe("buy_signal", () => {
       nextAction: { actor: "owner" },
       receiptId: null,
     });
+  });
+
+  it("answers paymentRecorded null when no console is configured", async () => {
+    const { buy } = await setup();
+    expect((await buy()).structured).toMatchObject({ status: "approved", paymentRecorded: null });
+  });
+});
+
+describe("buy_signal payment reports to the console (issue #22)", () => {
+  it("records the payment and the budget snapshot right after the purchase", async () => {
+    const { buy, fake, seen } = await setup({ console: true });
+
+    const { structured } = await buy();
+
+    expect(structured).toMatchObject({ status: "approved", paymentRecorded: true });
+    const receiptId = structured.receiptId ?? "";
+    expect(fake.state.signalPayments.get(receiptId.toLowerCase())).toMatchObject({
+      amount: "500",
+      resource: "/v1/signal/hedge?asset=BTC&horizon=weekly",
+      network: "eip155:5042002",
+      payer: TEST_BUYER_ADDRESS,
+      signal: {
+        asset: "BTC",
+        eventTicker: "BTC2611202200",
+        horizon: "weekly",
+        signalId: structured["signalId"],
+      },
+    });
+    expect(fake.state.signalBudget).toMatchObject({
+      buyerAddress: TEST_BUYER_ADDRESS,
+      day: DAY,
+      dailyBudget: "1000",
+      spentToday: "500",
+      maxPricePerPurchase: "500",
+      resetsAt: "2026-11-16T00:00:00.000Z",
+      gatewayBalance: GATEWAY_AVAILABLE.toString(),
+    });
+    // Nothing secret leaves: no payment signature, no key.
+    const sent = JSON.stringify([...fake.state.signalPayments.values(), fake.state.signalBudget]);
+    const signature = seen.find((r) => r.paymentSignature !== null)?.paymentSignature ?? "";
+    expect(signature).not.toBe("");
+    expect(sent).not.toContain(signature);
+    expect(sent).not.toContain(TEST_BUYER_KEY.slice(2));
+  });
+
+  it("still returns the signal when the console is down, and delivers the record later", async () => {
+    const { buy, fake, server } = await setup({ console: true });
+    fake.setDown(true);
+
+    const { structured } = await buy();
+
+    expect(structured).toMatchObject({ status: "approved", paymentRecorded: false });
+    expect(structured.signal).not.toBeNull();
+    expect(fake.state.signalPayments.size).toBe(0);
+    const reports = server.context.paymentReports;
+    expect(reports?.pending()).toBe(true);
+
+    fake.setDown(false);
+    await reports?.flush();
+    expect(fake.state.signalPayments.has((structured.receiptId ?? "").toLowerCase())).toBe(true);
+    expect(fake.state.signalBudget).toMatchObject({ spentToday: "500" });
+    expect(reports?.pending()).toBe(false);
+    expect(
+      server.lines.some((line) => line.includes('"level":"warn"') && line.includes("payments.report_failed")),
+    ).toBe(true);
+  });
+
+  it("treats a console without the routes (404) as not recorded yet, quietly", async () => {
+    const { buy, fake, server } = await setup({ console: true });
+    fake.setSignalRoutes(false);
+
+    const { structured, text } = await buy();
+
+    expect(structured).toMatchObject({ status: "approved", reasons: [], paymentRecorded: false });
+    expect(text).not.toMatch(/console/i);
+    const reportLines = server.lines.filter((line) => line.includes("payments."));
+    expect(reportLines.some((line) => line.includes("payments.console_route_missing"))).toBe(true);
+    expect(reportLines.every((line) => line.includes('"level":"debug"'))).toBe(true);
+
+    fake.setSignalRoutes(true);
+    await server.context.paymentReports?.flush();
+    expect(fake.state.signalPayments.size).toBe(1);
+  });
+
+  it("delivers the ledger's payments after a restart, without duplicates", async () => {
+    const first = await setup({ dailyBudget: 1_000n });
+    const bought = [(await first.buy()).structured.receiptId, (await first.buy()).structured.receiptId];
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+
+    const second = await setup({ dailyBudget: 1_000n, dataDir: first.dataDir, console: true });
+    const reports = second.server.context.paymentReports;
+    const stop = reports?.start();
+    await reports?.flush();
+    stop?.();
+
+    expect([...second.fake.state.signalPayments.keys()].sort()).toEqual(
+      bought.map((id) => (id ?? "").toLowerCase()).sort(),
+    );
+    expect(second.fake.state.signalBudget).toMatchObject({ spentToday: "1000", gatewayBalance: "4999000" });
+    const puts = () =>
+      second.fake.state.requests.filter((r) => r.startsWith("PUT /api/agent/v1/signal-payments/"));
+    const before = puts().length;
+    await reports?.flush();
+    expect(puts()).toHaveLength(before);
+    expect(second.fake.state.signalPayments.size).toBe(2);
+  });
+
+  it("sends the snapshot with an unknown balance when Gateway cannot be read", async () => {
+    const { buy, fake, balances } = await setup({ console: true });
+    balances.mockRejectedValue(new Error("Gateway API balance fetch failed"));
+
+    await buy();
+
+    expect(fake.state.signalBudget).toMatchObject({ spentToday: "500", gatewayBalance: null });
   });
 });

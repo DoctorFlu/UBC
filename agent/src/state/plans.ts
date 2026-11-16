@@ -30,6 +30,8 @@ export interface OrderOutcome {
   reason: string | null;
   txHash: `0x${string}` | null;
   contextHash: `0x${string}` | null;
+  /** Whether the console links the intent to its context; null without a console or an intent. */
+  contextLinked: boolean | null;
 }
 
 export interface StoredPlan {
