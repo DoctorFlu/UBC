@@ -15,6 +15,10 @@ import {
   putContextRequestSchema,
   putIntentContextRequestSchema,
   putPairingRequestSchema,
+  putSignalBudgetRequestSchema,
+  putSignalPaymentRequestSchema,
+  signalBudgetResponseSchema,
+  signalPaymentResponseSchema,
   verifyContext,
 } from "@mandate/shared";
 import { type Address, type Hex, isAddressEqual } from "viem";
@@ -134,6 +138,36 @@ export const postPlan = agentRoute(async (request, service) => {
     planResponseSchema.parse({ planId: stored.planId, storedAt: stored.storedAt }),
     created ? 201 : 200,
   );
+});
+
+// ------------------------------------------------------------------ signal payments (#22)
+
+export const putSignalPayment = agentRoute(async (request, service, params) => {
+  const receipt = bytes32Schema.safeParse(params.receiptId);
+  if (!receipt.success) {
+    return apiError(
+      422,
+      "invalid_parameter",
+      "The receipt id must be the payment's 32-byte nonce: 0x and 64 hex digits.",
+    );
+  }
+  const body = await readBody(request, putSignalPaymentRequestSchema);
+  if (!body.ok) return body.response;
+  const { payment, created } = service.offchain.putSignalPayment(receipt.data, body.data);
+  if (created) service.changed();
+  return json(
+    signalPaymentResponseSchema.parse({ receiptId: payment.receiptId, recordedAt: payment.recordedAt }),
+    created ? 201 : 200,
+  );
+});
+
+export const putSignalBudget = agentRoute(async (request, service) => {
+  const body = await readBody(request, putSignalBudgetRequestSchema);
+  if (!body.ok) return body.response;
+  const before = service.offchain.signalBudget()?.storedAt ?? null;
+  const stored = service.offchain.putSignalBudget(body.data);
+  if (stored.storedAt !== before) service.changed();
+  return json(signalBudgetResponseSchema.parse(stored));
 });
 
 // ------------------------------------------------------------------ policy change requests

@@ -18,6 +18,7 @@ import type {
 import type { Address, Hex } from "viem";
 
 import type { AgentPlanView } from "@/lib/hedge/types";
+import type { SignalBudgetView, SignalPaymentView } from "@/lib/payments/types";
 
 export type NetworkKind = "local" | "arc-testnet";
 
@@ -127,6 +128,10 @@ export interface OffchainView {
    * as a `HedgePlan` is left out rather than drawn wrong.
    */
   plans: AgentPlanView[];
+  /** The agent's x402 signal payments, newest first (#22). */
+  signalPayments: SignalPaymentView[];
+  /** The latest signal budget snapshot the agent reported, or null before the first. */
+  signalBudget: SignalBudgetView | null;
 }
 
 export interface ConsoleSnapshot {

@@ -9,12 +9,18 @@ import {
   type PostPolicyChangeRequest,
   type ProposedRules,
   type PutPairingRequest,
+  type PutSignalBudgetRequest,
+  type PutSignalPaymentRequest,
   holdingSchema,
   proposedRulesSchema,
+  putSignalBudgetRequestSchema,
+  putSignalPaymentRequestSchema,
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
 import { getAddress } from "viem";
 import { z } from "zod";
+
+import type { SignalBudgetView, SignalPaymentView } from "@/lib/payments/types";
 
 import { type Database, transaction } from "../db";
 
@@ -222,6 +228,70 @@ export class OffchainStore {
     return rows.map(planFromRow);
   }
 
+  // ---------------------------------------------------------------- signal payments (#22)
+
+  /**
+   * Records one payment under its receipt id (lower case). A payment is an immutable fact: a repeat
+   * stores nothing and returns the first record, whatever its body says.
+   */
+  putSignalPayment(
+    receiptId: string,
+    payment: PutSignalPaymentRequest,
+  ): { payment: SignalPaymentView; created: boolean } {
+    const id = receiptId.toLowerCase();
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO signal_payments (receipt_id, paid_at, payment, recorded_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, new Date(payment.paidAt).toISOString(), JSON.stringify(payment), this.now().toISOString());
+    const stored = this.signalPayment(id);
+    if (!stored) throw new Error(`payment ${id} vanished after insert`);
+    return { payment: stored, created: Number(result.changes) > 0 };
+  }
+
+  signalPayment(receiptId: string): SignalPaymentView | null {
+    const row = this.db
+      .prepare("SELECT * FROM signal_payments WHERE receipt_id = ?")
+      .get(receiptId.toLowerCase()) as PaymentRow | undefined;
+    return row ? paymentFromRow(row) : null;
+  }
+
+  /** Newest payment first. */
+  signalPayments(limit = 500): SignalPaymentView[] {
+    const rows = this.db
+      .prepare("SELECT * FROM signal_payments ORDER BY paid_at DESC, rowid DESC LIMIT ?")
+      .all(limit) as unknown as PaymentRow[];
+    return rows.map(paymentFromRow);
+  }
+
+  /** Keeps the snapshot with the latest `asOf`; an older one is ignored. Returns what is now stored. */
+  putSignalBudget(snapshot: PutSignalBudgetRequest): SignalBudgetView {
+    const asOf = new Date(snapshot.asOf).toISOString();
+    return transaction(this.db, () => {
+      const current = this.signalBudget();
+      if (!current || Date.parse(current.asOf) < Date.parse(asOf)) {
+        this.db
+          .prepare(
+            `INSERT INTO signal_budget (id, as_of, snapshot, stored_at) VALUES (1, ?, ?, ?)
+             ON CONFLICT (id) DO UPDATE SET as_of = excluded.as_of, snapshot = excluded.snapshot,
+               stored_at = excluded.stored_at`,
+          )
+          .run(asOf, JSON.stringify(snapshot), this.now().toISOString());
+      }
+      const stored = this.signalBudget();
+      if (!stored) throw new Error("the signal budget vanished after insert");
+      return stored;
+    });
+  }
+
+  signalBudget(): SignalBudgetView | null {
+    const row = this.db.prepare("SELECT * FROM signal_budget WHERE id = 1").get() as BudgetRow | undefined;
+    return row
+      ? { ...putSignalBudgetRequestSchema.parse(JSON.parse(row.snapshot)), storedAt: row.stored_at }
+      : null;
+  }
+
   // ---------------------------------------------------------------- policy change requests
 
   createChangeRequest(input: PostPolicyChangeRequest): PolicyChangeRequest {
@@ -343,6 +413,27 @@ export class OffchainStore {
 }
 
 // ------------------------------------------------------------------ rows
+
+interface PaymentRow {
+  receipt_id: string;
+  paid_at: string;
+  payment: string;
+  recorded_at: string;
+}
+
+function paymentFromRow(row: PaymentRow): SignalPaymentView {
+  return {
+    ...putSignalPaymentRequestSchema.parse(JSON.parse(row.payment)),
+    receiptId: row.receipt_id,
+    recordedAt: row.recorded_at,
+  };
+}
+
+interface BudgetRow {
+  as_of: string;
+  snapshot: string;
+  stored_at: string;
+}
 
 interface PlanRow {
   plan_id: string;

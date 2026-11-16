@@ -551,6 +551,8 @@ export class ConsoleService {
         pairing: pairing ? this.toPairingView(pairing) : null,
         changeRequests: this.offchain.changeRequests(),
         plans,
+        signalPayments: this.offchain.signalPayments(),
+        signalBudget: this.offchain.signalBudget(),
       },
       mcpPublicUrl: this.config.mcpPublicUrl,
     };
