@@ -69,12 +69,6 @@
   color: var(--color-text-muted);
 }
 
-.rationale {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  padding-bottom: var(--space-1);
-}
-
 @media (width < 80rem) {
   .board {
     grid-template-columns: minmax(0, 1fr);

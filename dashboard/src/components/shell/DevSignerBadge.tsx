@@ -12,6 +12,7 @@ export function DevSignerBadge({ short = false }: { short?: boolean }) {
       className={styles.devBadge}
       title="Signing with a public anvil test key (NEXT_PUBLIC_DEV_SIGNER=1). Never use with real funds."
       data-testid="dev-signer-badge"
+      data-dev-signer=""
     >
       <FlaskConical aria-hidden strokeWidth={2} />
       {short ? "Dev" : "Dev signer"}

@@ -205,6 +205,8 @@ export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRo
     const heldTx = intentId === null ? undefined : heldIn.get(intentId);
     const held = heldTx !== undefined && heldTx.toLowerCase() !== event.transactionHash.toLowerCase();
     if (event.type === "IntentNeedsApproval") heldIn.set(event.intentId, event.transactionHash);
+    const flags = intentId === null ? [] : (flagsOf.get(intentId) ?? []);
+    const described = describe(event, held, version);
     return {
       id: eventKey(event),
       at: isoFromUnix(event.blockTimestamp),
@@ -214,8 +216,12 @@ export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRo
       event: event.type,
       txHash: event.transactionHash,
       unchanged: event.type === "Paused" && event.paused === pausedAtTxStart,
-      flags: intentId === null ? [] : (flagsOf.get(intentId) ?? []),
-      ...describe(event, held, version),
+      flags,
+      ...described,
+      summary:
+        event.type === "ResultRecorded" && !event.filled && flags.length > 0
+          ? "The executor recorded that the order did not fill: it refuses intents the MCP server could not have sent"
+          : described.summary,
     };
   });
 }

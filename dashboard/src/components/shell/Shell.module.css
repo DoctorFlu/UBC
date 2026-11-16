@@ -492,4 +492,12 @@
   .brandNameTop {
     display: none;
   }
+
+  /*
+   * With the dev signer's badge too, the status strip has no room for the mark on a phone, and the live
+   * lamp would sit on top of it. The drawer behind the menu button still shows it.
+   */
+  .topbar:has([data-dev-signer]) .brandTop {
+    display: none;
+  }
 }

@@ -1,4 +1,5 @@
 import type { Address, Hex } from "viem";
+import type { MarketListing } from "./anomalies";
 import type { PolicyState } from "./evaluate";
 import { compareEvents, eventKey } from "./events";
 import type { IntentStatus } from "./reasons";
@@ -47,6 +48,11 @@ export interface IntentView {
    * Absent when every number fits. Only a key other than this system's (a stolen agent key) writes these.
    */
   outOfRange?: OutOfRange;
+  /**
+   * Gemini's listing of `market` as a reader that checks it (the console) first saw it. Never set from the
+   * chain; absent until checked. `intentAnomalies` flags a market Gemini does not list or lists elsewhere.
+   */
+  listing?: MarketListing;
   /** Transaction that proposed the intent (the first event seen for it). */
   proposedTxHash: Hex;
   /** Transaction that approved or rejected it, or null while none. */

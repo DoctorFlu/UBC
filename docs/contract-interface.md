@@ -142,6 +142,7 @@ They are listed with the smallest change that would close each one, most valuabl
    A Sports market sent with category 0 (Crypto) is approved.
    Through the MCP server the category comes from Gemini, so this needs a stolen key, but then nothing onchain stops it.
    Offchain, the executor now looks the market up on Gemini and refuses any approved intent whose category does not match the listing, recording it as not filled (`chain.executor-refuses`).
+   The console checks each intent's market against Gemini's listing the same way, stores the first answer, and flags a category mismatch or a market Gemini does not list, with a warning beside Approve while the intent waits.
    It still counts against the budget until then, and a full fix needs a market registry or an attestation.
 4. **Market, outcome and limit price are not validated** (`chain.limit-price-edges`, `chain.market-strings`; item 10 in section 3).
    Empty and 16 KiB markets, an outcome of `MAYBE`, and limit prices of 0, 100 and 1,000,000 are all approved and stored.

@@ -12,6 +12,7 @@ import Link from "next/link";
 import { Fragment } from "react";
 import type { Hex } from "viem";
 
+import { AgentReason } from "@/components/domain/AgentReason";
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { amountLabel, FlaggedBadge, intentFlags, MarketName, OrderSummary } from "@/components/domain/Intent";
 import { SimulatedFill } from "@/components/domain/SimulatedFill";
@@ -56,6 +57,8 @@ interface Step {
 function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
   const events = intentEvents(chain, intentId);
   const intent = chain.intents.find((candidate) => candidate.id === intentId);
+  // The executor refuses what the MCP server could not have sent, and records it as not filled.
+  const refused = intent !== undefined && intentFlags(intent).length > 0;
   const out: Step[] = [];
   const meta = (event: PolicyEvent) => ({
     key: `${event.transactionHash}:${event.logIndex.toString()}`,
@@ -125,7 +128,9 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
             ? event.filledCents === null
               ? "The executor recorded a fill too large to show."
               : `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
-            : "The executor recorded that the order did not fill; its amount went back to the budget.",
+            : refused
+              ? "The executor refuses intents like this one, flagged above, so it recorded that the order did not fill; its amount went back to the budget."
+              : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
           simulated: simulated && event.filled,
         });
@@ -292,9 +297,7 @@ function SealedReasonCard({
         <div className={styles.sealedBody}>
           <p className={styles.sealedTitle}>Verified</p>
           <p className={styles.sealedText}>This document hashes to exactly {SOURCE_TEXT[sealed.source]}.</p>
-          <blockquote className={styles.reason}>
-            <p>{doc.reason}</p>
-          </blockquote>
+          <AgentReason text={doc.reason} label="In the agent's own words" />
           <dl className={styles.facts}>
             <dt>Your request</dt>
             <dd>{doc.requestText}</dd>
@@ -498,7 +501,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             </dl>
             {intent.status === "needs_approval" ? (
               <div className={styles.decide}>
-                <ApprovalActions intent={intent} />
+                <ApprovalActions intent={intent} warn />
               </div>
             ) : null}
           </Card>

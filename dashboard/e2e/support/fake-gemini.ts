@@ -40,14 +40,87 @@ function shiftDates(value: unknown, shiftMs: number): unknown {
   return value;
 }
 
+/** A Sports market, for the test that sends it with the Crypto category. */
+export const SPORTS_MARKET = "GEMI-NFL-2611152125-SF-DAL-M-SF";
+
+const EVENT_ROUTE = "/v1/prediction-markets/events/";
+const RECORDED_EXPIRY = "2026-11-20T22:00:00.000Z";
+
+interface ExtraEvent {
+  title: string;
+  category: string;
+  contracts: [ticker: string, label: string][];
+}
+
+/**
+ * Markets the e2e chain uses that the recordings lack, listed as Gemini lists them, so the console's
+ * listing check flags only what a test means it to. Each is added to the recorded event of that ticker,
+ * or makes an event of its own.
+ */
+const EXTRA_EVENTS: Record<string, ExtraEvent> = {
+  // The demo seed's ETH order sits on the recorded ETH ladder, at a strike the recording lacks.
+  ETH2611202200: {
+    title: "ETH price on November 20",
+    category: "Crypto",
+    contracts: [["HI2800", "$2,800 or above"]],
+  },
+  NBA2611200100: {
+    title: "Los Angeles L vs Boston",
+    category: "Sports",
+    contracts: [["HILAL", "Los Angeles L"]],
+  },
+  "NFL-2611152125-SF-DAL-M": {
+    title: "San Francisco vs Dallas",
+    category: "Sports",
+    contracts: [["SF", "San Francisco"]],
+  },
+};
+
+function readFixture(file: string): unknown {
+  return JSON.parse(readFileSync(join(FIXTURES, file), "utf8"));
+}
+
+/** One event as `GET /v1/prediction-markets/events/:ticker` returns it, or null when Gemini lists none. */
+function eventBody(ticker: string): unknown {
+  const recorded = ROUTES[`${EVENT_ROUTE}${ticker}`];
+  const listed = (readFixture("events-crypto.json") as { data: { ticker: string }[] }).data.find(
+    (event) => event.ticker === ticker,
+  );
+  const base = (recorded ? readFixture(recorded) : listed) as Record<string, unknown> | undefined;
+  const extra = EXTRA_EVENTS[ticker];
+  if (!extra) return base ?? null;
+  const contracts = extra.contracts.map(([contract, label]) => ({
+    instrumentSymbol: `GEMI-${ticker}-${contract}`,
+    ticker: contract,
+    label,
+    status: "active",
+    marketState: "open",
+    expiryDate: RECORDED_EXPIRY,
+  }));
+  const event = base ?? {
+    id: ticker,
+    ticker,
+    title: extra.title,
+    category: extra.category,
+    status: "active",
+    expiryDate: RECORDED_EXPIRY,
+    contracts: [],
+  };
+  const existing = Array.isArray(event.contracts) ? (event.contracts as unknown[]) : [];
+  return { ...event, contracts: [...existing, ...contracts] };
+}
+
 /** The recorded body for a path, dates moved as described above, or null for a route it does not know. */
 export function recordedResponse(path: string, now = Date.now()): unknown {
-  const file = path.startsWith("/v1/prediction-markets/events?")
-    ? "events-crypto.json"
-    : ROUTES[path.split("?")[0] ?? ""];
-  if (!file) return null;
+  const route = path.split("?")[0] ?? "";
+  let body: unknown = null;
+  if (path.startsWith("/v1/prediction-markets/events?")) body = readFixture("events-crypto.json");
+  else if (route.startsWith(EVENT_ROUTE)) {
+    body = eventBody(decodeURIComponent(route.slice(EVENT_ROUTE.length)));
+  } else if (ROUTES[route]) body = readFixture(ROUTES[route]);
+  if (body === null) return null;
   const shiftMs = Math.max(0, Math.floor((now - RECORDED_AT) / DAY_MS)) * DAY_MS;
-  return shiftDates(JSON.parse(readFileSync(join(FIXTURES, file), "utf8")), shiftMs);
+  return shiftDates(body, shiftMs);
 }
 
 /** The port the smoke and screenshot suites serve it on (the live suite starts its own). */
