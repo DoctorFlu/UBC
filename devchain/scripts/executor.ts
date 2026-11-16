@@ -5,12 +5,12 @@
  * with zero profit and loss. It never places an order. Before acting it checks the intent the way a real
  * executor must (see `src/executor.ts`): a market Gemini does not list, a category Gemini disagrees with,
  * an outcome other than YES or NO, or a limit price outside 1 to 99 is refused and recorded as not
- * filled. It reads Gemini's public market data for that check; when Gemini cannot be reached it waits and
- * tries again rather than fill blindly. It refuses to run against anything but the local devchain.
+ * filled. It reads Gemini's public market data (or `GEMINI_API_URL`) for that check; when Gemini cannot be
+ * reached it waits and tries again rather than fill blindly. It refuses to run against anything but the
+ * local devchain.
  */
-import { createGeminiClient } from "@mandate/gemini";
 import { resolvePolicyDeployment } from "@mandate/shared/node";
-import { devPolicyClient, geminiVenue, startSimulatedExecutor } from "../src";
+import { devGeminiClient, devPolicyClient, geminiVenue, startSimulatedExecutor } from "../src";
 
 const fillDelayMs = Number(process.env.SIM_EXECUTOR_DELAY_MS ?? 1_500);
 
@@ -33,7 +33,7 @@ console.log(
 );
 const executor = startSimulatedExecutor({
   client,
-  venue: geminiVenue(createGeminiClient({ maxRetries: 1, timeoutMs: 8_000 })),
+  venue: geminiVenue(devGeminiClient()),
   fromBlock: deployment.fromBlock ?? 0n,
   fillDelayMs,
 });
