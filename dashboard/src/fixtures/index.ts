@@ -18,6 +18,8 @@ import type { Address, Hex } from "viem";
 import { buildChainView } from "@/lib/live/chain-view";
 import type { ChainView, ConsoleNetwork, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
 
+import { sampleHedgePlan } from "./samples";
+
 /** Anvil account #0, the dev signer's owner address (a public test key; see lib/wallet/dev-signer.ts). */
 export const OWNER_ADDRESS: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 /** Anvil account #1, standing in for Grok Bot's agent key. */
@@ -235,7 +237,16 @@ export const fixtureSnapshot: ConsoleSnapshot = {
         appliedTxHash: null,
       },
     ],
-    latestPlan: { planId: fixtureContext.planId, asset: "BTC", storedAt: "2026-11-15T13:24:38.000Z" },
+    plans: [
+      {
+        planId: sampleHedgePlan.planId,
+        asset: "BTC",
+        requestText: "Protect my 0.05 BTC down to $62,000 this week, for at most $60.",
+        createdAt: "2026-11-15T13:24:31.000Z",
+        storedAt: "2026-11-15T13:24:32.000Z",
+        plan: sampleHedgePlan,
+      },
+    ],
   },
   mcpPublicUrl: "https://mandate-mcp.example.dev/mcp",
 };
@@ -250,6 +261,6 @@ export const emptyFixtureSnapshot: ConsoleSnapshot = {
     holdingsUpdatedAt: null,
     pairing: null,
     changeRequests: [],
-    latestPlan: null,
+    plans: [],
   },
 };

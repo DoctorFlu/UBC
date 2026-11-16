@@ -33,6 +33,8 @@ import type {
   SealedReason,
   SealedSource,
 } from "@/lib/live/types";
+import { readHedgePlan } from "@/lib/hedge/plan-schema";
+import type { AgentPlanView } from "@/lib/hedge/types";
 import { buildChainView } from "@/lib/live/chain-view";
 import { OWNER_REQUEST_MAX_AGE_MS } from "@/lib/owner-request";
 
@@ -519,7 +521,21 @@ export class ConsoleService {
       : null;
     const pairing = this.offchain.latestPairing();
     const holdings = this.offchain.holdings();
-    const plan = this.offchain.latestPlan();
+    const plans = this.offchain.latestPlans().flatMap((stored): AgentPlanView[] => {
+      const plan = readHedgePlan(stored.plan);
+      return plan
+        ? [
+            {
+              planId: stored.planId,
+              asset: stored.asset,
+              requestText: stored.requestText,
+              createdAt: stored.createdAt,
+              storedAt: stored.storedAt,
+              plan,
+            },
+          ]
+        : [];
+    });
     this.snapshotCache = {
       seq: this.seq,
       network: this.network,
@@ -534,7 +550,7 @@ export class ConsoleService {
         holdingsUpdatedAt: holdings.updatedAt,
         pairing: pairing ? this.toPairingView(pairing) : null,
         changeRequests: this.offchain.changeRequests(),
-        latestPlan: plan ? { planId: plan.planId, asset: plan.asset, storedAt: plan.storedAt } : null,
+        plans,
       },
       mcpPublicUrl: this.config.mcpPublicUrl,
     };

@@ -1,7 +1,11 @@
 import type { FullConfig } from "@playwright/test";
 
+import { DEMO_POLICY } from "@mandate/devchain";
+import { CONSOLE_AGENT_ROUTES } from "@mandate/shared";
+
 import { AGENT_ADDRESS, routes } from "./routes";
-import { announceAgent, decisionContext, sealReason, waitForSnapshot } from "./support/console";
+import { agentApi, announceAgent, decisionContext, sealReason, waitForSnapshot } from "./support/console";
+import { recordedPlanRequest } from "./support/fake-gemini";
 
 /** Intents the demo seed proposes (support/chain.ts `seedDemo`). */
 const DEMO_INTENTS = 7;
@@ -9,7 +13,8 @@ const DEMO_INTENTS = 7;
 /**
  * Runs once the demo chain and the console are up (the live suite starts its own and skips this):
  * 1. Waits until the console has read the whole demo history from the chain.
- * 2. Plays the agent's MCP server once: announces the agent and seals the reason for intent 0.
+ * 2. Plays the agent's MCP server once: announces the agent, seals the reason for intent 0 and posts a
+ *    hedge plan made by the real planner on the recorded Gemini ladder the fake Gemini serves.
  * 3. `next dev` compiles each route on its first request. Tests that hit a cold route in parallel can
  *    wait long enough for Chrome to log "preloaded but not used" warnings, which the smoke test rightly
  *    treats as failures. Compiling every route once, in order, before the tests removes that.
@@ -34,6 +39,20 @@ export default async function warmUp(config: FullConfig) {
       ),
     );
   }
+  const committed = ready.chain?.committedCents ?? 0;
+  await agentApi(
+    baseURL,
+    CONSOLE_AGENT_ROUTES.plans,
+    "POST",
+    await recordedPlanRequest({
+      quantity: "0.05",
+      dropPercent: 5,
+      maxCostCents: 6_000,
+      maxTradeCents: DEMO_POLICY.maxTradeCents,
+      remainingBudgetCents: DEMO_POLICY.budgetCents - committed,
+      requestText: "Protect my 0.05 BTC against a 5% drop this week, for at most $60.",
+    }),
+  );
   for (const route of routes) {
     const response = await fetch(new URL(route.path, baseURL));
     await response.arrayBuffer();

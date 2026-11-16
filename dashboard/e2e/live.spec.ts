@@ -4,6 +4,7 @@ import { type Page, expect, test } from "@playwright/test";
 
 import { CONSOLE_AGENT_ROUTES } from "@mandate/shared";
 
+import { formatContractsHundredths, formatUsdCents } from "../src/lib/format";
 import type { ConsoleSnapshot } from "../src/lib/live/types";
 import { AGENT_ADDRESS, routes } from "./routes";
 import {
@@ -24,6 +25,7 @@ import {
   snapshot,
   waitForSnapshot,
 } from "./support/console";
+import { type FakeGemini, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first mandate, watch
@@ -36,12 +38,14 @@ import {
 
 const PORT = Number(process.env.E2E_LIVE_PORT ?? 3102);
 const CHAIN_PORT = Number(process.env.E2E_LIVE_CHAIN_PORT ?? 8646);
+const GEMINI_PORT = Number(process.env.E2E_LIVE_GEMINI_PORT ?? 8656);
 const baseURL = `http://localhost:${PORT.toString()}`;
 
 test.describe.configure({ mode: "serial" });
 test.use({ baseURL, viewport: { width: 1440, height: 900 } });
 
 let chain: TestChain;
+let gemini: FakeGemini;
 let server: ChildProcess | null = null;
 const paths = suitePaths("live");
 /** Every page the dashboard serves; `/activity/0` compiles the detail route even before intent 0 exists. */
@@ -63,6 +67,7 @@ async function startConsole(): Promise<void> {
       CONSOLE_EVENT_SOURCE: "rpc",
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
+      GEMINI_API_URL: gemini.url,
     },
   });
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
@@ -113,6 +118,7 @@ function toast(page: Page) {
 test.beforeAll(async () => {
   test.setTimeout(240_000);
   freshSuiteDir("live");
+  gemini = await startFakeGemini(GEMINI_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
   await startConsole();
 });
@@ -120,6 +126,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await stopConsole();
   await chain.anvil.stop();
+  await gemini.stop();
 });
 
 test("before the first mandate, the console says so", async ({ page }) => {
@@ -325,6 +332,106 @@ test("the owner can dismiss a change request, and the rules stay as they are", a
   expect((await snapshot(baseURL)).chain?.rules).toEqual(rules);
 });
 
+test("the hedge view: an honest empty state and preview, then the agent's plan, executed onchain", async ({
+  page,
+}) => {
+  await open(page, "/hedge");
+  await expect(page.getByText(/has not planned a hedge for BTC/)).toBeVisible();
+  await expect(page.getByTestId("hedge-preview")).toHaveText(
+    "No preview: Save your BTC holding to see a preview.",
+  );
+  await expect(page.getByTestId("live-ladder")).toBeVisible();
+
+  // Save a holding through the UI: the preview follows at once, made by the same planner.
+  const save = page.getByRole("button", { name: "Sign and save" });
+  await page.getByRole("button", { name: "Add an asset" }).click();
+  const holding = page.getByTestId("holding-row").last();
+  await holding.getByRole("textbox", { name: "Asset" }).fill("BTC");
+  await holding.getByRole("textbox", { name: "Quantity" }).fill("0.05");
+  await save.click();
+  await expect(toast(page)).toContainText("Holdings saved");
+  const state = await snapshot(baseURL);
+  const rules = state.chain?.rules;
+  if (!rules) throw new Error("no mandate");
+  const remaining = rules.budgetCents - (state.chain?.committedCents ?? 0);
+  const expected = (
+    await recordedPlanRequest({
+      quantity: "0.05",
+      dropPercent: 10,
+      maxCostCents: remaining,
+      maxTradeCents: rules.maxTradeCents,
+      remainingBudgetCents: remaining,
+      requestText: "",
+    })
+  ).plan;
+  const preview = page.getByTestId("hedge-preview");
+  await expect(preview).toContainText("Preview, not the agent’s plan.");
+  await expect(preview).toContainText(formatUsdCents(expected.totals.costCents));
+  await expect(preview).toContainText(formatContractsHundredths(expected.totals.contractsHundredths));
+  await expect(page.getByTestId("agent-plan")).toHaveCount(0);
+
+  // The agent posts its plan: it replaces the preview without a refresh.
+  const request = await recordedPlanRequest({
+    quantity: "0.05",
+    dropPercent: 5,
+    maxCostCents: 6_000,
+    maxTradeCents: rules.maxTradeCents,
+    remainingBudgetCents: remaining,
+    requestText: "Protect my 0.05 BTC against a 5% drop this week.",
+  });
+  const { plan } = request;
+  const order = [...plan.orders].sort((a, b) => a.amountCents - b.amountCents)[0];
+  if (!order) throw new Error("the plan has no orders");
+  await agentApi(baseURL, CONSOLE_AGENT_ROUTES.plans, "POST", request);
+  const card = page.getByTestId("agent-plan");
+  await expect(card).toHaveAttribute("data-plan-id", plan.planId);
+  await expect(card).toContainText(request.requestText);
+  await expect(page.getByTestId("hedge-preview")).toHaveCount(0);
+  await expect(page.getByTestId("plan-execution")).toHaveText(
+    "Not executed: no intent on the chain cites this plan yet.",
+  );
+
+  // The agent proposes one of the plan's orders and seals a reason naming the plan; the executor fills it.
+  const proposed = await chain.agent.proposeTrade(
+    noBuy(order.instrumentSymbol, order.amountCents, order.limitPriceCents),
+  );
+  if (proposed.verdict === "needs_approval") await chain.user.approveIntent(proposed.intentId);
+  const intent = (
+    await waitForSnapshot(baseURL, (current) =>
+      Boolean(current.chain?.intents.some((candidate) => candidate.id === proposed.intentId)),
+    )
+  ).chain?.intents.find((candidate) => candidate.id === proposed.intentId);
+  if (!intent) throw new Error("the proposal did not reach the console");
+  await sealReason(baseURL, intent.id, intent.proposedTxHash, {
+    ...decisionContext("The cheapest rung of the plan, bought first."),
+    planId: plan.planId,
+  });
+  await chain.executor.recordResult({
+    intentId: intent.id,
+    filled: true,
+    filledCents: order.amountCents,
+    pnlCents: 0,
+  });
+  await expect(page.getByTestId("plan-execution")).toHaveText(
+    `1 of ${plan.orders.length.toString()} orders proposed, 1 filled.`,
+  );
+  const onChain = page
+    .getByRole("row")
+    .filter({ has: page.getByRole("link", { name: `Intent #${intent.id.toString()}`, exact: true }) });
+  await expect(onChain).toContainText(formatContractsHundredths(order.quantityHundredths));
+  await expect(onChain).toContainText("Executed");
+
+  // Gemini goes down: the quotes say so, and the plan stays.
+  gemini.setFailing(true);
+  try {
+    await expect(page.getByTestId("quotes-error")).toContainText("did not answer", { timeout: 45_000 });
+    await expect(card).toBeVisible();
+    await expect(page.getByTestId("live-ladder")).toHaveCount(0);
+  } finally {
+    gemini.setFailing(false);
+  }
+});
+
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
   await open(page, "/");
   const isolator = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });
@@ -335,9 +442,9 @@ test("the kill switch pauses the agent and the contract refuses its next proposa
   await expect(toast(page)).toContainText("Agent paused");
 
   const refused = await chain.agent.proposeTrade(noBuy(BTC_65K, 500, 31));
-  expect(refused).toMatchObject({ intentId: 4, verdict: "rejected", reason: "agent paused" });
+  expect(refused).toMatchObject({ verdict: "rejected", reason: "agent paused" });
   await open(page, "/activity");
-  await expect(row(page, 4)).toContainText("agent paused");
+  await expect(row(page, refused.intentId)).toContainText("agent paused");
 });
 
 test("the agent's reason, linked offchain, is checked against the intent", async ({ page }) => {
@@ -368,6 +475,6 @@ test("a restarted console rebuilds exactly the same state", async ({ page }) => 
   expect(durableState(after)).toEqual(durableState(before));
 
   await open(page, "/activity");
-  for (const id of [0, 1, 2, 3, 4]) await expect(row(page, id)).toBeVisible();
+  for (const intent of after.chain?.intents ?? []) await expect(row(page, intent.id)).toBeVisible();
   await expect(page.getByTestId("paused-banner")).toBeVisible();
 });

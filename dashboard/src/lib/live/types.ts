@@ -17,6 +17,8 @@ import type {
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
 
+import type { AgentPlanView } from "@/lib/hedge/types";
+
 export type NetworkKind = "local" | "arc-testnet";
 
 /** The chain the console reads and the owner's wallet signs on. */
@@ -120,7 +122,11 @@ export interface OffchainView {
   pairing: PairingView | null;
   /** Newest first. */
   changeRequests: PolicyChangeRequest[];
-  latestPlan: { planId: string; asset: string; storedAt: string } | null;
+  /**
+   * The agent's latest stored plan for each asset, newest first. A stored plan the console cannot read
+   * as a `HedgePlan` is left out rather than drawn wrong.
+   */
+  plans: AgentPlanView[];
 }
 
 export interface ConsoleSnapshot {

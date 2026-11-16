@@ -207,11 +207,19 @@ export class OffchainStore {
     return row ? planFromRow(row) : null;
   }
 
-  latestPlan(): StoredPlan | null {
-    const row = this.db
-      .prepare("SELECT * FROM hedge_plans ORDER BY stored_at DESC, rowid DESC LIMIT 1")
-      .get() as PlanRow | undefined;
-    return row ? planFromRow(row) : null;
+  /** The most recently stored plan of each asset, newest first. */
+  latestPlans(): StoredPlan[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM hedge_plans AS p
+         WHERE p.rowid = (
+           SELECT q.rowid FROM hedge_plans AS q WHERE q.asset = p.asset
+           ORDER BY q.stored_at DESC, q.rowid DESC LIMIT 1
+         )
+         ORDER BY p.stored_at DESC, p.rowid DESC`,
+      )
+      .all() as unknown as PlanRow[];
+    return rows.map(planFromRow);
   }
 
   // ---------------------------------------------------------------- policy change requests

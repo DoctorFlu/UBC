@@ -19,9 +19,10 @@ import {
 } from "@mandate/shared";
 import { type Address, type Hex, isAddressEqual } from "viem";
 
+import { hedgePlanSchema } from "@/lib/hedge/plan-schema";
+
 import type { ConsoleService } from "../console-service";
 import type { StoredPairing } from "../store/offchain";
-import { hedgePlanSchema } from "./plan-schema";
 import { apiError, checkServiceToken, describeIssues, json, readBody } from "./responses";
 
 /**

@@ -292,6 +292,31 @@ describe("agent API: hedge plans", () => {
     expect(service.offchain.plan(plan.planId)?.requestText).toBe(body.requestText);
   });
 
+  it("shows the latest plan of each asset in the snapshot, read back as the planner typed it", async () => {
+    const fresh = makeService();
+    const eth = { ...plan, planId: "plan_eth_1", asset: "ETH" };
+    const later = { ...plan, planId: "plan_btc_2" };
+    for (const next of [plan, eth, later]) {
+      const response = await postPlan(
+        call("POST", CONSOLE_AGENT_ROUTES.plans, {
+          ...body,
+          planId: next.planId,
+          asset: next.asset,
+          plan: next,
+        }),
+        fresh,
+      );
+      expect(response.status).toBe(201);
+    }
+    const plans = fresh.snapshot().offchain.plans;
+    expect(plans.map((entry) => [entry.asset, entry.planId])).toEqual([
+      ["BTC", "plan_btc_2"],
+      ["ETH", "plan_eth_1"],
+    ]);
+    expect(plans[0]?.plan).toEqual(later);
+    expect(plans[0]).toMatchObject({ requestText: body.requestText, createdAt: body.createdAt });
+  });
+
   it("refuses a plan that is not a planner HedgePlan, or whose id does not match", async () => {
     await expectError(
       await postPlan(

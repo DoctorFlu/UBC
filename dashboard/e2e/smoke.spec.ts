@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { type Page, expect, test } from "@playwright/test";
 import { createPublicClient, http, isAddressEqual } from "viem";
 
+import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "../src/lib/format";
+
 import { OWNER_ADDRESS, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
 import { snapshot } from "./support/console";
@@ -181,6 +183,62 @@ test.describe("seeded demo", () => {
     await expect(blank.getByText("Use the ticker, like BTC.")).toHaveCount(0);
     await save.click();
     await expect(blank.getByText("Use the ticker, like BTC.")).toBeVisible();
+  });
+
+  test("the hedge view shows the agent's plan with exactly the planner's numbers", async ({
+    page,
+    baseURL,
+  }) => {
+    const stored = (await snapshot(baseURL ?? "")).offchain.plans[0];
+    if (!stored) throw new Error("the warm-up posted no plan");
+    const { plan } = stored;
+    const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
+
+    await page.goto("/hedge");
+    const card = page.getByTestId("agent-plan");
+    await expect(card).toHaveAttribute("data-plan-id", plan.planId);
+    await expect(card).toContainText(stored.requestText);
+    await expect(card).toContainText(formatUsdCents(plan.totals.costCents));
+    await expect(card).toContainText(formatUsdCents(plan.totals.maxPayoutCents));
+    await expect(card).toContainText(formatContractsHundredths(plan.totals.contractsHundredths));
+    await expect(page.getByTestId("plan-execution")).toHaveText(
+      "Not executed: no intent on the chain cites this plan yet.",
+    );
+    await expect(page.getByTestId("plan-signal")).toContainText("None");
+
+    // Every point of the planner's payoff table, in the chart's readout and in the table under it.
+    const chart = page.getByRole("img", { name: /Payoff at settlement for BTC/ });
+    const readout = page.getByTestId("payoff-readout");
+    await chart.focus();
+    await page.keyboard.press("Home");
+    const lowest = plan.payoff[0];
+    if (!lowest) throw new Error("the plan has no payoff");
+    await expect(readout).toContainText(`If BTC settles at ${usd(lowest.priceCents)}:`);
+    await expect(readout).toContainText(`combined ${formatUsdCentsDelta(lowest.netPnlCents)}`);
+    await page.getByText("Every settlement price the planner checked").click();
+    const rows = page.getByRole("table", { name: /Payoff by settlement price/ }).locator("tbody tr");
+    await expect(rows).toHaveCount(plan.payoff.length);
+    const cells = await rows.evaluateAll((trs) =>
+      trs.map((tr) => [...tr.querySelectorAll("th, td")].map((cell) => cell.textContent.trim())),
+    );
+    expect(cells).toEqual(
+      [...plan.payoff]
+        .reverse()
+        .map((point) => [
+          usd(point.priceCents),
+          formatUsdCentsDelta(point.unhedgedPnlCents),
+          formatUsdCentsDelta(point.hedgePnlCents),
+          formatUsdCentsDelta(point.netPnlCents),
+        ]),
+    );
+
+    // The live ladder marks exactly the rungs the plan buys, with their fractional quantities.
+    const ladder = page.getByTestId("live-ladder");
+    await expect(ladder).toHaveAttribute("data-event", plan.eventTicker);
+    const bought = plan.rungs.filter((rung) => rung.quantityHundredths > 0);
+    await expect(ladder.getByTestId("bought-rung")).toHaveText(
+      bought.map((rung) => `${formatContractsHundredths(rung.quantityHundredths)} NO`),
+    );
   });
 
   test("an intent without a link says no reason was recorded", async ({ page }) => {
