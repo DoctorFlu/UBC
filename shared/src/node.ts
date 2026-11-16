@@ -81,12 +81,15 @@ export function resolvePolicyDeployment(
     };
   }
 
-  if (!existsSync(localPath)) {
+  // Read at run time: `turbopackIgnore` keeps the console's bundler from tracing the whole project here.
+  if (!existsSync(/* turbopackIgnore: true */ localPath)) {
     throw new DeploymentNotFoundError(
       `No Policy contract configured: set POLICY_ADDRESS, or run \`npm run dev:chain\` to create ${localPath}`,
     );
   }
-  const local = deploymentFileSchema.parse(JSON.parse(readFileSync(localPath, "utf8")));
+  const local = deploymentFileSchema.parse(
+    JSON.parse(readFileSync(/* turbopackIgnore: true */ localPath, "utf8")),
+  );
   return {
     source: "devchain",
     address: local.address,

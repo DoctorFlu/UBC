@@ -24,6 +24,10 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_DEV_SIGNER: process.env.NEXT_PUBLIC_DEV_SIGNER === "1" ? "1" : "0",
   },
+  // The container image (deploy/Dockerfile) builds with NEXT_OUTPUT=standalone: a minimal `server.js` plus
+  // only the files the server was traced to load, so the image carries no full node_modules. Every other
+  // build keeps the usual `.next` output for `next start`.
+  ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
 };
 
 export default nextConfig;
