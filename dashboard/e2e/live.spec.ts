@@ -241,7 +241,10 @@ test("a fill the executor records appears on the intent", async ({ page }) => {
 
 test("a rule that blocks an intent says so on Home", async ({ page }) => {
   await open(page, "/");
-  const maxTrade = page.getByTestId("rules-summary").getByRole("listitem").filter({ hasText: "Max trade size" });
+  const maxTrade = page
+    .getByTestId("rules-summary")
+    .getByRole("listitem")
+    .filter({ hasText: "Max trade size" });
   await expect(maxTrade).toBeVisible();
   await expect(maxTrade).not.toContainText("Blocked");
   const blocked = await chain.agent.proposeTrade(noBuy(BTC_65K, 3_000, 31));
