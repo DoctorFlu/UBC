@@ -3,7 +3,8 @@
  *
  * - Prices and money: integer cents (number).
  * - Contract quantities: integer hundredths of a contract (number). One contract pays 100
- *   cents, so a quantity in hundredths is also its payout in cents.
+ *   cents, so a quantity in hundredths is also its payout in cents. Gemini contracts are whole,
+ *   so every quantity the planner orders is a multiple of `CONTRACT_HUNDREDTHS`.
  * - Holding quantities: integer units of 1e-8 of the asset (bigint), so products such as
  *   quantity x price never lose precision.
  */
@@ -86,6 +87,16 @@ export function formatUsd(cents: number): string {
 /** Whole-dollar format for strikes and floors, keeping cents only when present. */
 export function formatPrice(cents: number): string {
   return cents % 100 === 0 ? formatUsd(cents).slice(0, -3) : formatUsd(cents);
+}
+
+/** One whole contract, in hundredths. */
+export const CONTRACT_HUNDREDTHS = 100;
+
+/** A contract count for a sentence: "25" for whole contracts, "12.37" otherwise. */
+export function formatContractCount(hundredths: number): string {
+  return hundredths % CONTRACT_HUNDREDTHS === 0
+    ? (hundredths / CONTRACT_HUNDREDTHS).toString()
+    : formatContracts(hundredths);
 }
 
 export function formatContracts(hundredths: number): string {

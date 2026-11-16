@@ -90,20 +90,21 @@ describe("planHedge with a paid signal", () => {
     const baseline = planHedge(exampleInput({ maxCostCents: 2_000 }));
     expect(baseline.rungs.map((r) => [r.strikeCents, r.quantityHundredths])).toEqual([
       [6_550_000, 2_500],
-      [6_500_000, 1_860],
+      [6_500_000, 1_800],
     ]);
 
     const plan = withSignal({ maxCostCents: 2_000 });
-    // $64,500 (950) and $64,000 (850) first, then $65,000 with the 200 cents left; $65,500 is cut.
+    // $64,500 (950) and $64,000 (850) first, then 4 whole contracts at $65,000 with the 200 cents
+    // left; $65,500 is cut.
     expect(plan.rungs.map((r) => [r.strikeCents, r.quantityHundredths, r.amountCents])).toEqual([
-      [6_500_000, 465, 200],
+      [6_500_000, 400, 172],
       [6_450_000, 2_500, 950],
       [6_400_000, 2_500, 850],
     ]);
-    expect(plan.totals.costCents).toBe(2_000);
+    expect(plan.totals.costCents).toBe(1_972);
     expect(plan.signal).toMatchObject({ changedOrders: true, expensiveBoughtStrikesCents: [] });
     expect(plan.warnings.find((w) => w.code === "cost_cap_reached")?.message).toBe(
-      "To stay within the cost cap of $20.00, the rungs the paid signal rates cheapest were kept and the rest cut: $65,000 scaled to 4.65 of 25.00; $65,500 dropped.",
+      "To stay within the cost cap of $20.00, the rungs the paid signal rates cheapest were kept and the rest cut: $65,000 scaled to 4 of 25 contracts; $65,500 dropped.",
     );
     expect(plan.planId).not.toBe(baseline.planId);
     expect(summarizePlan(plan)).toContain(

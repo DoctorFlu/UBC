@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { buildLadder, eventSchema, normalizeEvent } from "@mandate/gemini";
 import { describe, expect, it } from "vitest";
 import { hedgePayoutCents, planHedge, PlannerInputError, summarizePlan } from "../src/index";
-import { EXAMPLE_SPOT, exampleInput, exampleLadder } from "./helpers";
+import { EXAMPLE_SPOT, exampleInput, exampleLadder, rung } from "./helpers";
 
 const codes = (plan: ReturnType<typeof planHedge>) => plan.warnings.map((w) => w.code);
 
@@ -104,20 +104,21 @@ describe("the design-doc worked example", () => {
 });
 
 describe("protection range", () => {
-  it("starts protection at spot by default, covering exactly the holding's loss at the floor", () => {
+  it("starts protection at spot by default, covering the holding's loss at the floor to the contract", () => {
     const plan = planHedge(exampleInput({ goal: { floorCents: 6_400_000 } }));
     expect(plan.ceilingCents).toBe(EXAMPLE_SPOT);
     expect(plan.rungs.map((r) => [r.strikeCents / 100, r.quantity, r.amountCents])).toEqual([
-      // 0.05 x ($65,586 - $65,500) = 4.30 contracts at 48 cents.
-      [65_500, "4.30", 207],
+      // 0.05 x ($65,586 - $65,500) = 4.30 contracts, rounded down to 4 whole contracts at 48 cents.
+      [65_500, "4.00", 192],
       [65_000, "25.00", 1_075],
       [64_500, "25.00", 950],
       [64_000, "25.00", 850],
     ]);
-    expect(plan.totals.costCents).toBe(3_082);
-    expect(plan.totals.maxPayoutCents).toBe(7_930);
+    expect(plan.totals.costCents).toBe(3_067);
+    // 79.30 contracts of loss down to the floor; whole contracts buy 79 of them.
+    expect(plan.totals.maxPayoutCents).toBe(7_900);
     expect(plan.totals.lossAtFloorCents).toBe(7_930);
-    expect(plan.totals.coverageAtFloorBps).toBe(10_000);
+    expect(plan.totals.coverageAtFloorBps).toBe(9_962);
     expect(plan.warnings).toEqual([]);
     expect(plan.status).toBe("ok");
   });
@@ -148,7 +149,10 @@ describe("protection range", () => {
     const plan = planHedge(exampleInput({ goal: { dropPercent: 1.5 } }));
     // $65,586 x 0.985 = $64,602.21
     expect(plan.floorCents).toBe(6_460_221);
-    expect(plan.rungs.at(-1)).toMatchObject({ strikeCents: 6_450_000, quantity: "19.88" });
+    // 0.05 x ($65,586 - $64,602.21) = 49.19 contracts down to the floor, 29 of them above $65,000:
+    // the last rung buys the 20 whole contracts left, carrying the fractions of the rungs above.
+    expect(plan.rungs.at(-1)).toMatchObject({ strikeCents: 6_450_000, quantity: "20.00", contracts: 20 });
+    expect(plan.totals.maxPayoutCents).toBe(4_900);
   });
 
   it("lowers a ceiling more than one strike above spot", () => {
@@ -194,15 +198,16 @@ describe("limits", () => {
     expect(plan.rungs.map((r) => [r.strikeCents / 100, r.quantity])).toEqual([
       [65_500, "25.00"],
       [65_000, "25.00"],
-      [64_500, "19.07"],
+      [64_500, "19.00"],
     ]);
-    expect(plan.totals.costCents).toBe(3_000);
+    // $7.25 is left for $64,500 at 38 cents: 19 whole contracts, $7.22.
+    expect(plan.totals.costCents).toBe(2_997);
     const warning = plan.warnings.find((w) => w.code === "cost_cap_reached");
     expect(warning?.message).toBe(
-      "To stay within the cost cap of $30.00, rungs nearest spot were kept and the rest cut: $64,500 scaled to 19.07 of 25.00; $64,000 dropped.",
+      "To stay within the cost cap of $30.00, rungs nearest spot were kept and the rest cut: $64,500 scaled to 19 of 25 contracts; $64,000 dropped.",
     );
     expect(plan.uncovered.filter((u) => u.code === "cost_cap_reached").map((u) => u.shortfallCents)).toEqual([
-      593, 2_500,
+      600, 2_500,
     ]);
   });
 
@@ -221,10 +226,11 @@ describe("limits", () => {
       exampleInput({ limits: { maxTradeCents: 500, remainingBudgetCents: 100_000, categoryAllowed: true } }),
     );
     const top = plan.rungs[0];
-    expect(top?.orders.map((o) => [o.quantity, o.amountCents])).toEqual([
-      ["10.41", 500],
-      ["10.41", 500],
-      ["4.18", 201],
+    // $5.00 buys 10 whole contracts at 48 cents.
+    expect(top?.orders.map((o) => [o.quantity, o.contracts, o.amountCents])).toEqual([
+      ["10.00", 10, 480],
+      ["10.00", 10, 480],
+      ["5.00", 5, 240],
     ]);
     for (const order of plan.orders) expect(order.amountCents).toBeLessThanOrEqual(500);
     expect(codes(plan)).toContain("orders_split");
@@ -235,8 +241,86 @@ describe("limits", () => {
     const plan = planHedge(exampleInput({ depthHundredths: { "GEMI-BTC2611202200-HI65000": 1_000 } }));
     expect(plan.rungs.find((r) => r.strikeCents === 6_500_000)?.quantity).toBe("10.00");
     expect(plan.warnings.find((w) => w.code === "thin_depth")?.message).toBe(
-      "The order book is too thin at $65,000 (10.00 of 25.00) contracts at the best price.",
+      "The order book is too thin at $65,000 (10 of 25) contracts at the best price; only whole contracts are bought.",
     );
+  });
+
+  it("buys only the whole contracts a fractional depth holds", () => {
+    const plan = planHedge(exampleInput({ depthHundredths: { "GEMI-BTC2611202200-HI65000": 1_050 } }));
+    expect(plan.rungs.find((r) => r.strikeCents === 6_500_000)).toMatchObject({
+      quantity: "10.00",
+      contracts: 10,
+    });
+    expect(plan.uncovered.find((u) => u.code === "thin_depth")?.shortfallCents).toBe(1_500);
+    expect(plan.warnings.find((w) => w.code === "thin_depth")?.message).toContain("(10.50 of 25)");
+  });
+
+  describe("whole contracts under a cost cap (issue #54)", () => {
+    // The live run: 0.05 BTC from spot $65,426 to a $64,500 floor, $15.00 max cost. Before the fix
+    // the plan bought 21.3 contracts at 42 cents ($8.95) and 12.87 at 47 cents ($6.05).
+    const capped = (maxCostCents: number) =>
+      planHedge(
+        exampleInput({
+          ladder: { ...exampleLadder(), rungs: [rung(64_500, 47), rung(65_000, 42)] },
+          spotCents: 6_542_600,
+          goal: { floorCents: 6_450_000 },
+          maxCostCents,
+        }),
+      );
+
+    it("sizes every order as whole contracts within the $15.00 cap", () => {
+      const plan = capped(1_500);
+      expect(
+        plan.orders.map((o) => [
+          o.strikeCents / 100,
+          o.quantity,
+          o.contracts,
+          o.limitPriceCents,
+          o.amountCents,
+        ]),
+      ).toEqual([
+        [65_000, "21.00", 21, 42, 882],
+        [64_500, "13.00", 13, 47, 611],
+      ]);
+      expect(plan.totals).toMatchObject({
+        costCents: 1_493,
+        maxPayoutCents: 3_400,
+        payoutBelowFloorCents: 3_400,
+      });
+      // Payoff figures come from the whole-contract orders.
+      expect(plan.payoff.find((p) => p.priceCents === 6_449_999)?.hedgePnlCents).toBe(3_400 - 1_493);
+      expect(plan.warnings.find((w) => w.code === "cost_cap_reached")?.message).toBe(
+        "To stay within the cost cap of $15.00, rungs nearest spot were kept and the rest cut: $64,500 scaled to 13 of 25 contracts.",
+      );
+    });
+
+    it("drops a rung that cannot afford one contract, and says why", () => {
+      const plan = capped(900);
+      expect(plan.orders.map((o) => [o.strikeCents / 100, o.contracts, o.amountCents])).toEqual([
+        [65_000, 21, 882],
+      ]);
+      expect(plan.warnings.find((w) => w.code === "cost_cap_reached")?.message).toBe(
+        "To stay within the cost cap of $9.00, rungs nearest spot were kept and the rest cut: $64,500 dropped, because one contract there costs 47 cents and only $0.18 was left.",
+      );
+      expect(plan.uncovered.find((u) => u.code === "cost_cap_reached")?.shortfallCents).toBe(2_500);
+    });
+
+    it("carries thin slices down the staircase, and buys nothing for less than one contract", () => {
+      // 0.001 BTC over $2,000 is 2 contracts: each $500 slice is half a contract, so every second
+      // strike buys one.
+      const small = planHedge(exampleInput({ holding: { asset: "BTC", quantity: "0.001" } }));
+      expect(small.orders.map((o) => [o.strikeCents / 100, o.contracts])).toEqual([
+        [65_000, 1],
+        [64_000, 1],
+      ]);
+      expect(small.totals.maxPayoutCents).toBe(200);
+      // 0.0003 BTC over $2,000 is 0.6 contracts: nothing to buy.
+      const plan = planHedge(exampleInput({ holding: { asset: "BTC", quantity: "0.0003" } }));
+      expect(plan.orders).toEqual([]);
+      expect(plan.warnings.find((w) => w.code === "below_minimum")?.message).toBe(
+        "The holding needs less than one whole contract at $65,500, $65,000, $64,500, $64,000, so nothing is bought there.",
+      );
+    });
   });
 
   it("uses depth carried on the ladder", () => {
@@ -302,7 +386,7 @@ describe("summarizePlan", () => {
     const summary = summarizePlan(planHedge(exampleInput()));
     expect(summary).toBe(
       [
-        "To protect your 0.05 BTC (spot $65,586), buy 100.00 NO contracts across 4 strikes from $65,500 down to $64,000 for $40.75, settling Nov 20, 2026 22:00 UTC.",
+        "To protect your 0.05 BTC (spot $65,586), buy 100 NO contracts across 4 strikes from $65,500 down to $64,000 for $40.75, settling Nov 20, 2026 22:00 UTC.",
         "If BTC finishes below $64,000, the hedge pays $100.00 against a $79.30 loss on the holding there (126% covered).",
         "The hedge pays back its cost if BTC finishes below $65,000; at or above $65,500 it expires worthless.",
         "Protection starts at $66,000, above spot ($65,586), so the payout can exceed the holding's actual loss by up to $20.70.",

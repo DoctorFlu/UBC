@@ -133,11 +133,13 @@ export interface PlannedOrder {
   instrumentSymbol: string;
   strikeCents: number;
   side: "no";
-  /** Contracts with two decimals, e.g. "25.00". */
+  /** Contracts with two decimals, e.g. "25.00". Always a whole number of contracts. */
   quantity: string;
   quantityHundredths: number;
+  /** Whole contracts: quantityHundredths / 100. */
+  contracts: number;
   limitPriceCents: number;
-  /** ceil(quantity x limit price): the most this order can cost. */
+  /** contracts x limit price: what this order costs at its limit. */
   amountCents: number;
 }
 
@@ -148,7 +150,9 @@ export interface PlannedRung {
   side: "no";
   quantity: string;
   quantityHundredths: number;
-  /** The size the design called for before cost, budget and depth limits. */
+  /** Whole contracts: quantityHundredths / 100. */
+  contracts: number;
+  /** The whole contracts the design called for before cost, budget and depth limits. */
   designedHundredths: number;
   limitPriceCents: number;
   /** Sum of the rung's order amounts. */

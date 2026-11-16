@@ -4,7 +4,7 @@
  */
 import { shortId } from "./signal";
 import type { HedgePlan, PlanSignalUse, SignalRungRating as SignalRung } from "./types";
-import { formatContracts, formatPrice, formatUsd } from "./units";
+import { formatContractCount, formatPrice, formatUsd } from "./units";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -47,7 +47,7 @@ export function summarizePlan(plan: HedgePlan): string {
       ? `at ${formatPrice(highest)}`
       : `across ${plan.rungs.length.toString()} strikes from ${formatPrice(highest)} down to ${formatPrice(lowest)}`;
   sentences.push(
-    `To protect your ${holding} (spot ${formatPrice(plan.spotCents)}), buy ${formatContracts(totals.contractsHundredths)} NO contracts ${span} for ${formatUsd(totals.costCents)}, settling ${formatExpiry(plan.expiry)}.`,
+    `To protect your ${holding} (spot ${formatPrice(plan.spotCents)}), buy ${formatContractCount(totals.contractsHundredths)} NO contracts ${span} for ${formatUsd(totals.costCents)}, settling ${formatExpiry(plan.expiry)}.`,
   );
 
   if (plan.floorCents !== null) {

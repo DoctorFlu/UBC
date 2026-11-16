@@ -10,14 +10,19 @@
  *
  * so the moment the price drops below Ki the payout has caught up with the loss from C to Ki.
  * The last rung is the first strike at or below the floor F, sized only for the slice down to F.
- * Quantities are rounded down to the 0.01 contract increment.
+ * Gemini contracts are whole, so quantities are whole contracts, rounded down cumulatively: the
+ * rungs down to Ki together buy floor(q x (C - max(K_i, F))) contracts. A slice too thin for a
+ * contract of its own is carried to the next strike down, and the whole staircase falls short of
+ * the design by less than one contract. Every cap (depth, per-trade limit, cost, budget) then
+ * only lowers a rung's whole-contract count, so every order costs exactly contracts x limit price.
  *
  * Invariant (never over-hedge): for every final price P,
  *
  *     hedge payout(P) <= q x (C - max(P, F))   (and 0 at or above C),
  *
- * because payout(P) is the sum of n_i over strikes above P, each n_i is at most its slice of
- * the loss, and dropping or scaling rungs only lowers it. The ceiling defaults to spot, so by
+ * because payout(P) is the sum of n_i over strikes above P, that sum is at most the loss down
+ * to the lowest of those strikes (the rounding is cumulative and downward), and dropping or
+ * scaling rungs only lowers it. The ceiling defaults to spot, so by
  * default the hedge never pays more than the holding actually loses; the top rung is then the
  * highest strike below spot, sized for the drop from spot to it. A ceiling above spot is
  * allowed only up to the first strike at or above spot (this snaps the first step to the
@@ -44,7 +49,9 @@ import type {
 } from "./types";
 import {
   ceilDiv,
+  CONTRACT_HUNDREDTHS,
   floorDiv,
+  formatContractCount,
   formatContracts,
   formatHoldingUnits,
   formatPrice,
@@ -230,18 +237,25 @@ function design(
 ): DesignedRung[] {
   const designed: DesignedRung[] = [];
   let previous = ceilingCents;
+  // Whole contracts the rungs above this one were designed with, so rounding never compounds.
+  let contractsAbove = 0n;
   for (const rung of descending) {
     if (rung.strikeCents >= ceilingCents) continue;
     const bottom = Math.max(rung.strikeCents, floorCents);
     const gap = previous - bottom;
     if (gap <= 0) break;
+    // q x (C - bottom) dollars is that many contracts down to here: units x cents / 1e8 / 100.
+    const contractsDown = floorDiv(
+      ctx.units * BigInt(ceilingCents - bottom),
+      HOLDING_SCALE * BigInt(CONTRACT_HUNDREDTHS),
+    );
     designed.push({
       rung,
       coversFromCents: previous,
       coversToCents: bottom,
-      // q x gap dollars, in hundredths of a contract: units x gapCents / 1e8, rounded down.
-      designedHundredths: Number(floorDiv(ctx.units * BigInt(gap), HOLDING_SCALE)),
+      designedHundredths: Number(contractsDown - contractsAbove) * CONTRACT_HUNDREDTHS,
     });
+    contractsAbove = contractsDown;
     previous = rung.strikeCents;
     if (rung.strikeCents <= floorCents) break;
   }
@@ -304,7 +318,7 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
   for (const d of designed) {
     const { rung } = d;
     let want = d.designedHundredths;
-    if (want < 1) {
+    if (want < CONTRACT_HUNDREDTHS) {
       note("below_minimum", d, 0);
       continue;
     }
@@ -324,23 +338,30 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
     const limitPriceCents = Math.min(99, rung.noBuyCents + slippage);
     const depth = input.depthHundredths?.[rung.instrumentSymbol] ?? rung.depth?.noBuyHundredths;
     if (depth !== undefined && depth < want) {
-      thin.push(`${formatPrice(rung.strikeCents)} (${formatContracts(depth)} of ${formatContracts(want)})`);
-      note("thin_depth", d, want - depth);
-      want = depth;
-      if (want < 1) continue;
+      // Only whole contracts can be bought from the book.
+      const available = wholeContracts(depth);
+      thin.push(
+        `${formatPrice(rung.strikeCents)} (${formatContractCount(depth)} of ${formatContractCount(want)})`,
+      );
+      note("thin_depth", d, want - available);
+      want = available;
+      if (want === 0) continue;
     }
-    const perOrderMax = Math.floor((input.limits.maxTradeCents * 100) / limitPriceCents);
-    if (perOrderMax < 1) {
+    // The most whole contracts one order can hold within the per-trade limit.
+    const perOrderMax = wholeContracts(Math.floor((input.limits.maxTradeCents * 100) / limitPriceCents));
+    if (perOrderMax === 0) {
       note("trade_cap_too_small", d, want);
       continue;
     }
-    const affordable = maxAffordable(want, limitPriceCents, perOrderMax, ctx.spendCapCents - spent);
+    // Every contract costs exactly the limit price, so the cap buys a whole number of them.
+    const left = Math.max(0, ctx.spendCapCents - spent);
+    const affordable = Math.min(want, Math.floor(left / limitPriceCents) * CONTRACT_HUNDREDTHS);
     if (affordable < want) {
       capReached = true;
       capped.push(
         affordable === 0
-          ? `${formatPrice(rung.strikeCents)} dropped`
-          : `${formatPrice(rung.strikeCents)} scaled to ${formatContracts(affordable)} of ${formatContracts(want)}`,
+          ? `${formatPrice(rung.strikeCents)} dropped, because one contract there costs ${limitPriceCents.toString()} cents and only ${formatUsd(left)} was left`
+          : `${formatPrice(rung.strikeCents)} scaled to ${formatContractCount(affordable)} of ${formatContractCount(want)} contracts`,
       );
       note(capCode, d, want - affordable);
       if (affordable === 0) continue;
@@ -351,6 +372,7 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
       side: "no",
       quantity: formatContracts(quantityHundredths),
       quantityHundredths,
+      contracts: quantityHundredths / CONTRACT_HUNDREDTHS,
       limitPriceCents,
       amountCents: orderAmountCents(quantityHundredths, limitPriceCents),
     }));
@@ -363,6 +385,7 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
       side: "no",
       quantity: formatContracts(affordable),
       quantityHundredths: affordable,
+      contracts: affordable / CONTRACT_HUNDREDTHS,
       designedHundredths: d.designedHundredths,
       limitPriceCents,
       amountCents,
@@ -395,7 +418,7 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
     warn(
       ctx,
       "below_minimum",
-      `The holding is too small to need the 0.01-contract minimum at ${list(strikesOf("below_minimum"))}.`,
+      `The holding needs less than one whole contract at ${list(strikesOf("below_minimum"))}, so nothing is bought there.`,
       strikesOf("below_minimum"),
     );
   }
@@ -403,7 +426,7 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
     warn(
       ctx,
       "thin_depth",
-      `The order book is too thin at ${thin.join(", ")} contracts at the best price.`,
+      `The order book is too thin at ${thin.join(", ")} contracts at the best price; only whole contracts are bought.`,
       strikesOf("thin_depth"),
     );
   }
@@ -411,7 +434,7 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
     warn(
       ctx,
       "trade_cap_too_small",
-      `The per-trade limit of ${formatUsd(input.limits.maxTradeCents)} is too small to buy even 0.01 contracts at ${list(strikesOf("trade_cap_too_small"))}.`,
+      `The per-trade limit of ${formatUsd(input.limits.maxTradeCents)} is too small to buy even one contract at ${list(strikesOf("trade_cap_too_small"))}.`,
       strikesOf("trade_cap_too_small"),
     );
   }
@@ -453,10 +476,12 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
   }
 }
 
-/**
- * Greedy split: full orders of `perOrderMax`, then the remainder. Unlike an even split, its
- * total cost never decreases as the quantity grows, which `maxAffordable` relies on.
- */
+/** Hundredths rounded down to whole contracts. */
+function wholeContracts(hundredths: number): number {
+  return Math.floor(hundredths / CONTRACT_HUNDREDTHS) * CONTRACT_HUNDREDTHS;
+}
+
+/** Greedy split of whole contracts: full orders of `perOrderMax`, then the remainder. */
 function splitOrder(hundredths: number, perOrderMax: number): number[] {
   const sizes: number[] = [];
   let left = hundredths;
@@ -466,27 +491,6 @@ function splitOrder(hundredths: number, perOrderMax: number): number[] {
     left -= size;
   }
   return sizes;
-}
-
-function splitCost(hundredths: number, priceCents: number, perOrderMax: number): number {
-  const full = Math.floor(hundredths / perOrderMax);
-  return (
-    full * orderAmountCents(perOrderMax, priceCents) + orderAmountCents(hundredths % perOrderMax, priceCents)
-  );
-}
-
-/** Largest quantity up to `want` whose split orders cost at most `budgetCents`. */
-function maxAffordable(want: number, priceCents: number, perOrderMax: number, budgetCents: number): number {
-  if (budgetCents <= 0) return 0;
-  if (splitCost(want, priceCents, perOrderMax) <= budgetCents) return want;
-  let low = 0;
-  let high = want;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (splitCost(mid, priceCents, perOrderMax) <= budgetCents) low = mid;
-    else high = mid - 1;
-  }
-  return low;
 }
 
 function warn(ctx: Context, code: WarningCode, message: string, strikesCents: number[] = []): void {

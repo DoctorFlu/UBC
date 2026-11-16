@@ -132,7 +132,7 @@ describe("hedge planner invariants", () => {
     );
   });
 
-  it("keeps every order within maxTradeCents, on the 0.01 increment, priced exactly", () => {
+  it("keeps every order within maxTradeCents, in whole contracts, priced exactly", () => {
     fc.assert(
       fc.property(scenario, (s) => {
         const plan = planHedge(s.input);
@@ -143,6 +143,11 @@ describe("hedge planner invariants", () => {
           expect(order.quantity).toMatch(/^\d+\.\d{2}$/);
           expect(Math.round(Number(order.quantity) * 100)).toBe(order.quantityHundredths);
           expect(order.amountCents).toBe(Math.ceil((order.quantityHundredths * order.limitPriceCents) / 100));
+          // Gemini contracts are whole (issue #54).
+          expect(Number.isInteger(order.contracts)).toBe(true);
+          expect(order.contracts).toBeGreaterThanOrEqual(1);
+          expect(order.quantityHundredths).toBe(order.contracts * 100);
+          expect(order.amountCents).toBe(order.contracts * order.limitPriceCents);
           expect(order.limitPriceCents).toBeGreaterThanOrEqual(1);
           expect(order.limitPriceCents).toBeLessThanOrEqual(99);
         }
@@ -217,8 +222,9 @@ describe("hedge planner invariants", () => {
           const units = parseHoldingUnits(s.input.holding.quantity);
           const maxGap = Math.max(...plan.rungs.map((r) => r.coversFromCents - r.coversToCents));
           const aboveCeiling = Math.max(0, plan.spotCents - plan.ceilingCents);
-          // Each rung rounds down by under 0.01 contract, which is under one cent of payout.
-          const slack = BigInt(s.input.ladder.rungs.length) * HOLDING_SCALE;
+          // Whole contracts are rounded down cumulatively, so the staircase as a whole falls short
+          // of the design by under one contract: under 100 cents of payout.
+          const slack = 100n * HOLDING_SCALE;
           const bound = -(units * BigInt(aboveCeiling + maxGap)) - slack;
           for (const price of probePrices(s, plan)) {
             if (price < range.toCents || price > plan.ceilingCents) continue;
@@ -233,6 +239,27 @@ describe("hedge planner invariants", () => {
           expect(hedgePayoutCents(plan.rungs, lowestStrike - 1)).toBe(designed);
         },
       ),
+      RUNS,
+    );
+  });
+
+  it("orders only whole contracts and stays within the cap, with or without a binding limit (issue #54)", () => {
+    fc.assert(
+      fc.property(scenario, (s) => {
+        const plan = planHedge(s.input);
+        const cap = Math.min(s.input.maxCostCents, s.input.limits.remainingBudgetCents);
+        for (const order of plan.orders) {
+          expect(Number.isSafeInteger(order.contracts) && order.contracts >= 1).toBe(true);
+          expect(order.amountCents).toBe(order.contracts * order.limitPriceCents);
+        }
+        for (const r of plan.rungs) {
+          expect(r.contracts).toBe(r.orders.reduce((sum, o) => sum + o.contracts, 0));
+          expect(r.payoutCents).toBe(r.contracts * 100);
+        }
+        expect(plan.totals.costCents).toBe(plan.orders.reduce((sum, o) => sum + o.amountCents, 0));
+        expect(plan.totals.costCents).toBeLessThanOrEqual(cap);
+        expect(plan.totals.maxPayoutCents).toBe(plan.rungs.reduce((sum, r) => sum + r.contracts * 100, 0));
+      }),
       RUNS,
     );
   });
