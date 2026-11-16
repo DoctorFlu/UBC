@@ -1,0 +1,17 @@
+{
+  "name": "@mandate/brand",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Design tokens and self-hosted fonts shared by the console and the landing page.",
+  "exports": {
+    "./tokens.css": "./tokens.css",
+    "./fonts": "./fonts.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "next": "^16.4.6"
+  }
+}
