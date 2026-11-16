@@ -576,6 +576,10 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   const state = await snapshot(baseURL);
   const rules = state.chain?.rules;
   if (!rules) throw new Error("no mandate");
+  // Block times have whole seconds, so the new plan is made in a later second than every intent so far:
+  // none of them can have carried it out.
+  const lastProposed = Math.max(...(state.chain?.intents.map((intent) => intent.proposedAt) ?? [0]));
+  await expect.poll(() => Date.now() / 1000, { timeout: 5_000 }).toBeGreaterThan(lastProposed + 1);
   const request = await recordedPlanRequest({
     quantity: "0.05",
     dropPercent: 7,
