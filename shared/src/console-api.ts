@@ -13,6 +13,9 @@ import { addressSchema, bytes32Schema, intentIdSchema, policyRulesSchema, txHash
  * Rules for every route:
  * - Base path `CONSOLE_AGENT_API_BASE`, JSON in and out.
  * - `Authorization: Bearer <CONSOLE_SERVICE_TOKEN>`, compared in constant time. Missing or wrong: 401.
+ * - Every route but `resolveToken` acts for one agent, named in the `x-mandate-agent` header
+ *   (`AGENT_ID_HEADER` in `tenancy.ts`), and reads and writes only that agent's mandate. Missing: 400;
+ *   unknown: 404.
  * - A body or parameter that fails its schema: 422 with `consoleErrorSchema`.
  * - Nothing here can change the onchain policy, approve an intent or unpause. Those need the
  *   owner's wallet.
@@ -45,6 +48,10 @@ export const CONSOLE_AGENT_ROUTES = {
   signalPayment: (receiptId: string) => `${CONSOLE_AGENT_API_BASE}/signal-payments/${receiptId}`,
   /** PUT replaces the snapshot of the agent's signal budget and Gateway balance (latest `asOf` wins). Issue #22. */
   signalBudget: `${CONSOLE_AGENT_API_BASE}/signal-budget`,
+  /** POST: which agent and mandate a bearer token belongs to (`tenancy.ts`). Needs no agent header. Issue #94. */
+  resolveToken: `${CONSOLE_AGENT_API_BASE}/auth/resolve`,
+  /** POST: the console signs a transaction with the agent's key, or refuses (`tenancy.ts`). Issue #94. */
+  signTransaction: `${CONSOLE_AGENT_API_BASE}/signer/transactions`,
 } as const;
 
 const isoDateTime = z.iso.datetime({ offset: true });
