@@ -907,6 +907,16 @@ describe("mandates on the demo chain", () => {
       [bob, carol].flatMap((m) => service.accounts.store.mandates(m.workspaceId).map((x) => x.id)),
     );
     expect(home.mandates.some((row) => others.has(row.mandate.id))).toBe(false);
+
+    // A market that never answers costs Home that goal's cover, not the page: it answers after the wait.
+    const started = Date.now();
+    const stalled = await workspaceHome(access, service, () => new Promise(() => undefined), 50);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(stalled.mandates.find((row) => row.mandate.id === twinA.mandate.id)?.cover).toMatchObject({
+      goals: 1,
+      unavailable: 1,
+    });
+    expect(stalled.mandates.find((row) => row.mandate.id === twinA.mandate.id)?.waiting).toBe(1);
   });
 
   it("refuses a mandate past the workspace's cap, with what to do about it", async () => {
