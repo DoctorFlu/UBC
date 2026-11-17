@@ -6,6 +6,7 @@ import type { Clock } from "../src/context";
 import { createLogger, type Logger } from "../src/logger";
 import type { Tool } from "../src/mcp/tool";
 import type { Services } from "../src/services";
+import { envAgent, staticResolver, type TokenResolver } from "../src/tenancy/resolver";
 
 export const TEST_TOKEN = randomBytes(32).toString("base64url");
 /** A throwaway key (the well-known first Hardhat account), never used for anything real. */
@@ -18,6 +19,11 @@ export const TEST_BUYER_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
 export function testConfig(env: Record<string, string> = {}, limits: Partial<Limits> = {}): Config {
   return parseConfig({ MCP_AUTH_TOKEN: TEST_TOKEN, ...env }, { ...DEFAULT_LIMITS, ...limits });
+}
+
+/** A console stand-in that knows one token, `TEST_TOKEN`, for the first mandate's agent. */
+export function testResolver(): TokenResolver {
+  return staticResolver(new Map([[TEST_TOKEN, envAgent()]]));
 }
 
 export function captureLogs(): { logger: Logger; lines: string[] } {
@@ -34,11 +40,14 @@ export function testServer(
     tools?: readonly Tool[];
     services?: Partial<Services>;
     clock?: Clock;
+    /** Defaults to one token, `TEST_TOKEN`, for the first mandate's agent. */
+    resolver?: TokenResolver;
   } = {},
 ): MandateServer & { lines: string[] } {
   const { logger, lines } = captureLogs();
   const server = createMandateServer(testConfig(options.env, options.limits), logger, {
     clock: options.clock ?? fixedClock,
+    resolver: options.resolver ?? testResolver(),
     ...(options.tools === undefined ? {} : { tools: options.tools }),
     ...(options.services === undefined ? {} : { services: options.services }),
   });

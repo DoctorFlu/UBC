@@ -6,8 +6,8 @@
 #   pbpaste | deploy/set-secret.sh GROK_WEBHOOK_URL       # from standard input (one trailing newline is dropped)
 #   deploy/set-secret.sh GROK_WEBHOOK_KEY                 # from a terminal: asks, and shows nothing typed
 #
-# Only the names on the allow-list below are accepted; CONSOLE_PASSWORD_HASH has its own script
-# (set-console-password.sh), and the tokens and keys the stack generates are never set by hand.
+# Only the names on the allow-list below are accepted; the tokens and keys the stack generates
+# (deploy/init-env.sh) are never set by hand.
 # The value must be printable ASCII without a single quote, with no space at either end; GROK_WEBHOOK_URL
 # must also start with https:// and hold no space. Anything else is refused and nothing changes.
 #

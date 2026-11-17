@@ -1,10 +1,11 @@
 # @mandate/redteam
 
 A scripted adversary with the agent's own capabilities that tries to break the mandate, and records every attempt (issue #24).
-It attacks from the two places a hostile agent can act:
+It attacks from the three places a hostile agent, or another workspace, can act:
 
-- **Through the MCP server** (`mcp`): a compromised or jailbroken Grok Bot, holding the server's bearer token, calling the tools with the official MCP SDK client and probing the HTTP layer.
+- **Through the MCP server** (`mcp`): a compromised or jailbroken Grok Bot, holding a bearer token for the server (its own workspace's, or another one's), calling the tools with the official MCP SDK client and probing the HTTP layer.
 - **Straight at the contract** (`chain`): a stolen agent key, sending raw transactions to every state-changing function of the Policy ABI, bypassing the server entirely.
+- **Through the console** (`console`): a signed-in member of another workspace, calling the console's own API with his session and the console's own `Origin`, and presenting his agent token where the MCP server's service token belongs.
 
 Each attempt gets a verdict:
 
@@ -35,6 +36,7 @@ It exits 2 when it refuses a target.
 For each Policy contract (`production`, then `reference`) it starts anvil on a free port with a fresh deployment and the demo rules, an in-memory console, and the real MCP server code (config, tools, auth, limits) served over HTTP on another free port.
 Only the market data is a fixture (`src/fixtures.ts`: one Crypto ladder and one Sports event, shaped like `@mandate/gemini` returns them), so the run is deterministic and needs no network.
 It never binds 3000, 8545, 8787 or 8788, and it reads no `.env`.
+For the attacks across workspaces it adds a second workspace's agent (a console-issued token, no contract) to the in-memory console, and starts the real console's API (`dashboard/scripts/redteam-console.ts`: the route modules under `dashboard/src/app/api`, served by plain Node without the pages) on a free port and a new temporary data folder, seeded with two workspaces; it stops it with the run.
 The owner and executor keys are used only to set up scenarios: pausing and resuming, approving a held intent late, and recording a loss.
 
 ### Against the live stack (`--target stack`)
@@ -118,6 +120,8 @@ src/
   run.ts       runs attacks, owner-side scenarios (paused, daily loss), and the invariant check
   targets.ts   the self-contained target and the safety checks for the live stack
   mcp.ts       the MCP attacker (SDK client per call, raw HTTP probes)
+  console.ts   the console attacker: the real console API in a child process, two workspaces
+  tenancy-attacks.ts  attacks from another workspace, through the MCP server and the console
   chain.ts     the chain attacker (raw transactions from the agent key)
   fixtures.ts  market data for the self-contained run
   report.ts    terminal lines, JSON and Markdown

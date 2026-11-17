@@ -48,14 +48,14 @@ describe("plan_hedge with a Gemini endpoint that never answers", () => {
       gemini = await startFakeGemini();
       const { logger, lines } = captureLogs();
       stack = await startStack({
-        holdings: [{ asset: "BTC", quantity: "0.05" }],
+        holdings: [{ asset: "BTC", quantity: "0.04213" }],
         spotCents: 6_414_000,
         marketsClient: createGeminiMarkets({ baseUrl: gemini.url }),
         env: { MCP_TOOL_DEADLINE_MS: String(DEADLINE_MS) },
         logger,
       });
       gemini.stalled.add(prefix);
-      const requestText = "Protect my 0.05 BTC against a 3% drop this week, for at most $40.";
+      const requestText = "Protect my 0.04213 BTC against a 3% drop this week, for at most $40.";
 
       const started = performance.now();
       const result = await stack.call("plan_hedge", {
@@ -92,7 +92,8 @@ describe("plan_hedge with a Gemini endpoint that never answers", () => {
       expect(String(stops[0]?.["step"])).toMatch(new RegExp(`^${step.replace(".", "\\.")}`));
       const logged = lines.join("\n");
       expect(logged).not.toContain(requestText);
-      expect(logged).not.toContain("0.05");
+      // Five decimals: a timestamp ("40.059Z") or a duration never contains it.
+      expect(logged).not.toContain("0.04213");
       expect(parsed(lines, "tool.client_gone")).toEqual([]);
     });
   }

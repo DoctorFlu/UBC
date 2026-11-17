@@ -5,7 +5,9 @@
  */
 import type * as z from "zod";
 import {
+  AGENT_ID_HEADER,
   CONSOLE_AGENT_ROUTES,
+  ENV_AGENT_ID,
   consoleErrorSchema,
   contextResponseSchema,
   holdingsResponseSchema,
@@ -83,12 +85,33 @@ export class HttpConsoleClient implements ConsoleClient {
   readonly #token: Secret;
   readonly #fetch: FetchLike;
   readonly #timeoutMs: number;
+  /** The agent every call acts for: the console reads and writes only that agent's mandate. */
+  readonly agentId: string;
 
-  constructor(options: { baseUrl: string; token: Secret; fetch?: FetchLike; timeoutMs?: number }) {
+  constructor(options: {
+    baseUrl: string;
+    token: Secret;
+    /** Defaults to the first mandate's agent, the one the server's own key signs for. */
+    agentId?: string;
+    fetch?: FetchLike;
+    timeoutMs?: number;
+  }) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.#token = options.token;
+    this.agentId = options.agentId ?? ENV_AGENT_ID;
     this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
     this.#timeoutMs = options.timeoutMs ?? CONSOLE_TIMEOUT_MS;
+  }
+
+  /** The same client, acting for another agent. */
+  forAgent(agentId: string): HttpConsoleClient {
+    return new HttpConsoleClient({
+      baseUrl: this.baseUrl,
+      token: this.#token,
+      agentId,
+      fetch: this.#fetch,
+      timeoutMs: this.#timeoutMs,
+    });
   }
 
   async getHoldings(signal?: AbortSignal): Promise<HoldingsResponse> {
@@ -206,6 +229,7 @@ export class HttpConsoleClient implements ConsoleClient {
     const headers: Record<string, string> = {
       accept: "application/json",
       authorization: `Bearer ${this.#token.reveal()}`,
+      [AGENT_ID_HEADER]: this.agentId,
     };
     if (options.body !== undefined) headers["content-type"] = "application/json";
 

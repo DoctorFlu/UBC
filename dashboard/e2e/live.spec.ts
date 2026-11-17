@@ -34,6 +34,8 @@ import {
 } from "./support/chain";
 import {
   E2E_SERVICE_TOKEN,
+  ownerHeaders,
+  waitForConsole,
   agentApi,
   decisionContext,
   sealReason,
@@ -47,6 +49,7 @@ import {
   recordedPlanRequest,
   startFakeGemini,
 } from "./support/fake-gemini";
+import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first rules, watch
@@ -151,13 +154,16 @@ async function startConsole(budgetMs = 225_000): Promise<void> {
     const seconds = (Date.now() - startedAt) / 1_000;
     if (seconds >= 5) setupLog(`${label}: ${seconds.toFixed(1)}s`);
   };
+  await step("waiting for the console", () => waitForConsole(baseURL, remaining()));
+  // The first start claims the first workspace on /claim, as its owner would; a restart keeps the session.
+  await step("claiming the first workspace", () => claimOwnerOnce(baseURL, paths.dataDir));
   await step("waiting for a live feed", () =>
     waitForSnapshot(baseURL, (current) => current.feed.health === "live", Math.min(180_000, remaining())),
   );
   // `next dev` compiles a route on its first request; compile every route now, so no test waits on it.
   for (const path of LIVE_ROUTES) {
     await step(`compiling ${path}`, async (signal) => {
-      const response = await fetch(new URL(path, baseURL), { signal });
+      const response = await fetch(new URL(path, baseURL), { headers: ownerHeaders(baseURL), signal });
       await response.arrayBuffer();
     });
   }
@@ -212,9 +218,15 @@ test.beforeAll(async () => {
   // The console's start gets what is left, minus a margin, so a stuck start fails with its own message.
   const deadline = Date.now() + 230_000;
   freshSuiteDir("live");
+  forgetOwner(baseURL);
   gemini = await startFakeGemini(GEMINI_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
   await startConsole(deadline - Date.now());
+});
+
+// The owner's session, which `beforeAll` made when it claimed the console.
+test.beforeEach(async ({ context }) => {
+  await signInAsOwner(context, baseURL);
 });
 
 test.afterAll(async () => {

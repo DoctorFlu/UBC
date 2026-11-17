@@ -33,6 +33,7 @@ import type {
   ChainView,
   ConsoleNetwork,
   ConsoleSnapshot,
+  ConsoleWakeStatus,
   ContractInfo,
   ContractKind,
   FeedHealth,
@@ -50,6 +51,8 @@ import type { AgentPlanView } from "@/lib/hedge/types";
 import { buildChainView } from "@/lib/live/chain-view";
 import { OWNER_REQUEST_MAX_AGE_MS } from "@/lib/owner-request";
 
+import { Accounts } from "./accounts/accounts";
+import type { Mandate } from "./accounts/store";
 import type { ConsoleConfig } from "./config";
 import type { Database } from "./db";
 import { type ChainClient, LogScanner, blockTimestamps, findDeployBlock } from "./ingest/chain-reader";
@@ -63,14 +66,17 @@ import {
   type StoredPairing,
   type StoredPlan,
 } from "./store/offchain";
+import { ConsoleWake, type LadderSource, NO_WAKE_TARGET_REASON, wakeOffStatus } from "./wake";
 import { type SettlementRow, SettlementStore } from "./store/settlements";
 import { type SignedRow, type VenueOrderRow, VenueOrderStore } from "./store/venue-orders";
-import { ConsoleWake, type LadderSource } from "./wake";
 
 export interface Logger {
   info: (message: string) => void;
   warn: (message: string) => void;
 }
+
+/** What the service needs to know about a mandate: whose records, and whether it follows the chain. */
+export type MandateScope = Pick<Mandate, "id" | "deployment">;
 
 const consoleLogger: Logger = {
   info: (message) => console.info(`[console] ${message}`),
@@ -115,10 +121,15 @@ const STREAM_STALE_MS = 30_000;
  * It survives restarts: the event cache and the scan cursor are in SQLite, so a restart rebuilds the
  * same state and reads only the blocks it missed. A devchain restarted at the same address is detected
  * by the deploy block's hash and starts from scratch.
+ *
+ * Every view is of one mandate (docs/accounts.md): `snapshot`, `subscribe` and the offchain records take
+ * the mandate they are for. The chain this service follows is the server's configured contract, which
+ * only the mandate with deployment `env` sees; any other mandate sees no contract yet.
  */
 export class ConsoleService {
   readonly events: EventStore;
   readonly offchain: OffchainStore;
+  readonly accounts: Accounts;
   /** What filled positions paid at settlement, as the executor signed it (#92). */
   readonly settlements: SettlementStore;
   /** The executor's venue order journal and the venue it announced (#93). */
@@ -141,8 +152,13 @@ export class ConsoleService {
   private lastStreamAt = 0;
 
   private seq = 0;
-  private snapshotCache: ConsoleSnapshot | null = null;
-  private readonly listeners = new Set<(snapshot: ConsoleSnapshot) => void>();
+  /** Each mandate's latest snapshot, until the next change. */
+  private readonly snapshotCache = new Map<string, ConsoleSnapshot>();
+  /** The live streams, by mandate: each one hears only its own mandate's snapshots. */
+  private readonly listeners = new Map<
+    string,
+    { mandate: MandateScope; listeners: Set<(snapshot: ConsoleSnapshot) => void> }
+  >();
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPushAt = 0;
 
@@ -166,6 +182,10 @@ export class ConsoleService {
   ) {
     this.events = new EventStore(db);
     this.offchain = new OffchainStore(db);
+    this.accounts = new Accounts(config.accounts, db, {
+      dataDir: config.dataDir,
+      log: (message) => this.log.info(message),
+    });
     this.settlements = new SettlementStore(db);
     this.venueOrders = new VenueOrderStore(db);
     this.stream = new StreamReceiver(config.streamSecurityToken);
@@ -177,7 +197,8 @@ export class ConsoleService {
           logger: this.log,
         })
       : null;
-    this.wake = new ConsoleWake(config, db, {
+    // One webhook, from the settings, for the mandate on the server's contract (docs/accounts.md).
+    this.wake = new ConsoleWake(config, db, this.accounts.store.envMandate().id, {
       logger: this.log,
       onChange: () => {
         this.changed();
@@ -439,20 +460,28 @@ export class ConsoleService {
     this.changed();
   }
 
-  /** The agent's MCP server called the console: a Bot run is in progress. */
-  noteAgentActivity(): void {
-    this.wake.noteAgentActivity();
+  /** An agent of `mandate` called the console through its MCP server: that mandate's Bot run is in progress. */
+  noteAgentActivity(mandate: MandateScope): void {
+    if (mandate.id === this.wake.mandateId) this.wake.noteAgentActivity();
   }
 
-  /** What a price check reads: the agent's latest plans, the holdings and the intents. */
+  /** The wake-up status `mandate`'s owners see: off for every mandate the console sends none for. */
+  private wakeStatus(mandate: MandateScope): ConsoleWakeStatus {
+    return mandate.id === this.wake.mandateId
+      ? this.wake.status()
+      : wakeOffStatus(this.config, NO_WAKE_TARGET_REASON);
+  }
+
+  /** What a price check reads: the wake-up mandate's latest plans and holdings, and the intents. */
   private priceInputs() {
-    const plans = this.offchain.latestPlans().flatMap((stored) => {
+    const mandateId = this.wake.mandateId;
+    const plans = this.offchain.latestPlans(mandateId).flatMap((stored) => {
       const view = toPlanView(stored);
       return view ? [view] : [];
     });
     const head = this.head;
     const intents = head ? buildChainView(this.state, head, this.details).intents : [];
-    return { plans, holdings: this.offchain.holdings().holdings, intents };
+    return { plans, holdings: this.offchain.holdings(mandateId).holdings, intents };
   }
 
   /**
@@ -586,31 +615,57 @@ export class ConsoleService {
     const news = quiet(next) !== quiet(this.feed);
     this.feed = next;
     if (news || Date.now() - this.lastPushAt >= QUIET_PUSH_MS) this.changed();
-    else this.snapshotCache = null;
+    else this.snapshotCache.clear();
   }
 
-  /** Marks the state changed and tells listeners soon after; bursts of changes become one message. */
+  /**
+   * Marks the state changed and tells listeners soon after; bursts of changes become one message. Every
+   * mandate's listeners hear it, each with a snapshot of their own mandate.
+   */
   changed(): void {
-    this.snapshotCache = null;
+    this.snapshotCache.clear();
     if (this.notifyTimer || this.listeners.size === 0) return;
     this.notifyTimer = setTimeout(() => {
       this.notifyTimer = null;
       this.lastPushAt = Date.now();
-      const snapshot = this.snapshot();
-      for (const listener of this.listeners) listener(snapshot);
+      for (const { mandate, listeners } of this.listeners.values()) {
+        const snapshot = this.snapshot(mandate);
+        for (const listener of listeners) listener(snapshot);
+      }
     }, 20);
   }
 
-  subscribe(listener: (snapshot: ConsoleSnapshot) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  /** Listens for one mandate's snapshots. */
+  subscribe(mandate: MandateScope, listener: (snapshot: ConsoleSnapshot) => void): () => void {
+    const group = this.listeners.get(mandate.id) ?? { mandate, listeners: new Set() };
+    group.listeners.add(listener);
+    this.listeners.set(mandate.id, group);
+    return () => {
+      group.listeners.delete(listener);
+      if (group.listeners.size === 0 && this.listeners.get(mandate.id) === group) {
+        this.listeners.delete(mandate.id);
+      }
+    };
   }
 
-  snapshot(): ConsoleSnapshot {
-    if (this.snapshotCache) return this.snapshotCache;
+  /** The chain feed's health, for the public health check: says nothing about any mandate. */
+  get feedHealth(): FeedHealth {
+    return this.feed.health;
+  }
+
+  /** Whether this mandate follows the contract this service reads. */
+  private follows(mandate: MandateScope): boolean {
+    return mandate.deployment === "env";
+  }
+
+  /** One mandate's state, as every view renders it. */
+  snapshot(mandate: MandateScope): ConsoleSnapshot {
+    const cached = this.snapshotCache.get(mandate.id);
+    if (cached) return cached;
     this.seq += 1;
-    const session = this.session;
-    const lastEvent = this.state.events.at(-1);
+    const follows = this.follows(mandate);
+    const session = follows ? this.session : null;
+    const lastEvent = follows ? this.state.events.at(-1) : undefined;
     const contract: ContractInfo | null = session
       ? {
           address: session.deployment.address,
@@ -620,34 +675,44 @@ export class ConsoleService {
           recordsContextHash: this.recordsContextHash,
         }
       : null;
-    const pairing = this.offchain.latestPairing();
-    const holdings = this.offchain.holdings();
-    const plans = this.offchain.latestPlans().flatMap((stored) => {
+    const pairing = this.offchain.latestPairing(mandate.id);
+    const holdings = this.offchain.holdings(mandate.id);
+    const plans = this.offchain.latestPlans(mandate.id).flatMap((stored) => {
       const view = toPlanView(stored);
       return view ? [view] : [];
     });
-    this.snapshotCache = {
+    const snapshot: ConsoleSnapshot = {
       seq: this.seq,
-      network: this.network,
-      feed: {
-        ...this.feed,
-        lastEventAt: lastEvent ? new Date(lastEvent.blockTimestamp * 1000).toISOString() : null,
-      },
+      network: follows ? this.network : UNCONFIGURED_NETWORK,
+      feed: follows
+        ? {
+            ...this.feed,
+            lastEventAt: lastEvent ? new Date(lastEvent.blockTimestamp * 1000).toISOString() : null,
+          }
+        : {
+            source: this.config.eventSource,
+            health: "unconfigured",
+            detail: "This mandate has no Policy contract yet.",
+            lastEventAt: null,
+            lastSyncAt: null,
+            syncedBlock: null,
+          },
       contract,
-      chain: session && this.head ? this.chainView(this.head) : null,
+      chain: session && this.head ? this.chainView(mandate, this.head) : null,
       offchain: {
         holdings: holdings.holdings,
         holdingsUpdatedAt: holdings.updatedAt,
-        pairing: pairing ? this.toPairingView(pairing) : null,
-        changeRequests: this.offchain.changeRequests(),
+        pairing: pairing ? this.toPairingView(pairing, follows) : null,
+        changeRequests: this.offchain.changeRequests(mandate.id),
         plans,
-        signalPayments: this.offchain.signalPayments(),
-        signalBudget: this.offchain.signalBudget(),
+        signalPayments: this.offchain.signalPayments(mandate.id),
+        signalBudget: this.offchain.signalBudget(mandate.id),
       },
       mcpPublicUrl: this.config.mcpPublicUrl,
-      wake: this.wake.status(),
+      wake: this.wakeStatus(mandate),
     };
-    return this.snapshotCache;
+    this.snapshotCache.set(mandate.id, snapshot);
+    return snapshot;
   }
 
   /**
@@ -655,18 +720,18 @@ export class ConsoleService {
    * carried out, which a newer plan may have replaced on the hedge page. Null when none is stored or it
    * cannot be read as a plan.
    */
-  planView(planId: string): AgentPlanView | null {
-    const stored = this.offchain.plan(planId);
+  planView(mandate: MandateScope, planId: string): AgentPlanView | null {
+    const stored = this.offchain.plan(mandate.id, planId);
     return stored ? toPlanView(stored) : null;
   }
 
   /** The pairing an agent announced from this address, as the console shows it, or null. */
-  pairingView(agentAddress: string): PairingView | null {
-    const pairing = this.offchain.pairing(agentAddress);
-    return pairing ? this.toPairingView(pairing) : null;
+  pairingView(mandate: MandateScope, agentAddress: string): PairingView | null {
+    const pairing = this.offchain.pairing(mandate.id, agentAddress);
+    return pairing ? this.toPairingView(pairing, this.follows(mandate)) : null;
   }
 
-  private toPairingView(pairing: StoredPairing): PairingView {
+  private toPairingView(pairing: StoredPairing, follows: boolean): PairingView {
     return {
       agentAddress: pairing.agentAddress,
       agentName: pairing.agentName,
@@ -674,20 +739,20 @@ export class ConsoleService {
       status: pairing.status,
       announcedAt: pairing.announcedAt,
       confirmedAt: pairing.confirmedAt,
-      isContractAgent: this.roles ? isAddressEqual(this.roles.agent, pairing.agentAddress) : false,
+      isContractAgent: follows && this.roles ? isAddressEqual(this.roles.agent, pairing.agentAddress) : false,
     };
   }
 
-  private chainView(head: { blockNumber: number; timestamp: number }): ChainView {
+  private chainView(mandate: MandateScope, head: { blockNumber: number; timestamp: number }): ChainView {
     const view = buildChainView(this.state, head, this.details);
     const intents = this.withListings(view.intents);
     return {
       ...view,
       intents,
-      sealed: this.sealedReasons(intents),
-      settlements: this.settlementViews(),
-      venueOrders: this.venueOrderViews(),
-      venue: this.venueView(),
+      sealed: this.sealedReasons(mandate, intents),
+      settlements: this.settlementViews(mandate),
+      venueOrders: this.venueOrderViews(mandate),
+      venue: this.venueView(mandate),
     };
   }
 
@@ -696,9 +761,12 @@ export class ConsoleService {
     this.changed();
   }
 
-  /** The latest verified version of each venue order of the live deployment. */
-  private venueOrderViews(): Record<number, VenueOrderView> {
-    const session = this.session;
+  /**
+   * The latest verified version of each venue order of the deployment `mandate` follows: none for a
+   * mandate without a contract, like settlements.
+   */
+  private venueOrderViews(mandate: MandateScope): Record<number, VenueOrderView> {
+    const session = this.follows(mandate) ? this.session : null;
     const views: Record<number, VenueOrderView> = {};
     if (!session) return views;
     for (const row of this.venueOrders.orders(session.id)) {
@@ -708,9 +776,12 @@ export class ConsoleService {
     return views;
   }
 
-  /** The venue the executor last announced for the live deployment, when it still verifies. */
-  private venueView(): ExecutorVenueView | null {
-    const session = this.session;
+  /**
+   * The venue the executor last announced for the deployment `mandate` follows, when it still verifies:
+   * none for a mandate without a contract.
+   */
+  private venueView(mandate: MandateScope): ExecutorVenueView | null {
+    const session = this.follows(mandate) ? this.session : null;
     const row = session ? this.venueOrders.venue(session.id) : null;
     return row ? checkExecutorVenue(row) : null;
   }
@@ -719,17 +790,20 @@ export class ConsoleService {
    * Each stored settlement of the live deployment, checked the way decision contexts are: the document
    * must still hash to the hash it was stored under. Its signature was checked when it was stored.
    */
-  private settlementViews(): Record<number, SettlementView> {
-    const session = this.session;
+  private settlementViews(mandate: MandateScope): Record<number, SettlementView> {
+    const session = this.follows(mandate) ? this.session : null;
     const views: Record<number, SettlementView> = {};
     if (!session) return views;
     for (const row of this.settlements.list(session.id)) views[row.intentId] = checkSettlement(row);
     return views;
   }
 
-  /** The verified settlements of the live deployment, newest first, as the agent API serves them. */
-  verifiedSettlements(): StoredSettlement[] {
-    const session = this.session;
+  /**
+   * The verified settlements of the deployment `mandate` follows, newest first, as the agent API serves
+   * them: none for a mandate without a contract.
+   */
+  verifiedSettlements(mandate: MandateScope): StoredSettlement[] {
+    const session = this.follows(mandate) ? this.session : null;
     if (!session) return [];
     return this.settlements.list(session.id).flatMap((row) => {
       const view = checkSettlement(row);
@@ -754,8 +828,10 @@ export class ConsoleService {
    */
   settlementStored(eventTicker: string): void {
     this.changed();
-    const deploymentId = this.deploymentId;
-    const intents = this.snapshot().chain?.intents;
+    // The settlement is of the server's contract: the mandate that follows it is the wake-up mandate.
+    const mandate = this.accounts.store.envMandate();
+    const deploymentId = this.deploymentIdFor(mandate);
+    const intents = this.snapshot(mandate).chain?.intents;
     if (!deploymentId || !intents) return;
     const prefix = `GEMI-${eventTicker}-`;
     const filledBuys = intents
@@ -771,7 +847,7 @@ export class ConsoleService {
       deploymentId,
       eventTicker,
       filledBuys,
-      settlements: this.verifiedSettlements().map((settlement) => settlement.document),
+      settlements: this.verifiedSettlements(mandate).map((settlement) => settlement.document),
     });
   }
 
@@ -800,10 +876,10 @@ export class ConsoleService {
    * contract records one, otherwise the agent's offchain link (PUT intents/:id/context) when its
    * transaction is the intent's proposal. Either way the stored document is checked with `verifyContext`.
    */
-  private sealedReasons(intents: readonly IntentView[]): Record<number, SealedReason> {
+  private sealedReasons(mandate: MandateScope, intents: readonly IntentView[]): Record<number, SealedReason> {
     const session = this.session;
     const links = session
-      ? this.offchain.intentContextLinks(session.id)
+      ? this.offchain.intentContextLinks(mandate.id, session.id)
       : new Map<number, StoredIntentContextLink>();
     const claims: { id: number; hash: Hex; source: SealedSource }[] = [];
     for (const intent of intents) {
@@ -816,7 +892,10 @@ export class ConsoleService {
         claims.push({ id: intent.id, hash: link.hash, source: "offchain" });
       }
     }
-    const stored = this.offchain.contexts(claims.map((claim) => claim.hash));
+    const stored = this.offchain.contexts(
+      mandate.id,
+      claims.map((claim) => claim.hash),
+    );
     const sealed: Record<number, SealedReason> = {};
     for (const { id, hash, source } of claims) {
       const context = stored.get(hash.toLowerCase());
@@ -839,11 +918,26 @@ export class ConsoleService {
     return sealed;
   }
 
-  // ---------------------------------------------------------------- intent context links
+  // ---------------------------------------------------------------- the chain, per mandate
 
-  /** The live deployment's id, for records that belong to one deployment; null while there is none. */
-  get deploymentId(): string | null {
-    return this.session?.id ?? null;
+  /**
+   * The contract this mandate follows, while the service is reading it: its deployment id (for records
+   * that belong to one deployment), read-only client, roles and chain. Null for a mandate with no
+   * contract, and while the chain is unreachable.
+   */
+  async chainFor(
+    mandate: MandateScope,
+  ): Promise<{ deploymentId: string; policy: PolicyClient; roles: Roles; chainId: number } | null> {
+    if (!this.follows(mandate)) return null;
+    const session = this.session;
+    const roles = await this.currentRoles();
+    if (!session || !roles || this.session !== session) return null;
+    return { deploymentId: session.id, policy: session.policy, roles, chainId: session.deployment.chain.id };
+  }
+
+  /** The deployment id of the contract this mandate follows, without reading the chain; null when none. */
+  deploymentIdFor(mandate: MandateScope): string | null {
+    return this.follows(mandate) ? (this.session?.id ?? null) : null;
   }
 }
 

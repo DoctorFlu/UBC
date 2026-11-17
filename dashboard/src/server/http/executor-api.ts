@@ -61,7 +61,9 @@ async function handlePut(
   }
 
   const deployment = service.deployment;
-  const deploymentId = service.deploymentId;
+  // Settlements belong to the contract the server follows, which only the first workspace's mandate sees.
+  const mandate = service.accounts.store.envMandate();
+  const deploymentId = service.deploymentIdFor(mandate);
   const roles = await service.currentRoles();
   if (!deployment || !deploymentId || !roles) {
     return apiError(
@@ -93,7 +95,7 @@ async function handlePut(
     );
   }
 
-  const intent = service.snapshot().chain?.intents.find((candidate) => candidate.id === intentId);
+  const intent = service.snapshot(mandate).chain?.intents.find((candidate) => candidate.id === intentId);
   if (!intent || intent.status === "approved") {
     // The executor settles days after the fill, but a test can be quicker than the console's next poll.
     return apiError(

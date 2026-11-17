@@ -21,6 +21,7 @@ export * from "./reducer";
 export * from "./settlement";
 export * from "./venue-order";
 export * from "./signal-api";
+export * from "./tenancy";
 export * from "./types";
 export * from "./units";
 export * from "./wake";

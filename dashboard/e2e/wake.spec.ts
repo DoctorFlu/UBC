@@ -16,7 +16,15 @@ import {
   startTestChain,
   suitePaths,
 } from "./support/chain";
-import { E2E_SERVICE_TOKEN, agentApi, snapshot, waitForSnapshot } from "./support/console";
+import {
+  E2E_SERVICE_TOKEN,
+  agentApi,
+  ownerHeaders,
+  snapshot,
+  waitForConsole,
+  waitForSnapshot,
+} from "./support/console";
+import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
 import { type FakeGemini, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 import { type FakeWebhook, startFakeWebhook } from "./support/fake-webhook";
 
@@ -75,9 +83,12 @@ async function startConsole(): Promise<void> {
       output += chunk;
     });
   }
+  await waitForConsole(baseURL);
+  // The first start claims the first workspace on /claim, as its owner would; a restart keeps the session.
+  await claimOwnerOnce(baseURL, paths.dataDir);
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
   for (const path of ["/", "/setup", "/activity"]) {
-    const response = await fetch(new URL(path, baseURL));
+    const response = await fetch(new URL(path, baseURL), { headers: ownerHeaders(baseURL) });
     await response.arrayBuffer();
   }
 }
@@ -121,12 +132,18 @@ async function open(page: Page, path: string): Promise<void> {
 test.beforeAll(async () => {
   test.setTimeout(240_000);
   freshSuiteDir("wake");
+  forgetOwner(baseURL);
   gemini = await startFakeGemini(GEMINI_PORT);
   webhook = await startFakeWebhook(WEBHOOK_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
   // Before the console first reads the chain: history, which must wake nothing.
   await chain.user.setPolicy(DEMO_POLICY);
   await startConsole();
+});
+
+// The owner's session, which `beforeAll` made when it claimed the console.
+test.beforeEach(async ({ context }) => {
+  await signInAsOwner(context, baseURL);
 });
 
 test.afterAll(async () => {

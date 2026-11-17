@@ -30,10 +30,12 @@ function scorecardOf(chain: ChainView): PublicScorecard {
 /**
  * The contract's agent, named as it announced itself when that announcement came from the same key.
  * Nothing caller-chosen reaches a store: an address that is not the contract's agent is a 404 before any
- * other work.
+ * other work. The scorecard is of the server's own contract, whose record is public onchain; no other
+ * mandate has one yet (docs/accounts.md).
  */
 function scorecardAgent(address: string) {
-  const snapshot = getConsoleService().snapshot();
+  const service = getConsoleService();
+  const snapshot = service.snapshot(service.accounts.store.envMandate());
   const agent = snapshot.contract?.roles?.agent;
   const known =
     agent !== undefined && isAddress(address, { strict: false }) && isAddressEqual(address, agent);

@@ -32,7 +32,7 @@ export function line(r: AttackRecord): string {
   const tag = r.verdict === "SKIPPED" ? "skip" : r.verdict;
   const flag = r.asExpected ? "" : "  << UNEXPECTED (expected " + r.expectedVerdict + ")";
   const txs = r.txHashes.length === 0 ? "" : ` [tx ${r.txHashes.map(shortHash).join(", ")}]`;
-  return `${`[${tag}]`.padEnd(10)}${r.surface.padEnd(6)}${r.id}: ${r.actual}${txs}${flag}`;
+  return `${`[${tag}]`.padEnd(10)}${r.surface.padEnd(8)}${r.id}: ${r.actual}${txs}${flag}`;
 }
 
 export function summaryLine(report: RunReport): string {

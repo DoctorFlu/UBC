@@ -4,6 +4,7 @@ import type { Logger } from "./logger";
 import type { CallDeadline } from "./mcp/deadline";
 import type { ScopedServices } from "./mcp/scoped-services";
 import { createServices, type Services } from "./services";
+import { SERVER_AGENT, type AgentIdentity } from "./tenancy/agents";
 
 export interface Clock {
   now(): Date;
@@ -11,11 +12,16 @@ export interface Clock {
 
 export const systemClock: Clock = { now: () => new Date() };
 
-/** Process-wide dependencies, built once at startup. */
+/**
+ * The dependencies a call runs with. The server builds one at startup for its own agent, and one per
+ * agent a token resolves to (`tenancy/agents.ts`), each with that agent's services.
+ */
 export interface AppContext extends Services {
   readonly config: Config;
   readonly logger: Logger;
   readonly clock: Clock;
+  /** The agent the call acts for. */
+  readonly agent: AgentIdentity;
 }
 
 /**
@@ -44,5 +50,5 @@ export function createAppContext(
   // Built from the final console and payments, so a test that swaps either gets a matching reporter.
   const paymentReports =
     "paymentReports" in services ? services.paymentReports : createPaymentReporter(merged, logger, clock);
-  return { ...merged, paymentReports, config, logger, clock };
+  return { ...merged, paymentReports, config, logger, clock, agent: SERVER_AGENT };
 }

@@ -1,0 +1,385 @@
+{
+  "buy_signal": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "asset": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9]{2,10}$",
+        "description": "Underlying, for example BTC"
+      },
+      "eventTicker": {
+        "description": "Gemini event ticker of the ladder, for example BTC2611202200",
+        "type": "string"
+      },
+      "expiry": {
+        "description": "ISO 8601 settlement time of the ladder, for example 2026-11-20T22:00:00Z",
+        "type": "string"
+      },
+      "horizon": {
+        "description": "Soonest open ladder of this kind",
+        "type": "string",
+        "enum": ["hourly", "daily", "weekly", "month-end"]
+      }
+    },
+    "required": ["asset"]
+  },
+  "execute_plan": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "description": "The planId plan_hedge returned"
+      },
+      "reason": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000,
+        "description": "Why you are doing this, in one or two sentences for the owner. It is sealed into the intent's decision context"
+      },
+      "signalReceiptIds": {
+        "default": [],
+        "description": "Receipt ids of paid signals that informed this decision, from buy_signal",
+        "maxItems": 10,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "required": ["planId", "reason"]
+  },
+  "get_activity": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "limit": {
+        "default": 10,
+        "description": "How many intents to show",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 25
+      }
+    }
+  },
+  "get_intent": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "intentId": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "The intentId a proposal returned"
+      }
+    },
+    "required": ["intentId"]
+  },
+  "get_ladder": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "asset": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9]{2,10}$",
+        "description": "Crypto asset symbol, e.g. BTC, ETH, SOL"
+      },
+      "horizon": {
+        "default": "weekly",
+        "description": "Soonest open ladder of this kind",
+        "type": "string",
+        "enum": ["hourly", "daily", "weekly", "month-end"]
+      },
+      "eventTicker": {
+        "description": "A specific ladder event, overriding horizon",
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._-]{1,80}$"
+      }
+    },
+    "required": ["asset"]
+  },
+  "get_policy": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {}
+  },
+  "get_portfolio": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {}
+  },
+  "get_setup_state": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {}
+  },
+  "list_markets": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "category": {
+        "description": "Only this mandate category",
+        "type": "string",
+        "enum": ["Crypto", "Sports", "Economics", "Commodities", "Weather", "Politics", "Other"]
+      },
+      "search": {
+        "description": "Words in the event title",
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 60
+      },
+      "eventTicker": {
+        "description": "Show this event's contracts instead of a list",
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._-]{1,80}$"
+      },
+      "limit": {
+        "default": 15,
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 30
+      }
+    }
+  },
+  "ping": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {}
+  },
+  "plan_hedge": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "asset": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9]{2,10}$",
+        "description": "Crypto asset symbol, e.g. BTC, ETH, SOL"
+      },
+      "quantity": {
+        "description": "Units to protect, e.g. '0.05'. Default: the owner's holding of this asset in the console",
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d{0,11})(\\.\\d{1,8})?$"
+      },
+      "floorCents": {
+        "description": "Protect down to this price, in cents",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      },
+      "dropPercent": {
+        "description": "Or protect down to spot minus this percent",
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "exclusiveMaximum": 100
+      },
+      "ceilingCents": {
+        "description": "Where protection starts; default spot",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      },
+      "maxCostCents": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991,
+        "description": "The most the owner wants to spend on this hedge, in cents"
+      },
+      "horizon": {
+        "default": "weekly",
+        "description": "Ladder expiry horizon",
+        "type": "string",
+        "enum": ["hourly", "daily", "weekly", "month-end"]
+      },
+      "eventTicker": {
+        "description": "A specific ladder, overriding horizon",
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._-]{1,80}$"
+      },
+      "slippageCents": {
+        "default": 0,
+        "description": "Cents added to each NO price for the limit",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10
+      },
+      "signalReceiptId": {
+        "description": "receiptId from buy_signal for this same ladder. The plan then buys cheap rungs first and flags expensive ones, and every order cites the receipt",
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "requestText": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000,
+        "description": "The owner's request in their own words; it is sealed into each intent's decision context"
+      }
+    },
+    "required": ["asset", "maxCostCents", "requestText"]
+  },
+  "propose_trade": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "market": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "description": "Gemini instrumentSymbol exactly as list_markets or get_ladder returned it, e.g. GEMI-BTC2611202200-HI65000"
+      },
+      "outcome": {
+        "type": "string",
+        "enum": ["YES", "NO"],
+        "description": "Which side of the contract. Hedges buy NO on 'at or above' contracts"
+      },
+      "side": {
+        "default": "buy",
+        "description": "buy (default) or sell",
+        "type": "string",
+        "enum": ["buy", "sell"]
+      },
+      "amountCents": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000000,
+        "description": "Most to spend (buy) or the size (sell), in integer US cents: 1000 is $10.00"
+      },
+      "limitPrice": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 99,
+        "description": "Limit price in cents per $1 contract, 1 to 99"
+      },
+      "reason": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000,
+        "description": "Why you are doing this, in one or two sentences for the owner. It is sealed into the intent's decision context"
+      },
+      "requestText": {
+        "default": "",
+        "description": "The owner's request in their own words",
+        "type": "string",
+        "maxLength": 2000
+      },
+      "signalReceiptIds": {
+        "default": [],
+        "description": "Receipt ids of paid signals that informed this decision, from buy_signal",
+        "maxItems": 10,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "required": ["market", "outcome", "amountCents", "limitPrice", "reason"]
+  },
+  "request_pairing": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "agentName": {
+        "default": "Grok Bot",
+        "description": "How the console should name this agent",
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60
+      }
+    }
+  },
+  "request_policy_change": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "budgetCents": {
+        "description": "Lifetime budget for buys, in integer cents",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000000000
+      },
+      "maxTradeCents": {
+        "description": "Largest single trade, in integer cents",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000000000
+      },
+      "allowedCategories": {
+        "description": "The full list of categories to allow, e.g. ['Crypto', 'Economics']",
+        "maxItems": 7,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["Crypto", "Sports", "Economics", "Commodities", "Weather", "Politics", "Other"]
+        }
+      },
+      "approvalAboveCents": {
+        "description": "Trades above this wait for the owner; 0 turns approvals off, in integer cents",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000000000
+      },
+      "dailyLossCents": {
+        "description": "Realized loss per UTC day that stops trading; 0 turns it off, in integer cents",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000000000
+      },
+      "reason": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000,
+        "description": "Why, in the owner's terms: shown to the owner next to the diff"
+      }
+    },
+    "required": ["reason"],
+    "additionalProperties": false
+  },
+  "simulate_trade": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "market": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "description": "Gemini instrumentSymbol exactly as list_markets or get_ladder returned it, e.g. GEMI-BTC2611202200-HI65000"
+      },
+      "outcome": {
+        "type": "string",
+        "enum": ["YES", "NO"],
+        "description": "Which side of the contract. Hedges buy NO on 'at or above' contracts"
+      },
+      "side": {
+        "default": "buy",
+        "description": "buy (default) or sell",
+        "type": "string",
+        "enum": ["buy", "sell"]
+      },
+      "amountCents": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000000,
+        "description": "Most to spend (buy) or the size (sell), in integer US cents: 1000 is $10.00"
+      },
+      "limitPrice": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 99,
+        "description": "Limit price in cents per $1 contract, 1 to 99"
+      }
+    },
+    "required": ["market", "outcome", "amountCents", "limitPrice"]
+  },
+  "whoami": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {}
+  }
+}

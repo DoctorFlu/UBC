@@ -16,6 +16,7 @@ import {
 import type { ChainAttempt } from "./chain";
 import { HEDGE_LADDER_TICKER, SPOT_CENTS } from "./fixtures";
 import { floodListingChecks, LISTING_CAP_PER_MINUTE } from "./listing-flood";
+import { tenancyAttacks } from "./tenancy-attacks";
 import { floodWakes, REJECTION_DEBOUNCE_MS } from "./wake-flood";
 import { field, type ToolResult } from "./mcp";
 import type { Amounts, Attack, AttackContext, Observation } from "./types";
@@ -647,6 +648,7 @@ export function attacks(amounts: Amounts): Attack[] {
         };
       },
     },
+    ...tenancyAttacks(amounts),
     {
       id: "mcp.repeat-and-overlap-runs",
       name: "Repeated, overlapping and stale hedge runs (issue #88)",

@@ -11,6 +11,8 @@ import { PolicyClient, type PolicyClientOptions } from "./client";
 import { deploymentFileSchema, type DeploymentFile } from "./deployment";
 import { addressSchema } from "./types";
 
+export { clientKey, isPrivateAddress } from "./client-key";
+
 /**
  * A path relative to this file. Built with `node:path` rather than `new URL(relative, import.meta.url)`,
  * which bundlers (the dashboard's Turbopack build) read as an asset to copy into the build, while the

@@ -4,8 +4,10 @@ import { join } from "node:path";
 
 import { devAccount } from "@mandate/devchain";
 import {
+  AGENT_ID_HEADER,
   CONSOLE_EXECUTOR_ROUTES,
   Category,
+  ENV_AGENT_ID,
   type Settlement,
   consoleErrorSchema,
   hashSettlement,
@@ -16,7 +18,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
-import { type ConsoleConfig, readWakeConfig } from "../config";
+import { envMandate, signUpWorkspace, workspaceAgent } from "../../../test/support/accounts";
+import { readWakeConfig, testConsoleConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { getSettlements } from "./agent-api";
@@ -32,23 +35,22 @@ let filledId: number;
 let heldId: number;
 
 function makeService(): ConsoleService {
-  const config: ConsoleConfig = {
-    dataDir,
-    eventSource: "rpc",
+  const config = testConsoleConfig(dataDir, {
     pollIntervalMs: 50,
     serviceToken: TOKEN,
-    streamSecurityToken: null,
-    publicUrl: "http://console.test",
-    mcpPublicUrl: null,
     wake: readWakeConfig({}),
-  };
+  });
   return new ConsoleService(config, openDatabase(dataDir), { env: chain.env, logger: silent });
 }
 
 async function untilIntent(id: number, status: string): Promise<void> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    if (service.snapshot().chain?.intents.find((intent) => intent.id === id)?.status === status) return;
+    if (
+      service.snapshot(envMandate(service)).chain?.intents.find((intent) => intent.id === id)?.status ===
+      status
+    )
+      return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`intent ${String(id)} never became ${status}`);
@@ -198,14 +200,14 @@ describe("PUT /api/executor/v1/settlements/:intentId", () => {
     );
     await expectError(await put(filledId, other), 409, "conflict");
 
-    const view = service.snapshot().chain?.settlements[filledId];
+    const view = service.snapshot(envMandate(service)).chain?.settlements[filledId];
     expect(view).toMatchObject({ status: "verified", hash: stored.hash, document: { payoutCents: 4_000 } });
   });
 
   it("serves verified settlements to the agent, and flags a stored document that was edited", async () => {
     const listed = await getSettlements(
       new Request("http://console.test/api/agent/v1/settlements", {
-        headers: { authorization: `Bearer ${TOKEN}` },
+        headers: { authorization: `Bearer ${TOKEN}`, [AGENT_ID_HEADER]: ENV_AGENT_ID },
       }),
       service,
     );
@@ -213,8 +215,20 @@ describe("PUT /api/executor/v1/settlements/:intentId", () => {
     const { settlements } = settlementsResponseSchema.parse(await listed.json());
     expect(settlements.map((settlement) => settlement.intentId)).toEqual([filledId]);
 
+    // Another workspace's agent and members see none of them: they belong to the server's contract.
+    const other = workspaceAgent(service, signUpWorkspace(service, "Bob"));
+    const theirs = await getSettlements(
+      new Request("http://console.test/api/agent/v1/settlements", {
+        headers: { authorization: `Bearer ${TOKEN}`, [AGENT_ID_HEADER]: other.agent.id },
+      }),
+      service,
+    );
+    expect(settlementsResponseSchema.parse(await theirs.json()).settlements).toEqual([]);
+    expect(service.snapshot(other.mandate).chain).toBeNull();
+    expect(service.verifiedSettlements(other.mandate)).toEqual([]);
+
     // Someone with access to the console's database rewrites the payout.
-    const deploymentId = service.deploymentId ?? "";
+    const deploymentId = service.deploymentIdFor(envMandate(service)) ?? "";
     const row = service.settlements.get(deploymentId, filledId);
     if (row === null) throw new Error("the settlement was not stored");
     openDatabase(dataDir)
@@ -224,11 +238,11 @@ describe("PUT /api/executor/v1/settlements/:intentId", () => {
         filledId,
       );
     service.changed();
-    expect(service.snapshot().chain?.settlements[filledId]).toEqual({
+    expect(service.snapshot(envMandate(service)).chain?.settlements[filledId]).toEqual({
       status: "tampered",
       hash: row.hash,
       storedAt: row.storedAt,
     });
-    expect(service.verifiedSettlements()).toEqual([]);
+    expect(service.verifiedSettlements(envMandate(service))).toEqual([]);
   });
 });

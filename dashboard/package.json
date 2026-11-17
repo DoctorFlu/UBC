@@ -10,6 +10,7 @@
     "start": "next start",
     "typegen": "next typegen",
     "typecheck": "npm run typegen && tsc --noEmit -p tsconfig.typecheck.json",
+    "admin": "tsx --import ./scripts/server-only.mjs scripts/admin.ts",
     "e2e": "playwright test --project=smoke && E2E_SUITE=live playwright test --project=live && npm run e2e:prod",
     "e2e:prod": "E2E_SERVER=prod playwright test --project=prod",
     "screenshots": "E2E_SERVER=prod playwright test --project=screenshots"
@@ -20,6 +21,8 @@
     "@mandate/planner": "*",
     "@mandate/shared": "*",
     "@mandate/streams": "*",
+    "@simplewebauthn/browser": "14.0.0",
+    "@simplewebauthn/server": "14.0.3",
     "@tanstack/react-query": "^5.107.1",
     "@ui-sdk/core": "0.1.0-beta.6",
     "@ui-sdk/react": "0.1.0-beta.6",
@@ -36,6 +39,7 @@
     "@mandate/devchain": "*",
     "@playwright/test": "^1.65.1",
     "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0"
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "0.28.2"
   }
 }

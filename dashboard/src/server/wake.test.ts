@@ -8,31 +8,27 @@ import { createTestClient, http } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { recordedLadder, recordedPlanRequest } from "../../e2e/support/fake-gemini";
+import { envMandate, envSnapshot, signUpWorkspace, workspaceAgent } from "../../test/support/accounts";
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../test/support/devchain";
-import { type ConsoleConfig, readWakeConfig } from "./config";
+import { type ConsoleConfig, readWakeConfig, testConsoleConfig } from "./config";
 import { ConsoleService } from "./console-service";
 import { openDatabase } from "./db";
+import { NO_WAKE_TARGET_REASON } from "./wake";
 
 const silent = { info: () => undefined, warn: () => undefined };
 const SECRET_URL = "https://hooks.example.test/routines/secret-path-7/run";
 const KEY = "routine-key-for-tests";
 
 function config(dataDir: string): ConsoleConfig {
-  return {
-    dataDir,
-    eventSource: "rpc",
-    pollIntervalMs: 50,
-    serviceToken: null,
-    streamSecurityToken: null,
+  return testConsoleConfig(dataDir, {
     publicUrl: "http://localhost:3000",
-    mcpPublicUrl: null,
     wake: {
       target: new WakeTarget(SECRET_URL, KEY),
       offReason: null,
       dailyCap: 6,
       priceCheckMs: 50,
     },
-  };
+  });
 }
 
 /** A webhook that answers 200 and keeps every body it was sent. */
@@ -60,7 +56,7 @@ async function caughtUp(service: ConsoleService, chain: TestChain): Promise<void
   const head = Number(await chain.user.publicClient.getBlockNumber({ cacheTime: 0 }));
   await until(
     () => {
-      const feed = service.snapshot().feed;
+      const feed = envSnapshot(service).feed;
       return feed.health === "live" && (feed.syncedBlock ?? -1) >= head;
     },
     `block ${String(head)}`,
@@ -114,7 +110,12 @@ describe("event wake-ups from the console's pipeline", () => {
   it("never wakes for the history read on first start", () => {
     // The deployment's setPolicy happened before the console first read the chain.
     expect(rx.bodies).toEqual([]);
-    expect(service.snapshot().wake).toMatchObject({ enabled: true, usedToday: 0, leftToday: 6, recent: [] });
+    expect(envSnapshot(service).wake).toMatchObject({
+      enabled: true,
+      usedToday: 0,
+      leftToday: 6,
+      recent: [],
+    });
   });
 
   it("wakes once for an owner pause, and holds the resume until the debounce window ends", async () => {
@@ -127,7 +128,7 @@ describe("event wake-ups from the console's pipeline", () => {
     await chain.user.setPaused(false);
     await caughtUp(service, chain);
     expect(rx.bodies).toHaveLength(1);
-    expect(service.snapshot().wake.recent[0]).toMatchObject({ kind: "mandate_changed", status: "queued" });
+    expect(envSnapshot(service).wake.recent[0]).toMatchObject({ kind: "mandate_changed", status: "queued" });
   });
 
   it("wakes for an intent the contract rejects outside a run", async () => {
@@ -172,11 +173,11 @@ describe("event wake-ups from the console's pipeline", () => {
   });
 
   it("does not wake for what a Bot run in progress causes", async () => {
-    const before = service.snapshot().wake.recent.length;
-    service.noteAgentActivity();
+    const before = envSnapshot(service).wake.recent.length;
+    service.noteAgentActivity(envMandate(service));
     await chain.agent.proposeTrade(noBuy(3_000));
     await caughtUp(service, chain);
-    expect(service.snapshot().wake.recent).toHaveLength(before);
+    expect(envSnapshot(service).wake.recent).toHaveLength(before);
   });
 
   it("offers each event once, whichever source delivers it", async () => {
@@ -197,8 +198,8 @@ describe("event wake-ups from the console's pipeline", () => {
       requestText: "Protect my 0.05 BTC below 3% down this week.",
     });
     // As the agent API stores it: the plan is plain JSON on the wire.
-    service.offchain.putPlan({ ...request, plan: { ...request.plan } });
-    service.offchain.saveHoldings([{ asset: "BTC", quantity: "0.05" }]);
+    service.offchain.putPlan(envMandate(service).id, { ...request, plan: { ...request.plan } });
+    service.offchain.saveHoldings(envMandate(service).id, [{ asset: "BTC", quantity: "0.05" }]);
     const floor = request.plan.floorCents ?? 0;
     await new Promise((resolve) => setTimeout(resolve, 100));
     await caughtUp(service, chain);
@@ -216,7 +217,7 @@ describe("event wake-ups from the console's pipeline", () => {
   });
 
   it("resends nothing after a restart, and stays within the cap", async () => {
-    const recent = service.snapshot().wake.recent.map((d) => [d.id, d.status]);
+    const recent = envSnapshot(service).wake.recent.map((d) => [d.id, d.status]);
     const sent = rx.bodies.length;
     await service.stop();
     service = start(dataDir);
@@ -224,12 +225,36 @@ describe("event wake-ups from the console's pipeline", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     await service.wake.settled();
     expect(rx.bodies).toHaveLength(sent);
-    expect(service.snapshot().wake.recent.map((d) => [d.id, d.status])).toEqual(recent);
-    expect(service.snapshot().wake.usedToday).toBe(sent);
+    expect(envSnapshot(service).wake.recent.map((d) => [d.id, d.status])).toEqual(recent);
+    expect(envSnapshot(service).wake.usedToday).toBe(sent);
+  });
+
+  it("shows another workspace none of these wake-ups, and its agent cannot hold them back", () => {
+    expect(envSnapshot(service).wake.recent.length).toBeGreaterThan(0);
+    const other = workspaceAgent(service, signUpWorkspace(service, "Other owner")).mandate;
+    expect(service.snapshot(other).wake).toEqual({
+      enabled: false,
+      dailyCap: 6,
+      usedToday: 0,
+      leftToday: 6,
+      recent: [],
+      offReason: NO_WAKE_TARGET_REASON,
+      priceCheckEveryMs: 50,
+      lastPriceCheckAt: null,
+      priceProblem: null,
+    });
+
+    const dir = mkdtempSync(join(tmpdir(), "mandate-wake-tenants-"));
+    const fresh = new ConsoleService(config(dir), openDatabase(dir), { env: chain.env, logger: silent });
+    const stranger = workspaceAgent(fresh, signUpWorkspace(fresh, "Stranger")).mandate;
+    fresh.noteAgentActivity(stranger);
+    expect(fresh.wake.notifier.runInProgress(Date.now())).toBe(false);
+    fresh.noteAgentActivity(envMandate(fresh));
+    expect(fresh.wake.notifier.runInProgress(Date.now())).toBe(true);
   });
 
   it("is off without a webhook, and the snapshot never carries its URL or key", async () => {
-    const snapshot = JSON.stringify(service.snapshot());
+    const snapshot = JSON.stringify(envSnapshot(service));
     expect(snapshot).not.toContain("secret-path");
     expect(snapshot).not.toContain(KEY);
     expect(JSON.stringify(service.config)).not.toContain("secret-path");
@@ -243,7 +268,7 @@ describe("event wake-ups from the console's pipeline", () => {
     await caughtUp(off, chain);
     await chain.user.setPaused(true);
     await caughtUp(off, chain);
-    expect(off.snapshot().wake).toMatchObject({
+    expect(envSnapshot(off).wake).toMatchObject({
       enabled: false,
       recent: [],
       offReason: "Set GROK_WEBHOOK_URL and GROK_WEBHOOK_KEY on the console to the routine's webhook.",

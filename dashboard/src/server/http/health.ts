@@ -16,7 +16,7 @@ export interface HealthResponse {
  * hosting smoke test call it, and it is public behind the reverse proxy, so it says nothing about the
  * mandate, the owner or the agent: only the state of the chain feed, which every console page shows.
  */
-export function health(service: Pick<ConsoleService, "snapshot">): Response {
-  const body: HealthResponse = { status: "ok", feed: service.snapshot().feed.health };
+export function health(service: Pick<ConsoleService, "feedHealth">): Response {
+  const body: HealthResponse = { status: "ok", feed: service.feedHealth };
   return json(body);
 }
