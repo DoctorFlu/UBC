@@ -87,6 +87,68 @@ The definition of "covered" is in [cover.md](cover.md).
 This changed what the tools return and the descriptions of `plan_hedge` and `execute_plan`, not any tool name or input schema.
 The Bot reads descriptions only when the connector is added, so until it is added again it sees the old descriptions; the behaviour does not depend on them, because the server instructions arrive on every connection and every result says what to do next.
 
+## Daily digest (issue #97)
+
+A second routine sends the owner one short notification a day: what is protected, what was spent, what settled, and what waits for the owner.
+It is read-only: it calls `get_setup_state`, `get_policy`, `get_portfolio` and `get_activity`, and never trades, buys a signal or proposes anything.
+Its text is [agent/grok/digest.md](../agent/grok/digest.md).
+
+The model adds nothing up.
+The server sums the day and the console measures the cover, in fields the existing tools now return; no tool name or input schema changed:
+
+- `get_activity` returns `last24h`: the intents proposed in the last 24 hours by status, what they filled, the rejections by the contract's reason, flagged intents, the signals bought and what settled, with cost, payout and net.
+  It reads back through the whole day, whatever `limit` asks for, so the routine calls it with `limit` 1 to keep the result small.
+- `get_activity` returns `waitingForOwner`: the intents waiting for approval and the rule change requests still pending, with links to the console.
+  A request's reason was written by the agent, so it is marked untrusted and kept out of the summary.
+- `get_portfolio` returns `cover`: the cover held now against each current goal, which the console measures on Gemini's quotes exactly as its Hedge page does, and how much of it waits for the owner's approval.
+
+These come from one new console read route, `GET /api/agent/v1/summary`.
+A field the console cannot fill is null, and the routine reports it as unknown, never as zero.
+The Bot sees no output schemas, so the routine names every field it reads.
+
+To create it in Grok:
+
+1. Open Settings, then Automations, and create a new automation.
+2. Name it, for example `Mandate daily digest`, and set the schedule to Daily at the hour the owner wants it, for example 8:00 AM.
+3. Keep only the "Mandate Hosted" connector, and unselect the Mandate hedging skill, which is for the hourly hedge check.
+4. Paste everything below the line in `agent/grok/digest.md` as the instruction and save.
+5. **Test** runs it immediately.
+
+### Example digests
+
+These three were written by following the routine on what the four tools returned on a local stack: the real MCP server, a Policy contract on anvil, the simulated executor and the fake console (`agent/test/digest-days.ts`).
+The console address is a placeholder.
+They show the shape; Grok writes the real ones.
+
+A quiet day: the hourly runs found the goal covered and bought nothing.
+
+```text
+Mandate: all covered, quiet day. Nothing waits for you.
+Protected: BTC below $63,000 to Nov 20 (BTC2611202200): 100% covered.
+Spent: nothing filled, no signals bought. Budget left $179.00.
+Waiting for you: nothing.
+```
+
+A day with a settlement: last week's ladder expired and settled, and the routine protected the next one.
+
+```text
+Mandate: last week's BTC ladder settled, net +$11.00. BTC is covered again.
+Protected: BTC below $63,000 to Nov 27 (BTC2611272200): 100% covered.
+Spent: $42.00 on 6 orders, 2 signals for 0.02 USDC. Budget left $158.00.
+Settled: BTC2611202200, 3 positions: cost $21.00, paid $32.00, net +$11.00.
+Waiting for you: nothing.
+```
+
+A day with something waiting for the owner: one order was above the approval threshold, a call outside the routine was rejected, and the agent asked for a rule change.
+
+```text
+Mandate: 1 order and 1 rule change wait for your approval.
+Protected: BTC below $63,000 to Nov 20 (BTC2611202200): 100% covered, $52.50 of it waits for your approval.
+Spent: $23.10 on 2 orders, 1 signal for 0.01 USDC. Budget left $176.90.
+Blocked: 1 order over max trade size.
+Waiting for you: intent #2 ($21.00); change request pcr_1, approval threshold to $25.00. https://console.example/approvals
+```
+
 ## Grok Bot's own approvals, and why the mandate still matters
 
 Grok Bot has Auto Review, which checks each action before it runs and shows an approval card when it decides the owner should confirm.
@@ -130,3 +192,4 @@ Checked on 2026-11-15 against our server through a Cloudflare quick tunnel.
 2. Tool result size limits and timeouts beyond what we have seen.
 3. A webhook-triggered routine receives our JSON body (`mandate.wake`, [event-wake.md](event-wake.md)), and how the Bot sees it beside the instruction. The notifier is tested only against a local fake receiver.
 4. The export method.
+5. That a daily routine's result reaches the owner as a phone notification, and that Grok keeps the digest's shape (a first line of about 100 characters, then at most five short lines).
