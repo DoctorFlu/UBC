@@ -4,5 +4,5 @@
     "lib": ["DOM", "ES2023"],
     "types": ["node"]
   },
-  "include": ["fonts.ts", "scripts"]
+  "include": ["fonts.ts", "icons.test.ts", "scripts"]
 }

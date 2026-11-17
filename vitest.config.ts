@@ -17,7 +17,7 @@ export default defineConfig({
   },
   test: {
     include: [
-      "{shared,gemini,planner,agent,signals,devchain,streams,redteam}/**/*.test.ts",
+      "{brand,shared,gemini,planner,agent,signals,devchain,streams,redteam}/**/*.test.ts",
       "dashboard/src/**/*.test.ts",
       "site/src/**/*.test.{ts,tsx}",
       "deploy/test/**/*.test.ts",

@@ -1,6 +1,7 @@
 /**
- * `npm run og -w @mandate/site`: draws the link preview (Open Graph and Twitter card) image,
- * `src/app/opengraph-image.png`, 1200 by 630, in the page's own look: the headline on the board beside
+ * `npm run og -w @mandate/site`: draws the link preview image, 1200 by 630, as
+ * `src/app/opengraph-image.png` and `twitter-image.png` (the same picture; Next declares each file for its
+ * own card, and a symbolic link would resolve to the first and clash), in the page's own look: the headline on the board beside
  * a schedule card whose three breakers show the three answers. Chromium draws it with the brand's fonts
  * and colours. Needs `npx playwright install chromium` once.
  */
@@ -10,8 +11,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const brand = (path: string) => fileURLToPath(new URL(`../../brand/${path}`, import.meta.url));
-const font = (file: string) => `data:font/woff2;base64,${readFileSync(brand(`fonts/${file}`)).toString("base64")}`;
-const out = fileURLToPath(new URL("../src/app/opengraph-image.png", import.meta.url));
+const font = (file: string) =>
+  `data:font/woff2;base64,${readFileSync(brand(`fonts/${file}`)).toString("base64")}`;
+const app = (file: string) => fileURLToPath(new URL(`../src/app/${file}`, import.meta.url));
 
 const MARK = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.75" y="2.75" width="16.5" height="18.5" rx="2.25" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="5.5" width="6" height="8" rx="1" fill="currentColor"/><path d="M8 17.5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
@@ -19,7 +21,12 @@ const MARK = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3
 // above $20. Three crypto orders against it, one per answer.
 const ROWS = [
   { amount: "$18.00", why: "Within every rule", word: "Approved", tone: "approved" },
-  { amount: "$22.00", why: "Above your $20.00 signature line", word: "Held for your signature", tone: "held" },
+  {
+    amount: "$22.00",
+    why: "Above your $20.00 signature line",
+    word: "Held for your signature",
+    tone: "held",
+  },
   { amount: "$30.00", why: "<code>over max trade size</code>", word: "Rejected", tone: "rejected" },
 ];
 
@@ -70,8 +77,9 @@ try {
   const page = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 });
   await page.setContent(html);
   await page.evaluate(() => document.fonts.ready);
-  writeFileSync(out, await page.screenshot({ type: "png" }));
-  console.log(`preview written to ${out}`);
+  const image = await page.screenshot({ type: "png" });
+  for (const file of ["opengraph-image.png", "twitter-image.png"]) writeFileSync(app(file), image);
+  console.log(`preview written to ${app("")}`);
 } finally {
   await browser.close();
 }

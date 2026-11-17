@@ -1,6 +1,6 @@
 /**
- * `npm run icons -w @mandate/brand`: draws the app icons from the Mandate mark and writes them to
- * `brand/icons/`, where the console and the landing page link them from their `app/` folders.
+ * `npm run icons -w @mandate/brand`: draws the app icons from the Mandate mark into `brand/icons/` and
+ * copies them into the console's and the landing page's `app/` folders (see icon-files.ts).
  *
  * The mark is the one in the console's sidebar and the site's header: a breaker plate with its handle
  * up. Here it is redrawn on a 32-unit grid so its strokes land on whole pixels at 16 and 32 px.
@@ -15,13 +15,14 @@
  * Chromium draws the PNGs, so they match what a browser makes of the SVG. Needs
  * `npx playwright install chromium` once.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { chromium } from "@playwright/test";
 
-const OUT = fileURLToPath(new URL("../icons/", import.meta.url));
+import { ICON_COPIES, ICON_FILES, ICON_SOURCE as OUT } from "./icon-files";
+
 const DOCS = fileURLToPath(new URL("../docs/", import.meta.url));
 mkdirSync(OUT, { recursive: true });
 mkdirSync(DOCS, { recursive: true });
@@ -121,7 +122,9 @@ try {
   for (const size of [16, 32, 48]) pngs.push({ size, data: await render(tileSvg(size, 7), size) });
   writeFileSync(join(OUT, "favicon.ico"), ico(pngs));
   writeFileSync(join(OUT, "apple-icon.png"), await render(tileSvg(180, 0), 180));
-  console.log(`icons written to ${OUT}`);
+  for (const dir of ICON_COPIES)
+    for (const file of ICON_FILES) copyFileSync(join(OUT, file), join(dir, file));
+  console.log(`icons written to ${OUT} and copied to ${ICON_COPIES.join(", ")}`);
 
   // The review sheet: each icon at the size a browser shows it, on light and dark tab-strip colours,
   // drawn at 1x, then the same strip enlarged 4x without smoothing so single pixels can be judged.
@@ -143,7 +146,9 @@ try {
         ${cell(data("favicon.ico", "image/x-icon"), 32, "ico 32")}
         ${cell(data("apple-icon.png", "image/png"), 180, "apple 180")}
       </main></body></html>`);
-    await Promise.all((await page.locator("img").all()).map((img) => img.evaluate((el: HTMLImageElement) => el.decode())));
+    await Promise.all(
+      (await page.locator("img").all()).map((img) => img.evaluate((el: HTMLImageElement) => el.decode())),
+    );
     const sheet = await page.screenshot({ fullPage: true });
     // The four small icons, with a few pixels of tab strip around them.
     const boxes = await Promise.all(
