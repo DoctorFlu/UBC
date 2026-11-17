@@ -21,33 +21,39 @@ The console asks for a passkey sign-in; a workspace there is opened with a code 
 ## How it fits together
 
 ```mermaid
-flowchart LR
+flowchart TB
     Owner([Owner])
     Grok["Grok Bot<br/>chat or routine"]
-    Console["Console<br/>dashboard/"]
-    MCP["MCP server<br/>agent/"]
-    Signals["Signal API<br/>signals/"]
-    Executor["Executor<br/>devchain/"]
-    Policy[("Policy contract<br/>chain id 5042002")]
-    Gemini["Gemini<br/>Prediction Markets"]
-    Gateway["Circle Gateway<br/>x402 on Arc testnet"]
-    Streams["QuickNode Stream<br/>designed, not active"]
 
-    Owner -- "rules and approvals" --> Console
-    Console -- "owner transactions" --> Policy
+    subgraph repo["This repository"]
+        Console["Console<br/>dashboard/"]
+        MCP["MCP server<br/>agent/"]
+        Signals["Signal API<br/>signals/"]
+        Executor["Executor<br/>devchain/"]
+    end
+
+    subgraph outside["Chain and services"]
+        Policy[("Policy contract<br/>chain id 5042002")]
+        Gemini["Gemini<br/>Prediction Markets"]
+        Gateway["Circle Gateway<br/>x402 on Arc testnet"]
+        Streams["QuickNode Stream<br/>designed, not active"]
+    end
+
     Owner -- "chat" --> Grok
+    Owner -- "rules, approvals" --> Console
     Console -- "wake-up webhook" --> Grok
-    Grok -- "MCP tools, agent token" --> MCP
-    MCP -- "proposeTrade, agent key" --> Policy
-    MCP -- "holdings, plans, sealed reasons" --> Console
-    MCP -- "market data" --> Gemini
+    Grok -- "MCP tools" --> MCP
+    MCP -- "holdings, plans, reasons" --> Console
     MCP -- "buys a signal" --> Signals
-    Signals -- "verifies and settles the payment" --> Gateway
-    Signals -- "ladder prices" --> Gemini
-    Executor -- "reads approved intents, records results" --> Policy
-    Executor -- "places orders" --> Gemini
-    Executor -- "order journal, settlements" --> Console
-    Policy -- "events, RPC poll today" --> Console
+    MCP -- "proposeTrade" --> Policy
+    MCP -- "market data" --> Gemini
+    Console -- "owner transactions" --> Policy
+    Policy -- "events, RPC poll" --> Console
+    Signals -- "payment" --> Gateway
+    Signals -- "prices" --> Gemini
+    Executor -- "approved intents, results" --> Policy
+    Executor -- "orders" --> Gemini
+    Executor -- "journal, settlements" --> Console
     Policy -. "Logs dataset" .-> Streams
     Streams -. "signed webhook" .-> Console
 ```
