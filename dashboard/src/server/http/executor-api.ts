@@ -131,7 +131,7 @@ async function handlePut(
       `Intent ${String(intentId)} already has a settlement, ${result.existing.hash}; the first record stands.`,
     );
   }
-  if (result.created) service.changed();
+  if (result.created) service.settlementStored(document.eventTicker);
   return json(storedSettlementSchema.parse(responseOf(result.row, document)), result.created ? 201 : 200);
 }
 

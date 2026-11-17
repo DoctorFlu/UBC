@@ -133,6 +133,11 @@ export interface SettlementTotals {
   pnlCents: number;
 }
 
+/** The asset of a Gemini crypto ladder's event ticker ("BTC2611202200" is BTC), or null for another. */
+export function eventTickerAsset(eventTicker: string): string | null {
+  return /^([A-Z]+?)(?:05M|15M)?\d{10}$/.exec(eventTicker)?.[1] ?? null;
+}
+
 export function settlementTotals(
   docs: Iterable<Pick<Settlement, "costCents" | "payoutCents">>,
 ): SettlementTotals {

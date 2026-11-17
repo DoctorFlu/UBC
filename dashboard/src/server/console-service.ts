@@ -713,6 +713,33 @@ export class ConsoleService {
     });
   }
 
+  /**
+   * After a settlement on `eventTicker` was stored for the first time: pushes the new state and offers
+   * the ladder's wake-up, which goes out once every filled buy on that ladder is settled.
+   */
+  settlementStored(eventTicker: string): void {
+    this.changed();
+    const deploymentId = this.deploymentId;
+    const intents = this.snapshot().chain?.intents;
+    if (!deploymentId || !intents) return;
+    const prefix = `GEMI-${eventTicker}-`;
+    const filledBuys = intents
+      .filter(
+        (intent) =>
+          intent.status === "executed" &&
+          intent.isBuy === true &&
+          (intent.filledCents ?? 0) > 0 &&
+          intent.market?.startsWith(prefix) === true,
+      )
+      .map((intent) => intent.id);
+    this.wake.onSettlement({
+      deploymentId,
+      eventTicker,
+      filledBuys,
+      settlements: this.verifiedSettlements().map((settlement) => settlement.document),
+    });
+  }
+
   /** The chain id and address of the live deployment, or null while there is none. */
   get deployment(): { chainId: number; address: Address } | null {
     const session = this.session;

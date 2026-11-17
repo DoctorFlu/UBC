@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { eventKey } from "./events";
+import { type Settlement, eventTickerAsset, settlementTotals } from "./settlement";
 import type { PolicyEvent } from "./types";
 
 /**
@@ -23,6 +24,7 @@ export const WAKE_EVENT_VERSION = 1;
  * - `mandate_changed`: the owner changed the rules, paused or resumed the agent.
  * - `order_filled`: the executor recorded a fill well after the order was approved.
  * - `order_failed`: the executor recorded that an approved order did not fill.
+ * - `ladder_settled`: every filled position on an expired ladder is settled; the ladder is over.
  */
 export const WAKE_KINDS = [
   "price_below_floor",
@@ -32,6 +34,7 @@ export const WAKE_KINDS = [
   "mandate_changed",
   "order_filled",
   "order_failed",
+  "ladder_settled",
 ] as const;
 export type WakeKind = (typeof WAKE_KINDS)[number];
 
@@ -49,6 +52,7 @@ export const WAKE_DEBOUNCE_MS: Readonly<Record<WakeKind, number>> = {
   mandate_changed: MINUTE_MS,
   order_filled: 10 * MINUTE_MS,
   order_failed: 10 * MINUTE_MS,
+  ladder_settled: 10 * MINUTE_MS,
 };
 
 /** Wake-ups per UTC day when `GROK_WAKE_DAILY_CAP` is not set: half again the hourly schedule's 24 runs. */
@@ -75,6 +79,9 @@ export const FLOOR_REARM_BPS = 50;
 
 /** The most intents one wake-up lists; `count` still counts every trigger it carries. */
 export const WAKE_MAX_INTENTS = 10;
+
+/** The most ladders one `ladder_settled` wake-up lists. */
+export const WAKE_MAX_LADDERS = 4;
 
 // ------------------------------------------------------------------ the body
 
@@ -145,6 +152,30 @@ export const wakeDetailSchema = z.discriminatedUnion("kind", [
     kind: z.literal("order_failed"),
     detail: z.object({ intents: z.array(z.object(intentRef)).min(1) }),
   }),
+  z.object({
+    kind: z.literal("ladder_settled"),
+    detail: z.object({
+      ladders: z
+        .array(
+          z.object({
+            /** "BTC", read from the event ticker; null when it names no crypto asset. */
+            asset: z.string().max(16).nullable(),
+            eventTicker: z.string().max(64),
+            expiresAt: isoSchema,
+            /** The index value the ladder settled at, in dollars as Gemini publishes it, or null. */
+            settlementValue: z.string().max(32).nullable(),
+            /** Filled positions on the ladder, every one of them settled. */
+            positions: z.int().min(1),
+            costCents: centsSchema,
+            payoutCents: centsSchema,
+            /** Payout minus cost: negative when the protection expired unused. */
+            pnlCents: z.int(),
+          }),
+        )
+        .min(1)
+        .max(WAKE_MAX_LADDERS),
+    }),
+  }),
 ]);
 export type WakeDetail = z.infer<typeof wakeDetailSchema>;
 export type WakeDetailOf<K extends WakeKind> = Extract<WakeDetail, { kind: K }>["detail"];
@@ -183,8 +214,20 @@ export type WakeCandidate = WakeDetail & {
 
 // ------------------------------------------------------------------ summaries
 
-const usd = (cents: number) =>
-  `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+/** Whole dollars without cents ("$80"), anything else with both digits ("$24.80", never "$24.8"). */
+const usd = (cents: number) => {
+  const digits = cents % 100 === 0 ? 0 : 2;
+  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: 2 })}`;
+};
+
+/** Money with a sign, for a net: "+$27.60", "-$12.40", "$0". */
+const signedUsd = (cents: number) => (cents > 0 ? `+${usd(cents)}` : cents < 0 ? `-${usd(-cents)}` : usd(0));
+
+function settledAt(value: string | null): string {
+  const dollars = value === null ? Number.NaN : Number(value);
+  if (!Number.isFinite(dollars)) return "";
+  return ` at $${dollars.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function more(count: number, shown: number): string {
   return count > shown ? ` (${String(count)} in all)` : "";
@@ -230,6 +273,26 @@ export function wakeSummary(detail: WakeDetail, count: number): string {
       const ids = detail.detail.intents.map((i) => `#${String(i.id)}`).join(", ");
       return `The executor recorded that intent ${ids}${more(count, detail.detail.intents.length)} did not fill.`;
     }
+    case "ladder_settled": {
+      const ladders = detail.detail.ladders;
+      const only = ladders.length === 1 ? ladders[0] : undefined;
+      if (only) {
+        const what = only.positions === 1 ? "1 position" : `${String(only.positions)} positions`;
+        const name = only.asset ? `${only.asset} ladder` : "ladder";
+        return (
+          `The ${name} ${only.eventTicker} settled${settledAt(only.settlementValue)}: ` +
+          `${what} cost ${usd(only.costCents)}, paid ${usd(only.payoutCents)}, net ${signedUsd(only.pnlCents)}. ` +
+          "Plan on the next ladder."
+        );
+      }
+      const sum = (key: "costCents" | "payoutCents" | "pnlCents") =>
+        ladders.reduce((total, ladder) => total + ladder[key], 0);
+      return (
+        `${String(ladders.length)} ladders settled (${ladders.map((l) => l.eventTicker).join(", ")})${more(count, ladders.length)}: ` +
+        `cost ${usd(sum("costCents"))}, paid ${usd(sum("payoutCents"))}, net ${signedUsd(sum("pnlCents"))} in all. ` +
+        "Plan on the next ladders."
+      );
+    }
   }
 }
 
@@ -239,6 +302,14 @@ export function wakeSummary(detail: WakeDetail, count: number): string {
  */
 export function mergeWakeDetail(earlier: WakeDetail, later: WakeDetail): WakeDetail {
   if (earlier.kind !== later.kind) return later;
+  if (earlier.kind === "ladder_settled" && later.kind === "ladder_settled") {
+    const merged = new Map<string, (typeof later.detail.ladders)[number]>();
+    for (const ladder of [...earlier.detail.ladders, ...later.detail.ladders]) {
+      merged.delete(ladder.eventTicker);
+      merged.set(ladder.eventTicker, ladder);
+    }
+    return { kind: "ladder_settled", detail: { ladders: [...merged.values()].slice(-WAKE_MAX_LADDERS) } };
+  }
   if (!("intents" in later.detail) || !("intents" in earlier.detail)) return later;
   type Item = { id: number };
   const merged = new Map<number, Item>();
@@ -522,4 +593,54 @@ export function priceWakes(
     });
   }
   return { wakes, memory: next };
+}
+
+// ------------------------------------------------------------------ settlement
+
+/** What the console knows about one ladder when a settlement on it is stored. */
+export interface LadderSettlementInput {
+  deploymentId: string;
+  eventTicker: string;
+  /** Ids of every filled buy on the ladder, read from the chain. */
+  filledBuys: readonly number[];
+  /** The verified settlements stored for the deployment (those of other ladders are ignored). */
+  settlements: readonly Settlement[];
+  /** Unix ms. */
+  now: number;
+}
+
+/**
+ * One wake-up per ladder (issue #92): once every filled buy on an expired ladder has a verified
+ * settlement, the Bot reports what the ladder cost and paid, and plans on the next one. Null while a
+ * position on it waits for its outcome, so a ladder of three positions wakes the Bot once, not three
+ * times. The trigger id is the deployment and the ladder, so it is offered once across restarts and
+ * repeated records. A settlement is never "the run's own doing" or history: the executor records it on
+ * its own clock, and a ladder that settled while the console was paused is still news.
+ */
+export function ladderSettledWake(input: LadderSettlementInput): WakeCandidate | null {
+  const docs = input.settlements.filter((doc) => doc.eventTicker === input.eventTicker);
+  const first = docs[0];
+  if (first === undefined) return null;
+  const settled = new Set(docs.map((doc) => doc.intentId));
+  if (input.filledBuys.some((id) => !settled.has(id))) return null;
+  const totals = settlementTotals(docs);
+  return {
+    kind: "ladder_settled",
+    detail: {
+      ladders: [
+        {
+          asset: eventTickerAsset(input.eventTicker),
+          eventTicker: input.eventTicker.slice(0, 64),
+          expiresAt: new Date(first.expiresAt).toISOString(),
+          settlementValue: first.settlementValue?.slice(0, 32) ?? null,
+          positions: totals.positions,
+          costCents: totals.costCents,
+          payoutCents: totals.payoutCents,
+          pnlCents: totals.pnlCents,
+        },
+      ],
+    },
+    sourceId: `settlement:${input.deploymentId}:${input.eventTicker}`,
+    occurredAt: input.now,
+  };
 }

@@ -3,7 +3,7 @@
  * cost, what they paid and the net, in plain words. Built from the verified settlement records only; a
  * record whose document no longer matches its hash is never counted.
  */
-import { type Settlement, type SettlementTotals, settlementTotals } from "@mandate/shared";
+import { type Settlement, type SettlementTotals, eventTickerAsset, settlementTotals } from "@mandate/shared";
 
 import { formatUsdCents } from "@/lib/format";
 import type { ChainView } from "@/lib/live/types";
@@ -33,9 +33,7 @@ export function verifiedSettlements(chain: Pick<ChainView, "settlements"> | null
 }
 
 /** The asset of a crypto ladder ticker: "BTC2611202200" -> "BTC". */
-export function tickerAsset(eventTicker: string): string | null {
-  return /^([A-Z]+?)(?:05M|15M)?\d{10}$/.exec(eventTicker)?.[1] ?? null;
-}
+export const tickerAsset = eventTickerAsset;
 
 /** Settled ladders, newest expiry first, optionally of one asset only. */
 export function settledLadders(

@@ -51,6 +51,7 @@ The body is version 1 of `wakeEventSchema` (`shared/src/wake.ts`), usually 300 t
 | `mandate_changed` | The owner changed the rules, paused or resumed the agent. | `change` (`rules`, `paused` or `resumed`), `paused` |
 | `order_filled` | The executor recorded a fill more than 2 minutes (chain time) after the approval. | `intents[]`: `id`, `market`, `filledCents`, `pnlCents` |
 | `order_failed` | The executor recorded that an approved order did not fill. | `intents[]`: `id`, `market` |
+| `ladder_settled` | A ladder expired and the executor's settlement of its last filled position was stored (issue #92). | `ladders[]`: `asset`, `eventTicker`, `expiresAt`, `settlementValue`, `positions`, `costCents`, `payoutCents`, `pnlCents` |
 
 What the Bot does with each kind is in the routine, [agent/grok/routine.md](../agent/grok/routine.md).
 
@@ -73,9 +74,17 @@ The question for each event: does the Bot learn something it could act on, that 
 | `ResultRecorded`, not filled | yes, unless a run is in progress | Protection the goal counted on is missing. |
 | Spot below the floor | yes | The protection starts to pay; the run reviews the hedge. |
 | Spot rose and cover is no longer met | yes | The goal is measured from spot, so the same positions now cover less. |
+| The executor's settlement of a ladder's last filled position is stored | yes, `ladder_settled` | The ladder is over: its protection is gone, and the next ladder holds none yet. |
+| Any other settlement stored | no | Its ladder still has a position waiting for its outcome; the ladder wakes the Bot once, at its last one. |
 
-Settlement is not recorded today: the contract has one `ResultRecorded` per intent, written when the order fills, and the simulated executor always records a profit and loss of 0 there.
-When an executor records settlement (a later event, or a profit and loss on the fill), it gets a kind of its own.
+Settlement is not a chain event: the contract has one `ResultRecorded` per intent, written when the order fills, so the executor records what each position paid in the console instead ([order-lifecycle.md](order-lifecycle.md)).
+The console offers the `ladder_settled` wake-up when it stores one of those records, not from the chain:
+
+- One wake-up per ladder, not per position: it is offered when the record of the ladder's last filled buy is stored, so a ladder of three positions wakes the Bot once, with the three positions' cost, payout and net added up.
+- Its trigger id is the deployment and the ladder's event ticker, so a repeated record, an executor restart or a console restart never offers it again.
+- It is never dropped as "the run's own doing" (a run cannot cause a settlement) or as stale: a ladder that settled while the machine was paused is still news when it wakes.
+- Two ladders settling inside one 10-minute window (BTC and ETH on the same expiry) share one wake-up: the second joins the first if it is still waiting, or waits for the window to end, and `detail.ladders` lists each ladder once.
+- A position whose record is tampered with does not count as settled, so its ladder never wakes the Bot; the console shows the record as tampered.
 Role changes (`setAgent`, `setExecutor`) emit no event, so nothing can wake on them.
 
 A loss of cover that is not a rise of spot (an owner rejection, a failed fill) is reported by its chain trigger, not again by the price check.
@@ -97,14 +106,14 @@ So a new console, a deleted data folder or a long stop never replays old events 
 
 | Guard | How |
 | --- | --- |
-| Once per event | Every trigger has an id (the deployment, transaction hash and log index, or the goal and the count of crossings). The console records each id in its SQLite file before anything is sent and ignores it after, across restarts. |
+| Once per event | Every trigger has an id (the deployment, transaction hash and log index; the goal and the count of crossings; or the deployment and a settled ladder). The console records each id in its SQLite file before anything is sent and ignores it after, across restarts. |
 | No resend after a restart | A wake-up sent is never sent again. One whose request was in flight when the process stopped is marked failed ("outcome unknown") and counts toward the cap, because it may have started a run. |
-| Debounce per kind | At most one wake-up of a kind per window: prices 30 minutes, rejections and fill results 10 minutes, owner decisions 2 minutes, mandate changes 1 minute. A trigger inside the window is not lost: it joins the one wake-up of its kind waiting for the window to end. |
+| Debounce per kind | At most one wake-up of a kind per window: prices 30 minutes, rejections, fill results and settled ladders 10 minutes, owner decisions 2 minutes, mandate changes 1 minute. A trigger inside the window is not lost: it joins the one wake-up of its kind waiting for the window to end. |
 | Daily cap | `GROK_WAKE_DAILY_CAP` (default 12) per UTC day, counting wake-ups answered 2xx and those whose outcome is unknown. Past it, a due wake-up is recorded as not sent. |
 | Retries | Network errors and 5xx: retried after 1 s, 5 s, 30 s and 2 minutes, then given up. 4xx and redirects: never retried (a redirect is never followed, so the key never goes elsewhere). Each request times out after 10 s. |
 | Bounded queue | At most one wake-up per kind waits for its first try, and at most 16 wait at all; past that a new one is recorded as dropped. |
 | Secrets | The webhook URL and key are kept in a `WakeTarget`, which prints and serializes as `[redacted]`. Log lines, the record, errors (only "HTTP 503", "network error" or "timed out", never a raw message) and the console's snapshot never carry either. |
-| No new polling | There is no timer of its own. Chain triggers ride on the ingestion that exists; price checks ride on the console's existing poll loop; the only timer is the one that sends a waiting wake-up, set only while one waits. |
+| No new polling | There is no timer of its own. Chain triggers ride on the ingestion that exists; price checks ride on the console's existing poll loop; settled ladders ride on the executor's request that stores a settlement; the only timer is the one that sends a waiting wake-up, set only while one waits. |
 
 ## Price checks and a machine that pauses
 
@@ -142,6 +151,7 @@ The console's Setup page shows, in Advanced view, whether wake-ups are on (or wh
 
 - `shared/test/wake.test.ts`: each rule, and the notifier's debounce, cap, retries, restart and secrecy on a simulated clock.
 - `dashboard/src/server/wake.test.ts`: the console's pipeline on anvil with a fake receiver.
+- `dashboard/src/server/settlement-wake.test.ts`: a ladder of two positions wakes the Bot once, after its last settlement, with the ladder's totals; a repeated record and a restart send nothing.
 - `dashboard/e2e/wake.spec.ts` (in the `live` project): the real console and chain, the fake Gemini and a local webhook receiver; an owner pause, a rejected intent, a late fill and a fall of spot each send exactly one event, the debounce and the cap hold, a restart resends nothing, and the Setup page shows it.
 - `redteam` attack `chain.wake-flood`: a stolen agent key sends a burst of rejected intents, replayed through the same rules and notifier over a simulated day, and stays inside the cap.
 

@@ -45,6 +45,8 @@ By `kind`:
 - `owner_decision` with `decision` `rejected`: run steps 1 to 4 but do not execute a plan in this run; I said no to that order, so tell me what `plan_hedge` says is still missing and let me decide.
 - `mandate_changed`: run the steps; if the change is `paused`, step 2 stops the run, so just confirm you stood down.
 - `order_filled` or `order_failed`: run the steps; a failed order is no longer counted as held, so `plan_hedge` may buy that slice again.
+- `ladder_settled` (a ladder expired and every position on it is settled): run the steps; in step 3 report what that ladder cost, what it paid and the net, as `get_activity` gives them, then let step 4 plan on the next ladder.
+  `detail.ladders` holds the same numbers; never work out a payout yourself.
 
 End with a three-line summary: what you checked, what you did, what I need to do.
 If this run was started by an event, name the event in the first line, using its `summary`.
