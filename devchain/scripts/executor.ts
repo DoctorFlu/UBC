@@ -44,6 +44,7 @@ import {
   geminiVenue,
   simulatedVenue,
   startExecutor,
+  venueDeployment,
   type RecordSigner,
   type Venue,
 } from "../src";
@@ -129,7 +130,13 @@ if (settings.venue === "gemini") {
     publicClient,
     trading,
     journal: consoleOrderJournal({ consoleUrl, sign }),
-    deployment: { chainId, policy },
+    // The deploy block's hash is part of every client order id, so a later chain that deploys the contract
+    // at the same address never reuses the ids of this one's orders on the same Gemini account (#117).
+    deployment: await venueDeployment(client, deployment.fromBlock ?? 0n).catch((error: unknown) =>
+      fail(
+        `Could not read the contract's deploy block: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    ),
     orderTtlMs,
   });
   announcement = {

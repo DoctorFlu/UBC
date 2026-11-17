@@ -16,6 +16,7 @@ import type { AgentPolicy } from "../services";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { intentFlags, intentRow, IntentRowSchema, shownMarket } from "../support/intents";
 import { proposedChangesText, reasonCode } from "../support/rules";
+import { readOrders } from "../support/orders";
 import {
   LadderSettlementSchema,
   ladderSentence,
@@ -378,11 +379,22 @@ export const getActivity = defineTool({
     const views: ReadonlyMap<number, IntentView> = events.views;
     const eventsRead = events.read;
     // What filled positions paid at expiry lives in the console, signed by the executor (issue #92); the
-    // links and the change requests waiting for the owner too (issue #97).
-    const [stored, summary] = await Promise.all([readSettlements(ctx), readSummary(ctx)]);
+    // links and the change requests waiting for the owner too (issue #97), and the size of each order the
+    // executor placed on Gemini (issue #117).
+    const [stored, summary, orders] = await Promise.all([
+      readSettlements(ctx),
+      readSummary(ctx),
+      readOrders(ctx),
+    ]);
     const byIntent = new Map(stored?.map((settlement) => [settlement.intentId, settlement.document]));
     const rows = intents.map((intent) =>
-      intentRow(intent, views.get(intent.id), ctx.ledger.lookup(intent.id), byIntent.get(intent.id)),
+      intentRow(
+        intent,
+        views.get(intent.id),
+        ctx.ledger.lookup(intent.id),
+        byIntent.get(intent.id),
+        orders?.get(intent.id),
+      ),
     );
     const ladders = stored === null ? null : settledLadders(stored);
     const settlements =

@@ -565,6 +565,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
         deployment: {
           chainId: chain.executor.publicClient.chain.id,
           policy: chain.address.toLowerCase() as `0x${string}`,
+          deployBlockHash: `0x${"ab".repeat(32)}`,
         },
       }),
       settlements: fakeSink(),

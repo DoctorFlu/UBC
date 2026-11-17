@@ -150,8 +150,8 @@ Grok Bot is told the order of work in `src/instructions.ts`; every result carrie
 | `simulate_trade` | The verdict a trade would get, from the contract's `previewTrade` when it has one and the server's copy of the rules otherwise, naming the rule. |
 | `propose_trade` | Proposes one trade with its decision context; the contract approves, rejects with a reason, or holds it for the owner. Safe to retry. |
 | `execute_plan` | Proposes a plan's orders in order, stops at the first rejection, and reports each rung. Safe to retry and resumable. |
-| `get_intent` | One intent's status, reason, fill and decision context, checked against its hash. |
-| `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged, what each settled position cost, paid and netted at expiry, the last 24 hours summed by the server, and what waits for the owner. |
+| `get_intent` | One intent's status, reason, fill and decision context, checked against its hash, and the order placed on Gemini when there is one. |
+| `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged, the order placed on Gemini for each, what each settled position cost, paid and netted at expiry, the last 24 hours summed by the server, and what waits for the owner. |
 | `buy_signal` | Pays the signal API a fraction of a cent for a per-strike cheap, fair or expensive verdict, inside a daily budget; returns a `receiptId` that `plan_hedge` accepts. |
 | `request_policy_change` | Files a rule change with a reason for the owner to decide in the console; it can never touch the pause switch. |
 | `ping`, `whoami` | Liveness and the agent's address. |

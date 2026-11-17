@@ -128,12 +128,27 @@ export const executorVenueSchema = z.strictObject({
 });
 export type ExecutorVenue = z.infer<typeof executorVenueSchema>;
 
+/** What a client order id is made of, besides the intent: the contract and the block it was deployed in. */
+export interface OrderIdDeployment {
+  chainId: number;
+  policy: string;
+  /** Hash of the block the contract was deployed in. */
+  deployBlockHash: string;
+}
+
 /**
- * Our id for an intent's order: the chain, the first 8 hex digits of the contract and the intent id, so
- * it is the same on every attempt and restart, and differs between contracts.
+ * Our id for an intent's order: `mandate-<chain id>-<contract>-<deploy block>-<intent id>`, with the first
+ * 8 hex digits of the contract's address and of its deploy block's hash. It is the same on every attempt
+ * and restart, and differs between contracts.
+ * The deploy block tells apart two deployments at the same address (issue #117): a fresh local dev chain
+ * deploys the contract at the address the last one had, but its blocks carry the time they were mined, so
+ * the deploy block's hash differs unless both chains were started and deployed within the same second.
+ * Ids already journalled keep the form they were written in (without the block); a retry reuses its
+ * record's id, so nothing is ever looked up under an id it was not sent with.
  */
-export function clientOrderIdFor(chainId: number, policy: string, intentId: number): string {
-  return `mandate-${String(chainId)}-${policy.toLowerCase().slice(2, 10)}-${String(intentId)}`;
+export function clientOrderIdFor(deployment: OrderIdDeployment, intentId: number): string {
+  const hex = (value: string) => value.toLowerCase().slice(2, 10);
+  return `mandate-${String(deployment.chainId)}-${hex(deployment.policy)}-${hex(deployment.deployBlockHash)}-${String(intentId)}`;
 }
 
 /** Validates a venue order record or announcement and returns keccak256 of its canonical JSON. */

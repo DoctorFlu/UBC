@@ -39,6 +39,7 @@ import type {
   PutSignalBudgetRequest,
   PutSignalPaymentRequest,
   Roles,
+  OrdersResponse,
   SettlementsResponse,
   SummaryResponse,
   SignalBudgetResponse,
@@ -188,6 +189,11 @@ export interface ConsoleClient {
    * (issue #92). Null when the console has no such route yet (404).
    */
   getSettlements(signal?: AbortSignal): Promise<SettlementsResponse | null>;
+  /**
+   * The orders the executor placed on a real venue, from its signed journal: their size and fills
+   * (issue #117). Null when the console has no such route yet (404).
+   */
+  getOrders(signal?: AbortSignal): Promise<OrdersResponse | null>;
   /**
    * Which Gemini the console reads market data from, from its public `GET /api/health`; production when
    * it names none (a console older than this check).

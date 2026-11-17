@@ -26,7 +26,7 @@ import { formatCount, formatUsdCents } from "@/lib/format";
 import { useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, countByStatus, newestFirst, todayUsage } from "@/lib/live/derive";
-import type { ConsoleSnapshot } from "@/lib/live/types";
+import type { ConsoleSnapshot, VenueOrderView } from "@/lib/live/types";
 import { fillsAreSimulated } from "@/lib/network";
 import { verifiedSettlements } from "@/lib/settlement/settlement";
 
@@ -57,9 +57,24 @@ function SettledCell({ settlement }: { settlement: Settlement | undefined }) {
   );
 }
 
-function activityColumns(settlements: ReadonlyMap<number, Settlement>): readonly Column<IntentView>[] {
+function activityColumns(
+  settlements: ReadonlyMap<number, Settlement>,
+  venueOrders: Readonly<Record<number, VenueOrderView>>,
+): readonly Column<IntentView>[] {
   return [
-    ...baseColumns.slice(0, -1),
+    ...baseColumns.slice(0, -1).map((column) =>
+      column.key === "order"
+        ? {
+            ...column,
+            cell: (intent: IntentView) => (
+              <OrderAmount
+                intent={intent}
+                placedHundredths={venueOrders[intent.id]?.quantityHundredths ?? null}
+              />
+            ),
+          }
+        : column,
+    ),
     {
       key: "settled",
       header: "At expiry",
@@ -157,7 +172,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
   const snapshot = preview ?? live;
   const chain = snapshot.chain;
   const settlements = verifiedSettlements(chain);
-  const shown = useAdvancedColumns(activityColumns(settlements));
+  const shown = useAdvancedColumns(activityColumns(settlements, chain?.venueOrders ?? {}));
   if (!chain) return <ChainUnavailable snapshot={snapshot} title="Activity" />;
   const settled = settlementTotals([...settlements.values()]);
 

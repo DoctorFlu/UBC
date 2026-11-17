@@ -90,12 +90,14 @@ The console (all from the verified records only):
   After the agent plans on the next ladder, the last settled ladder stays below it.
 - Activity: an "At expiry" column with what each settled position paid and its net, and a "Paid at expiry" total.
 - Intent detail: an "At expiry" card with the resolution, cost, payout and net, and in Advanced view the signer and the hash.
+- The Order line, on the intent page, in Activity and on Home: the contracts the order was placed for on a real venue, sized for its fee, and in Advanced view what the amount buys at the limit when that differs ([gemini-venue.md](gemini-venue.md#the-console)).
 - The public scorecard counts settled positions with their cost, payout and net, and says they are recorded offchain, signed by the executor.
 
 The agent (no tool input changed):
 
 - `get_activity` returns `settlements`: totals and the last few settled ladders, and each intent's `settlement`; its `last24h.settled` counts the ones the console stored in the last 24 hours, for the daily digest ([grok-bot.md](grok-bot.md#daily-digest-issue-97)).
 - `get_portfolio` returns `settled`, with the last settled ladder, and says that ladder is over.
+- `get_intent` and `get_activity` return each intent's `order` on a real venue: the contracts placed and filled, and the fee.
 - `plan_hedge` never offers an expired ladder, so the next plan rolls to the next one by itself.
 - The console wakes the routine once per settled ladder (`ladder_settled`, [event-wake.md](event-wake.md)), with the ladder's cost, payout and net.
   The routine ([agent/grok/routine.md](../agent/grok/routine.md)) reports that and plans on the next ladder.
