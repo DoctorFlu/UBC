@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { AccountStore } from "./accounts/store";
 import { newId } from "./accounts/secrets";
-import { type Database, MIGRATIONS, migrate, migrationId, openDatabase } from "./db";
+import { type Database, type Migration, MIGRATIONS, migrate, migrationId, openDatabase } from "./db";
 import { OffchainStore } from "./store/offchain";
 import { SettlementStore } from "./store/settlements";
 import { VenueOrderStore } from "./store/venue-orders";
@@ -39,6 +39,29 @@ function shippedHash(versions: number): string {
   return createHash("sha256").update(steps.join("\u0000")).digest("hex");
 }
 
+/**
+ * SHA-256 of the schema a version leaves (every table, index and trigger as SQLite stores it, by name), for
+ * the migrations written as code: version 8 is the accounts of #94 as main shipped them at cf43611, and
+ * version 9 the several mandates of #95. Once 9 is on main, a change here means it was edited after a
+ * console ran it.
+ */
+const SHIPPED_SCHEMA_SHA256 = {
+  8: "a1b6c0b890cc9585c59d9aad44bcab810a4af2fe052015f46e0f4d8871523e94",
+  9: "2aec9eec5ca927a45ea82498ef77b77c040e31ecee086c921604f28e4fbab6a3",
+} as const;
+
+function schemaHash(version: number): string {
+  const db = new DatabaseSync(":memory:");
+  migrate(db, version);
+  const rows = db
+    .prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name")
+    .all() as { type: string; name: string; sql: string }[];
+  db.close();
+  return createHash("sha256")
+    .update(rows.map((row) => `${row.type}\u0000${row.name}\u0000${row.sql}`).join("\u0000"))
+    .digest("hex");
+}
+
 const AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const OWNER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const DEPLOYMENT = "84532:0xabc:1:0xdef";
@@ -47,14 +70,14 @@ const MS = Date.parse(T);
 
 /**
  * The schema version the hosted console runs: every migration up to here is applied on its database, so
- * each keeps its position and the accounts migration comes after all of them. When another migration
- * lands on main first, raise this, insert a row into its tables below, and move accounts after it.
- * The hosted console is at 6 until #108 is deployed (7), so versions 6 and 5 are upgraded below as well.
+ * each keeps its position and the mandates migration (9) comes after all of them. When another migration
+ * lands on main first, raise this, insert a row into its tables below, and move mandates after it.
+ * Versions 7 (before accounts), 6 and 5 are upgraded below as well.
  */
-const HOSTED_VERSION = 7;
+const HOSTED_VERSION = 8;
 
-/** Every table at `HOSTED_VERSION`: a migration moved or reordered on this branch changes this list. */
-const HOSTED_TABLES = [
+/** Every table at version 7, before accounts. */
+const VERSION_7_TABLES = [
   "decision_contexts",
   "executor_venues",
   "hedge_plans",
@@ -74,6 +97,23 @@ const HOSTED_TABLES = [
   "wake_price_memory",
   "wake_sources",
 ];
+
+/** The tables accounts (version 8) added. */
+const ACCOUNT_TABLES = [
+  "access_codes",
+  "agent_tokens",
+  "agents",
+  "ceremonies",
+  "mandates",
+  "members",
+  "passkeys",
+  "recovery_codes",
+  "sessions",
+  "workspaces",
+];
+
+/** Every table at `HOSTED_VERSION`: a migration moved or reordered on this branch changes this list. */
+const HOSTED_TABLES = [...VERSION_7_TABLES, ...ACCOUNT_TABLES].sort();
 
 /**
  * The tables the accounts migration gives a mandate. Settlements, venue orders and the executor's venue
@@ -115,7 +155,8 @@ function hostedDatabase(version = HOSTED_VERSION): string {
   const dataDir = mkdtempSync(join(tmpdir(), "mandate-migrate-"));
   const db = new DatabaseSync(join(dataDir, "console.sqlite"));
   db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;");
-  migrate(db, version);
+  // Version 8 is what the hosted console made of its version 7 file, then used: built the same way.
+  migrate(db, Math.min(version, 7));
   const run = (sql: string, ...values: (string | number | null)[]) => db.prepare(sql).run(...values);
 
   const types = [
@@ -245,8 +286,108 @@ function hostedDatabase(version = HOSTED_VERSION): string {
       T,
     );
   }
+  if (version >= 8) {
+    migrate(db, 8);
+    addAccountRows(db);
+  }
   db.close();
   return dataDir;
+}
+
+/** The second workspace's ids, made by a sign-up on version 8. */
+const SIGNED_UP = { workspace: "wsp_signedup", mandate: "mnd_signedup", agent: "agt_signedup" };
+
+/**
+ * What version 8 consoles wrote once people used them: the first workspace claimed, with a member, a
+ * passkey, a session, a recovery code and an agent token; a second workspace from a sign-up, with its own
+ * mandate (no contract) and a console-held agent key; an invite, an open ceremony, and that mandate's own
+ * holding and plan. A row in every table.
+ */
+function addAccountRows(db: DatabaseSync): void {
+  const run = (sql: string, ...values: (string | number | null | Uint8Array)[]) =>
+    db.prepare(sql).run(...values);
+  const first = db.prepare("SELECT id, workspace_id FROM mandates WHERE deployment = 'env'").get() as {
+    id: string;
+    workspace_id: string;
+  };
+  run("UPDATE workspaces SET claimed_at = ? WHERE id = ?", T, first.workspace_id);
+  run("INSERT INTO workspaces VALUES (?, ?, ?, ?)", SIGNED_UP.workspace, "Bob's workspace", T, T);
+  run(
+    "INSERT INTO mandates (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)",
+    SIGNED_UP.mandate,
+    SIGNED_UP.workspace,
+    "Mandate",
+    T,
+  );
+  run(
+    "INSERT INTO agents VALUES (?, ?, ?, 'console', ?, ?, ?)",
+    SIGNED_UP.agent,
+    SIGNED_UP.mandate,
+    "Agent",
+    "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+    '{"v":1}',
+    T,
+  );
+  for (const [member, workspace, handle] of [
+    ["mbr_alice", first.workspace_id, "aGFuZGxlLWFsaWNl"],
+    ["mbr_bob", SIGNED_UP.workspace, "aGFuZGxlLWJvYg"],
+  ] as const) {
+    run("INSERT INTO members VALUES (?, ?, ?, 'admin', ?, ?)", member, workspace, member.slice(4), handle, T);
+    run(
+      "INSERT INTO passkeys VALUES (?, ?, ?, 0, '[\"internal\"]', 'multiDevice', 1, ?, NULL)",
+      `cred_${member}`,
+      member,
+      new Uint8Array([1, 2, 3]),
+      T,
+    );
+    run(
+      "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)",
+      `sess_${member}`,
+      member,
+      workspace,
+      T,
+      T,
+      "2026-12-15T10:00:00.000Z",
+    );
+  }
+  run("INSERT INTO recovery_codes VALUES (?, ?, ?)", "mbr_alice", "hash_recovery", T);
+  run(
+    "INSERT INTO ceremonies VALUES (?, ?, ?, ?, ?)",
+    "cer_1",
+    "sign-in",
+    "challenge",
+    "{}",
+    "2026-11-15T10:05:00.000Z",
+  );
+  run(
+    "INSERT INTO access_codes VALUES (?, 'invite', NULL, ?, ?, NULL)",
+    "hash_invite",
+    T,
+    "2026-11-22T10:00:00.000Z",
+  );
+  run(
+    "INSERT INTO agent_tokens VALUES (?, 'env', ?, ?, 'console', ?, NULL, NULL)",
+    "tok_1",
+    "Grok Bot",
+    "hash_token",
+    T,
+  );
+  run(
+    "INSERT INTO holdings VALUES (?, ?, ?)",
+    SIGNED_UP.mandate,
+    JSON.stringify([{ asset: "ETH", quantity: "2" }]),
+    T,
+  );
+  run(
+    "INSERT INTO hedge_plans VALUES (?, ?, ?, ?, ?, ?, ?)",
+    SIGNED_UP.mandate,
+    "plan_1",
+    "ETH",
+    "Protect my ETH",
+    T,
+    "{}",
+    T,
+  );
 }
 
 describe("the migrations", () => {
@@ -254,6 +395,8 @@ describe("the migrations", () => {
     expect(shippedHash(5)).toBe(SHIPPED_SHA256[5]);
     expect(shippedHash(6)).toBe(SHIPPED_SHA256[6]);
     expect(shippedHash(7)).toBe(SHIPPED_SHA256[7]);
+    expect(schemaHash(8)).toBe(SHIPPED_SCHEMA_SHA256[8]);
+    expect(schemaHash(9)).toBe(SHIPPED_SCHEMA_SHA256[9]);
   });
 
   it("keep main's order: the hosted version is exactly the schema the hosted console has", () => {
@@ -281,9 +424,9 @@ describe("the migrations", () => {
   });
 });
 
-describe("migration to accounts (after the hosted version)", () => {
+describe("migration to accounts (version 7 to 8, then 9)", () => {
   it("keeps every row, all in the first workspace's mandate, which nobody has claimed", () => {
-    const dataDir = hostedDatabase();
+    const dataDir = hostedDatabase(7);
     const before = new DatabaseSync(join(dataDir, "console.sqlite"));
     const counts = Object.fromEntries(tables(before).map((table) => [table, count(before, table)]));
     before.close();
@@ -299,9 +442,8 @@ describe("migration to accounts (after the hosted version)", () => {
     for (const [table, n] of Object.entries(counts)) expect(n, table).toBeGreaterThan(0);
 
     const db = openDatabase(dataDir);
-    expect(MIGRATIONS.length).toBe(HOSTED_VERSION + 1);
     expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(
-      HOSTED_VERSION + 1,
+      MIGRATIONS.length,
     );
     for (const [table, n] of Object.entries(counts)) expect(count(db, table), table).toBe(n);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
@@ -404,7 +546,7 @@ describe("migration to accounts (after the hosted version)", () => {
   );
 
   it("runs once: opening the upgraded database again changes nothing", () => {
-    const dataDir = hostedDatabase();
+    const dataDir = hostedDatabase(7);
     const first = openDatabase(dataDir);
     const mandate = new AccountStore(first).envMandate();
     first.close();
@@ -420,5 +562,116 @@ describe("migration to accounts (after the hosted version)", () => {
     expect(() => new SqliteWakeStore(db, "mnd_missing").addSource("chain:x", "wk_x", 1)).toThrow(
       /FOREIGN KEY/,
     );
+  });
+});
+
+describe("migration to several mandates (after the hosted version 8)", () => {
+  const columnsOf = (db: Database, table: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name);
+
+  it("keeps every row and every mandate's id, so every row that names a mandate still does", () => {
+    const dataDir = hostedDatabase();
+    const before = new DatabaseSync(join(dataDir, "console.sqlite"));
+    expect(tables(before)).toEqual(HOSTED_TABLES);
+    const counts = Object.fromEntries(tables(before).map((table) => [table, count(before, table)]));
+    const mandatesBefore = before.prepare("SELECT * FROM mandates ORDER BY rowid").all();
+    before.close();
+    for (const [table, n] of Object.entries(counts)) expect(n, table).toBeGreaterThan(0);
+
+    const db = openDatabase(dataDir);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(9);
+    expect(MIGRATIONS.length).toBe(HOSTED_VERSION + 1);
+    for (const [table, n] of Object.entries(counts)) expect(count(db, table), table).toBe(n);
+    expect(count(db, "owner_actions")).toBe(0);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+    // The migration switched foreign keys off around itself; they are on again.
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+
+    const after = db
+      .prepare(
+        "SELECT id, workspace_id, name, deployment, chain_id, policy_address, deploy_block, created_at FROM mandates ORDER BY rowid",
+      )
+      .all();
+    expect(after).toEqual(mandatesBefore);
+    const added = db
+      .prepare(
+        `SELECT id FROM mandates WHERE contract_kind IS NOT NULL OR executor_address IS NOT NULL
+           OR owner_address IS NOT NULL OR sealed_owner_key IS NOT NULL`,
+      )
+      .all();
+    expect(added).toEqual([]);
+
+    const accounts = new AccountStore(db);
+    const env = accounts.envMandate();
+    expect(env.deployment).toBe("env");
+    expect(accounts.mandates(SIGNED_UP.workspace).map((mandate) => [mandate.id, mandate.deployment])).toEqual(
+      [[SIGNED_UP.mandate, null]],
+    );
+    expect(accounts.agentOf(SIGNED_UP.mandate).id).toBe(SIGNED_UP.agent);
+    const offchain = new OffchainStore(db);
+    expect(offchain.holdings(SIGNED_UP.mandate).holdings).toEqual([{ asset: "ETH", quantity: "2" }]);
+    expect(offchain.holdings(env.id).holdings).toEqual([{ asset: "BTC", quantity: "0.05" }]);
+    expect(offchain.latestPlans(SIGNED_UP.mandate).map((plan) => plan.planId)).toEqual(["plan_1"]);
+    expect(columnsOf(db, "mandates")).toEqual([
+      "id",
+      "workspace_id",
+      "name",
+      "deployment",
+      "chain_id",
+      "policy_address",
+      "deploy_block",
+      "contract_kind",
+      "executor_address",
+      "owner_address",
+      "sealed_owner_key",
+      "created_at",
+    ]);
+  });
+
+  it("still refuses a row for a mandate that does not exist, and a contract two mandates would share", () => {
+    const db = openDatabase(hostedDatabase());
+    expect(() => new OffchainStore(db).saveHoldings("mnd_missing", [])).toThrow(/FOREIGN KEY/);
+    expect(() =>
+      db
+        .prepare("INSERT INTO agents VALUES ('agt_x', 'mnd_missing', 'Agent', 'console', '0x1', '{}', ?)")
+        .run(T),
+    ).toThrow(/FOREIGN KEY/);
+    const insert = db.prepare(
+      `INSERT INTO mandates (id, workspace_id, name, deployment, chain_id, policy_address, deploy_block,
+         contract_kind, executor_address, owner_address, sealed_owner_key, created_at)
+       VALUES (?, ?, 'M', ?, 31337, ?, 5, 'production', '0xe', '0xo', ?, ?)`,
+    );
+    insert.run("mnd_a", SIGNED_UP.workspace, "server", "0xabc", '{"v":1}', T);
+    // The same contract for another mandate, a server deployment without its owner key, a wallet
+    // deployment with one, a second env mandate, and an address not in lower case are all refused.
+    expect(() => insert.run("mnd_b", SIGNED_UP.workspace, "wallet", "0xabc", null, T)).toThrow(/UNIQUE/);
+    expect(() => insert.run("mnd_c", SIGNED_UP.workspace, "server", "0xabd", null, T)).toThrow(/CHECK/);
+    expect(() => insert.run("mnd_d", SIGNED_UP.workspace, "wallet", "0xabe", '{"v":1}', T)).toThrow(/CHECK/);
+    expect(() => insert.run("mnd_e", SIGNED_UP.workspace, "env", "0xabf", null, T)).toThrow(/UNIQUE/);
+    expect(() => insert.run("mnd_f", SIGNED_UP.workspace, "wallet", "0xABC1", null, T)).toThrow(/CHECK/);
+    const bare = db.prepare(
+      "INSERT INTO mandates (id, workspace_id, name, deployment, created_at) VALUES (?, ?, 'M', 'wallet', ?)",
+    );
+    expect(() => bare.run("mnd_g", SIGNED_UP.workspace, T)).toThrow(/CHECK/);
+    // A mandate being made holds its owner key before its contract exists.
+    db.prepare(
+      `INSERT INTO mandates (id, workspace_id, name, owner_address, sealed_owner_key, created_at)
+       VALUES (?, ?, 'M', '0xo', '{}', ?)`,
+    ).run("mnd_h", SIGNED_UP.workspace, T);
+  });
+
+  it("refuses to commit a step that would leave a broken reference, and keeps foreign keys on", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db);
+    const broken: Migration[] = [
+      ...MIGRATIONS,
+      { withoutForeignKeys: (inner) => inner.exec("INSERT INTO holdings VALUES ('mnd_missing', '[]', 'x')") },
+    ];
+    expect(() => migrate(db, broken.length, broken)).toThrow(/broke 1 references/);
+    expect(count(db, "holdings")).toBe(0);
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
   });
 });

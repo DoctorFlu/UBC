@@ -10,8 +10,10 @@
 #   CONSOLE_SESSION     a member's session: the value of the console's session cookie, copied from a signed-in
 #                       browser. Without it, the test checks that every member route refuses everyone, and
 #                       skips the checks that need a session.
-#   SMOKE_AGENT_ADDRESS the agent's address, for the public scorecard when MCP_AUTH_TOKEN is not given (it
-#                       is public: the scorecard's URL)
+#   SMOKE_AGENT_ADDRESS the first mandate's agent address, for the public scorecard (it is public: the
+#                       scorecard's URL). Only the first mandate's agent has a scorecard (docs/accounts.md).
+#                       Without it, the token's agent is used, so set it when MCP_AUTH_TOKEN is another
+#                       mandate's token, or not given.
 #   SMOKE_CA_CERT       a CA certificate to trust, for a host with a private certificate (localhost)
 #
 # It only reads and asks; it changes nothing. Exits 0 when every check passes.
@@ -102,7 +104,7 @@ expect "MCP refuses a request without a token" none POST /mcp 401 "${mcp_headers
 if has_basic_challenge; then fail "MCP's 401 comes from the MCP server, not a login prompt"; fi
 expect "MCP refuses a token the console does not know" wrong-token POST /mcp 401 "${mcp_headers[@]}" \
   --data-binary "$initialize"
-agent="${SMOKE_AGENT_ADDRESS:-}"
+agent=""
 if [ -z "$token" ]; then
   echo "   (no MCP_AUTH_TOKEN: the checks that need a token are skipped)"
 else
@@ -168,8 +170,10 @@ request none GET /claim --header "Accept: text/html"
 check "claim page without a session (GET /claim -> $status $(location))" \
   '[ "$status" = 200 ] || { [ "$status" = 307 ] && location | grep -q "/sign-in$"; }'
 expect "who is signed in, without a session" none GET /api/auth/session 401
-if [ -n "$agent" ]; then
-  expect "public scorecard without a session" none GET "/agent/$agent" 200
+# The scorecard is the first mandate's agent's: SMOKE_AGENT_ADDRESS when given, else the token's agent.
+scorecard="${SMOKE_AGENT_ADDRESS:-$agent}"
+if [ -n "$scorecard" ]; then
+  expect "public scorecard without a session" none GET "/agent/$scorecard" 200
   check "the scorecard page loads its assets" 'grep -q "/_next/static/" "$work/body"'
   asset="$(sed -n 's/.*\(\/_next\/static\/[^"]*\.js\)".*/\1/p' "$work/body" | head -n 1)"
   [ -n "$asset" ] && expect "the scorecard's scripts without a session" none GET "$asset" 200

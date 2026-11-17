@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  CATEGORY_IDS,
-  CATEGORY_LABELS,
-  Category,
-  type CategoryId,
-  type PolicyRules,
-  categoriesFromMask,
-  categoryMask,
-} from "@mandate/shared";
+import { CATEGORY_IDS, CATEGORY_LABELS, type PolicyRules } from "@mandate/shared";
 import { PenLine, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
@@ -16,7 +8,6 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field, Input } from "@/components/ui/Field";
 import { Toggle } from "@/components/ui/Toggle";
-import { formatUsdCents, parseUsdToCents } from "@/lib/format";
 import type { ChainView } from "@/lib/live/types";
 import { ownerBlockedReason, useOwnerAccess } from "@/lib/owner/access";
 import { useHydrated } from "@/lib/useHydrated";
@@ -24,46 +15,8 @@ import { useHydrated } from "@/lib/useHydrated";
 import styles from "./rules.module.css";
 import { BacktestPanel } from "./BacktestPanel";
 import { PolicyReview } from "./PolicyReview";
-import { AMOUNT_LABELS, type AmountKey, rulesDiff } from "./rules-diff";
-
-const amountHints: Record<AmountKey, string> = {
-  budgetCents: "All the agent may ever commit to buys. It is a lifetime cap and does not reset.",
-  maxTradeCents: "Larger intents are rejected as “over max trade size”.",
-  approvalAboveCents: "Intents above this wait for your signature. 0 means never ask.",
-  dailyLossCents:
-    "New intents stop once today’s losses recorded onchain reach it; it cannot yet see a loss at expiry. 0 turns it off.",
-};
-
-const AMOUNT_KEYS = Object.keys(AMOUNT_LABELS) as AmountKey[];
-
-/** A starting point for the first rules: small, crypto only, and every rule on. */
-const FIRST_MANDATE: PolicyRules = {
-  budgetCents: 20_000,
-  maxTradeCents: 2_500,
-  allowedCategories: categoryMask([Category.Crypto]),
-  approvalAboveCents: 2_000,
-  dailyLossCents: 4_000,
-  paused: false,
-};
-
-function plainDollars(cents: number) {
-  return formatUsdCents(cents, { trimWholeCents: true }).replace("$", "");
-}
-
-interface Draft {
-  amounts: Record<AmountKey, string>;
-  categories: readonly CategoryId[];
-}
-
-function draftFrom(rules: PolicyRules): Draft {
-  return {
-    amounts: Object.fromEntries(AMOUNT_KEYS.map((key) => [key, plainDollars(rules[key])])) as Record<
-      AmountKey,
-      string
-    >,
-    categories: categoriesFromMask(rules.allowedCategories),
-  };
-}
+import { AMOUNT_LABELS, rulesDiff } from "./rules-diff";
+import { AMOUNT_KEYS, FIRST_MANDATE, amountHints, checkDraft, draftFrom } from "./rules-draft";
 
 export interface RulesEditorProps {
   /** Rules in force, or null before the first `setPolicy`. */
@@ -94,40 +47,8 @@ export function RulesEditor({ rules, version, chain }: RulesEditorProps) {
     if (untouched) setDraft(draftFrom(base));
   }
 
-  const parsed = Object.fromEntries(
-    AMOUNT_KEYS.map((key) => [key, parseUsdToCents(draft.amounts[key])]),
-  ) as Record<AmountKey, number | null>;
-  const errors: Partial<Record<AmountKey, string>> = {};
-  for (const key of AMOUNT_KEYS) {
-    if (parsed[key] === null) errors[key] = "Enter a dollar amount, like 50 or 50.25.";
-  }
-  if (
-    parsed.maxTradeCents !== null &&
-    parsed.budgetCents !== null &&
-    parsed.maxTradeCents > parsed.budgetCents
-  ) {
-    errors.maxTradeCents = "The max trade size can't be more than the budget.";
-  }
-  if (
-    parsed.approvalAboveCents !== null &&
-    parsed.maxTradeCents !== null &&
-    parsed.approvalAboveCents > parsed.maxTradeCents
-  ) {
-    errors.approvalAboveCents = "Set it at or below the max trade size, or 0 to never ask.";
-  }
-  const hasErrors = Object.values(errors).some(Boolean) || draft.categories.length === 0;
-
-  const next: PolicyRules | null = hasErrors
-    ? null
-    : {
-        budgetCents: parsed.budgetCents ?? 0,
-        maxTradeCents: parsed.maxTradeCents ?? 0,
-        approvalAboveCents: parsed.approvalAboveCents ?? 0,
-        dailyLossCents: parsed.dailyLossCents ?? 0,
-        allowedCategories: categoryMask(draft.categories),
-        // setPolicy writes the pause flag too: keep it as it is; only the kill switch changes it.
-        paused: rules?.paused ?? false,
-      };
+  // setPolicy writes the pause flag too: keep it as it is; only the kill switch changes it.
+  const { errors, next } = checkDraft(draft, rules?.paused ?? false);
   const changes = next ? rulesDiff(rules, next) : [];
 
   return (
@@ -204,9 +125,11 @@ export function RulesEditor({ rules, version, chain }: RulesEditorProps) {
               type="submit"
               variant="primary"
               icon={<PenLine aria-hidden />}
-              disabled={!hydrated || changes.length === 0 || hasErrors}
+              disabled={!hydrated || changes.length === 0 || next === null}
             >
-              Review and sign
+              {access.kind === "owner" && access.signer === "passkey"
+                ? "Review and confirm"
+                : "Review and sign"}
             </Button>
             <Button
               type="button"

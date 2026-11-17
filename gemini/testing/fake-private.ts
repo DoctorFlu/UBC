@@ -320,6 +320,13 @@ export class FakeGeminiPrivate {
         },
       };
     }
+    // The sandbox's own answer to a longer id, measured on 2026-11-17; 36 characters are accepted.
+    if (typeof fields.clientOrderId === "string" && fields.clientOrderId.length > 36) {
+      return {
+        status: 400,
+        body: { error: "InvalidInput", message: "client_order_id must be at most 36 characters" },
+      };
+    }
     const quantity = parseHundredths(fields.quantity);
     const price = parseHundredths(fields.price);
     const side = fields.side;

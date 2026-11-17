@@ -33,6 +33,7 @@ import {
   CONSOLE_AGENT_API_BASE,
   CONSOLE_EXECUTOR_API_BASE,
   ENV_AGENT_ID,
+  type MandateDeploymentKind,
   agentTransactionRefusal,
   fromUnsignedTransaction,
   hashAgentToken,
@@ -138,11 +139,18 @@ export interface FakeConsole {
     privateKey?: Hex;
     /** The mandate's contract: the agent may sign `proposeTrade` to it, on its chain. */
     contract?: { policyAddress: Address; chainId: number };
+    /**
+     * Whose contract that is: the server's (`env`, the default), or the mandate's own (`server`), which
+     * the console then names in its answer with this deploy block (#95).
+     */
+    own?: { deployBlock: number };
   }) => FakeAgent;
   /** Another console-issued token for an agent. */
   readonly issueToken: (agentId: string) => { token: string; tokenId: string };
   /** Revokes a token at once, like the owner does in Setup. */
   readonly revokeToken: (token: string) => void;
+  /** Renames the agent's mandate, like an admin does in Setup: the next resolve names it so. */
+  readonly renameMandate: (agentId: string, name: string) => void;
   /** The records of an agent. */
   readonly stateOf: (agentId: string) => FakeConsoleState;
 }
@@ -178,11 +186,15 @@ interface AgentRecord {
   agentId: string;
   workspaceId: string;
   mandateId: string;
+  /** The mandate's name, which an admin can change at any time (`renameMandate`). */
+  mandateName: string;
   address: Address | null;
   signer: "env" | "console";
-  deployment: "env" | null;
+  deployment: MandateDeploymentKind | null;
   privateKey: Hex | null;
   contract: { policyAddress: Address; chainId: number } | null;
+  /** The deploy block of the mandate's own contract (`deployment: "server"`). */
+  deployBlock: number | null;
   state: FakeConsoleState;
 }
 
@@ -218,11 +230,13 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
         agentId: ENV_AGENT_ID,
         workspaceId: "wsp_first",
         mandateId: "mnd_first",
+        mandateName: "Mandate",
         address: null,
         signer: "env",
         deployment: "env",
         privateKey: null,
         contract: null,
+        deployBlock: null,
         state,
       },
     ],
@@ -277,7 +291,18 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
       agentId: agent.agentId,
       tokenId: record.tokenId,
       agent: { address: agent.address, signer: agent.signer },
-      mandate: { deployment: agent.deployment },
+      mandate: {
+        name: agent.mandateName,
+        deployment: agent.deployment,
+        contract:
+          agent.deployment === "server" && agent.contract !== null && agent.deployBlock !== null
+            ? {
+                chainId: agent.contract.chainId,
+                address: agent.contract.policyAddress,
+                deployBlock: agent.deployBlock,
+              }
+            : null,
+      },
     };
     return c.json(answer);
   });
@@ -551,11 +576,13 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
         agentId,
         workspaceId: `wsp_${base32(26)}`,
         mandateId: `mnd_${base32(26)}`,
+        mandateName: "Mandate",
         address,
         signer: "console",
-        deployment: agentOptions.contract === undefined ? null : "env",
+        deployment: agentOptions.contract === undefined ? null : agentOptions.own ? "server" : "env",
         privateKey: agentOptions.privateKey ?? null,
         contract: agentOptions.contract ?? null,
+        deployBlock: agentOptions.own?.deployBlock ?? null,
         state: newState(),
       };
       agents.set(agentId, record);
@@ -574,6 +601,11 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     revokeToken: (token) => {
       const record = tokens.get(hashAgentToken(token));
       if (record !== undefined) record.revoked = true;
+    },
+    renameMandate: (agentId, name) => {
+      const agent = agents.get(agentId);
+      if (agent === undefined) throw new Error(`no agent ${agentId}`);
+      agent.mandateName = name;
     },
     stateOf: (agentId) => {
       const agent = agents.get(agentId);

@@ -2,7 +2,6 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { planHedge } from "@mandate/planner";
 import {
   AGENT_ID_HEADER,
   CONSOLE_AGENT_ROUTES,
@@ -27,6 +26,7 @@ import { GET as holdingsRoute } from "@/app/api/agent/v1/holdings/route";
 
 import { envMandate, envSnapshot } from "../../../test/support/accounts";
 import { BTC_ABOVE_66K, type TestChain, startTestChain } from "../../../test/support/devchain";
+import { exampleLadder, examplePlan } from "../../../test/support/hedge";
 import { testConsoleConfig } from "../config";
 import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
@@ -109,52 +109,6 @@ const context: DecisionContext = {
   reason: "The $66,000 rung covers the first drop below spot at the lowest cost.",
   createdAt: "2026-11-14T15:51:00.000Z",
 };
-
-/** A three-rung BTC ladder, expiring at `expiry`. */
-function exampleLadder(expiry = "2026-11-20T22:00:00.000Z") {
-  const eventTicker = `BTC${expiry.slice(2, 4)}${expiry.slice(5, 7)}${expiry.slice(8, 10)}2200`;
-  const rung = (strike: number, noBuyCents: number) => ({
-    strikeCents: strike * 100,
-    instrumentSymbol: `GEMI-${eventTicker}-HI${String(strike)}`,
-    label: `$${strike.toLocaleString("en-US")} or above`,
-    marketState: "open" as const,
-    yesBidCents: 100 - noBuyCents,
-    yesAskCents: 105 - noBuyCents,
-    noBuyCents,
-    noSellCents: noBuyCents - 4,
-    lastTradeCents: null,
-  });
-  const spot = 6_558_600;
-  return {
-    asset: "BTC",
-    eventTicker,
-    title: "BTC price on expiry",
-    kind: "weekly" as const,
-    expiry,
-    settlementIndex: "LS-LRRR-XBTUSD",
-    spot: {
-      asset: "BTC",
-      symbol: "btcusd",
-      bidCents: spot,
-      askCents: spot,
-      lastCents: spot,
-      midCents: spot,
-      fetchedAt: "2026-11-14T15:50:00.000Z",
-    },
-    rungs: [rung(64_000, 34), rung(65_000, 43), rung(66_000, 53)],
-    fetchedAt: "2026-11-14T15:50:00.000Z",
-  };
-}
-
-function examplePlan(expiry?: string) {
-  return planHedge({
-    holding: { asset: "BTC", quantity: "0.05" },
-    ladder: exampleLadder(expiry),
-    goal: { floorCents: 6_400_000, ceilingCents: 6_600_000 },
-    maxCostCents: 4_500,
-    limits: { maxTradeCents: 10_000, remainingBudgetCents: 100_000, categoryAllowed: true },
-  });
-}
 
 describe("agent API: authentication", () => {
   const service = makeService();
@@ -584,7 +538,7 @@ describe("agent API: pairing", () => {
       agentAddress: AGENT,
       agentName: "Grok Bot",
       status: "pending",
-      claimUrl: `http://console.test/setup/pair/${AGENT}`,
+      claimUrl: `http://console.test/m/${envMandate(service).id}/setup/pair/${AGENT}`,
       isContractAgent: true,
     });
 
@@ -786,14 +740,15 @@ describe("agent API: the owner's view (#97)", () => {
     return policyChangeRequestSchema.parse(await response.json());
   };
 
-  it("gives the console's address and only the change requests still waiting for the owner", async () => {
+  it("gives the mandate's console address and only the change requests still waiting for the owner", async () => {
     const service = makeService();
     const dismissed = await fileRequest(service, 5_000);
     const pending = await fileRequest(service, 6_000);
     service.offchain.resolveChangeRequest(envMandate(service).id, dismissed.id, { status: "dismissed" });
 
     const summary = await summaryOf(service, quotes);
-    expect(summary.consoleUrl).toBe("http://console.test");
+    // The mandate's own pages (#95), so the agent's links open the mandate it acts for.
+    expect(summary.consoleUrl).toBe(`http://console.test/m/${envMandate(service).id}`);
     expect(summary.changeRequests.map((request) => request.id)).toEqual([pending.id]);
     expect(summary.cover).toEqual([]);
   });

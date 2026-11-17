@@ -13,11 +13,21 @@ export interface EmptyStateProps {
   action?: ReactNode;
   /** No frame, for use inside a card. */
   plain?: boolean;
+  /** `h1` when the empty state is the whole page, so the page still has its heading. */
+  titleAs?: "p" | "h1";
   className?: string;
 }
 
 /** An empty view is an invitation to act: say what will show up here and how to get it. */
-export function EmptyState({ icon, title, children, action, plain = false, className }: EmptyStateProps) {
+export function EmptyState({
+  icon,
+  title,
+  children,
+  action,
+  plain = false,
+  titleAs: Title = "p",
+  className,
+}: EmptyStateProps) {
   return (
     <div className={cx(styles.state, plain && styles.plain, className)}>
       {icon ? (
@@ -25,7 +35,7 @@ export function EmptyState({ icon, title, children, action, plain = false, class
           {icon}
         </span>
       ) : null}
-      <p className={styles.title}>{title}</p>
+      <Title className={styles.title}>{title}</Title>
       {children ? <div className={styles.body}>{children}</div> : null}
       {action ? <div className={styles.actions}>{action}</div> : null}
     </div>

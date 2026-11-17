@@ -564,3 +564,21 @@ button.footLink:disabled {
     gap: var(--space-1);
   }
 }
+
+.walletKey {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-text-muted);
+}
+
+/* The workspace pages have no status strip on wide screens: the sidebar holds everything. */
+.workspaceTopbar {
+  display: none;
+}
+
+@media (width < 64rem) {
+  .workspaceTopbar {
+    display: flex;
+  }
+}

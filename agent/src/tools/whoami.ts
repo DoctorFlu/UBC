@@ -19,6 +19,10 @@ export const whoami = defineTool({
       .object({
         id: z.string().describe("The agent this token acts for, as the console's Agents section names it"),
         mandateId: z.string().nullable().describe("The mandate it acts on"),
+        mandateName: z
+          .string()
+          .nullable()
+          .describe("That mandate's name, as its owners named it; a workspace may have several mandates"),
       })
       .describe("Which agent and mandate the bearer token reaches"),
     chain: z.object({ rpcHost: z.string().describe("Host of the Arc RPC endpoint the server uses") }),
@@ -39,12 +43,16 @@ export const whoami = defineTool({
     return {
       structured: {
         agentAddress: address,
-        agent: { id: agent.agentId, mandateId: agent.mandateId },
+        agent: { id: agent.agentId, mandateId: agent.mandateId, mandateName: agent.mandateName },
         chain: { rpcHost: rpcHost(config) },
         policyAddress: config.policyAddress ?? null,
         capabilities,
       },
-      summary: `Agent ${agent.agentId}${agent.mandateId === null ? "" : ` of mandate ${agent.mandateId}`}. ${
+      summary: `Agent ${agent.agentId}${
+        agent.mandateId === null
+          ? ""
+          : ` of mandate ${agent.mandateName === null ? agent.mandateId : `"${agent.mandateName}" (${agent.mandateId})`}`
+      }. ${
         address === null ? "No agent key is configured." : `Agent address ${address}.`
       } Capabilities: ${enabled.length === 0 ? "none yet; call get_setup_state" : enabled.join(", ")}.`,
     };

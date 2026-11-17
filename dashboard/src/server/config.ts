@@ -74,6 +74,54 @@ export interface ConsoleConfig {
   accounts: AccountsConfig;
   /** Event wake-ups of the Grok Bot routine (issue #40). */
   wake: WakeConfig;
+  /** Several mandates per workspace (#95). */
+  mandates: MandatesConfig;
+}
+
+export interface MandatesConfig {
+  /**
+   * Most mandates a workspace may have, the first included (`CONSOLE_MANDATES_PER_WORKSPACE`). Each mandate
+   * has exactly one agent, so this bounds the agents too; on the demo chain it also bounds the contracts
+   * the console deploys and pays for.
+   */
+  maxPerWorkspace: number;
+  /**
+   * Who deploys a new mandate's contract (`CONSOLE_MANDATE_DEPLOYER`): `server` on the demo chain, `wallet`
+   * (the owner's own) on Arc. Null picks by network: the local or demo chain is `server`, Arc is `wallet`.
+   */
+  deployer: "server" | "wallet" | null;
+  /**
+   * The executor a new contract names (`CONSOLE_MANDATE_EXECUTOR`). Null: the executor of the server's own
+   * contract, so one executor serves every mandate.
+   */
+  executor: `0x${string}` | null;
+  /** Where the compiled Policy contracts are (`CONSOLE_POLICY_ARTIFACTS_DIR`); null finds `devchain/out`. */
+  artifactsDir: string | null;
+}
+
+export const DEFAULT_MANDATES_PER_WORKSPACE = 5;
+
+export function readMandatesConfig(env: EnvVars = process.env): MandatesConfig {
+  const executor = optional(env.CONSOLE_MANDATE_EXECUTOR);
+  if (executor !== null && !/^0x[0-9a-fA-F]{40}$/.test(executor)) {
+    throw new Error(`CONSOLE_MANDATE_EXECUTOR must be an address (0x and 40 hex digits), got "${executor}"`);
+  }
+  const deployer = optional(env.CONSOLE_MANDATE_DEPLOYER);
+  return {
+    maxPerWorkspace: wholeNumber(
+      "CONSOLE_MANDATES_PER_WORKSPACE",
+      env.CONSOLE_MANDATES_PER_WORKSPACE,
+      DEFAULT_MANDATES_PER_WORKSPACE,
+      1,
+      100,
+    ),
+    deployer:
+      deployer === null
+        ? null
+        : oneOf("CONSOLE_MANDATE_DEPLOYER", deployer, ["server", "wallet"] as const, "server"),
+    executor: executor as `0x${string}` | null,
+    artifactsDir: optional(env.CONSOLE_POLICY_ARTIFACTS_DIR),
+  };
 }
 
 export interface WakeConfig {
@@ -247,6 +295,7 @@ export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
     mcpPublicUrl: optional(env.MCP_PUBLIC_URL),
     accounts,
     wake,
+    mandates: readMandatesConfig(env),
   };
 }
 
@@ -266,6 +315,7 @@ export function testConsoleConfig(
     publicUrl,
     mcpPublicUrl: null,
     wake: readWakeConfig({}),
+    mandates: readMandatesConfig({}),
     ...rest,
     accounts: { ...readAccountsConfig({ CONSOLE_MODE: "development" }, publicUrl), ...accounts },
   };

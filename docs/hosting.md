@@ -196,7 +196,8 @@ export MCP_AUTH_TOKEN="$(sed -n 's/^MCP_AUTH_TOKEN=//p' .env)"
 ./smoke.sh https://<host>
 ```
 
-Without `MCP_AUTH_TOKEN` it skips the MCP checks that need a token, so it can run from a machine that should not hold one; set `SMOKE_AGENT_ADDRESS` to the agent's address then, for the scorecard check.
+Without `MCP_AUTH_TOKEN` it skips the MCP checks that need a token, so it can run from a machine that should not hold one; set `SMOKE_AGENT_ADDRESS` to the first mandate's agent address then, for the scorecard check.
+Only the first mandate's agent has a public scorecard, so with another mandate's token set `SMOKE_AGENT_ADDRESS` too; otherwise the check uses the token's agent.
 With `CONSOLE_SESSION`, the value of the console's session cookie copied from a signed-in browser (`read -rs CONSOLE_SESSION && export CONSOLE_SESSION`), it also checks the signed-in routes.
 
 It checks both health endpoints, that `/mcp` refuses a request without a token or with an unknown one and answers `initialize`, `tools/list` and a read-only `whoami` call with the token, that member APIs answer 401 without a session or with a wrong one and pages send the browser to `/sign-in`, that nothing asks for a password, that cross-site writes and sign-ins are refused, that the account pages, the scorecard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs a session.
@@ -231,7 +232,7 @@ Never paste it into a chat, an issue or a pull request.
 Revoking a token in the Agents section stops it on its next call, `MCP_AUTH_TOKEN` included.
 The rest of the connector setup is in [agent/README.md](../agent/README.md#connect-grok-bot).
 
-The first time Grok Bot connects, it asks to pair and gives you a link to `https://<host>/setup/pair/<agent>`.
+The first time Grok Bot connects, it asks to pair and gives you a link to `https://<host>/m/<mandate>/setup/pair/<agent>`, the pairing page of the mandate it acts for.
 Open it, sign in, and confirm.
 On the demo chain, enter a holding under **Hedge** before asking for a hedge.
 
@@ -744,6 +745,30 @@ It is an update that changes the console's database, run exactly as in [Updates 
   The previous console cannot read the upgraded tables, whose rows now carry a mandate.
   On a version 8 file it starts, but its health check, its pages and the agent API's holdings answer 500 (`no such column: id`), as the version 7 image did on Docker on 17 Nov 2026; the MCP server and Caddy wait for a healthy console, so they are not started either.
   Passkeys made after the swap stay on their devices unused.
+
+### Upgrade to several mandates (once)
+
+The version with several mandates per workspace (issue #95) is database version 9.
+It is an update that changes the console's database, run exactly as in [Updates that change the console's database](#updates-that-change-the-consoles-database), with these differences:
+
+- **Nothing to add to the env file.**
+  The new settings (`CONSOLE_MANDATES_PER_WORKSPACE`, `CONSOLE_MANDATE_DEPLOYER`, `CONSOLE_MANDATE_EXECUTOR`, `EXECUTOR_DISCOVERY_MS`) have defaults that suit the hosted demo chain; [configuration.md](configuration.md#console) describes them.
+  The console image now carries the compiled Policy contracts, from the same build stage that compiles them for the demo chain.
+- **The rehearsal** goes from 8 to 9, then `9 -> 9`.
+  The migration rebuilds the `mandates` table with columns for each mandate's own contract and adds `owner_actions`; it needs nothing from the rest of the app, so the rehearsal runs `db.ts` alone as before.
+  The `diff` must show exactly:
+  - the version line;
+  - the new table `owner_actions` with 0 rows;
+  - `mandates` with the same number of rows (1 on a machine with only the first workspace, one more for each sign-up) and a new hash, because every row gains the new columns, all empty;
+  - every other table with the same rows and the same hash.
+
+  Any other change, a different row count above all, means stop.
+  `dashboard/src/server/db.test.ts` upgrades a database of the hosted version 8 with rows in every table, checks that every row and every mandate id is kept and that foreign keys hold, and pins the schema version 9 leaves.
+- **After the swap**, the first workspace sees the same pages at new addresses: `/` is now the workspace's Home, each mandate's pages are under `/m/<mandate id>`, and old links such as `/approvals` or Grok Bot's pairing link open the first mandate's page.
+  Grok Bot's links (the digest's, the wake-ups' and the pairing link) now name the mandate.
+  The executor finds new mandates' contracts through the console on its own; the server's own contract is served as before.
+- **A rollback restores the backup**: run all three blocks of the rollback, the second one included.
+  Version 9 rebuilt `mandates`, and whether the version 8 console runs on it was not tried, so treat it as an update that changes existing tables.
 
 ### Pauses and the free plan's limits
 

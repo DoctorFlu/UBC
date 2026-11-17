@@ -1,13 +1,15 @@
 import "server-only";
 
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
-import type { AccountView } from "@/lib/accounts/types";
+import type { AccountView, MandateView } from "@/lib/accounts/types";
+import { mandatePath } from "@/lib/mandate-path";
 
 import type { Access } from "./accounts/accounts";
 import type { Mandate } from "./accounts/store";
 import { getConsoleService } from "./console";
+import { mandateView } from "./http/mandates-api";
 import { sessionCookieName } from "./http/session";
 
 /**
@@ -22,16 +24,29 @@ export async function pageAccess(): Promise<Access | null> {
   return service.accounts.access(cookie?.value ?? null);
 }
 
-/**
- * The signed-in member and the mandate the console shows, or a redirect to the sign-in page. Phase 1 has
- * one mandate per workspace, so pages show the workspace's first; the API routes already take `?mandate=`.
- */
-export async function pageScope(): Promise<{ access: Access; mandate: Mandate }> {
+/** The signed-in member, or a redirect to the sign-in page (which brings them back to `next`). */
+export async function workspaceScope(next?: string): Promise<{ access: Access }> {
   const access = await pageAccess();
-  if (!access) redirect("/sign-in");
-  const mandate = getConsoleService().accounts.mandateFor(access, null);
-  if (!mandate) redirect("/sign-in");
+  if (!access) redirect(next && next !== "/" ? `/sign-in?next=${encodeURIComponent(next)}` : "/sign-in");
+  return { access };
+}
+
+/**
+ * The signed-in member and the mandate the URL names (`/m/<id>`, #95), or a redirect to the sign-in page.
+ * A mandate outside the member's workspace is not found, exactly like one that does not exist, so a page
+ * never says whether another workspace's mandate id is real.
+ */
+export async function pageScope(mandateId: string): Promise<{ access: Access; mandate: Mandate }> {
+  const { access } = await workspaceScope(mandatePath(mandateId));
+  const mandate = getConsoleService().accounts.mandateFor(access, mandateId);
+  if (!mandate || mandateId === "") notFound();
   return { access, mandate };
+}
+
+/** Every mandate of the member's workspace, oldest first, as the switcher and Home list them. */
+export function workspaceMandates(access: Access): MandateView[] {
+  const service = getConsoleService();
+  return service.accounts.store.mandates(access.workspace.id).map((mandate) => mandateView(service, mandate));
 }
 
 export function accountView(access: Access): AccountView {

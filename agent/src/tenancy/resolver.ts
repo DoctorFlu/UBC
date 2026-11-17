@@ -208,7 +208,7 @@ export function envAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent 
     agentId: "env",
     tokenId: "tok_env",
     agent: { address: null, signer: "env" },
-    mandate: { deployment: "env" },
+    mandate: { name: "Mandate", deployment: "env", contract: null },
     ...overrides,
   };
 }

@@ -2,15 +2,16 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 import { routePath, routes, schemes } from "./routes";
+import { firstMandatePath } from "./support/console";
 import { watchConsole } from "./support/problems";
 import { ownerCookie } from "./support/session";
 
 const ADVANCED_COOKIE = "mandate-advanced";
 
 test.describe("Advanced view", () => {
-  test("is off by default, and the default view shows the summary", async ({ page }) => {
+  test("is off by default, and the default view shows the summary", async ({ page, baseURL }) => {
     const problems = watchConsole(page);
-    await page.goto("/");
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     const toggle = page.getByRole("switch", { name: "Advanced view" });
     await expect(toggle).not.toBeChecked();
     await expect(page.getByTestId("rules-summary")).toBeVisible();
@@ -18,9 +19,13 @@ test.describe("Advanced view", () => {
     expect(problems).toEqual([]);
   });
 
-  test("turns on from the shell, saves a cookie and survives a reload", async ({ page, context }) => {
+  test("turns on from the shell, saves a cookie and survives a reload", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     const problems = watchConsole(page);
-    await page.goto("/");
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     await page.getByRole("switch", { name: "Advanced view" }).click();
     await expect(page.getByRole("switch", { name: "Advanced view" })).toBeChecked();
     await expect(page.getByText("Committed", { exact: true })).toBeVisible();
@@ -38,12 +43,16 @@ test.describe("Advanced view", () => {
     // An explicit cookie header replaces the stored ones, so it carries the owner's session too.
     const session = ownerCookie(baseURL ?? "") ?? "";
     const on = await (
-      await request.get("/", { headers: { cookie: `${ADVANCED_COOKIE}=on; ${session}` } })
+      await request.get(await firstMandatePath(baseURL ?? ""), {
+        headers: { cookie: `${ADVANCED_COOKIE}=on; ${session}` },
+      })
     ).text();
     expect(on).toContain("Committed");
     expect(on).not.toContain('data-testid="rules-summary"');
 
-    const off = await (await request.get("/", { headers: { cookie: session } })).text();
+    const off = await (
+      await request.get(await firstMandatePath(baseURL ?? ""), { headers: { cookie: session } })
+    ).text();
     expect(off).toContain('data-testid="rules-summary"');
     expect(off).not.toContain("Committed");
   });
@@ -57,9 +66,12 @@ test.describe("Advanced view", () => {
     expect(problems).toEqual([]);
   });
 
-  test("a deep link to Advanced-only content shows it with a note in the default view", async ({ page }) => {
+  test("a deep link to Advanced-only content shows it with a note in the default view", async ({
+    page,
+    baseURL,
+  }) => {
     const problems = watchConsole(page);
-    await page.goto("/#rule-meters");
+    await page.goto(`${await firstMandatePath(baseURL ?? "")}#rule-meters`);
     const note = page.getByTestId("advanced-note");
     await expect(note).toBeVisible();
     await expect(note).toContainText("part of Advanced view");
@@ -78,7 +90,7 @@ test.describe("Advanced view", () => {
     baseURL,
   }) => {
     await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
-    await page.goto("/#rule-meters");
+    await page.goto(`${await firstMandatePath(baseURL ?? "")}#rule-meters`);
     await expect(page.getByText("Committed", { exact: true })).toBeVisible();
     await expect(page.getByTestId("advanced-note")).toHaveCount(0);
   });
@@ -114,30 +126,55 @@ test.describe("times", () => {
 test.describe("live connection behind a proxy", () => {
   test("a slow event stream reads Connecting, then Live, with nothing added to the page", async ({
     page,
+    baseURL,
   }) => {
+    const path = await firstMandatePath(baseURL ?? "");
+    const mandateId = path.split("/m/")[1]?.split("/")[0] ?? "";
+    // This page's own stream (#95): the events route with this mandate's `?mandate=`, and no other request.
+    const isStream = (url: URL | string) => {
+      const parsed = new URL(url);
+      return parsed.pathname === "/api/console/events" && parsed.searchParams.get("mandate") === mandateId;
+    };
+    const lamp = page.getByTestId("live-indicator").filter({ visible: true });
+    // First the page and its stream unheld: `next dev` compiles both on their first request, so the held
+    // stream below measures only the proxy's delay, never a compile that happens to follow the release.
+    const firstStream = page.waitForResponse((response) => isStream(response.url()));
+    await page.goto(path);
+    expect((await firstStream).status()).toBe(200);
+    await expect(lamp).toHaveAttribute("data-health", "live");
+
     // A proxy in front of an idle console can take seconds to answer the first request.
     let release = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/api/console/events", async (route) => {
+    let heldStreams = 0;
+    await page.route(isStream, async (route) => {
+      heldStreams += 1;
       await held;
       await route.continue().catch(() => {});
     });
-    await page.goto("/");
-    const lamp = page.getByTestId("live-indicator").filter({ visible: true });
+    const released = page.waitForResponse((response) => isStream(response.url()));
+    await page.reload();
     await expect(lamp).toHaveAttribute("data-health", "connecting");
     await expect(lamp).toHaveText(/^Connecting/);
+    // The lamp reads Connecting because this page's stream is the one held, not for another reason.
+    expect(heldStreams).toBeGreaterThan(0);
     release();
+    // The stream's headers are what turn the lamp: wait for them, then for the lamp.
+    expect((await released).status()).toBe(200);
     await expect(lamp).toHaveAttribute("data-health", "live");
     await expect(lamp).toHaveText(/^Live/);
   });
 
-  test("the event stream comes back after the proxy answered with an HTTP error", async ({ page }) => {
+  test("the event stream comes back after the proxy answered with an HTTP error", async ({
+    page,
+    baseURL,
+  }) => {
     // A browser's EventSource gives up for good on an HTTP error (a 502 while the console wakes up),
     // where it would retry a dropped connection by itself.
     let failures = 2;
-    await page.route("**/api/console/events", async (route) => {
+    await page.route("**/api/console/events?*", async (route) => {
       if (failures > 0) {
         failures -= 1;
         await route.fulfill({ status: 502, contentType: "text/plain", body: "Bad gateway" });
@@ -145,7 +182,7 @@ test.describe("live connection behind a proxy", () => {
       }
       await route.continue().catch(() => {});
     });
-    await page.goto("/");
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     const lamp = page.getByTestId("live-indicator").filter({ visible: true });
     await expect(lamp).toHaveAttribute("data-health", "disconnected");
     await expect(lamp).toHaveText(/^Reconnecting/);
@@ -160,13 +197,14 @@ test.describe("phone menu on a slow device", () => {
 
   test("a tap on the menu while the page is still hydrating opens it, without a hydration error", async ({
     page,
+    baseURL,
   }) => {
     const problems = watchConsole(page);
     // A slow phone: the shell hydrates first and the page's own boundary later, which leaves a window in
     // which the menu button works but the page below it has not hydrated yet.
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 20 });
-    await page.goto("/", { waitUntil: "commit" });
+    await page.goto(await firstMandatePath(baseURL ?? ""), { waitUntil: "commit" });
     const menu = page.getByRole("button", { name: "Open menu" });
     const drawer = page.getByRole("dialog");
     // Tap as early as the button exists, and again until a tap lands after the shell hydrated. A tap that
@@ -179,7 +217,7 @@ test.describe("phone menu on a slow device", () => {
     // The drawer opens only once the page has hydrated, so any hydration error is already in `problems`.
     await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
-    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeAttached();
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeAttached();
     await page.keyboard.press("Escape");
     await expect(drawer).toBeHidden();
     expect(problems).toEqual([]);
@@ -235,11 +273,12 @@ test.describe("hedge disclosure", () => {
 
 test.describe("layout", () => {
   for (const width of [1440, 1024, 768, 390]) {
-    test(`a held approval card on Home is as tall as its content at ${width.toString()} px`, async ({
+    test(`a held approval card on Overview is as tall as its content at ${width.toString()} px`, async ({
       page,
+      baseURL,
     }) => {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto("/");
+      await page.goto(await firstMandatePath(baseURL ?? ""));
       const card = page.locator('[data-testid^="waiting-intent-"]').first();
       await expect(card).toBeVisible();
       const gap = await card.evaluate((element) => {
@@ -260,8 +299,8 @@ test.describe("layout", () => {
 });
 
 test.describe("keyboard", () => {
-  test("the Advanced view switch toggles with Space", async ({ page }) => {
-    await page.goto("/");
+  test("the Advanced view switch toggles with Space", async ({ page, baseURL }) => {
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     const toggle = page.getByRole("switch", { name: "Advanced view" });
     await toggle.focus();
     await page.keyboard.press("Space");

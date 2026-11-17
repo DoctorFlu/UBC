@@ -14,7 +14,8 @@ import { useToast } from "@/components/ui/Toast";
 import { When } from "@/components/ui/When";
 
 import type { ChainView } from "@/lib/live/types";
-import { ownerBlockedReason } from "@/lib/owner/access";
+import { useMandateUrls } from "@/lib/mandate/MandateContext";
+import { ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
 
 import styles from "./rules.module.css";
@@ -47,8 +48,8 @@ const requestedColumns: readonly Column<RuleChange>[] = [
   { key: "requested", header: "Requested", cell: (change) => change.to, align: "end", nowrap: true },
 ];
 
-async function markApplied(id: string, txHash: string): Promise<string | null> {
-  const response = await fetch(`/api/console/change-requests/${encodeURIComponent(id)}/applied`, {
+async function markApplied(url: string, txHash: string): Promise<string | null> {
+  const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ txHash }),
@@ -74,6 +75,7 @@ function RequestCard({
   agentName: string;
 }) {
   const toast = useToast();
+  const { api } = useMandateUrls();
   const { request: ownerRequest, pending, access } = useOwnerRequest();
   const [reviewing, setReviewing] = useState(false);
   const blocked = ownerBlockedReason(access);
@@ -98,7 +100,11 @@ function RequestCard({
     toast(
       result.ok
         ? { title: "Request dismissed", description: "The rules stay as they are." }
-        : { title: "Not dismissed", description: result.message, tone: "danger" },
+        : {
+            title: "Not dismissed",
+            description: result.message,
+            ...(result.cancelled ? {} : { tone: "danger" as const }),
+          },
     );
   };
 
@@ -150,7 +156,9 @@ function RequestCard({
                 onClick={() => setReviewing(true)}
                 disabled={!next || changes.length === 0 || blocked !== null}
               >
-                Review and sign
+                {access.kind === "owner" && access.signer === "passkey"
+                  ? "Review and confirm"
+                  : "Review and sign"}
               </Button>
               <Button
                 variant="secondary"
@@ -159,7 +167,7 @@ function RequestCard({
                 loading={pending}
                 disabled={blocked !== null}
               >
-                Dismiss
+                {ownerActionLabel(access, "Dismiss")}
               </Button>
               {blocked && access.kind !== "loading" ? <p className={styles.blockedNote}>{blocked}</p> : null}
             </div>
@@ -187,7 +195,10 @@ function RequestCard({
           next={next}
           title="Apply the agent's request"
           onSigned={async (hash) => {
-            const problem = await markApplied(request.id, hash);
+            const problem = await markApplied(
+              api(`/api/console/change-requests/${encodeURIComponent(request.id)}/applied`),
+              hash,
+            );
             if (problem)
               toast({ title: "Signed, but not marked applied", description: problem, tone: "danger" });
           }}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { cx } from "@/lib/cx";
-import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useNetwork } from "@/lib/live/LiveConsole";
 import { NETWORK_TAGS } from "@/lib/network";
 
 import styles from "./Shell.module.css";
@@ -21,12 +21,12 @@ export function BrandMark({ className }: { className?: string }) {
 
 /** The logo, with a tag naming the chain the console resolved (Local, Arc testnet). */
 export function Brand({ showTag = true, nameClassName }: { showTag?: boolean; nameClassName?: string }) {
-  const { network } = useSnapshot();
+  const network = useNetwork();
   return (
     <Link href="/" className={styles.brand}>
       <BrandMark />
       <span className={cx(styles.brandName, nameClassName)}>Mandate</span>
-      {showTag ? (
+      {showTag && network ? (
         <span className={styles.brandTag} title={network.name} data-testid="network-tag">
           {NETWORK_TAGS[network.kind]}
         </span>

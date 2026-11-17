@@ -8,6 +8,8 @@ import type {
 } from "@simplewebauthn/server";
 import { isoCBOR } from "@simplewebauthn/server/helpers";
 
+import type { NewPasskey } from "../../src/server/accounts/store";
+
 /**
  * A software passkey for server tests: it answers the console's registration and sign-in options the way a
  * platform authenticator does (ES256, attestation "none", user present and verified), so the ceremonies run
@@ -77,13 +79,29 @@ export class SoftPasskey {
     };
   }
 
-  /** A signed answer to the sign-in options, as `navigator.credentials.get` returns it. */
+  /** The passkey as the console stores it once registered, to give a member in a test directly. */
+  stored(): NewPasskey {
+    return {
+      credentialId: this.id,
+      publicKey: this.cose,
+      counter: 0,
+      transports: ["internal"],
+      deviceType: "singleDevice",
+      backedUp: false,
+    };
+  }
+
+  /**
+   * A signed answer to the sign-in options, as `navigator.credentials.get` returns it. `userVerified:
+   * false` answers as an authenticator that only checked presence (no PIN, no biometric).
+   */
   get(
     options: PublicKeyCredentialRequestOptionsJSON,
-    overrides: { origin?: string; rpId?: string } = {},
+    overrides: { origin?: string; rpId?: string; userVerified?: boolean } = {},
   ): AuthenticationResponseJSON {
     const clientDataJSON = this.clientData("webauthn.get", options.challenge, overrides.origin);
-    const authData = this.authenticatorData(overrides.rpId ?? options.rpId ?? "", 0x05);
+    const flags = overrides.userVerified === false ? 0x01 : 0x05;
+    const authData = this.authenticatorData(overrides.rpId ?? options.rpId ?? "", flags);
     const signature = sign(
       "sha256",
       Buffer.concat([authData, createHash("sha256").update(clientDataJSON).digest()]),

@@ -32,6 +32,8 @@ function outcome(result: ToolResult): string {
   return found.length > 0 ? found.join("+") : result.isError ? "error" : "ok";
 }
 
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
 function needIntruder(ctx: AttackContext): Intruder {
   if (ctx.intruder === null) throw new Error("this target has no second workspace");
   return ctx.intruder;
@@ -157,27 +159,20 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
       name: "A member of another workspace reaches for this one through the console",
       surface: "console",
       tried:
-        "Signed in to his own workspace, Bob asks the console for Alice's mandate by id (snapshot, live events, hedge quotes), lists agents, creates and revokes tokens on Alice's agent, dismisses and marks applied Alice's change request, saves holdings and confirms a pairing on her mandate, and presents his own agent token where the MCP server's service token belongs. Every write carries the console's own Origin, so only the tenancy check stands in the way.",
+        "Signed in to his own workspace, Bob asks the console for Alice's mandate by id (snapshot, live events, hedge quotes), lists agents, creates and revokes tokens on Alice's agent, asks for passkey challenges for a token on her agent and an owner call on her mandate, sends an owner call to her mandate on his session alone, dismisses and marks applied Alice's change request, saves holdings and confirms a pairing on her mandate, mints a token on his own agent without a passkey, and presents his own agent token where the MCP server's service token belongs. Every write carries the console's own Origin, so only the tenancy and step-up checks stand in the way.",
       expected:
-        "404 for every one of Alice's ids and the agent API refuses his token (401); Bob's own snapshot, stream and agent list carry nothing of Alice's, and no chain view, so none of the contract's venue orders, venue or settlements; Alice's token, change request and holdings are as they were, and her token still resolves to her agent.",
+        "404 for every one of Alice's ids, 422 for a token without a passkey, and the agent API refuses his token (401); Bob's own snapshot, stream and agent list carry nothing of Alice's, and no chain view, so none of the contract's venue orders, venue or settlements; Alice's token, change request and holdings are as they were, and her token still resolves to her agent.",
       expectedVerdict: "held",
       selfOnly: SELF_ONLY,
       async run(ctx) {
         const api = needConsole(ctx);
         const { alice, bob } = api;
         const marker = `red team ${ctx.runId}`;
-        const tokenName = `Grok (${marker})`;
 
         // Alice's side, with her own session and her agent's MCP server: the records Bob will reach for.
-        const aliceToken = await api.as("alice", "POST", `/api/console/agents/${alice.agentId}/tokens`, {
-          name: tokenName,
-        });
-        const created = json(aliceToken);
-        const token = field(created, "token");
-        const tokenId = field(created, "view", "id");
-        if (aliceToken.status !== 201 || typeof token !== "string" || typeof tokenId !== "string") {
-          throw new Error(`Alice could not create a token (HTTP ${String(aliceToken.status)})`);
-        }
+        // Her token was made with the console seeded, as her passkey would have confirmed it.
+        const token = api.agentToken("alice");
+        const tokenId = alice.tokenId;
         const filed = await api.asServer(alice.agentId, "POST", "/api/agent/v1/policy-change-requests", {
           agentAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
           proposed: { maxTradeCents: 3_000 },
@@ -187,11 +182,7 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
         if (filed.status !== 201 || typeof requestId !== "string") {
           throw new Error(`Alice's agent could not file a change request (HTTP ${String(filed.status)})`);
         }
-        const bobToken = json(
-          await api.as("bob", "POST", `/api/console/agents/${bob.agentId}/tokens`, { name: "Bob's Grok" }),
-        );
-        const bobAgentToken = field(bobToken, "token");
-        if (typeof bobAgentToken !== "string") throw new Error("Bob could not create his own token");
+        const bobAgentToken = api.agentToken("bob");
 
         const resolve = async (agentToken: string) =>
           field(
@@ -241,6 +232,41 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
             "a token on her agent",
             await api.as("bob", "POST", `/api/console/agents/${alice.agentId}/tokens`, { name: "mine now" }),
             404,
+          ],
+          [
+            "a passkey challenge for a token on her agent",
+            await api.as("bob", "POST", "/api/console/step-up", {
+              action: { kind: "create-token", agentId: alice.agentId, name: "mine now" },
+            }),
+            404,
+          ],
+          [
+            "a passkey challenge for an owner call on her mandate",
+            await api.as("bob", "POST", "/api/console/step-up", {
+              action: {
+                kind: "owner-call",
+                mandateId: alice.mandateId,
+                call: { functionName: "approveIntent", intentId: 0 },
+              },
+            }),
+            404,
+          ],
+          [
+            "an owner call on her mandate, on his session alone",
+            await api.as("bob", "POST", `/api/console/owner-calls${foreign}`, {
+              call: { functionName: "setPaused", paused: true },
+              stepUp: null,
+            }),
+            404,
+          ],
+          // A session alone (a stolen one, say) never mints a credential, even on its own agent.
+          [
+            "a token on his own agent, with his session and no passkey",
+            await api.as("bob", "POST", `/api/console/agents/${bob.agentId}/tokens`, {
+              name: "No passkey",
+              stepUp: null,
+            }),
+            422,
           ],
           [
             "revoke her token",
@@ -334,6 +360,131 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
             `his token resolves to ${bobResolvesTo === bob.agentId ? "his agent" : `AGENT ${String(bobResolvesTo)}`}`,
             `his chain view: ${bobHasNoChain ? "none" : "PRESENT"}; the contract's venue orders, venue or settlements in his views: ${executorRecords ? "YES" : "no"}`,
             `her token, request and holdings: ${changed ? "CHANGED" : "unchanged"} (request ${String(after.request)}, token resolves to ${after.resolvesTo === alice.agentId ? "her agent" : String(after.resolvesTo)})`,
+          ].join("; "),
+        };
+      },
+    },
+
+    {
+      id: "console.step-up",
+      name: "A stolen session, without the member's passkey, mints a credential",
+      surface: "console",
+      tried:
+        "With Bob's session and no passkey, as a thief who copied his cookie would have, the attacker asks for a real passkey challenge for a token on Bob's own agent, then answers it with a forged assertion for Bob's credential, replays the same challenge, spends a second challenge on a token of another name, presents Bob's challenge from Alice's session, and invents a challenge id. Every write carries the console's own Origin.",
+      expected:
+        "The challenge is issued (201), and every answer is refused: 401 step_up_refused for the forged assertion, the other name and the other workspace, 401 step_up_expired for the replay and the made-up id. No token is added to either agent.",
+      expectedVerdict: "held",
+      selfOnly: SELF_ONLY,
+      async run(ctx) {
+        const api = needConsole(ctx);
+        const { alice, bob } = api;
+        const tokens = async (who: "alice" | "bob", agentId: string) => {
+          const agents = (field(json(await api.as(who, "GET", "/api/console/agents")), "agents") ?? []) as {
+            id: string;
+            tokens: { id: string }[];
+          }[];
+          return agents.find((a) => a.id === agentId)?.tokens.length ?? -1;
+        };
+        const before = { bob: await tokens("bob", bob.agentId), alice: await tokens("alice", alice.agentId) };
+
+        const challenge = async (name: string) => {
+          const response = await api.as("bob", "POST", "/api/console/step-up", {
+            action: { kind: "create-token", agentId: bob.agentId, name },
+          });
+          const id = field(json(response), "id");
+          const options = field(json(response), "options");
+          return {
+            response,
+            id: typeof id === "string" ? id : "",
+            challenge: text(field(options, "challenge")),
+            credentialId: text(
+              (field(options, "allowCredentials") as { id?: unknown }[] | undefined)?.[0]?.id,
+            ),
+          };
+        };
+        // A well-formed assertion for Bob's credential and this challenge, signed by nobody.
+        const forged = (c: { challenge: string; credentialId: string }) => {
+          const b64 = (bytes: Buffer) => bytes.toString("base64url");
+          const authenticatorData = Buffer.alloc(37);
+          authenticatorData[32] = 0x05; // user present and verified
+          return {
+            id: c.credentialId,
+            rawId: c.credentialId,
+            type: "public-key",
+            clientExtensionResults: {},
+            response: {
+              clientDataJSON: b64(
+                Buffer.from(
+                  JSON.stringify({
+                    type: "webauthn.get",
+                    challenge: c.challenge,
+                    origin: new URL(api.base).origin,
+                  }),
+                ),
+              ),
+              authenticatorData: b64(authenticatorData),
+              signature: b64(Buffer.alloc(72, 1)),
+            },
+          };
+        };
+        const mint = (who: "alice" | "bob", agentId: string, name: string, stepUp: unknown) =>
+          api.as(who, "POST", `/api/console/agents/${agentId}/tokens`, { name, stepUp });
+
+        const first = await challenge("Stolen");
+        const second = await challenge("Stolen");
+        const third = await challenge("Stolen");
+        const attempts: [string, ApiResponse, number, string][] = [
+          [
+            "a forged assertion for his own credential",
+            await mint("bob", bob.agentId, "Stolen", { id: first.id, response: forged(first) }),
+            401,
+            "step_up_refused",
+          ],
+          [
+            "the same challenge again",
+            await mint("bob", bob.agentId, "Stolen", { id: first.id, response: forged(first) }),
+            401,
+            "step_up_expired",
+          ],
+          [
+            "a challenge for one name, spent on another",
+            await mint("bob", bob.agentId, "Other name", { id: second.id, response: forged(second) }),
+            401,
+            "step_up_refused",
+          ],
+          [
+            "his challenge, from Alice's session on her agent",
+            await mint("alice", alice.agentId, "Stolen", { id: third.id, response: forged(third) }),
+            401,
+            "step_up_refused",
+          ],
+          [
+            "a made-up challenge id",
+            await mint("bob", bob.agentId, "Stolen", { id: "made-up", response: forged(first) }),
+            401,
+            "step_up_expired",
+          ],
+        ];
+        const after = { bob: await tokens("bob", bob.agentId), alice: await tokens("alice", alice.agentId) };
+
+        const codeOf = (response: ApiResponse) => text(field(json(response), "error", "code"));
+        const accepted = attempts.filter(([, response]) => ok(response.status));
+        const minted = after.bob !== before.bob || after.alice !== before.alice;
+        const issued = [first, second, third].every(
+          (c) => c.response.status === 201 && c.id !== "" && c.challenge !== "" && c.credentialId !== "",
+        );
+        const exact = attempts.every(
+          ([, response, status, code]) => response.status === status && codeOf(response) === code,
+        );
+        return {
+          verdict: accepted.length > 0 || minted ? "BREACH" : "held",
+          matched: issued && before.bob > 0 && before.alice > 0 && exact,
+          actual: [
+            `challenges issued: ${[first, second, third].map((c) => String(c.response.status)).join("/")}`,
+            attempts
+              .map(([label, response]) => `${label}: ${String(response.status)} ${codeOf(response)}`)
+              .join("; "),
+            `tokens: Bob ${String(before.bob)} -> ${String(after.bob)}, Alice ${String(before.alice)} -> ${String(after.alice)}`,
           ].join("; "),
         };
       },

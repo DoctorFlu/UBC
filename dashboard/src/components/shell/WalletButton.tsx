@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, TriangleAlert, Wallet } from "lucide-react";
+import { KeyRound, LogOut, TriangleAlert, Wallet } from "lucide-react";
 import { useState } from "react";
 import { useConnect, useConnectors, useDisconnect, useSwitchChain } from "wagmi";
 
@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/States";
 import { useToast } from "@/components/ui/Toast";
 import { shortenHex } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useMandateScope } from "@/lib/mandate/MandateContext";
 import { useOwnerAccess } from "@/lib/owner/access";
 import { DEV_SIGNER_ID } from "@/lib/wallet/flags";
 import { useWalletState } from "@/lib/wallet/useWalletState";
@@ -25,6 +26,7 @@ export function WalletButton({ block = false }: { block?: boolean }) {
   const state = useWalletState();
   const network = useSnapshot().network;
   const access = useOwnerAccess();
+  const scope = useMandateScope();
   const notOwner = access.kind === "not-owner";
   const connectors = useConnectors();
   const { mutate: connect, isPending: connecting } = useConnect();
@@ -48,6 +50,20 @@ export function WalletButton({ block = false }: { block?: boolean }) {
       },
     );
   };
+
+  // The console holds this mandate's owner key (#95): no wallet signs here, the member's passkey confirms.
+  if (scope?.mandate.ownerSigner === "console") {
+    return (
+      <span
+        className={styles.walletChip}
+        data-testid="passkey-owner"
+        title="The console holds this mandate's owner key. Each owner action asks for your passkey first."
+      >
+        <KeyRound aria-hidden className={styles.walletKey} strokeWidth={1.75} />
+        <span>Passkey owner</span>
+      </span>
+    );
+  }
 
   let control;
   switch (state.kind) {

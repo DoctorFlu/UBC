@@ -14,10 +14,18 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
   It never follows a redirect, because fetch keeps custom headers across hosts and would hand the key, payload and signature to whatever host the answer names; a redirect is reported as `redirected`, an unknown outcome.
   The executor's market checks, and the rest of the stack's market data, read the public data of the environment its orders go to, because the sandbox lists other strikes than production (see below).
 - **One order per intent, whatever fails.**
-  Every order carries our client order id, `mandate-<chain id>-<first 8 hex digits of the contract>-<first 8 hex digits of its deploy block's hash>-<intent id>`, but safety does not depend on Gemini honouring it (see below).
+  Every order carries our client order id, `m-<deployment>-<intent id>`, but safety does not depend on Gemini honouring it (see below).
+  `<deployment>` is the first 20 hex digits (80 bits) of keccak256 of the chain id, the whole contract address and the whole hash of the block the contract was deployed in (`clientOrderIdFor` in `shared/src/venue-order.ts`).
+  Gemini takes a client order id of at most 36 characters (`GEMINI_CLIENT_ORDER_ID_MAX`).
+  This was measured on the sandbox on 2026-11-17: a 37-character id is refused with HTTP 400, `InvalidInput`, "client_order_id must be at most 36 characters", and a 36-character id is accepted and comes back intact in the placement's answer, the active orders and the order history.
+  `m-<deployment>-` takes 23 characters, which leaves 13 digits for the intent id: the largest intent id an order can carry is 9,999,999,999,999, which a contract reaching one intent a second would hit after about 300,000 years.
+  Above it, `clientOrderIdFor` throws and the executor refuses the intent before anything is journalled or sent.
+  The chain id and the contract are not readable in the id; the journal's record names both.
+  The fake Gemini the tests use refuses a longer id with Gemini's own answer, so an id form that is too long cannot pass the suites.
   The deploy block tells apart two deployments at the same address (issue #117): a fresh local dev chain deploys the contract at the address the last one had, and without it a new stack would reuse an earlier stack's ids on the same sandbox account.
   Each block carries the time it was mined, so two dev chains get different ids unless both were started and deployed within the same second.
-  An order journalled before this form (`mandate-<chain id>-<contract>-<intent id>`) keeps its id: a retry is always sent under its record's id.
+  The whole address tells apart two contracts (#95): one Gemini account places every mandate's orders, and on Arc anyone can grind a contract address to share another's first 8 hex digits and deploy it in the same block, which would give printed prefixes alone the same id; the digest covers the whole address and a block hash no one knows before the block is made, so it cannot be ground in advance: matching another contract's digest takes about 2^80 deployments, each paying gas, and among a million honest deployments the chance that any two share one is about 1 in 2.4 trillion.
+  An order journalled in an earlier form (`mandate-<chain id>-<first 8 hex digits of the contract>-<intent id>`, or with the first 8 hex digits of the deploy block's hash before the intent id) keeps its id: a retry is always sent under its record's id.
   Before an order is sent, the executor writes a "placing" record to its journal in the console; when that write fails, nothing is sent.
   A placement that gets no answer is never sent again: the executor looks the order up among the account's active orders and order history, by client order id when Gemini returns it, otherwise by its exact terms (symbol, side, outcome, quantity, price, after the attempt) and only when exactly one order matches.
   Until it finds the order, or proves there is none, the intent is held and nothing is recorded onchain.

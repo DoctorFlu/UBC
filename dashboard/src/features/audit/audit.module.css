@@ -117,3 +117,12 @@
     order: -1;
   }
 }
+
+/* Who confirmed each change in the console (#95), below the events with the same gap as between cards. */
+.ownerActions {
+  margin-block-start: var(--space-5);
+}
+
+.ownerActions .flushNote {
+  padding: var(--space-4) var(--space-5);
+}

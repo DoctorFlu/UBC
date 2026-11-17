@@ -1,11 +1,11 @@
 import "server-only";
 
-import { type Address, getAddress } from "viem";
+import { type Address, type Hex, getAddress } from "viem";
 
 import { ENV_AGENT_ID } from "@mandate/shared";
 
 import { type Database, transaction } from "../db";
-import { type MasterKey, createSealedAgentKey } from "./keys";
+import { type MasterKey, createSealedAgentKey, createSealedOwnerKey } from "./keys";
 import { hashSecret, newAgentToken, newId } from "./secrets";
 
 /**
@@ -31,12 +31,59 @@ export interface Member {
   createdAt: string;
 }
 
+/**
+ * Where a mandate's Policy contract came from:
+ * - `env`: the contract the server is configured with (the first workspace's first mandate);
+ * - `server`: deployed by the console on the demo chain, from an owner key the console holds;
+ * - `wallet`: deployed by the owner's own wallet, then checked by the console;
+ * - null: no contract yet.
+ */
+export type MandateDeployment = "env" | "server" | "wallet";
+
+/** A contract a mandate has of its own (`server` or `wallet`); the `env` one comes from the settings. */
+export interface MandateContract {
+  chainId: number;
+  address: Address;
+  deployBlock: number;
+  kind: "production" | "reference";
+  /** The executor the contract was deployed with. */
+  executor: Address;
+  /** The contract's `user()`: the console's sealed key for `server`, the owner's wallet for `wallet`. */
+  owner: Address;
+}
+
 export interface Mandate {
   id: string;
   workspaceId: string;
   name: string;
-  /** `env`: the Policy contract the server is configured with. Null: none yet. */
-  deployment: "env" | null;
+  deployment: MandateDeployment | null;
+  contract: MandateContract | null;
+  /**
+   * The address of the owner key the console holds for this mandate, when it holds one: a `server`
+   * deployment, or a mandate whose server deployment has not finished. The key itself is only ever read
+   * through `ownerKeyOf`.
+   */
+  ownerKeyAddress: Address | null;
+  createdAt: string;
+}
+
+/**
+ * An action a member took as the owner, as the audit trail shows it: an owner call the console signed
+ * (`functionName` is the contract function, with its calldata), or an offchain action a passkey confirmed
+ * (`mandate.create`, `token.create`, or an owner request such as `holdings.save`; no calldata).
+ */
+export interface OwnerActionRecord {
+  id: string;
+  mandateId: string;
+  memberId: string;
+  memberName: string | null;
+  /** The passkey that authorised it; null for a pause, which a session alone may do. */
+  credentialId: string | null;
+  functionName: string;
+  calldata: Hex | null;
+  status: "sent" | "failed";
+  txHash: Hex | null;
+  detail: string | null;
   createdAt: string;
 }
 
@@ -144,6 +191,221 @@ export class AccountStore {
       MandateRow | undefined;
     if (!row) throw new Error("the store has no mandate for the server's contract");
     return mandateFromRow(row);
+  }
+
+  /** Every mandate with a contract of its own (`server` or `wallet`), oldest first, across workspaces. */
+  contractMandates(): Mandate[] {
+    const rows = this.db
+      .prepare("SELECT * FROM mandates WHERE deployment IN ('server', 'wallet') ORDER BY created_at, rowid")
+      .all() as unknown as MandateRow[];
+    return rows.map(mandateFromRow);
+  }
+
+  /** The mandate whose own contract this is, or null. The `env` contract is not stored, so not found here. */
+  mandateByContract(chainId: number, address: string): Mandate | null {
+    const row = this.db
+      .prepare("SELECT * FROM mandates WHERE chain_id = ? AND policy_address = ?")
+      .get(chainId, address.toLowerCase()) as MandateRow | undefined;
+    return row ? mandateFromRow(row) : null;
+  }
+
+  /**
+   * Creates a mandate with no contract yet, and its agent with a new sealed key; with `ownerKey`, also the
+   * owner key the console will deploy its contract from, sealed the same way. The workspace's count is
+   * checked in the same transaction, so two requests at once cannot both pass the limit.
+   */
+  createMandate(input: {
+    workspaceId: string;
+    name: string;
+    master: MasterKey;
+    maxPerWorkspace: number;
+    ownerKey: boolean;
+  }): { ok: true; mandate: Mandate; agent: Agent } | { ok: false; count: number } {
+    return transaction(this.db, () => {
+      const { n } = this.db
+        .prepare("SELECT COUNT(*) AS n FROM mandates WHERE workspace_id = ?")
+        .get(input.workspaceId) as { n: number };
+      if (n >= input.maxPerWorkspace) return { ok: false as const, count: n };
+      const now = this.iso();
+      const mandateId = newId("mnd");
+      const agentId = newId("agt");
+      const owner = input.ownerKey ? createSealedOwnerKey(input.master, mandateId) : null;
+      this.db
+        .prepare(
+          `INSERT INTO mandates (id, workspace_id, name, owner_address, sealed_owner_key, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(mandateId, input.workspaceId, input.name, owner?.address ?? null, owner?.sealed ?? null, now);
+      const key = createSealedAgentKey(input.master, agentId);
+      this.db
+        .prepare(
+          `INSERT INTO agents (id, mandate_id, name, signer, address, sealed_key, created_at)
+           VALUES (?, ?, ?, 'console', ?, ?, ?)`,
+        )
+        .run(agentId, mandateId, "Agent", key.address, key.sealed, now);
+      const mandate = this.mandate(mandateId);
+      const agent = this.agent(agentId);
+      if (!mandate || !agent) throw new Error(`mandate ${mandateId} vanished after insert`);
+      return { ok: true as const, mandate, agent };
+    });
+  }
+
+  /**
+   * Gives a mandate with no contract the one it was just deployed with. Null when it already has one, or
+   * when another mandate has this contract (the unique index refuses it).
+   */
+  attachContract(
+    mandateId: string,
+    deployment: "server" | "wallet",
+    contract: MandateContract,
+  ): Mandate | null {
+    try {
+      const changed = this.db
+        .prepare(
+          `UPDATE mandates SET deployment = ?, chain_id = ?, policy_address = ?, deploy_block = ?,
+             contract_kind = ?, executor_address = ?, owner_address = ?
+           WHERE id = ? AND deployment IS NULL`,
+        )
+        .run(
+          deployment,
+          contract.chainId,
+          contract.address.toLowerCase(),
+          contract.deployBlock,
+          contract.kind,
+          contract.executor,
+          contract.owner,
+          mandateId,
+        );
+      if (Number(changed.changes) !== 1) return null;
+    } catch (error) {
+      if (error instanceof Error && /UNIQUE/.test(error.message)) return null;
+      throw error;
+    }
+    return this.mandate(mandateId);
+  }
+
+  /**
+   * Renames a mandate, and records it in the mandate's owner actions with the old and the new name, in one
+   * transaction. Unchanged (and nothing recorded) when the name is already this one; null when there is no
+   * such mandate. A name is only a label: no contract, key or passkey binding names it.
+   */
+  renameMandate(input: { mandateId: string; memberId: string; name: string }): Mandate | null {
+    return transaction(this.db, () => {
+      const before = this.mandate(input.mandateId);
+      if (!before) return null;
+      if (before.name === input.name) return before;
+      this.db.prepare("UPDATE mandates SET name = ? WHERE id = ?").run(input.name, input.mandateId);
+      this.recordOwnerAction({
+        mandateId: input.mandateId,
+        memberId: input.memberId,
+        credentialId: null,
+        functionName: "mandate.rename",
+        calldata: null,
+        status: "sent",
+        txHash: null,
+        detail: `from "${before.name}" to "${input.name}"`,
+      });
+      return this.mandate(input.mandateId);
+    });
+  }
+
+  /**
+   * A `server` contract found again on a chain that lost it: the console deployed it again from the same
+   * owner key, at the same address, in a later block.
+   */
+  moveDeployBlock(mandateId: string, deployBlock: number): void {
+    this.db
+      .prepare("UPDATE mandates SET deploy_block = ? WHERE id = ? AND deployment = 'server'")
+      .run(deployBlock, mandateId);
+  }
+
+  /** The owner key the console holds for a mandate, sealed; null when it holds none. */
+  ownerKeyOf(mandateId: string): { address: Address; sealed: string } | null {
+    const row = this.db
+      .prepare("SELECT owner_address, sealed_owner_key FROM mandates WHERE id = ?")
+      .get(mandateId) as { owner_address: string | null; sealed_owner_key: string | null } | undefined;
+    if (!row?.owner_address || !row.sealed_owner_key) return null;
+    return { address: getAddress(row.owner_address), sealed: row.sealed_owner_key };
+  }
+
+  /**
+   * The owner key the console holds for a mandate with no contract yet, created and sealed now when it
+   * has none (a sign-up's first mandate, made before anyone knew who would deploy it). Null once the
+   * mandate has a contract without one: an owner wallet's, never to be replaced.
+   */
+  ensureOwnerKey(mandateId: string, master: MasterKey): { address: Address; sealed: string } | null {
+    return transaction(this.db, () => {
+      const existing = this.ownerKeyOf(mandateId);
+      if (existing) return existing;
+      const key = createSealedOwnerKey(master, mandateId);
+      const changed = this.db
+        .prepare(
+          `UPDATE mandates SET owner_address = ?, sealed_owner_key = ?
+           WHERE id = ? AND deployment IS NULL AND sealed_owner_key IS NULL`,
+        )
+        .run(key.address, key.sealed, mandateId);
+      return Number(changed.changes) === 1 ? this.ownerKeyOf(mandateId) : null;
+    });
+  }
+
+  // ---------------------------------------------------------------- owner actions
+
+  /** Records an owner call the console signed, or tried to: who authorised it, with which passkey. */
+  recordOwnerAction(input: {
+    mandateId: string;
+    memberId: string;
+    credentialId: string | null;
+    functionName: string;
+    calldata: Hex | null;
+    status: "sent" | "failed";
+    txHash: Hex | null;
+    detail: string | null;
+  }): OwnerActionRecord {
+    const id = newId("oac");
+    this.db
+      .prepare(
+        `INSERT INTO owner_actions (id, mandate_id, member_id, credential_id, function_name, calldata, status,
+           tx_hash, detail, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.mandateId,
+        input.memberId,
+        input.credentialId,
+        input.functionName,
+        input.calldata,
+        input.status,
+        input.txHash,
+        input.detail,
+        this.iso(),
+      );
+    const record = this.ownerActions(input.mandateId, 1)[0];
+    if (!record || record.id !== id) throw new Error(`owner action ${id} vanished after insert`);
+    return record;
+  }
+
+  /** A mandate's owner calls the console signed, newest first. */
+  ownerActions(mandateId: string, limit = 100): OwnerActionRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT a.*, m.name AS member_name FROM owner_actions AS a LEFT JOIN members AS m ON m.id = a.member_id
+         WHERE a.mandate_id = ? ORDER BY a.created_at DESC, a.rowid DESC LIMIT ?`,
+      )
+      .all(mandateId, limit) as unknown as OwnerActionRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      mandateId: row.mandate_id,
+      memberId: row.member_id,
+      memberName: row.member_name,
+      credentialId: row.credential_id,
+      functionName: row.function_name,
+      calldata: row.calldata === null ? null : (row.calldata as Hex),
+      status: row.status,
+      txHash: row.tx_hash as Hex | null,
+      detail: row.detail,
+      createdAt: row.created_at,
+    }));
   }
 
   // ---------------------------------------------------------------- agents
@@ -551,18 +813,58 @@ interface MandateRow {
   id: string;
   workspace_id: string;
   name: string;
-  deployment: "env" | null;
+  deployment: MandateDeployment | null;
+  chain_id: number | null;
+  policy_address: string | null;
+  deploy_block: number | null;
+  contract_kind: "production" | "reference" | null;
+  executor_address: string | null;
+  owner_address: string | null;
+  sealed_owner_key: string | null;
   created_at: string;
 }
 
 function mandateFromRow(row: MandateRow): Mandate {
+  const own = row.deployment === "server" || row.deployment === "wallet";
   return {
     id: row.id,
     workspaceId: row.workspace_id,
     name: row.name,
     deployment: row.deployment,
+    contract:
+      own &&
+      row.chain_id !== null &&
+      row.policy_address !== null &&
+      row.deploy_block !== null &&
+      row.contract_kind !== null &&
+      row.executor_address !== null &&
+      row.owner_address !== null
+        ? {
+            chainId: row.chain_id,
+            address: getAddress(row.policy_address),
+            deployBlock: row.deploy_block,
+            kind: row.contract_kind,
+            executor: getAddress(row.executor_address),
+            owner: getAddress(row.owner_address),
+          }
+        : null,
+    ownerKeyAddress: row.sealed_owner_key && row.owner_address ? getAddress(row.owner_address) : null,
     createdAt: row.created_at,
   };
+}
+
+interface OwnerActionRow {
+  id: string;
+  mandate_id: string;
+  member_id: string;
+  member_name: string | null;
+  credential_id: string | null;
+  function_name: string;
+  calldata: string | null;
+  status: "sent" | "failed";
+  tx_hash: string | null;
+  detail: string | null;
+  created_at: string;
 }
 
 interface AgentRow {

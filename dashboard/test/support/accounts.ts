@@ -1,9 +1,14 @@
 import { randomBytes } from "node:crypto";
 
+import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/server";
+
+import type { StepUpAction, StepUpAnswer } from "../../src/server/accounts/step-up";
 import type { Member, NewPasskey } from "../../src/server/accounts/store";
 import { hashSecret, normalizeHumanCode } from "../../src/server/accounts/secrets";
 import type { ConsoleService, MandateScope } from "../../src/server/console-service";
+import { startStepUp } from "../../src/server/http/mandates-api";
 import { sessionCookieName } from "../../src/server/http/session";
+import { SoftPasskey } from "./passkey";
 
 /**
  * Accounts for server tests, without a browser: members are added through the store with a stand-in
@@ -47,6 +52,46 @@ export function signUpWorkspace(service: ConsoleService, name: string): Member {
   });
   if (!created) throw new Error("the workspace could not be created");
   return created.member;
+}
+
+/** Gives the member a software passkey that answers real challenges, for actions that need a step-up. */
+export function addSoftPasskey(service: ConsoleService, member: Member): SoftPasskey {
+  const key = new SoftPasskey(service.config.accounts.origin);
+  service.accounts.store.addPasskey(member.id, key.stored());
+  return key;
+}
+
+/**
+ * The member's passkey confirmation of `action`, as the console's browser code sends it: a challenge
+ * from the step-up route, answered by `key`. `cookie` is the member's session.
+ */
+export async function confirmWithPasskey(
+  service: ConsoleService,
+  cookie: string,
+  key: SoftPasskey,
+  action: StepUpAction,
+): Promise<StepUpAnswer> {
+  const started = await startStepUp(
+    new Request(`${service.config.accounts.origin}/api/console/step-up`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: service.config.accounts.origin },
+      body: JSON.stringify({ action }),
+    }),
+    service,
+  );
+  if (started.status !== 201) throw new Error(`the step-up did not start: ${String(started.status)}`);
+  const { id, options } = (await started.json()) as {
+    id: string;
+    options: PublicKeyCredentialRequestOptionsJSON;
+  };
+  return { id, response: key.get(options) };
+}
+
+/** The first mandate of the member's workspace: the one sign-up made. */
+export function mandateOf(service: ConsoleService, member: Member): string {
+  const mandate = service.accounts.store.mandates(member.workspaceId)[0];
+  if (!mandate) throw new Error("the workspace has no mandate");
+  return mandate.id;
 }
 
 /** A session for the member, as the `Cookie` header a browser would send. */

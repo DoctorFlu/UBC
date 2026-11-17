@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { useMandateUrls } from "@/lib/mandate/MandateContext";
 import { consoleNavGroups, isActive } from "@/lib/nav";
 
 import { NavIcon } from "./NavIcon";
@@ -17,6 +18,7 @@ export interface NavLinksProps {
 /** The directory: three groups separated by hairlines. Every view is always listed, in any view mode. */
 export function NavLinks({ counts = {}, onNavigate }: NavLinksProps) {
   const pathname = usePathname();
+  const { href } = useMandateUrls();
   return (
     <nav aria-label="Console" className={styles.nav}>
       {consoleNavGroups.map((group) => (
@@ -26,7 +28,7 @@ export function NavLinks({ counts = {}, onNavigate }: NavLinksProps) {
             return (
               <li key={item.href}>
                 <Link
-                  href={item.href}
+                  href={href(item.href)}
                   className={styles.navLink}
                   aria-current={isActive(pathname, item.href) ? "page" : undefined}
                   onClick={onNavigate}

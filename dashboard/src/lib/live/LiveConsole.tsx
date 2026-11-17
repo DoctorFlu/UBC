@@ -2,6 +2,8 @@
 
 import { type ReactNode, createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useMandateUrls } from "@/lib/mandate/MandateContext";
+
 import type { ConsoleNetwork, ConsoleSnapshot } from "./types";
 
 /** Whether the browser is receiving the console's server-sent events. */
@@ -34,9 +36,9 @@ const RETRY_MAX_MS = 30_000;
  * Whether the console says this browser has no session (any more): it expired, the member signed out in
  * another tab, or the console was upgraded under an open page. A network failure is not a no.
  */
-async function signedOut(): Promise<boolean> {
+async function signedOut(snapshotUrl: string): Promise<boolean> {
   try {
-    return (await fetch(SNAPSHOT_PATH, { cache: "no-store" })).status === 401;
+    return (await fetch(snapshotUrl, { cache: "no-store" })).status === 401;
   } catch {
     return false;
   }
@@ -63,6 +65,10 @@ export function LiveConsoleProvider({
   follow?: boolean;
   children: ReactNode;
 }) {
+  // The page's mandate (#95): its own stream and snapshot, never the workspace's first mandate's.
+  const { api } = useMandateUrls();
+  const eventsUrl = api(EVENTS_PATH);
+  const snapshotUrl = api(SNAPSHOT_PATH);
   const [snapshot, setSnapshot] = useState(initial);
   const [connection, setConnection] = useState<StreamConnection>("connecting");
   const latest = useRef(initial);
@@ -81,7 +87,7 @@ export function LiveConsoleProvider({
     let fresh = true;
     let stopped = false;
     const connect = () => {
-      const current = new EventSource(EVENTS_PATH);
+      const current = new EventSource(eventsUrl);
       source = current;
       current.addEventListener("open", () => {
         fresh = true;
@@ -94,7 +100,7 @@ export function LiveConsoleProvider({
         // as a proxy's 502 while the console wakes up: open a new stream after a growing pause. A 401 means
         // the session is gone, and no retry brings it back: go and sign in instead.
         if (current.readyState === EventSource.CLOSED) {
-          void signedOut().then((out) => {
+          void signedOut(snapshotUrl).then((out) => {
             if (stopped) return;
             if (out) {
               toSignIn();
@@ -124,12 +130,12 @@ export function LiveConsoleProvider({
       clearTimeout(retry);
       source?.close();
     };
-  }, [follow, accept]);
+  }, [follow, accept, eventsUrl, snapshotUrl]);
 
   const refresh = useCallback(async () => {
     if (!follow) return;
     try {
-      const response = await fetch(SNAPSHOT_PATH, { cache: "no-store" });
+      const response = await fetch(snapshotUrl, { cache: "no-store" });
       if (response.status === 401) {
         toSignIn();
         return;
@@ -141,7 +147,7 @@ export function LiveConsoleProvider({
     } catch {
       // The stream still brings the change once it is back.
     }
-  }, [follow, accept]);
+  }, [follow, accept, snapshotUrl]);
 
   const waitFor = useCallback(
     (test: (snapshot: ConsoleSnapshot) => boolean, timeoutMs: number) =>

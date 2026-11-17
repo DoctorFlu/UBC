@@ -48,6 +48,7 @@ function scripted(answers: (Response | Error)[]) {
   const journal = consoleOrderJournal({
     consoleUrl: "http://console.test",
     sign: () => Promise.resolve(`0x${"11".repeat(65)}` as const),
+    deployment: { chainId: 5_042_002, policy: POLICY },
     fetch: (input, init) => {
       calls.push(`${init.method ?? "GET"} ${new URL(input).pathname}`);
       const next = answers.shift() ?? new Response("{}", { status: 201 });

@@ -76,7 +76,7 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
   const snapshot = preview ?? live;
   const { advanced } = useAdvanced();
   const chain = snapshot.chain;
-  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Home" />;
+  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Overview" />;
 
   const attention = needsOwner(snapshot);
   const recent = newestFirst(chain).slice(0, 5);
@@ -88,7 +88,7 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
   return (
     <div className={styles.view}>
       <PageHeader
-        title="Home"
+        title="Overview"
         description={summary(snapshot, attention.total)}
         meta={
           advanced ? (
@@ -111,7 +111,11 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
           <h2 id="needs-you" className={styles.sectionTitle}>
             Needs you
           </h2>
-          {attention.total > 0 ? <ArrowLink href="/approvals">All approvals</ArrowLink> : null}
+          {attention.total > 0 ? (
+            <ArrowLink view href="/approvals">
+              All approvals
+            </ArrowLink>
+          ) : null}
         </div>
         {attention.total === 0 ? (
           <EmptyState title="You're all caught up" className={styles.caughtUp}>
@@ -128,7 +132,11 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
         <Card
           className={styles.rules}
           title="Rules in force"
-          actions={<ArrowLink href="/rules">Rules</ArrowLink>}
+          actions={
+            <ArrowLink view href="/rules">
+              Rules
+            </ArrowLink>
+          }
         >
           {rules ? (
             advanced ? (
@@ -165,7 +173,11 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
           className={styles.recent}
           title="Recent activity"
           padding="flush"
-          actions={<ArrowLink href="/activity">All activity</ArrowLink>}
+          actions={
+            <ArrowLink view href="/activity">
+              All activity
+            </ArrowLink>
+          }
         >
           <Table
             caption="The five most recent intents and their verdicts"

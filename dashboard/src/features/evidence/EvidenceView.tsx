@@ -2,7 +2,7 @@
 
 import { describeReason } from "@mandate/shared";
 import { ArrowLeft, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
-import Link from "next/link";
+import { ViewLink } from "@/components/ui/ViewLink";
 import type { ReactNode } from "react";
 
 import { FlaggedBadge, IntentLink, MarketName, amountLabel, intentFlags } from "@/components/domain/Intent";
@@ -193,7 +193,11 @@ function SignalLink({ view, evidence }: { view: AgentPlanView; evidence: Evidenc
       tone={payment ? "good" : "attention"}
       title="Paid signal"
       aside={
-        payment ? <ArrowLink href={paymentHref(evidence.receiptId)}>Payment record</ArrowLink> : undefined
+        payment ? (
+          <ArrowLink view href={paymentHref(evidence.receiptId)}>
+            Payment record
+          </ArrowLink>
+        ) : undefined
       }
       testId="evidence-signal"
     >
@@ -264,7 +268,9 @@ function PlanLink({
       title="The plan"
       aside={
         current ? (
-          <ArrowLink href={`/hedge?asset=${encodeURIComponent(view.asset)}`}>Hedge page</ArrowLink>
+          <ArrowLink view href={`/hedge?asset=${encodeURIComponent(view.asset)}`}>
+            Hedge page
+          </ArrowLink>
         ) : undefined
       }
       testId="evidence-plan"
@@ -463,10 +469,10 @@ export function EvidenceView({ view, preview }: { view: AgentPlanView; preview?:
   const status = STATUS[evidence.status];
   return (
     <div className={styles.view}>
-      <Link href={`/hedge?asset=${encodeURIComponent(view.asset)}`} className={styles.back}>
+      <ViewLink href={`/hedge?asset=${encodeURIComponent(view.asset)}`} className={styles.back}>
         <ArrowLeft aria-hidden className={styles.backIcon} strokeWidth={2} />
         Hedge
-      </Link>
+      </ViewLink>
       <PageHeader
         title="Evidence chain"
         description={`From your request to the fill, for the agent's ${clip(view.asset, 12)} hedge plan. Each link opens the record behind it.`}

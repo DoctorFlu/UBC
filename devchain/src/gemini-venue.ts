@@ -42,6 +42,7 @@ import {
   type SettledPosition,
 } from "@mandate/gemini/private";
 import {
+  ClientOrderIdError,
   clientOrderIdFor,
   formatCents,
   isFinalVenueOrderState,
@@ -75,6 +76,12 @@ export interface GeminiVenueOptions {
   deployment: { chainId: number; policy: `0x${string}`; deployBlockHash: `0x${string}` };
   /** How long an order rests unfilled before the rest is cancelled. Default 10 minutes. */
   orderTtlMs?: number;
+  /**
+   * Whether an unanswered attempt may be matched to an order by its exact terms when Gemini returns no
+   * client order ids. Default true. False when the account serves several contracts (#95): another
+   * mandate's order for the same terms would be taken for this one, so the intent is held instead.
+   */
+  matchByTerms?: boolean;
   now?: () => number;
 }
 
@@ -272,6 +279,14 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       // Gemini keeps client order ids, and none is ours: the attempt never reached it.
       return { found: null, detail: "no order on Gemini carries this intent's client order id" };
     }
+    if (options.matchByTerms === false) {
+      return {
+        found: null,
+        detail:
+          "Gemini returned no client order ids, and this account places orders for several mandates, so an " +
+          "order cannot be told apart by its terms; check Gemini",
+      };
+    }
     const sentAt = Date.parse(record.placedAt);
     const quantity = quantityText(record.quantityHundredths);
     const matches = orders.filter((order) => {
@@ -353,6 +368,17 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       };
     }
 
+    // A retry keeps the id its first attempt was sent with, in whichever form it was written: the record
+    // does not allow another, and Gemini knows that one. A new id that cannot fit Gemini's limit is refused
+    // here, before anything is journalled or sent.
+    let clientOrderId: string;
+    try {
+      clientOrderId = previous?.clientOrderId ?? clientOrderIdFor({ ...deployment, policy }, order.intentId);
+    } catch (error) {
+      if (!(error instanceof ClientOrderIdError)) throw error;
+      return { status: "refused", detail: error.message };
+    }
+
     const sentAt = iso();
     const record: VenueOrderRecord = {
       kind: "venue-order",
@@ -363,8 +389,7 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       revision: (previous?.revision ?? 0) + 1,
       venue: "gemini",
       environment: trading.environment,
-      // A retry keeps the id its first attempt was sent with, including one written before #117's form.
-      clientOrderId: previous?.clientOrderId ?? clientOrderIdFor({ ...deployment, policy }, order.intentId),
+      clientOrderId,
       market: order.market,
       side: order.isBuy ? "buy" : "sell",
       outcome: order.outcome,

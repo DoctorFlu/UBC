@@ -4,6 +4,7 @@ import { KNOWN_ASSETS } from "@mandate/gemini";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import type { HedgeMarketResponse } from "@/lib/hedge/types";
+import { useMandateUrls } from "@/lib/mandate/MandateContext";
 
 /** How often an open hedge view asks the console for fresh quotes. The console caches Gemini for 10 s. */
 export const QUOTES_REFRESH_MS = 15_000;
@@ -32,9 +33,12 @@ export function useHedgeMarket(input: {
   enabled: boolean;
 }): HedgeMarketState {
   const supported = (KNOWN_ASSETS as readonly string[]).includes(input.asset);
+  const { api } = useMandateUrls();
+  const url = api("/api/console/hedge/market");
   const query = useQuery({
     queryKey: [
       "hedge-market",
+      url,
       input.asset,
       input.eventTicker,
       input.preview,
@@ -50,7 +54,7 @@ export function useHedgeMarket(input: {
       const params = new URLSearchParams({ asset: input.asset });
       // No `event`: the console asks for the event of the plan it stores, and refuses any other.
       if (input.preview) params.set("preview", "1");
-      const response = await fetch(`/api/console/hedge/market?${params.toString()}`, {
+      const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}${params.toString()}`, {
         signal,
         cache: "no-store",
       });

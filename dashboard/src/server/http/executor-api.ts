@@ -60,25 +60,17 @@ async function handlePut(
     return apiError(422, "invalid_settlement", `The settlement does not add up: ${problems.join("; ")}.`);
   }
 
-  const deployment = service.deployment;
-  // Settlements belong to the contract the server follows, which only the first workspace's mandate sees.
-  const mandate = service.accounts.store.envMandate();
-  const deploymentId = service.deploymentIdFor(mandate);
-  const roles = await service.currentRoles();
-  if (!deployment || !deploymentId || !roles) {
-    return apiError(
-      503,
-      "chain_unavailable",
-      "The console is not following a Policy contract yet. Try again shortly.",
-    );
-  }
-  if (document.chainId !== deployment.chainId || !isAddressEqual(document.policy, deployment.address)) {
+  // Settlements belong to the contract they name, which one mandate follows (#95: one executor serves all).
+  const found = await service.contractOf(document.chainId, document.policy);
+  if (!found) {
     return apiError(
       422,
       "wrong_deployment",
-      "The settlement names another chain or Policy contract than the one this console follows.",
+      "The settlement names a chain or Policy contract this console does not follow (or cannot read right now).",
     );
   }
+  const { mandate } = found;
+  const { deploymentId, roles } = found.chain;
 
   const hash = hashSettlement(document);
   let signer: `0x${string}`;
@@ -133,7 +125,7 @@ async function handlePut(
       `Intent ${String(intentId)} already has a settlement, ${result.existing.hash}; the first record stands.`,
     );
   }
-  if (result.created) service.settlementStored(document.eventTicker);
+  if (result.created) service.settlementStored(mandate, document.eventTicker);
   return json(storedSettlementSchema.parse(responseOf(result.row, document)), result.created ? 201 : 200);
 }
 

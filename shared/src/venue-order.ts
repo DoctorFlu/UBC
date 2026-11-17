@@ -137,18 +137,59 @@ export interface OrderIdDeployment {
 }
 
 /**
- * Our id for an intent's order: `mandate-<chain id>-<contract>-<deploy block>-<intent id>`, with the first
- * 8 hex digits of the contract's address and of its deploy block's hash. It is the same on every attempt
- * and restart, and differs between contracts.
- * The deploy block tells apart two deployments at the same address (issue #117): a fresh local dev chain
- * deploys the contract at the address the last one had, but its blocks carry the time they were mined, so
- * the deploy block's hash differs unless both chains were started and deployed within the same second.
- * Ids already journalled keep the form they were written in (without the block); a retry reuses its
- * record's id, so nothing is ever looked up under an id it was not sent with.
+ * The longest `client_order_id` Gemini takes. Measured on the sandbox on 2026-11-17: 37 characters are
+ * refused with HTTP 400 InvalidInput, "client_order_id must be at most 36 characters"; 36 are accepted and
+ * come back intact in the placement's answer, the active orders and the order history.
+ */
+export const GEMINI_CLIENT_ORDER_ID_MAX = 36;
+
+/** Hex digits of the deployment digest in a client order id: 80 bits. */
+const ORDER_ID_DIGEST_DIGITS = 20;
+
+/** `m-` + digest + `-`: what is left of Gemini's 36 characters is the intent id's. */
+const ORDER_ID_PREFIX_LENGTH = 2 + ORDER_ID_DIGEST_DIGITS + 1;
+
+/** The largest intent id a client order id can carry: 13 digits. */
+export const MAX_ORDER_INTENT_ID = 10 ** (GEMINI_CLIENT_ORDER_ID_MAX - ORDER_ID_PREFIX_LENGTH) - 1;
+
+/** An intent whose id does not fit Gemini's client order id. Thrown before anything is journalled or sent. */
+export class ClientOrderIdError extends Error {
+  override name = "ClientOrderIdError";
+}
+
+/**
+ * Our id for an intent's order: `m-<deployment>-<intent id>`, where `<deployment>` is the first 20 hex
+ * digits (80 bits) of keccak256 of the chain id, the whole contract address and the whole hash of the
+ * block the contract was deployed in. It is the same on every attempt and restart, and at most
+ * `GEMINI_CLIENT_ORDER_ID_MAX` (36) characters: 23 for `m-<deployment>-`, which leaves 13 digits for the
+ * intent id. An intent above `MAX_ORDER_INTENT_ID` throws `ClientOrderIdError`; at one intent a second,
+ * a contract reaches it after 300,000 years.
+ *
+ * - Two deployments at the same address get different ids (issue #117): a fresh local dev chain deploys
+ *   the contract at the address the last one had, but its deploy block has another hash unless both chains
+ *   were started and deployed within the same second.
+ * - Two contracts never share one (#95): one venue account serves every mandate's contract. The digest
+ *   covers the chain, the whole address and the deploy block's hash, which no one knows before the block
+ *   is made, so it cannot be ground in advance: matching another contract's digest takes about 2^80
+ *   deployments, each paying gas. Among a million honest deployments, the chance that any two share one
+ *   is about 1 in 2.4 trillion (n^2 / 2^81).
+ * - Nothing in it is meant to be read: the chain and the contract are in the journal's record. The short
+ *   `m-` prefix keeps ids of other forms (the owner's own orders, earlier forms) apart from ours.
+ *
+ * Ids already journalled keep the form they were written in (`mandate-<chain id>-<contract>-...`); a retry
+ * reuses its record's id, so nothing is ever looked up under an id it was not sent with.
  */
 export function clientOrderIdFor(deployment: OrderIdDeployment, intentId: number): string {
-  const hex = (value: string) => value.toLowerCase().slice(2, 10);
-  return `mandate-${String(deployment.chainId)}-${hex(deployment.policy)}-${hex(deployment.deployBlockHash)}-${String(intentId)}`;
+  if (!Number.isSafeInteger(intentId) || intentId < 0 || intentId > MAX_ORDER_INTENT_ID) {
+    throw new ClientOrderIdError(
+      `intent ${String(intentId)} does not fit Gemini's ${String(GEMINI_CLIENT_ORDER_ID_MAX)}-character client order id (the largest intent id it can carry is ${String(MAX_ORDER_INTENT_ID)})`,
+    );
+  }
+  const policy = deployment.policy.toLowerCase();
+  const digest = keccak256(
+    stringToBytes(`${String(deployment.chainId)}:${policy}:${deployment.deployBlockHash.toLowerCase()}`),
+  ).slice(2, 2 + ORDER_ID_DIGEST_DIGITS);
+  return `m-${digest}-${String(intentId)}`;
 }
 
 /** Validates a venue order record or announcement and returns keccak256 of its canonical JSON. */

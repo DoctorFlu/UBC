@@ -1,7 +1,7 @@
 "use client";
 
 import type { PolicyRules } from "@mandate/shared";
-import { PenLine, TriangleAlert } from "lucide-react";
+import { KeyRound, PenLine, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { Hex } from "viem";
 
@@ -44,6 +44,7 @@ export function PolicyReview({ open, onClose, next, title, onSigned }: PolicyRev
   const warnings = rulesWarnings(next, snapshot.chain?.committedCents ?? 0);
   const blocked = ownerBlockedReason(access);
   const finished = state.phase === "done";
+  const byPasskey = access.kind === "owner" && access.signer === "passkey";
 
   const close = () => {
     if (working) return;
@@ -76,7 +77,11 @@ export function PolicyReview({ open, onClose, next, title, onSigned }: PolicyRev
       open={open}
       onClose={close}
       title={title}
-      description={`Your wallet signs one setPolicy transaction on ${snapshot.network.name}. Every rule is replaced at once.`}
+      description={
+        byPasskey
+          ? `Your passkey confirms these rules, and the console signs one setPolicy transaction on ${snapshot.network.name} with this mandate's owner key. Every rule is replaced at once.`
+          : `Your wallet signs one setPolicy transaction on ${snapshot.network.name}. Every rule is replaced at once.`
+      }
       lightDismiss={false}
       footer={
         finished ? (
@@ -90,12 +95,12 @@ export function PolicyReview({ open, onClose, next, title, onSigned }: PolicyRev
             </Button>
             <Button
               variant="primary"
-              icon={<PenLine aria-hidden />}
+              icon={byPasskey ? <KeyRound aria-hidden /> : <PenLine aria-hidden />}
               onClick={() => void sign()}
               loading={working}
               disabled={blocked !== null || changes.length === 0}
             >
-              Sign in wallet
+              {byPasskey ? "Confirm rules with passkey" : "Sign in wallet"}
             </Button>
           </>
         )

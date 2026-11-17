@@ -22,6 +22,7 @@ import {
   readCookie,
   sessionCookie,
   sessionIdOf,
+  WORKSPACE,
 } from "./session";
 
 /**
@@ -120,7 +121,7 @@ export const startAddPasskey = consoleRoute(async (request, service, { access })
   if (denied) return denied;
   const started = await service.accounts.startRegistration({ kind: "add", member: access.member });
   return ceremonyResponse(service, started.ceremonyId, started.options);
-});
+}, WORKSPACE);
 
 // ------------------------------------------------------------------ finishing a registration
 

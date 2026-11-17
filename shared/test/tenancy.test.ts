@@ -52,7 +52,7 @@ describe("agent tokens", () => {
       mandateId: "mnd_1",
       tokenId: "tok_1",
       agent: { address: null, signer: "env" },
-      mandate: { deployment: "env" },
+      mandate: { name: "Mandate", deployment: "env", contract: null },
     };
     expect(resolveTokenResponseSchema.safeParse({ ...base, agentId: "env" }).success).toBe(true);
     expect(

@@ -29,7 +29,7 @@ function base32(bytes: Uint8Array): string {
 }
 
 /** A record id such as `wsp_` and 26 base32 characters (128 random bits). Not a secret. */
-export function newId(prefix: "wsp" | "mbr" | "mnd" | "agt" | "tok"): string {
+export function newId(prefix: "wsp" | "mbr" | "mnd" | "agt" | "tok" | "oac" | "stp"): string {
   return `${prefix}_${base32(randomBytes(16))}`;
 }
 

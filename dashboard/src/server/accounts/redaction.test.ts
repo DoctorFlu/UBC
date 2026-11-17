@@ -9,6 +9,7 @@ import type {
 } from "@simplewebauthn/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { confirmWithPasskey } from "../../../test/support/accounts";
 import { SoftPasskey } from "../../../test/support/passkey";
 import { testConsoleConfig } from "../config";
 import { setConsoleServiceForTests } from "../console";
@@ -185,12 +186,8 @@ beforeAll(async () => {
   const aliceCookie = `${sessionCookieName(service.config.accounts)}=${aliceSession}`;
 
   // Bob signs up: a workspace of his own, whose agent's key the console holds.
-  const bob = await register(
-    startSignUp,
-    "/api/auth/sign-up",
-    { name: "Bob", inviteCode: null },
-    new SoftPasskey(ORIGIN),
-  );
+  const bobPasskey = new SoftPasskey(ORIGIN);
+  const bob = await register(startSignUp, "/api/auth/sign-up", { name: "Bob", inviteCode: null }, bobPasskey);
   remember("Bob's session", bob.session);
   remember("Bob's recovery code", bob.recoveryCode);
   const bobCookie = `${sessionCookieName(service.config.accounts)}=${bob.session}`;
@@ -205,8 +202,14 @@ beforeAll(async () => {
 
   // Bob makes a token, his agent uses it, and he revokes it.
   const tokensPath = `/api/console/agents/${bobAgent.agent.id}/tokens`;
+  // A token is a credential: Bob's passkey confirms it.
+  const stepUp = await confirmWithPasskey(service, bobCookie, bobPasskey, {
+    kind: "create-token",
+    agentId: bobAgent.agent.id,
+    name: "Grok",
+  });
   const created = await createToken(
-    request("POST", tokensPath, { cookie: bobCookie, body: { name: "Grok" } }),
+    request("POST", tokensPath, { cookie: bobCookie, body: { name: "Grok", stepUp } }),
     service,
     { agentId: bobAgent.agent.id },
   );
@@ -236,9 +239,13 @@ beforeAll(async () => {
   // Failures, where a careless message would quote what it was given.
   // A token pasted as a new token's name is refused, so the Agents list never shows it.
   const pasted = await record(
-    await createToken(request("POST", tokensPath, { cookie: bobCookie, body: { name: token } }), service, {
-      agentId: bobAgent.agent.id,
-    }),
+    await createToken(
+      request("POST", tokensPath, { cookie: bobCookie, body: { name: token, stepUp: null } }),
+      service,
+      {
+        agentId: bobAgent.agent.id,
+      },
+    ),
   );
   expect(pasted.status).toBe(422);
   await record(await resolve(token));

@@ -160,4 +160,10 @@ const ACCOUNT_API_ROUTES = [
   "/api/console/agents/agt_warm_up/tokens",
   "/api/console/agents/agt_warm_up/tokens/tok_warm_up",
   "/api/console/passkeys",
+  // Several mandates (#95).
+  "/api/console/mandates",
+  "/api/console/mandates/mnd_warm_up/deployment",
+  "/api/console/step-up",
+  "/api/console/owner-calls",
+  "/api/console/owner-actions",
 ];
