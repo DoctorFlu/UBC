@@ -189,7 +189,7 @@ export const getSetupState = defineTool({
     if (stopped !== undefined) {
       const v = unavailableFor(stopped);
       return {
-        structured: { ...v, ready: false, steps: setupSteps(ctx.config) },
+        structured: { ...v, ready: false, steps: setupSteps(ctx.config, ctx.agent) },
         summary: summarizeVerdict(v),
       };
     }
