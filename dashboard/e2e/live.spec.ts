@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 
-import { type Page, expect, test } from "@playwright/test";
+import { type Locator, type Page, type TestInfo, expect, test } from "@playwright/test";
 
 import { consoleSettlementSink, simulatedVenue, startExecutor } from "@mandate/devchain";
 import { createGeminiClient } from "@mandate/gemini";
@@ -1011,6 +1011,24 @@ test("a market Gemini lists elsewhere, or not at all, is flagged beside Approve 
   );
 });
 
+/**
+ * Shots at 390 and 1440 wide, light and dark, for reviewing contrast; back to 1440 light after. Of
+ * `target` only when given: a full page of a long list costs far more than the part under review.
+ */
+async function shoot(page: Page, testInfo: TestInfo, name: string, target?: Locator): Promise<void> {
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const path = testInfo.outputPath(`${name}-${width.toString()}-${scheme}.png`);
+      if (target) await target.screenshot({ path });
+      else await page.screenshot({ path, fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: "light" });
+}
+
 test("an expired ladder settles once: Hedge, Activity and the intent show what it paid", async ({
   page,
 }, testInfo) => {
@@ -1055,10 +1073,7 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     await expect(page.getByText("for a ladder that has expired", { exact: false })).toBeVisible();
     await expect.poll(() => logs.some((line) => line.includes("waiting for Gemini to publish"))).toBe(true);
     expect(Object.keys((await snapshot(baseURL)).chain?.settlements ?? {})).toEqual([]);
-    await page.screenshot({
-      path: testInfo.outputPath("hedge-expired-waiting-1440-light.png"),
-      fullPage: true,
-    });
+    await shoot(page, testInfo, "hedge-expired-waiting", expired);
 
     // Gemini publishes it: BTC settled at $64,250.42, so NO below $65,000 pays and NO below $64,000 does not.
     gemini.settle(RECORDED_EVENT, "64250.4175");
@@ -1106,18 +1121,7 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
       `It cost ${formatUsdCents(cost)} and paid ${formatUsdCents(paid)}`,
     );
     await expect(expired.getByRole("table")).toHaveCount(0);
-    for (const scheme of ["light", "dark"] as const) {
-      await page.emulateMedia({ colorScheme: scheme });
-      for (const width of [1440, 390]) {
-        await page.setViewportSize({ width, height: 900 });
-        await page.screenshot({
-          path: testInfo.outputPath(`hedge-settled-${width.toString()}-${scheme}.png`),
-          fullPage: true,
-        });
-      }
-    }
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.emulateMedia({ colorScheme: "light" });
+    await shoot(page, testInfo, "hedge-settled");
     await page.getByRole("switch", { name: "Advanced view" }).click();
     const strikes = expired.getByRole("table", { name: `Settled positions on ${RECORDED_EVENT}` });
     await expect(strikes.getByRole("row")).toHaveCount(documents.length + 1);
@@ -1135,28 +1139,27 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     await expect(row(page, first.intentId).getByTestId("intent-settled")).toContainText(
       first.payoutCents > 0 ? `Paid ${formatUsdCents(first.payoutCents)}` : "Paid nothing",
     );
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: 900 });
-      if (width === 390) {
-        // Stacked, an intent with nothing settled shows no empty "At expiry" label.
-        const unsettled = chainView.intents.find((intent) => chainView.settlements[intent.id] === undefined);
-        if (unsettled) {
-          await expect(row(page, unsettled.id).locator('td[data-label="At expiry"]')).toBeHidden();
-        }
-      }
-      await page.screenshot({
-        path: testInfo.outputPath(`activity-settled-${width.toString()}-light.png`),
-        fullPage: true,
-      });
+    // Stacked, an intent with nothing settled shows no empty "At expiry" label.
+    await page.setViewportSize({ width: 390, height: 900 });
+    const unsettled = chainView.intents.find((intent) => chainView.settlements[intent.id] === undefined);
+    if (unsettled) {
+      await expect(row(page, unsettled.id).locator('td[data-label="At expiry"]')).toBeHidden();
     }
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await shoot(page, testInfo, "activity-settled", row(page, first.intentId));
 
     // The intent: its signed settlement.
     await open(page, `/activity/${first.intentId.toString()}`);
     const card = page.getByTestId("intent-settlement");
     await expect(card).toHaveAttribute("data-sealed", "verified");
     await expect(card).toContainText("It settled at $64,250.42");
-    await page.screenshot({ path: testInfo.outputPath("intent-settled-1440-light.png"), fullPage: true });
+    await shoot(page, testInfo, "intent-settled", card);
+
+    // The public scorecard counts the settled positions, from the verified records only.
+    await page.goto(`/agent/${AGENT_ADDRESS}`);
+    const counted = page.getByTestId("count-settled");
+    await expect(counted).toHaveAttribute("data-count", documents.length.toString());
+    await expect(counted).toContainText(`paid ${formatUsdCents(paid)}`);
+    await shoot(page, testInfo, "scorecard-settled", counted);
   } finally {
     executor.stop();
   }
