@@ -181,7 +181,7 @@ export class FakeGeminiPrivate {
   }
 
   /** In-process fetch for unit tests: base URL is ignored. A dropped answer rejects like a timeout. */
-  readonly fetch = async (input: string, init?: RequestInit): Promise<Response> => {
+  readonly fetch = (input: string, init?: RequestInit): Promise<Response> => {
     const url = new URL(input);
     const headers = new Headers(init?.headers);
     const answer = this.handle({
@@ -192,12 +192,14 @@ export class FakeGeminiPrivate {
     if (answer === DROPPED) {
       const error = new Error("The operation was aborted due to timeout");
       error.name = "TimeoutError";
-      throw error;
+      return Promise.reject(error);
     }
-    return new Response(JSON.stringify(answer.body), {
-      status: answer.status,
-      headers: { "content-type": "application/json" },
-    });
+    return Promise.resolve(
+      new Response(JSON.stringify(answer.body), {
+        status: answer.status,
+        headers: { "content-type": "application/json" },
+      }),
+    );
   };
 
   /**

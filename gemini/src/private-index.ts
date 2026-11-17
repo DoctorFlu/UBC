@@ -28,3 +28,4 @@ export {
   type GeminiPrivateErrorKind,
 } from "./private-errors";
 export { geminiTradingSettings, keyScope, type GeminiTradingSettings } from "./private-settings";
+export { geminiDoctor, type DoctorOptions, type DoctorStatus } from "./doctor";

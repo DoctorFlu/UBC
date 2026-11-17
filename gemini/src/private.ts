@@ -203,7 +203,7 @@ function invalid(message: string): GeminiPrivateError {
  */
 export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): GeminiPrivateClient {
   const { environment, credentials } = options;
-  if (!(environment in GEMINI_HOSTS)) throw invalid(`unknown Gemini environment "${String(environment)}"`);
+  if (!(environment in GEMINI_HOSTS)) throw invalid(`unknown Gemini environment "${environment}"`);
   if (environment === "production" && options.allowProduction !== true) {
     throw invalid("production trades real money and needs allowProduction");
   }
