@@ -139,16 +139,24 @@ test.describe("a second workspace", () => {
   let token = "";
   let agentId = "";
   let passkey: VirtualPasskey;
+  /** Each chain RPC request Bob's pages made, by JSON-RPC method: there must be none. */
+  const chainReads: string[] = [];
 
   test.beforeAll(async ({ browser, baseURL }) => {
     const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });
     // As Caddy does on the hosted demo chain, the browser's chain RPC is the first workspace's alone
-    // (docs/accounts.md): Bob's pages, his deploy and every passkey-confirmed owner call work without it.
+    // (docs/accounts.md): Bob's pages, his deploy and every passkey-confirmed owner call work without it,
+    // and never ask it (a 403 in the background would be a hosted bug the page hides).
     const { network } = await snapshot(baseURL ?? "");
     const rpc = new URL(network.rpcUrl);
     await context.route(
       (url) => url.origin === rpc.origin && url.pathname === rpc.pathname,
-      (route) => route.fulfill({ status: 403, contentType: "text/plain", body: "Forbidden" }),
+      (route) => {
+        const body = route.request().postData() ?? "";
+        const methods = [...body.matchAll(/"method"\s*:\s*"([^"]+)"/g)].map((match) => match[1] ?? "?");
+        chainReads.push(...(methods.length > 0 ? methods : [route.request().method()]));
+        return route.fulfill({ status: 403, contentType: "text/plain", body: "Forbidden" });
+      },
     );
     page = await context.newPage();
     passkey = await addVirtualPasskey(page);
@@ -543,5 +551,9 @@ test.describe("a second workspace", () => {
     } finally {
       await context.close();
     }
+  });
+
+  test("never asked the chain RPC, which is not his workspace's to read", () => {
+    expect(chainReads).toEqual([]);
   });
 });

@@ -149,8 +149,8 @@ export interface OrderIdDeployment {
  * - Two contracts never share one (#95): one venue account serves every mandate's contract, and on Arc
  *   anyone deploying a contract can grind its address to match another's first 8 hex digits and land it
  *   in the same block, so printed prefixes alone could be made to meet. The digest covers the whole
- *   address, so a lookalike must match the 32-bit prefix and the 48-bit digest together: 80 bits of
- *   grinding, about 4 x 10^7 years at a billion addresses a second.
+ *   address and the deploy block's hash, which no one knows before the block is made, so it cannot be
+ *   ground in advance; a lookalike shares it only by a 1 in 2^48 chance.
  *
  * Ids already journalled keep the form they were written in; a retry reuses its record's id, so nothing
  * is ever looked up under an id it was not sent with.

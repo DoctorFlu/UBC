@@ -34,9 +34,10 @@ export type { OwnerCall };
 const OWNER_CALLS_PATH = "/api/console/owner-calls";
 
 /**
- * - `checking`: simulating the call, so a refusal shows before any prompt opens.
- * - `signing`: the wallet prompt, or the passkey prompt (`via`), is open.
- * - `pending`: sent, waiting to be mined.
+ * - `checking`: simulating the call in the browser, so a refusal shows before the wallet prompt opens
+ *   (wallet only: the console simulates a passkey call itself).
+ * - `signing`: the wallet prompt, or the passkey prompt and the console's send (`via`), is open.
+ * - `pending`: sent, waiting to be mined (a passkey call answers once it is mined).
  * - `syncing`: mined; waiting for the console to read its event, so every view agrees.
  * - `cancelled`: the person closed the prompt. Nothing was sent; the page is as it was, with a sentence.
  */
@@ -136,9 +137,13 @@ function describeFailure(error: unknown): string {
 }
 
 /**
- * Sends owner transactions with the connected wallet: simulate (so a refusal never opens the wallet),
- * apply Arc's fee floor, sign, wait for the receipt, then wait until the console's own event feed shows
- * the transaction. Views update from that feed, never from this hook.
+ * Sends owner transactions, then waits until the console's own event feed shows the transaction. Views
+ * update from that feed, never from this hook.
+ * - With the connected wallet: simulate (so a refusal never opens the wallet), apply Arc's fee floor,
+ *   sign, and wait for the receipt, all through the browser's chain RPC.
+ * - With a passkey (#95): one prompt, then the console simulates, signs with the mandate's owner key,
+ *   sends and waits for the receipt. The browser reads no chain, since its RPC may not be this
+ *   workspace's to read (on the hosted demo chain, /rpc is the first workspace's alone).
  */
 export function useOwnerTx() {
   const config = useConfig();
