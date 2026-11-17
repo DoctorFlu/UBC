@@ -28,6 +28,8 @@ export interface MarketDescription {
   length: number;
   /** "Nov 20, 22:00 UTC", when the symbol carries an expiry. */
   settles: string | null;
+  /** The same expiry as an ISO time, for comparing with the clock. */
+  expiresAt: string | null;
   symbol: string;
   asset: string | null;
   /** Strike in dollars, as written in the symbol. */
@@ -66,6 +68,7 @@ export function describeMarket(symbol: string, category: number | null = null): 
       preview: previewText(symbol),
       length,
       settles: null,
+      expiresAt: null,
       symbol,
       asset: null,
       strike: null,
@@ -79,6 +82,7 @@ export function describeMarket(symbol: string, category: number | null = null): 
       parsed: false,
       ...known,
       settles: null,
+      expiresAt: null,
       symbol,
       asset: null,
       strike: null,
@@ -100,6 +104,7 @@ export function describeMarket(symbol: string, category: number | null = null): 
     title: `${asset} $${groupThousands(strike)} or above`,
     parsed: true,
     settles: valid ? `${MONTHS[mm - 1] ?? ""} ${dd.toString()}, ${pad(hh)}:${pad(mi)} UTC` : null,
+    expiresAt: valid ? date.toISOString() : null,
     symbol,
     asset,
     strike,

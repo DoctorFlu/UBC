@@ -3,10 +3,17 @@
  * cost, what they paid and the net, in plain words. Built from the verified settlement records only; a
  * record whose document no longer matches its hash is never counted.
  */
-import { type Settlement, type SettlementTotals, eventTickerAsset, settlementTotals } from "@mandate/shared";
+import {
+  type IntentView,
+  type Settlement,
+  type SettlementTotals,
+  eventTickerAsset,
+  settlementTotals,
+} from "@mandate/shared";
 
 import { formatUsdCents } from "@/lib/format";
-import type { ChainView } from "@/lib/live/types";
+import type { ChainView, SettlementView } from "@/lib/live/types";
+import { describeMarket } from "@/lib/markets";
 
 /** One ladder's settled positions: one expiry of one asset. */
 export interface SettledLadder {
@@ -81,18 +88,66 @@ export function formatSettlementValue(value: string | null): string | null {
   return formatUsdCents(cents);
 }
 
-/** What the protection cost, what it paid and the net, in one plain sentence. */
+/**
+ * What the protection cost, what it paid and the net after fees, in one plain sentence. The fee is the
+ * venue's, estimated from its schedule; the sentence says so once.
+ */
 export function totalsSentence(totals: SettlementTotals): string {
-  const { costCents, payoutCents, pnlCents } = totals;
-  if (payoutCents === 0)
-    return `It cost ${usd(costCents)} and paid nothing, so the protection cost ${usd(costCents)}.`;
+  const { costCents, feeCents, payoutCents, pnlCents } = totals;
+  const cost = totals.feesEstimated
+    ? `${usd(costCents)} and ${usd(feeCents)} in fees (estimated)`
+    : usd(costCents);
+  if (payoutCents === 0) return `It cost ${cost} and paid nothing, so the protection cost ${usd(-pnlCents)}.`;
   const net =
     pnlCents > 0
       ? `a net gain of ${usd(pnlCents)}`
       : pnlCents < 0
         ? `a net cost of ${usd(-pnlCents)}`
         : "exactly what it cost";
-  return `It cost ${usd(costCents)} and paid ${usd(payoutCents)}: ${net}.`;
+  return `It cost ${cost} and paid ${usd(payoutCents)}: ${net}.`;
+}
+
+/**
+ * The one result of an intent's position, which every view shows the same way. The contract records the
+ * fill with a result of 0 (it cannot record the settlement: contract request 2.4), so the result of a
+ * bought position is its settlement's net after fees, and before that there is none yet.
+ */
+export type PositionResult =
+  /** Nothing filled (or not decided yet): there is no position. */
+  | { kind: "none" }
+  /** A filled sell: only bought positions settle at expiry. */
+  | { kind: "sold" }
+  /** Bought and holding: no result until the market expires. Null when the market names no expiry. */
+  | { kind: "open"; expiresAt: string | null; settles: string | null }
+  /** Expired; the executor has not recorded the outcome yet. */
+  | { kind: "awaiting"; expiresAt: string }
+  /** A settlement is stored but no longer matches its hash: it is not shown or counted. */
+  | { kind: "unverified" }
+  /** Settled: the net after the estimated fee, the same number as the "At expiry" card. */
+  | { kind: "settled"; netCents: number; feeCents: number | null; payoutCents: number };
+
+export function positionResult(
+  intent: Pick<IntentView, "status" | "isBuy" | "filledCents" | "market">,
+  settlement: SettlementView | undefined,
+  now: number | null,
+): PositionResult {
+  if (settlement?.status === "verified") {
+    const doc = settlement.document;
+    return {
+      kind: "settled",
+      netCents: doc.pnlCents,
+      feeCents: doc.feeCents ?? null,
+      payoutCents: doc.payoutCents,
+    };
+  }
+  if (settlement?.status === "tampered") return { kind: "unverified" };
+  if (intent.status !== "executed" || (intent.filledCents ?? 0) <= 0) return { kind: "none" };
+  if (intent.isBuy === false) return { kind: "sold" };
+  const market = intent.market === null ? null : describeMarket(intent.market);
+  const expiresAt = market?.expiresAt ?? null;
+  if (expiresAt !== null && now !== null && Date.parse(expiresAt) <= now)
+    return { kind: "awaiting", expiresAt };
+  return { kind: "open", expiresAt, settles: market?.settles ?? null };
 }
 
 /** "BTC settled at $64,992.86, so 2 of the 3 positions paid out." for the headline of a settled ladder. */
