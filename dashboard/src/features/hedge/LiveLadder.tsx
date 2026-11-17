@@ -1,14 +1,16 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+
+import { When } from "@/components/ui/When";
 
 import { Button } from "@/components/ui/Button";
 
 import { Skeleton } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import type { LadderQuotes, QuoteRung } from "@/lib/hedge/types";
-import { formatContractPrice, formatContractsHundredths, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { formatContractPrice, formatContractsHundredths, formatUsdCents } from "@/lib/format";
 
 import styles from "./hedge.module.css";
 import type { HedgeMarketState } from "./useHedgeMarket";
@@ -200,8 +202,12 @@ function LadderTable({
   );
 }
 
-/** "BTC price on November 20, spot $65,586, quoted 20:19:04 UTC", or why there is nothing to quote. */
-export function ladderCaption(quotes: LadderQuotes | null): string | null {
+/** "BTC price on November 20. Spot $65,586, quoted 2 min ago.", or null when there is nothing to quote. */
+export function ladderCaption(quotes: LadderQuotes | null): ReactNode {
   if (!quotes) return null;
-  return `${quotes.title}. Spot ${usd(quotes.spotCents)}, quoted ${formatTimeUtc(quotes.fetchedAt)}.`;
+  return (
+    <>
+      {quotes.title}. Spot {usd(quotes.spotCents)}, quoted <When at={quotes.fetchedAt} />.
+    </>
+  );
 }

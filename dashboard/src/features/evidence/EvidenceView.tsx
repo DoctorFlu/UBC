@@ -24,7 +24,7 @@ import {
   chainHeadline,
   evidenceChain,
 } from "@/lib/evidence/chain";
-import { formatContractsHundredths, formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { formatContractsHundredths, formatUsdCents } from "@/lib/format";
 import type { AgentPlanView } from "@/lib/hedge/types";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { isoFromUnix } from "@/lib/live/derive";
@@ -35,8 +35,6 @@ import { formatUsdc } from "@/lib/payments/usdc";
 import { clip } from "@/lib/text";
 
 import styles from "./evidence.module.css";
-
-const at = (iso: string) => `${formatDateUtc(iso)}, ${formatTimeUtc(iso)}`;
 
 /** Agent-supplied and onchain strings are clipped to these lengths; the full value stays copyable. */
 const MAX_SYMBOL = 64;
@@ -167,7 +165,9 @@ function RequestLink({ view }: { view: AgentPlanView }) {
       ) : (
         <p className={styles.muted}>The agent stored the plan without the request that led to it.</p>
       )}
-      <p className={styles.note}>As the agent reported it with the plan, {at(view.createdAt)}.</p>
+      <p className={styles.note}>
+        As the agent reported it with the plan, <When at={view.createdAt} date />.
+      </p>
     </ChainLink>
   );
 }
@@ -307,7 +307,9 @@ function PlanLink({
           <ul>
             {unproposed.map(({ index, order }) => (
               <li key={index}>
-                <span className="mono">{clip(order.instrumentSymbol, MAX_SYMBOL)}</span>
+                <Advanced fallback={<span>{describeMarket(order.instrumentSymbol).title}</span>}>
+                  <span className="mono">{clip(order.instrumentSymbol, MAX_SYMBOL)}</span>
+                </Advanced>
                 <span className="num">{formatUsdCents(order.amountCents)}</span>
               </li>
             ))}
