@@ -83,6 +83,13 @@ export const WAKE_MAX_INTENTS = 10;
 /** The most ladders one `ladder_settled` wake-up lists. */
 export const WAKE_MAX_LADDERS = 4;
 
+/**
+ * A ladder whose expiry is older than this when its last settlement is stored wakes nothing. A paused
+ * machine wakes within hours (the hourly run calls it), so only a replay is older: settlements recorded
+ * again into a new console data folder.
+ */
+export const SETTLED_NEWS_MS = 24 * 60 * MINUTE_MS;
+
 // ------------------------------------------------------------------ the body
 
 const isoSchema = z.iso.datetime();
@@ -621,6 +628,8 @@ export function ladderSettledWake(input: LadderSettlementInput): WakeCandidate |
   const docs = input.settlements.filter((doc) => doc.eventTicker === input.eventTicker);
   const first = docs[0];
   if (first === undefined) return null;
+  // History, not news: records stored again for a ladder that expired long ago (a deleted data folder).
+  if (input.now - Date.parse(first.expiresAt) > SETTLED_NEWS_MS) return null;
   const settled = new Set(docs.map((doc) => doc.intentId));
   if (input.filledBuys.some((id) => !settled.has(id))) return null;
   const totals = settlementTotals(docs);

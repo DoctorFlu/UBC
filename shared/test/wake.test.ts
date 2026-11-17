@@ -6,6 +6,7 @@ import {
   MAX_EVENT_AGE_MS,
   MemoryWakeStore,
   RUN_QUIET_MS,
+  SETTLED_NEWS_MS,
   WAKE_DEBOUNCE_MS,
   WAKE_RETRY_DELAYS_MS,
   WakeNotifier,
@@ -366,6 +367,13 @@ describe("ladderSettledWake", () => {
       "The BTC ladder BTC2611202200 settled at $65,210.00: 2 positions cost $24.80, paid $0, net -$24.80. " +
         "Plan on the next ladder.",
     );
+  });
+
+  it("treats a ladder that expired more than a day before as history, not news", () => {
+    const expiry = Date.parse("2026-11-20T22:00:00.000Z");
+    const at = (now: number) => ladderSettledWake({ ...input([1], [doc(1)]), now });
+    expect(at(expiry + SETTLED_NEWS_MS)).not.toBeNull();
+    expect(at(expiry + SETTLED_NEWS_MS + 1)).toBeNull();
   });
 
   it("merges two ladders that settle inside one window, each listed once", () => {

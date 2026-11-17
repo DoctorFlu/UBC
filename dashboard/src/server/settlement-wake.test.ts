@@ -30,6 +30,9 @@ const silent = { info: () => undefined, warn: () => undefined };
 const SECRET_URL = "https://hooks.example.test/routines/secret-path-9/run";
 const KEY = "routine-key-for-settlement-tests";
 const LADDER = "BTC2611202200";
+// The ladder expired a minute ago: a settlement is news only within a day of its expiry.
+const EXPIRED_AT = new Date(Math.floor(Date.now() / 60_000) * 60_000 - 60_000).toISOString();
+const RESOLVED_AT = new Date(Date.parse(EXPIRED_AT) + 8_232).toISOString();
 
 function config(dataDir: string): ConsoleConfig {
   return {
@@ -75,7 +78,7 @@ describe("the settlement wake-up", () => {
       market: BTC_ABOVE_65K,
       eventTicker: LADDER,
       strikeCents: 6_500_000,
-      expiresAt: "2026-11-20T22:00:00.000Z",
+      expiresAt: EXPIRED_AT,
       outcome: "NO",
       costCents: 1_240,
       limitPrice: 31,
@@ -84,7 +87,7 @@ describe("the settlement wake-up", () => {
       payoutCents: 4_000,
       pnlCents: 2_760,
       settlementValue: "64250.4175",
-      resolvedAt: "2026-11-20T22:00:08.232Z",
+      resolvedAt: RESOLVED_AT,
       venue: "simulated",
     };
     const signature = await devAccount("executor").signMessage({
@@ -156,7 +159,7 @@ describe("the settlement wake-up", () => {
           {
             asset: "BTC",
             eventTicker: LADDER,
-            expiresAt: "2026-11-20T22:00:00.000Z",
+            expiresAt: EXPIRED_AT,
             settlementValue: "64250.4175",
             positions: 2,
             costCents: 2_480,
