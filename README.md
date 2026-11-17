@@ -159,7 +159,7 @@ The owner has entered a holding in the console, for example 0.05 BTC, and saved 
   It refuses any approved intent the MCP server could not have sent (not a Gemini symbol, a limit outside 1 to 99, a category Gemini disagrees with), and places one order per intent at most ([docs/gemini-venue.md](docs/gemini-venue.md#safety-rules)).
 - **Red team.**
   `npm run redteam` attacks the mandate through the MCP server and with a stolen agent key.
-  Against the `production` contract it ran 47 attacks: 40 held, 7 bounded, 0 breaches ([redteam/REPORT.md](redteam/REPORT.md)).
+  Against the `production` contract it ran 47 attacks: 42 held, 5 bounded, 0 breaches ([redteam/REPORT.md](redteam/REPORT.md)).
   The bounded ones are listed there with their limits: for example, splitting an order gets past the per-order rules but not the budget.
 
 ## How the sponsor technologies are used
