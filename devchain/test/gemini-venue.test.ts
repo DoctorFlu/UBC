@@ -84,7 +84,7 @@ const order = (patch: Partial<VenueOrder> = {}): VenueOrder => ({
   market: MARKET,
   outcome: "NO",
   isBuy: true,
-  amountCents: 1_240,
+  amountCents: 1_300, // 40 contracts at 31c and the 60c worst-case fee
   limitPrice: 31,
   ...patch,
 });
@@ -213,6 +213,22 @@ describe("placing an order", () => {
       detail: expect.stringMatching(/not on .* 5c price grid/) as unknown,
     });
     expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+  });
+
+  it("sizes the order so its cost and Gemini's worst-case fee fit the approved amount, and refuses less than a cent", async () => {
+    // 98c at 97c: 1 contract costs 97c and at most a 1c fee (the sandbox charged exactly that).
+    placedOf(await venue().placeOrder(order({ amountCents: 98, limitPrice: 97 })));
+    expect(fake.callsTo(ORDER_ROUTE)[0]?.fields.quantity).toBe("1");
+    // $10 at 50c: 20 contracts would cost $10 and a 35c fee, so 19.32 is the most that fits.
+    placedOf(await venue().placeOrder(order({ intentId: 8, amountCents: 1_000, limitPrice: 50 })));
+    expect(fake.callsTo(ORDER_ROUTE)[1]?.fields.quantity).toBe("19.32");
+    // 2c at 30c: 0.03 contracts fit (0.9c, rounded up to 1c, and a 1c fee), but they cost less than the
+    // cent Gemini takes at least for an order, so Gemini would refuse it.
+    expect(await venue().placeOrder(order({ intentId: 9, amountCents: 2, limitPrice: 30 }))).toEqual({
+      status: "refused",
+      detail: "0.03 contracts at 30c cost less than the $0.01 Gemini's sandbox takes for an order",
+    });
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(2);
   });
 
   it("records an order Gemini refuses as refused, with Gemini's reason, and never sends it again", async () => {

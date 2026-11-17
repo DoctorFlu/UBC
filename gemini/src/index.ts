@@ -12,6 +12,14 @@ export {
 } from "./client";
 export type { RequestOptions } from "./abort";
 export {
+  affordableHundredths,
+  MIN_ORDER_COST_CENTS,
+  orderCostCents,
+  predictionFeeCents,
+  worstCaseSpendCents,
+  type FeeRole,
+} from "./fees";
+export {
   announcedSource,
   describeEnvironment,
   environmentMismatch,

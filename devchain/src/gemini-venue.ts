@@ -25,7 +25,9 @@
  * `disputed`, written to the order's record for the console, and never settled while it lasts.
  */
 import {
+  affordableHundredths,
   findInstrument,
+  MIN_ORDER_COST_CENTS,
   toHundredths,
   scaleDecimal,
   type GeminiClient,
@@ -294,12 +296,19 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
         detail: `the limit price ${String(order.limitPrice)}c is not on ${order.market}'s ${String(priceStep)}c price grid`,
       };
     }
-    const affordable = Math.floor((order.amountCents * 100) / order.limitPrice);
-    const quantityHundredths = affordable - (affordable % quantityStep);
+    // The approved amount covers the order and Gemini's fee: the most contracts whose cost at the limit
+    // plus the taker fee there (the worst case) fits it. See @mandate/gemini fees.ts.
+    const quantityHundredths = affordableHundredths(order.amountCents, order.limitPrice, quantityStep);
     if (quantityHundredths < minimum || quantityHundredths <= 0) {
       return {
         status: "refused",
-        detail: `${formatCents(order.amountCents)} at ${String(order.limitPrice)}c buys less than the ${quantityText(minimum)} contracts ${where} takes`,
+        detail: `${formatCents(order.amountCents)} at ${String(order.limitPrice)}c, with Gemini's fee, buys less than the ${quantityText(minimum)} contracts ${where} takes`,
+      };
+    }
+    if (quantityHundredths * order.limitPrice < MIN_ORDER_COST_CENTS * 100) {
+      return {
+        status: "refused",
+        detail: `${quantityText(quantityHundredths)} contracts at ${String(order.limitPrice)}c cost less than the ${formatCents(MIN_ORDER_COST_CENTS)} ${where} takes for an order`,
       };
     }
 

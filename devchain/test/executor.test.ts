@@ -566,7 +566,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
 
   it("places an approved order once, follows it until it fills, and records the fill", async () => {
     start();
-    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     await vi.waitFor(() => {
       expect(fake.orders.size).toBe(1);
     });
@@ -596,7 +596,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
       body: { error: "InsufficientFunds", message: "no" },
     });
     start();
-    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
     expect(statuses.get(id)).toBe("failed");
     expect((await chain.outsider.getSnapshot()).committedCents).toBe(0);
@@ -609,7 +609,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
   it("holds an order while the terms are not accepted, records nothing, and places it once they are", async () => {
     fake.termsAccepted = false;
     start();
-    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     await vi.waitFor(() => {
       expect(fake.callsTo("/v1/prediction-markets/order").length).toBeGreaterThan(1);
     });
