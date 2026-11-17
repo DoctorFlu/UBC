@@ -223,6 +223,8 @@ export interface WakeNotifierOptions {
   retryDelaysMs?: readonly number[];
   /** Most wake-ups waiting at once. */
   maxQueued?: number;
+  /** Called after the record changed (a wake-up was queued, sent, failed or capped). */
+  onChange?: () => void;
 }
 
 const DAY_MS = 86_400_000;
@@ -340,6 +342,7 @@ export class WakeNotifier {
     this.store.transaction(() => {
       for (const candidate of candidates) this.offerOne(candidate, at);
     });
+    this.options.onChange?.();
     this.arm();
   }
 
@@ -482,6 +485,7 @@ export class WakeNotifier {
       const due = this.store.queued().find((d) => d.dueAt <= at);
       if (!due) return;
       await this.deliver(due, at);
+      this.options.onChange?.();
     }
   }
 

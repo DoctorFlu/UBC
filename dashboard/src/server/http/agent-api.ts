@@ -49,6 +49,9 @@ export function agentRoute(handler: AgentHandler) {
   ): Promise<Response> => {
     const denied = checkServiceToken(request, service.config.serviceToken);
     if (denied) return denied;
+    // Only the agent's MCP server holds the token, and it calls during every Bot run: events the run
+    // causes meanwhile must not wake the Bot again (docs/event-wake.md).
+    service.noteAgentActivity();
     try {
       return await handler(request, service, params);
     } catch (error) {

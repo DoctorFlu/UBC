@@ -8,7 +8,7 @@ import { type Hex, toHex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
-import type { ConsoleConfig } from "../config";
+import { type ConsoleConfig, readWakeConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { receiveStreamDelivery } from "./stream-webhook";
@@ -27,6 +27,7 @@ function config(dataDir: string, streamSecurityToken: string | null): ConsoleCon
     streamSecurityToken,
     publicUrl: "http://localhost:3000",
     mcpPublicUrl: null,
+    wake: readWakeConfig({}),
   };
 }
 
