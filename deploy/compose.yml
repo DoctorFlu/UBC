@@ -52,9 +52,11 @@ services:
     environment:
       MANDATE_HOST: ${MANDATE_HOST:?set MANDATE_HOST in deploy/.env (see mandate.env.template)}
       CONSOLE_USER: ${CONSOLE_USER:-owner}
-      # Until deploy/set-console-password.sh sets the owner's hash, a bcrypt hash of 32 random bytes that were
-      # thrown away: no password matches it, so every owner route answers 401 and the rest of the stack runs.
-      CONSOLE_PASSWORD_HASH: ${CONSOLE_PASSWORD_HASH:-JDJhJDE0JExhbUlmZGxqeTZCTnM4Q1p0SFI1aXU5NEwyQVNSdFZlM0YwUVJYMDRLQ0p6NkpoNm9Ndi91}
+      # Until deploy/set-console-password.sh sets the owner's hash, the base64 of the plain sentence
+      # "locked: run deploy/set-console-password.sh". It is not a bcrypt hash (those start with "$2"), so bcrypt
+      # refuses to compare any password with it: every owner route answers 401, whatever the login, and the rest
+      # of the stack runs. Caddy logs each refused login as an error ("hashedSecret too short") while locked.
+      CONSOLE_PASSWORD_HASH: ${CONSOLE_PASSWORD_HASH:-bG9ja2VkOiBydW4gZGVwbG95L3NldC1jb25zb2xlLXBhc3N3b3JkLnNo}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/app-routes.caddy:/etc/caddy/app-routes.caddy:ro

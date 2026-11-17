@@ -50,7 +50,7 @@ The rules are in one file, [`deploy/caddy/app-routes.caddy`](../deploy/caddy/app
 | `/rpc` (demo chain only) | the owner | The owner's login. It forwards to anvil, so the browser's test signer can send transactions. |
 | everything else (pages, `/api/console/*`) | the owner | The owner's login (HTTP basic auth over HTTPS). |
 
-Until the owner sets a password, `CONSOLE_PASSWORD_HASH` is empty and compose uses a hash of 32 random bytes nobody kept, so every owner route answers 401 to everyone while the rest of the stack runs.
+Until the owner sets a password, `CONSOLE_PASSWORD_HASH` is empty and compose uses the base64 of the sentence `locked: run deploy/set-console-password.sh`, which is not a bcrypt hash, so no password can match it: every owner route answers 401 to everyone while the rest of the stack runs.
 The owner's login is needed because the console's pages and read APIs show holdings, hedge plans and decision contexts, and on the demo chain the owner's key is public, so wallet signatures alone prove nothing there.
 Caddy strips the login header before the request reaches the console.
 A browser request from another site (`Sec-Fetch-Site: cross-site` or `same-site`) to an owner route is refused unless it is a plain page navigation, so another site cannot use a logged-in browser to make changes.
