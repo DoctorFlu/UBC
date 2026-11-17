@@ -1,7 +1,5 @@
 import "server-only";
 
-import { isIP } from "node:net";
-
 /**
  * In-memory token buckets: each key starts with `capacity` tokens and regains `refillPerSecond` a second.
  * One console process, one set of buckets (docs/accounts.md says what a fleet would use instead).
@@ -99,32 +97,5 @@ export function defaultRateLimits(now?: () => number): RateLimits {
   };
 }
 
-function isPrivate(address: string): boolean {
-  const ip = address.replace(/^::ffff:/, "");
-  if (isIP(ip) === 4) {
-    const [a = 0, b = 0] = ip.split(".").map(Number);
-    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 0;
-  }
-  if (isIP(ip) === 6) return ip === "::1" || /^f[cd]/i.test(ip) || /^fe80/i.test(ip);
-  return true;
-}
-
-/**
- * Who a request comes from, for rate limits. Behind a trusted proxy, the right-most public address in
- * `X-Forwarded-For`: proxies append the peer they saw, so the addresses to its left are whatever the client
- * claimed. Without a trusted proxy the header is the client's own claim, so every request shares one key and
- * only the totals apply.
- */
-export function clientKey(request: Request, trustProxy: boolean): string {
-  if (!trustProxy) return "direct";
-  const chain = (request.headers.get("x-forwarded-for") ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => isIP(entry.replace(/^::ffff:/, "")) !== 0);
-  for (let index = chain.length - 1; index >= 0; index -= 1) {
-    const address = chain[index] ?? "";
-    if (!isPrivate(address)) return address;
-  }
-  // Only private addresses: the nearest peer, which the client cannot choose.
-  return chain.at(-1) ?? "unknown";
-}
+/** Who a request comes from (docs/accounts.md, "Rate limits"): one rule for the console and the MCP server. */
+export { clientKey } from "@mandate/shared/node";

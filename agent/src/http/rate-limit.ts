@@ -1,5 +1,3 @@
-import { isIP } from "node:net";
-
 /**
  * In-memory token buckets keyed by caller. Each key starts with `capacity` tokens and regains
  * `refillPerSecond` tokens per second up to `capacity`. One process, one bucket set: enough for a
@@ -49,37 +47,5 @@ export class TokenBucketLimiter {
   }
 }
 
-/**
- * Who a request comes from, for the failed-token limit. Behind a trusted proxy, the right-most public
- * address in `X-Forwarded-For` (proxies append the peer they saw; what is to its left is the client's own
- * claim). Without one, every request shares one key.
- */
-export function clientKey(request: Request, trustProxy: boolean): string {
-  if (!trustProxy) return "direct";
-  const chain = (request.headers.get("x-forwarded-for") ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => isIP(entry.replace(/^::ffff:/, "")) !== 0);
-  for (let index = chain.length - 1; index >= 0; index -= 1) {
-    const address = chain[index] ?? "";
-    if (!isPrivate(address)) return address;
-  }
-  return chain.at(-1) ?? "unknown";
-}
-
-function isPrivate(address: string): boolean {
-  const v4 = address.replace(/^::ffff:/, "");
-  if (isIP(v4) === 4) {
-    const [a = 0, b = 0] = v4.split(".").map(Number);
-    return (
-      a === 10 ||
-      a === 127 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254)
-    );
-  }
-  const lower = address.toLowerCase();
-  return lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80");
-}
+/** Who a request comes from (docs/accounts.md, "Rate limits"): one rule for the console and the MCP server. */
+export { clientKey } from "@mandate/shared/node";
