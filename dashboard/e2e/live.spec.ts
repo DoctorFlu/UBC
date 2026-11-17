@@ -1,9 +1,21 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { closeSync, openSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { type Locator, type Page, type TestInfo, expect, test } from "@playwright/test";
 
-import { consoleSettlementSink, simulatedVenue, startExecutor } from "@mandate/devchain";
+import {
+  announceVenue,
+  consoleOrderJournal,
+  consoleSettlementSink,
+  devAccount,
+  geminiVenue,
+  simulatedVenue,
+  startExecutor,
+} from "@mandate/devchain";
 import { createGeminiClient } from "@mandate/gemini";
+import { createGeminiPrivateClient } from "@mandate/gemini/private";
+import { FakeGeminiPrivate, unpacedLimiter } from "@mandate/gemini/testing";
 import { CONSOLE_AGENT_ROUTES, isMarketSymbol } from "@mandate/shared";
 
 import { formatContractsHundredths, formatUsdCents } from "../src/lib/format";
@@ -84,12 +96,27 @@ const LIVE_API_ROUTES = [
   "/api/executor/v1/settlements/0",
 ];
 
-async function startConsole(): Promise<void> {
+const suiteStartedAt = Date.now();
+
+/** A line about the console's start, timed from the suite's start, so a slow or stuck start names its step. */
+function setupLog(line: string): void {
+  process.stderr.write(`[live setup +${((Date.now() - suiteStartedAt) / 1_000).toFixed(1)}s] ${line}\n`);
+}
+
+/** `next dev`'s own output (what it compiles, and when), kept beside the suite's data. */
+const consoleLog = join(paths.dir, "next-dev.log");
+
+/** Starts `next dev` and compiles every route; fails before `budgetMs`, naming the step that did not finish. */
+async function startConsole(budgetMs = 225_000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  const remaining = () => Math.max(1, deadline - Date.now());
+  const output = openSync(consoleLog, "a");
+  setupLog(`starting next dev on port ${PORT.toString()} (its output: ${consoleLog})`);
   server = spawn("npx", ["next", "dev", "--port", PORT.toString()], {
     cwd: DASHBOARD_DIR,
     // Its own process group, so stopping it stops next's workers too.
     detached: true,
-    stdio: ["ignore", "ignore", "inherit"],
+    stdio: ["ignore", output, "inherit"],
     env: {
       ...process.env,
       NEXT_PUBLIC_DEV_SIGNER: "1",
@@ -106,18 +133,44 @@ async function startConsole(): Promise<void> {
       NEXT_DEV_CACHE: "off",
     },
   });
-  await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
+  closeSync(output);
+  const step = async (label: string, run: (signal: AbortSignal) => Promise<unknown>) => {
+    const startedAt = Date.now();
+    const signal = AbortSignal.timeout(remaining());
+    const aborted = new Promise<never>((_, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
+    });
+    try {
+      await Promise.race([run(signal), aborted]);
+    } catch (error) {
+      setupLog(`${label}: failed after ${((Date.now() - startedAt) / 1_000).toFixed(1)}s`);
+      const lines = readFileSync(consoleLog, "utf8").trimEnd().split("\n");
+      process.stderr.write(`last lines of next dev's output:\n${lines.slice(-30).join("\n")}\n`);
+      throw new Error(`the console did not start: ${label} did not finish`, { cause: error });
+    }
+    const seconds = (Date.now() - startedAt) / 1_000;
+    if (seconds >= 5) setupLog(`${label}: ${seconds.toFixed(1)}s`);
+  };
+  await step("waiting for a live feed", () =>
+    waitForSnapshot(baseURL, (current) => current.feed.health === "live", Math.min(180_000, remaining())),
+  );
   // `next dev` compiles a route on its first request; compile every route now, so no test waits on it.
   for (const path of LIVE_ROUTES) {
-    const response = await fetch(new URL(path, baseURL));
-    await response.arrayBuffer();
+    await step(`compiling ${path}`, async (signal) => {
+      const response = await fetch(new URL(path, baseURL), { signal });
+      await response.arrayBuffer();
+    });
   }
   for (const path of LIVE_API_ROUTES) {
-    const response = await fetch(new URL(path, baseURL), {
-      method: path.endsWith("/snapshot") ? "GET" : "POST",
+    await step(`compiling ${path}`, async (signal) => {
+      const response = await fetch(new URL(path, baseURL), {
+        method: path.endsWith("/snapshot") ? "GET" : "POST",
+        signal,
+      });
+      await response.arrayBuffer();
     });
-    await response.arrayBuffer();
   }
+  setupLog("the console is ready");
 }
 
 async function stopConsole(): Promise<void> {
@@ -156,10 +209,12 @@ function toast(page: Page) {
 
 test.beforeAll(async () => {
   test.setTimeout(240_000);
+  // The console's start gets what is left, minus a margin, so a stuck start fails with its own message.
+  const deadline = Date.now() + 230_000;
   freshSuiteDir("live");
   gemini = await startFakeGemini(GEMINI_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
-  await startConsole();
+  await startConsole(deadline - Date.now());
 });
 
 test.afterAll(async () => {
@@ -1211,6 +1266,145 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     await shoot(page, testInfo, "scorecard-settled", counted);
   } finally {
     executor.stop();
+  }
+});
+
+test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and state in Advanced view", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  // The real executor with the Gemini venue: public data from the fake Gemini, the private API from a fake
+  // that checks every signature, and the order journal in this console, signed with the executor key.
+  const fake = new FakeGeminiPrivate({ apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" });
+  const sign = (hash: `0x${string}`) => devAccount("executor").signMessage({ message: { raw: hash } });
+  const chainId = chain.executor.publicClient.chain.id;
+  const policy = chain.address.toLowerCase() as `0x${string}`;
+  expect(
+    await announceVenue(
+      { consoleUrl: baseURL, sign },
+      {
+        kind: "executor-venue",
+        version: 1,
+        chainId,
+        policy,
+        venue: "gemini",
+        environment: "sandbox",
+        announcedAt: new Date().toISOString(),
+      },
+    ),
+  ).toBeNull();
+  // The test waits on what happens, never on a clock: the order reaching the fake, and the executor's own
+  // line for the fill. Its log is attached to the test, so a failure shows what it did and when.
+  const logs: string[] = [];
+  const say = (line: string) => logs.push(`${new Date().toISOString()} ${line}`);
+  const waiters: { pattern: RegExp; resolve: () => void }[] = [];
+  const untilLogged = (pattern: RegExp) =>
+    logs.some((line) => pattern.test(line))
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => waiters.push({ pattern, resolve }));
+  let orderReachedGemini = () => {};
+  const orderOnFake = new Promise<void>((resolve) => {
+    orderReachedGemini = resolve;
+  });
+  say("[test] starting the executor");
+  const executor = startExecutor({
+    client: chain.executor,
+    venue: geminiVenue({
+      publicClient: createGeminiClient({ baseUrl: gemini.url }),
+      trading: createGeminiPrivateClient({
+        environment: "sandbox",
+        credentials: { apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" },
+        fetch: async (input, init) => {
+          const answer = await fake.fetch(input, init);
+          if (new URL(input).pathname === "/v1/prediction-markets/order" && answer.status === 201) {
+            say("[test] the fake Gemini took an order");
+            orderReachedGemini();
+          }
+          return answer;
+        },
+        limiter: unpacedLimiter(),
+      }),
+      journal: consoleOrderJournal({ consoleUrl: baseURL, sign }),
+      deployment: { chainId, policy },
+    }),
+    settlements: consoleSettlementSink({ consoleUrl: baseURL }),
+    fromBlock: 0n,
+    fillDelayMs: 0,
+    fillPollMs: 200,
+    pollingIntervalMs: 200,
+    log: (line) => {
+      say(line);
+      for (const waiter of waiters) if (waiter.pattern.test(line)) waiter.resolve();
+    },
+  });
+  try {
+    // The badge, next to Local and Dev signer, at both widths and in both themes.
+    await open(page, "/");
+    const badge = page.getByTestId("venue-badge").filter({ visible: true });
+    await expect(badge).toHaveText("Gemini Sandbox");
+    await expect(badge).toHaveAttribute("data-venue", "sandbox");
+    await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toBeVisible();
+    await shoot(page, testInfo, "topbar-sandbox", page.locator("header").first());
+    // On a phone the strip still fits: menu, name, lamp, Sandbox, Dev and the isolator, no sideways scroll.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(badge).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    // Nothing in the strip overlaps: the menu, the lamp, the venue badge, in that order.
+    const menu = await page.getByRole("button", { name: "Open menu" }).boundingBox();
+    const lamp = await page.getByTestId("live-indicator").filter({ visible: true }).boundingBox();
+    const venue = await badge.boundingBox();
+    if (!menu || !lamp || !venue) throw new Error("the strip is missing a part");
+    expect(menu.x).toBeGreaterThanOrEqual(0);
+    expect(menu.x + menu.width).toBeLessThanOrEqual(lamp.x);
+    expect(lamp.x + lamp.width).toBeLessThanOrEqual(venue.x);
+    await page.screenshot({ path: testInfo.outputPath("home-sandbox-390-light.png") });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const market = "GEMI-ETH2611202200-HI2800";
+    const { intentId, verdict } = await chain.agent.proposeTrade(noBuy(market, 300, 31));
+    expect(verdict).toBe("approved");
+    say(`[test] proposed intent #${String(intentId)}`);
+    // The executor sees the approval before the console does: its first journal write is answered "not
+    // seen yet" and tried again within moments, and the order follows.
+    await orderOnFake;
+    expect(fake.orders.size).toBe(1);
+    const [order] = [...fake.orders.values()];
+    if (!order) throw new Error("no order on the fake");
+    expect(order).toMatchObject({
+      symbol: market,
+      side: "buy",
+      outcome: "no",
+      quantity: 967,
+      priceCents: 31,
+    });
+
+    // Open on Gemini: the plain view says nothing new; Advanced view names the order and its state.
+    await open(page, `/activity/${intentId.toString()}`);
+    await expect(page.getByTestId("intent-venue-order")).toHaveCount(0);
+    await page.getByRole("switch", { name: "Advanced view" }).click();
+    await expect(page.getByTestId("intent-venue-order")).toHaveText(`Gemini sandbox #${order.orderId}`);
+    await expect(page.getByTestId("intent-venue-state")).toHaveText("Open");
+    await expect(page.getByTestId("intent-venue-note")).toHaveText("Resting on Gemini's sandbox at 31c");
+
+    // Filled on Gemini: recorded onchain once, shown without the simulated marker.
+    fake.fill(order.orderId);
+    await untilLogged(new RegExp(`intent #${String(intentId)} buy NO .* filled \\(0x`));
+    await expect(page.getByTestId("intent-venue-state")).toHaveText("Filled");
+    await expect(page.locator("main").getByText("Executed").first()).toBeVisible();
+    await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
+    expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+    const view = (await snapshot(baseURL)).chain?.venueOrders[intentId];
+    expect(view).toMatchObject({ state: "filled", venueOrderId: order.orderId, filledCents: 300 });
+    await shoot(
+      page,
+      testInfo,
+      "intent-venue-order",
+      page.locator("dl", { has: page.getByTestId("intent-venue-order") }),
+    );
+    await page.getByRole("switch", { name: "Advanced view" }).click();
+  } finally {
+    executor.stop();
+    await testInfo.attach("executor-log", { body: logs.join("\n"), contentType: "text/plain" });
   }
 });
 

@@ -15,7 +15,8 @@ import type { DatabaseSync } from "node:sqlite";
  * - the offchain records the console is the system of record for: holdings, decision contexts, hedge
  *   plans, policy change requests, agent pairing and intent-to-context links;
  * - what Gemini said about each intent's market the first time the console checked it;
- * - what each filled position paid at settlement, as the executor signed it (the contract cannot hold it).
+ * - what each filled position paid at settlement, as the executor signed it (the contract cannot hold it);
+ * - the executor's journal of each intent's venue order, and the venue it announced.
  */
 export type Database = DatabaseSync;
 
@@ -173,6 +174,30 @@ export const MIGRATIONS: readonly string[] = [
     signer        TEXT    NOT NULL,
     stored_at     TEXT    NOT NULL,
     PRIMARY KEY (deployment_id, intent_id)
+  ) STRICT;
+  `,
+  // 7: the executor's journal of each intent's venue order, latest signed version only, and the venue it
+  // announced (#93).
+  `
+  CREATE TABLE venue_orders (
+    deployment_id TEXT    NOT NULL,
+    intent_id     INTEGER NOT NULL,
+    revision      INTEGER NOT NULL,
+    hash          TEXT    NOT NULL,
+    document      TEXT    NOT NULL,
+    signature     TEXT    NOT NULL,
+    signer        TEXT    NOT NULL,
+    stored_at     TEXT    NOT NULL,
+    PRIMARY KEY (deployment_id, intent_id)
+  ) STRICT;
+
+  CREATE TABLE executor_venues (
+    deployment_id TEXT NOT NULL PRIMARY KEY,
+    hash          TEXT NOT NULL,
+    document      TEXT NOT NULL,
+    signature     TEXT NOT NULL,
+    signer        TEXT NOT NULL,
+    stored_at     TEXT NOT NULL
   ) STRICT;
   `,
 ];

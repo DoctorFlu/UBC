@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGeminiClient, type FetchLike, type GeminiClientOptions } from "../src/index";
@@ -82,4 +84,55 @@ export function testClient(fetchImpl: FetchLike, clock = fakeClock(), extra: Gem
     random: () => 0.5,
     ...extra,
   });
+}
+
+/** One request a loopback test server received. */
+export interface Received {
+  method: string;
+  url: string;
+  headers: IncomingHttpHeaders;
+}
+
+async function listen(handle: (request: Received) => { status: number; headers?: Record<string, string> }) {
+  const received: Received[] = [];
+  const server: Server = createServer((request, response) => {
+    const seen = { method: request.method ?? "", url: request.url ?? "", headers: request.headers };
+    received.push(seen);
+    const answer = handle(seen);
+    response.writeHead(answer.status, answer.headers);
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${String(port)}`,
+    host: `127.0.0.1:${String(port)}`,
+    received,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => {
+          resolve();
+        });
+      }),
+  };
+}
+
+/**
+ * Two real loopback HTTP servers: `redirecting` answers every request with `status` and a `Location` on
+ * `target`, which answers 200 and records what reaches it. A signed client must leave `target` untouched.
+ */
+export async function redirectingPair(status: number) {
+  const target = await listen(() => ({ status: 200, headers: { "content-type": "application/json" } }));
+  const redirecting = await listen((request) => ({
+    status,
+    headers: { location: `${target.url}${request.url}` },
+  }));
+  return {
+    redirecting,
+    target,
+    close: async () => {
+      await Promise.all([redirecting.close(), target.close()]);
+    },
+  };
 }

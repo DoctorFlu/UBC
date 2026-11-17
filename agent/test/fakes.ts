@@ -240,6 +240,9 @@ export function ladderEvent(): MarketEvent {
       resolutionSide: null,
       resolvedAt: null,
       settlementValue: null,
+      quantityIncrement: null,
+      quantityMinimum: null,
+      priceIncrement: null,
     })),
   };
 }
@@ -257,6 +260,9 @@ export function sportsEvent(): MarketEvent {
     resolutionSide: null,
     resolvedAt: null,
     settlementValue: null,
+    quantityIncrement: null,
+    quantityMinimum: null,
+    priceIncrement: null,
   });
   return {
     id: "2",

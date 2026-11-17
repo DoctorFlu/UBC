@@ -15,6 +15,9 @@ import type {
   PolicyRules,
   Roles,
   Settlement,
+  SettlementVenue,
+  VenueEnvironment,
+  VenueOrderState,
   WakeStatus,
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
@@ -103,6 +106,32 @@ export type SettlementView =
   | { status: "verified"; hash: Hex; signer: Address; signature: Hex; storedAt: string; document: Settlement }
   | { status: "tampered"; hash: Hex; storedAt: string };
 
+/**
+ * The order the executor placed for an intent on a real venue (issue #93), from its signed journal in the
+ * console: only versions that still hash to what was stored are shown. The simulated venue keeps none.
+ */
+export interface VenueOrderView {
+  venue: "gemini";
+  environment: VenueEnvironment;
+  state: VenueOrderState;
+  /** Gemini's order id, once known. */
+  venueOrderId: string | null;
+  clientOrderId: string;
+  quantityHundredths: number;
+  filledHundredths: number;
+  filledCents: number;
+  detail: string | null;
+  updatedAt: string;
+}
+
+/** The venue the executor said it fills orders on when it last started (issue #93). */
+export interface ExecutorVenueView {
+  venue: SettlementVenue;
+  /** Null for the simulated venue. */
+  environment: VenueEnvironment | null;
+  announcedAt: string;
+}
+
 export interface ChainView {
   /** Newest block read, with its timestamp in unix seconds: "today" follows the chain's clock. */
   head: { blockNumber: number; timestamp: number };
@@ -126,6 +155,10 @@ export interface ChainView {
   sealed: Record<number, SealedReason>;
   /** Settlements by intent id, for filled positions whose market resolved (issue #92). */
   settlements: Record<number, SettlementView>;
+  /** Venue orders by intent id, for intents the executor placed on a real venue (issue #93). */
+  venueOrders: Record<number, VenueOrderView>;
+  /** The executor's venue, as it last announced it, or null before it has. */
+  venue: ExecutorVenueView | null;
 }
 
 export interface PairingView {
