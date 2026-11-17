@@ -309,6 +309,47 @@ describe("mandates on the demo chain", () => {
     expect(foreign.status).toBe(404);
   });
 
+  it("never deploys or attaches a second contract to a mandate that has one, on either branch", async () => {
+    const someTx = `0x${"ab".repeat(32)}`;
+    function redeploy(who: Member, mandateId: string, txHash: string | null) {
+      return postDeployment(post(who, `mandates/${mandateId}/deployment`, { txHash }), service, {
+        mandateId,
+      });
+    }
+    // The first workspace's env mandate follows the server's own contract: the admin's session can neither
+    // deploy it a contract of its own nor attach a wallet's.
+    const env = envMandate(service);
+    const rowBefore = service.accounts.store.mandate(env.id);
+    const serverAddress = service.serverContract?.deployment.address;
+    expect(serverAddress).toBeDefined();
+    expect(snapshotOf(env.id).contract?.address).toBe(serverAddress);
+    for (const txHash of [null, someTx]) {
+      const refused = await redeploy(owner, env.id, txHash);
+      expect(refused.status, String(txHash)).toBe(409);
+      expect(await errorCode(refused)).toBe("has_contract");
+    }
+    expect(service.accounts.store.mandate(env.id)).toEqual(rowBefore);
+    expect(service.accounts.store.ownerKeyOf(env.id)).toBeNull();
+    expect(snapshotOf(env.id).contract?.address).toBe(serverAddress);
+    expect(snapshotOf(env.id).contract?.ownerSigner).toBe("wallet");
+
+    // A mandate the console deployed keeps its contract and its owner key.
+    const carols = mandateOf(service, carol);
+    const deployed = service.accounts.store.mandate(carols);
+    const key = service.accounts.store.ownerKeyOf(carols);
+    expect(deployed?.deployment).toBe("server");
+    for (const txHash of [null, someTx]) {
+      const refused = await redeploy(carol, carols, txHash);
+      expect(refused.status, String(txHash)).toBe(409);
+      expect(await errorCode(refused)).toBe("has_contract");
+    }
+    expect(service.accounts.store.mandate(carols)).toEqual(deployed);
+    expect(service.accounts.store.ownerKeyOf(carols)).toEqual(key);
+    expect(snapshotOf(carols).contract?.address.toLowerCase()).toBe(
+      deployed?.contract?.address.toLowerCase(),
+    );
+  });
+
   it("approves only with the passkey confirming that intent on that mandate; pauses on the session alone", async () => {
     const created = await create(bob, "Approvals");
     const mandateId = created.mandate.id;

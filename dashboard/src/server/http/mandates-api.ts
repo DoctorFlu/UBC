@@ -177,6 +177,10 @@ export const postDeployment = consoleRoute(async (request, service, scope, param
   if (!mandate) return apiError(404, "not_found", "This workspace has no such mandate.");
   const body = await readBody(request, deploySchema);
   if (!body.ok) return body.response;
+  // A mandate that has its contract keeps it: the env mandate follows the server's own contract, and a
+  // deployed mandate's agent, executor and journals are bound to its address. Either branch refuses.
+  if (mandate.deployment !== null)
+    return apiError(409, "has_contract", "This mandate already has its contract.");
   let attached: Mandate;
   if (body.data.txHash === null) {
     try {

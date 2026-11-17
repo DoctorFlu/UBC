@@ -56,6 +56,8 @@ A mandate's `deployment` says which Policy contract it follows:
 - none: the mandate has no contract yet.
   Its console shows "no Policy contract", its Setup page offers to deploy one, and its agent's tools answer `unavailable`.
 
+A mandate's contract never changes once it has one: `POST /api/console/mandates/<mandate>/deployment` answers 409 `has_contract` for any mandate whose `deployment` is set, the first mandate (`env`) included, whether it asks the console to deploy or names a wallet's transaction.
+
 "New mandate" (`/mandates/new`) creates the mandate, its agent and the agent's first token, shown once with the steps to connect Grok Bot.
 On the demo chain the console then deploys the contract with the first rules the passkey confirmed, in the same request; on Arc the owner's wallet deploys it from the new mandate's Setup page and signs the first rules itself.
 
