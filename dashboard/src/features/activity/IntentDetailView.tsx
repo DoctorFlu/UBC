@@ -6,6 +6,7 @@ import {
   type PolicyEvent,
   describeReason,
   isMarketSymbol,
+  settlementTotals,
 } from "@mandate/shared";
 import { ArrowLeft, SearchX, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { ViewLink } from "@/components/ui/ViewLink";
@@ -43,7 +44,13 @@ import type {
   SettlementView,
   VenueOrderView,
 } from "@/lib/live/types";
-import { formatSettlementValue, totalsSentence } from "@/lib/settlement/settlement";
+import {
+  type PositionResult,
+  formatSettlementValue,
+  positionResult,
+  totalsSentence,
+} from "@/lib/settlement/settlement";
+import { useNow } from "@/lib/useNow";
 import { categoryName, describeMarket, namingCategory } from "@/lib/markets";
 import { evidenceHref } from "@/lib/evidence/chain";
 import { paymentHref } from "@/lib/payments/links";
@@ -376,20 +383,27 @@ function SettlementCard({ settlement }: { settlement: SettlementView }) {
             {level ? `It settled at ${level}` : "It settled"}
             {strike ? `, ${doc.resolution === "yes" ? "at or above" : "below"} the ${strike} strike` : ""}, so
             the {doc.outcome} contracts {doc.payoutCents > 0 ? "paid $1 each" : "paid nothing"}.{" "}
-            {totalsSentence({
-              positions: 1,
-              costCents: doc.costCents,
-              payoutCents: doc.payoutCents,
-              pnlCents: doc.pnlCents,
-            })}
+            {totalsSentence(settlementTotals([doc]))}
           </p>
           <dl className={styles.facts}>
+            <dt>Cost</dt>
+            <dd>
+              <Money cents={doc.costCents} />
+            </dd>
+            {doc.feeCents === undefined ? null : (
+              <>
+                <dt>Fee (estimated)</dt>
+                <dd data-testid="settlement-fee">
+                  <Money cents={doc.feeCents} />
+                </dd>
+              </>
+            )}
             <dt>Paid</dt>
             <dd>
               <Money cents={doc.payoutCents} />
             </dd>
-            <dt>Net</dt>
-            <dd>
+            <dt>{doc.feeCents === undefined ? "Net" : "Net after fees"}</dt>
+            <dd data-testid="settlement-net">
               <Money cents={doc.pnlCents} sign="always" />
             </dd>
             <dt>Outcome published</dt>
@@ -407,6 +421,15 @@ function SettlementCard({ settlement }: { settlement: SettlementView }) {
                 Offchain in the console, <When inSentence at={settlement.storedAt} date />; the Policy
                 contract cannot record a payout.
               </dd>
+              {doc.feeCents === undefined ? null : (
+                <>
+                  <dt>Fee source</dt>
+                  <dd>
+                    Estimated from Gemini&rsquo;s published fee schedule at the taker rate; no Gemini answer
+                    reports the fee.
+                  </dd>
+                </>
+              )}
               <dt>Signer</dt>
               <dd>
                 <HexValue value={settlement.signer} kind="address" />
@@ -421,6 +444,67 @@ function SettlementCard({ settlement }: { settlement: SettlementView }) {
       </div>
     </Card>
   );
+}
+
+/**
+ * The position's one result in the Order card: open until expiry, waiting for the outcome, or the
+ * settlement's net after fees (the same number as the "At expiry" card). The fee shows once something
+ * filled on Gemini, estimated from its schedule; a simulated fill pays none and shows no fee line.
+ */
+function PositionResultFacts({
+  result,
+  estimatedFeeCents,
+}: {
+  result: PositionResult;
+  estimatedFeeCents: number | null;
+}) {
+  const feeCents = result.kind === "settled" ? result.feeCents : estimatedFeeCents;
+  return (
+    <>
+      {feeCents === null || result.kind === "none" ? null : (
+        <>
+          <dt>Fee (estimated)</dt>
+          <dd data-testid="intent-fee">
+            <Money cents={feeCents} />
+          </dd>
+        </>
+      )}
+      <dt>Result</dt>
+      <dd data-testid="intent-result" data-result={result.kind}>
+        <ResultText result={result} />
+      </dd>
+    </>
+  );
+}
+
+function ResultText({ result }: { result: PositionResult }) {
+  switch (result.kind) {
+    case "none":
+      return <>Nothing filled, so there is no position</>;
+    case "sold":
+      return <>Sold; only bought positions settle at expiry</>;
+    case "open":
+      return result.settles === null ? (
+        <>Open until its market expires</>
+      ) : (
+        <>Open until expiry, {result.settles}</>
+      );
+    case "awaiting":
+      return (
+        <>
+          Expired <When inSentence at={result.expiresAt} />; waiting for the executor to record the outcome
+        </>
+      );
+    case "unverified":
+      return <>Not shown: the stored settlement fails its check</>;
+    case "settled":
+      return (
+        <>
+          <Money cents={result.netCents} sign="always" />
+          {result.feeCents === null ? " at expiry" : " at expiry, after fees"}
+        </>
+      );
+  }
 }
 
 const VENUE_ORDER_STATES: Record<VenueOrderView["state"], string> = {
@@ -456,6 +540,13 @@ function VenueOrderFacts({ order }: { order: VenueOrderView }) {
             {where} #{order.venueOrderId}
           </span>
         )}
+      </dd>
+      {/* The executor sizes the order so its cost and Gemini's fee fit the amount, so it buys fewer
+          contracts than the amount alone would at the limit (the Order row above). */}
+      <dt>Order size</dt>
+      <dd className="num" data-testid="intent-venue-size">
+        {formatContractsHundredths(order.quantityHundredths)}{" "}
+        {order.quantityHundredths === 100 ? "contract" : "contracts"}
       </dd>
       <dt>Venue state</dt>
       <dd data-testid="intent-venue-state">
@@ -561,6 +652,7 @@ function FlaggedCard({ intent, flags }: { intent: IntentView; flags: readonly st
 /** One intent with every onchain step, its links, and the agent's sealed reason checked against the chain. */
 export function IntentDetailView({ intentId, preview }: { intentId: number; preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
+  const now = useNow();
   const snapshot = preview ?? live;
   const chain = snapshot.chain;
   const title = `Intent #${intentId.toString()}`;
@@ -592,6 +684,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
   const timeline = steps(chain, intent.id, simulated);
   const flags = intentFlags(intent);
   const settlement: SettlementView | undefined = chain.settlements[intent.id];
+  const result = positionResult(intent, settlement, now);
 
   return (
     <div className={styles.view}>
@@ -644,18 +737,23 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                     <Money cents={intent.filledCents} />
                     {simulated && intent.status === "executed" ? <SimulatedFill /> : null}
                   </dd>
-                  <dt>Realized P&amp;L</dt>
-                  <dd>
-                    {intent.pnlCents === null ? (
-                      intent.outOfRange?.["pnlCents"] === undefined ? (
-                        "Not recorded"
+                  <PositionResultFacts result={result} estimatedFeeCents={venueOrder?.feeCents ?? null} />
+                  <Advanced>
+                    <dt>Recorded onchain</dt>
+                    <dd data-testid="intent-onchain-result">
+                      {intent.pnlCents === null ? (
+                        intent.outOfRange?.["pnlCents"] === undefined ? (
+                          "Not recorded"
+                        ) : (
+                          "Out of range"
+                        )
                       ) : (
-                        "Out of range"
-                      )
-                    ) : (
-                      <Money cents={intent.pnlCents} sign="always" />
-                    )}
-                  </dd>
+                        <Money cents={intent.pnlCents} sign="always" />
+                      )}{" "}
+                      as the result, at the fill. The contract cannot record the settlement (contract request
+                      2.4), so this is not the position&rsquo;s result.
+                    </dd>
+                  </Advanced>
                 </>
               ) : null}
               {venueOrder ? <VenueOrderFacts order={venueOrder} /> : null}

@@ -417,7 +417,8 @@ function AssetHedge({
       )}
       {lastSettled ? <LastSettledCard ladder={lastSettled} /> : null}
       <Disclosure
-        title={shown ? "Payoff and live ladder" : "Live ladder"}
+        // Not "Live ladder" alone: the card inside carries that title, and open, the two would read twice.
+        title={shown ? "Payoff and live ladder" : "Gemini's quotes"}
         summary={insideSummary(shown, market)}
         data-testid="hedge-more"
       >

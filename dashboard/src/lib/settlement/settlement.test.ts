@@ -1,4 +1,4 @@
-import type { IntentView, Settlement } from "@mandate/shared";
+import { type IntentView, type Settlement, settlementTotals } from "@mandate/shared";
 import { describe, expect, it } from "vitest";
 
 import { fixtureSnapshot } from "@/fixtures";
@@ -7,6 +7,7 @@ import type { SettlementView } from "@/lib/live/types";
 import {
   formatSettlementValue,
   ladderSettlement,
+  positionResult,
   settledAtSentence,
   settledLadders,
   tickerAsset,
@@ -82,7 +83,14 @@ describe("settled ladders", () => {
     expect(ladders.map((ladder) => ladder.eventTicker)).toEqual(["BTC2611202200", "BTC2611132200"]);
     const [latest] = ladders;
     expect(latest?.positions.map((position) => position.intentId)).toEqual([0, 2]);
-    expect(latest?.totals).toEqual({ positions: 2, costCents: 3_400, payoutCents: 4_000, pnlCents: 600 });
+    expect(latest?.totals).toEqual({
+      positions: 2,
+      costCents: 3_400,
+      feeCents: 0,
+      payoutCents: 4_000,
+      pnlCents: 600,
+      feesEstimated: false,
+    });
     expect(settledLadders({ settlements }).map((ladder) => ladder.eventTicker)).toEqual([
       "BTC2611202200",
       "ETH2611202200",
@@ -96,12 +104,70 @@ describe("settled ladders", () => {
     if (latest === undefined) throw new Error("no ladder");
     expect(settledAtSentence(latest)).toBe("BTC settled at $64,992.86, so 1 of the 2 positions paid out.");
     expect(totalsSentence(latest.totals)).toBe("It cost $34.00 and paid $40.00: a net gain of $6.00.");
-    expect(totalsSentence({ positions: 1, costCents: 2_160, payoutCents: 0, pnlCents: -2_160 })).toBe(
-      "It cost $21.60 and paid nothing, so the protection cost $21.60.",
+    const none = { feeCents: 0, feesEstimated: false };
+    expect(
+      totalsSentence({ positions: 1, costCents: 2_160, payoutCents: 0, pnlCents: -2_160, ...none }),
+    ).toBe("It cost $21.60 and paid nothing, so the protection cost $21.60.");
+    expect(
+      totalsSentence({ positions: 2, costCents: 3_000, payoutCents: 1_000, pnlCents: -2_000, ...none }),
+    ).toBe("It cost $30.00 and paid $10.00: a net cost of $20.00.");
+  });
+
+  it("counts Gemini's estimated fee in the net and says once that it is estimated", () => {
+    // The sandbox fill: 97c and a 1c fee, paid $1.00.
+    const fee = { costCents: 97, feeCents: 1, payoutCents: 100, pnlCents: 2 };
+    expect(settlementTotals([fee])).toEqual({ positions: 1, ...fee, feesEstimated: true });
+    expect(totalsSentence(settlementTotals([fee]))).toBe(
+      "It cost $0.97 and $0.01 in fees (estimated) and paid $1.00: a net gain of $0.02.",
     );
-    expect(totalsSentence({ positions: 2, costCents: 3_000, payoutCents: 1_000, pnlCents: -2_000 })).toBe(
-      "It cost $30.00 and paid $10.00: a net cost of $20.00.",
+    expect(totalsSentence(settlementTotals([{ costCents: 97, feeCents: 1, payoutCents: 0 }]))).toBe(
+      "It cost $0.97 and $0.01 in fees (estimated) and paid nothing, so the protection cost $0.98.",
     );
+    // A simulated fill has no fee: nothing is estimated.
+    expect(settlementTotals([{ costCents: 97, payoutCents: 100 }])).toMatchObject({
+      feeCents: 0,
+      pnlCents: 3,
+      feesEstimated: false,
+    });
+  });
+
+  it("gives every intent one result: none, open until expiry, waiting, or the settlement's net after fees", () => {
+    const filled = {
+      status: "executed" as const,
+      isBuy: true,
+      filledCents: 97,
+      market: "GEMI-BTC2611171700-HI64500",
+    };
+    const before = Date.parse("2026-11-17T16:30:00Z");
+    const after = Date.parse("2026-11-17T17:00:30Z");
+    expect(positionResult(filled, undefined, before)).toEqual({
+      kind: "open",
+      expiresAt: "2026-11-17T17:00:00.000Z",
+      settles: "Nov 17, 17:00 UTC",
+    });
+    expect(positionResult(filled, undefined, null)).toMatchObject({ kind: "open" });
+    expect(positionResult(filled, undefined, after)).toEqual({
+      kind: "awaiting",
+      expiresAt: "2026-11-17T17:00:00.000Z",
+    });
+    expect(positionResult({ ...filled, filledCents: 0 }, undefined, after)).toEqual({ kind: "none" });
+    expect(positionResult({ ...filled, status: "approved", filledCents: null }, undefined, after)).toEqual({
+      kind: "none",
+    });
+    expect(positionResult({ ...filled, isBuy: false }, undefined, after)).toEqual({ kind: "sold" });
+    const [stored] = Object.values(settlements);
+    if (stored?.status !== "verified") throw new Error("the fixture has a verified settlement");
+    const document = { ...stored.document, feeCents: 1, pnlCents: stored.document.pnlCents - 1 };
+    expect(positionResult(filled, { ...stored, document }, after)).toEqual({
+      kind: "settled",
+      netCents: document.pnlCents,
+      feeCents: 1,
+      payoutCents: document.payoutCents,
+    });
+    const tampered: SettlementView = { status: "tampered", hash: stored.hash, storedAt: stored.storedAt };
+    expect(positionResult(filled, tampered, after)).toEqual({
+      kind: "unverified",
+    });
   });
 
   it("says where an expired plan's ladder stands: open, waiting, partly or fully settled", () => {

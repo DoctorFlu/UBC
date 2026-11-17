@@ -17,12 +17,14 @@
  * EXECUTOR_DISCOVERY_MS   how often it asks the console which contracts name it as their executor (#95:
  *                         one executor serves every mandate's contract; default 15000, at least 1000).
  */
+import { executorVenueKind, type ExecutorVenueKind } from "@mandate/gemini";
+
 export interface ExecutorSettings {
   fillDelayMs: number;
   pollingIntervalMs: number | undefined;
   settleIntervalMs: number;
   consoleUrl: string;
-  venue: "simulated" | "gemini";
+  venue: ExecutorVenueKind;
   orderTtlMs: number;
   discoveryIntervalMs: number;
 }
@@ -42,10 +44,7 @@ function wholeMs(name: string, raw: string | undefined, min: number): number | u
 export function executorSettings(env: Record<string, string | undefined>): ExecutorSettings {
   const consoleUrl = env.CONSOLE_URL?.trim() || "http://localhost:3000";
   if (!URL.canParse(consoleUrl)) throw new Error(`CONSOLE_URL must be a URL, got "${consoleUrl}"`);
-  const venue = env.EXECUTOR_VENUE?.trim().toLowerCase() || "simulated";
-  if (venue !== "simulated" && venue !== "gemini") {
-    throw new Error(`EXECUTOR_VENUE must be simulated or gemini, got "${venue}"`);
-  }
+  const venue = executorVenueKind(env);
   return {
     venue,
     orderTtlMs: wholeMs("EXECUTOR_ORDER_TTL_MS", env.EXECUTOR_ORDER_TTL_MS, 10_000) ?? 600_000,

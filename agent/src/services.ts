@@ -14,6 +14,7 @@ import type {
   LadderListing,
   MarketEvent,
   SpotPrice,
+  GeminiEnvironment,
 } from "@mandate/gemini";
 import type { HedgeInput, HedgePlan } from "@mandate/planner";
 import type {
@@ -188,6 +189,11 @@ export interface ConsoleClient {
    */
   getSettlements(signal?: AbortSignal): Promise<SettlementsResponse | null>;
   /**
+   * Which Gemini the console reads market data from, from its public `GET /api/health`; production when
+   * it names none (a console older than this check).
+   */
+  getMarketEnvironment(signal?: AbortSignal): Promise<GeminiEnvironment>;
+  /**
    * What the owner sees that the agent reads nowhere else: the console's public address, pending change
    * requests and the cover held now against each current goal (issue #97). Null when the console has no
    * such route yet (404).
@@ -249,7 +255,7 @@ export interface Services {
 export function createServices(config: Config): Services {
   return {
     policy: createAgentPolicy(config),
-    markets: createGeminiMarkets(),
+    markets: createGeminiMarkets({ baseUrl: config.marketData.baseUrl }),
     planner: createHedgePlanner(),
     console: createConsoleClient(config),
     payments: createSignalPayments(config),

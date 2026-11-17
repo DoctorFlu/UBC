@@ -432,7 +432,7 @@ function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
                     ) : (
                       <Money cents={entry.fill.filledCents} />
                     )}
-                    , realized{" "}
+                    ; result recorded at the fill{" "}
                     {entry.fill.pnlCents === null ? (
                       "a result out of range"
                     ) : (

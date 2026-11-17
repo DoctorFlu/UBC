@@ -96,9 +96,15 @@ export const getIntent = defineTool({
     }
 
     const v = ok([], nextFor(row));
+    // The contract's recorded result is 0 at every fill (it cannot record the settlement), so the only
+    // result is the settlement's net after fees; before it, the position is open until its market expires.
+    const filled = row.filledCents !== null && row.filledCents > 0;
     const result =
       row.status === "executed" || row.status === "failed"
-        ? ` Filled ${amountText(row.filledCents)}, profit ${amountText(row.pnlCents)}.`
+        ? ` Filled ${amountText(row.filledCents)}.` +
+          (filled && row.settlement === null && row.side === "buy"
+            ? " No result yet: the position is open until its market expires and the executor records the outcome."
+            : "")
         : "";
     const atExpiry =
       row.settlement === null

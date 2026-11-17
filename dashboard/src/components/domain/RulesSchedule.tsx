@@ -48,7 +48,11 @@ export function RulesSchedule({ rules, committedCents, lossTodayCents, usage }: 
           <span className={styles.circuitHelp}>
             {rules.dailyLossCents === 0
               ? "Off: losses never stop new intents."
-              : "New intents stop once today's realized losses reach it."}
+              : "New intents stop once today's losses recorded onchain reach it."}
+          </span>
+          <span className={styles.circuitHelp} data-testid="loss-rule-scope">
+            The contract records only the fill, so this rule cannot yet see a loss at expiry (contract request
+            2.4).
           </span>
         </div>
         {rules.dailyLossCents === 0 ? (

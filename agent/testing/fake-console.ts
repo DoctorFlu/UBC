@@ -22,6 +22,7 @@
  * The settlements belong to the server's contract, so they are the first mandate's (`env`) records.
  * It does not check the fill onchain; the real console does.
  */
+import type { GeminiEnvironment } from "@mandate/gemini";
 import { randomBytes } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { isAddressEqual, recoverMessageAddress, type Address, type Hex } from "viem";
@@ -98,6 +99,8 @@ export interface FakeConsoleOptions {
    */
   cover?: (state: FakeConsoleState) => CoverNowView[] | Promise<CoverNowView[]>;
   now?: () => Date;
+  /** Which Gemini its public `GET /api/health` says it reads. Production by default. */
+  marketEnvironment?: GeminiEnvironment;
 }
 
 /** Another workspace's agent, as `addAgent` creates it. */
@@ -125,6 +128,8 @@ export interface FakeConsole {
   readonly setDown: (down: boolean) => void;
   /** Serve the signal payment and budget routes (default), or answer 404 as a console without them. */
   readonly setSignalRoutes: (served: boolean) => void;
+  /** Change the Gemini environment its health answer names. */
+  readonly setMarketEnvironment: (environment: GeminiEnvironment) => void;
   /** A new workspace with one mandate (no contract unless `contract` is given) and its agent. */
   readonly addAgent: (options?: {
     /** The agent's key, which this console holds and signs with. */
@@ -232,6 +237,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
   let down = false;
   let signalRoutes = true;
   let nextRequestId = 1;
+  let marketEnvironment: GeminiEnvironment = options.marketEnvironment ?? "production";
 
   const issueToken = (agentId: string) => {
     const token = `mdt_${randomBytes(32).toString("base64url")}`;
@@ -530,6 +536,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
 
   app.route(CONSOLE_AGENT_API_BASE, api);
   app.route(CONSOLE_EXECUTOR_API_BASE, executor);
+  app.get("/api/health", (c) => c.json({ status: "ok", feed: "live", marketEnvironment }));
 
   const handle = async (request: Request): Promise<Response> => app.fetch(request);
   return {
@@ -541,6 +548,9 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     },
     setDown: (value) => {
       down = value;
+    },
+    setMarketEnvironment: (environment) => {
+      marketEnvironment = environment;
     },
     setSignalRoutes: (served) => {
       signalRoutes = served;

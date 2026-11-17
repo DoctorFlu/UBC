@@ -438,7 +438,9 @@ export function startExecutor(options: ExecutorOptions): Executor {
       contractsHundredths: outcome.contractsHundredths,
       resolution: outcome.resolution,
       payoutCents: outcome.payoutCents,
-      pnlCents: outcome.payoutCents - held.costCents,
+      // The key is left out when there is no fee: a document never holds an undefined value.
+      ...(outcome.feeCents === undefined ? {} : { feeCents: outcome.feeCents }),
+      pnlCents: outcome.payoutCents - held.costCents - (outcome.feeCents ?? 0),
       settlementValue: outcome.settlementValue,
       resolvedAt: outcome.resolvedAt,
       venue: outcome.venue ?? venue.kind,
@@ -454,8 +456,9 @@ export function startExecutor(options: ExecutorOptions): Executor {
         if (result.status === "stored") {
           log(
             `${tag} intent #${intentId} SETTLED: ${held.market} resolved ${outcome.resolution.toUpperCase()}; ` +
-              `cost ${formatCents(held.costCents)}, paid ${formatCents(outcome.payoutCents)}, ` +
-              `net ${formatCents(document.pnlCents)} (${hash})`,
+              `cost ${formatCents(held.costCents)}, ` +
+              (document.feeCents === undefined ? "" : `fee ${formatCents(document.feeCents)} (estimated), `) +
+              `paid ${formatCents(outcome.payoutCents)}, net ${formatCents(document.pnlCents)} (${hash})`,
           );
         }
         return;

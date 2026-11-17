@@ -126,6 +126,8 @@ export interface VenueOrderView {
   quantityHundredths: number;
   filledHundredths: number;
   filledCents: number;
+  /** Gemini's fee on the fills, estimated from its schedule (no answer reports it); null until something fills. */
+  feeCents: number | null;
   detail: string | null;
   updatedAt: string;
 }

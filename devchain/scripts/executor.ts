@@ -17,17 +17,23 @@
  * Once a filled position's market has expired and its outcome is published, it records what the position
  * paid in the console, signed with the executor key (issue #92; see docs/order-lifecycle.md). It refuses to
  * run against anything but the local devchain. Keys are never printed.
+ *
+ * Settings come from the environment, then from `ENV_FILE` (or the repository's `.env`) for what the
+ * environment leaves unset, as `npm run gemini:doctor` reads them; the containers have no such file.
  */
-import { createGeminiClient, type GeminiClient } from "@mandate/gemini";
+import {
+  createGeminiClient,
+  marketDataSource,
+  type GeminiClient,
+  type MarketDataSource,
+} from "@mandate/gemini";
 import {
   createGeminiPrivateClient,
-  GEMINI_HOSTS,
   geminiTradingSettings,
   isGeminiPrivateError,
-  isLoopbackTestUrl,
   type GeminiPrivateClient,
 } from "@mandate/gemini/private";
-import { type ExecutorContract, type ExecutorVenue, PolicyClient, WriteLane } from "@mandate/shared";
+import { type ExecutorContract, type ExecutorVenue, loadEnv, PolicyClient, WriteLane } from "@mandate/shared";
 import { resolvePolicyDeployment } from "@mandate/shared/node";
 import {
   announceVenue,
@@ -51,9 +57,14 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+loadEnv();
+
 let settings: ReturnType<typeof executorSettings>;
+// Which Gemini the checks, outcomes and (on Gemini) orders read: the rule the whole stack follows.
+let marketData: MarketDataSource;
 try {
   settings = executorSettings(process.env);
+  marketData = marketDataSource(process.env);
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 }
@@ -97,17 +108,9 @@ if (settings.venue === "gemini") {
     }
     trading = createGeminiPrivateClient({ environment: gemini.environment, credentials: gemini.credentials });
     // The sandbox lists other strikes than production, so the checks and outcomes read the environment
-    // the orders go to. GEMINI_API_URL may name that same host, or a loopback fake in tests; any other
-    // host would check orders against one exchange and place them on another.
-    const override = process.env.GEMINI_API_URL?.trim().replace(/\/+$/, "") ?? "";
-    const publicUrl = GEMINI_HOSTS[gemini.environment];
-    if (override !== "" && override !== publicUrl && !isLoopbackTestUrl(override)) {
-      fail(
-        `GEMINI_API_URL is ${override}, but orders go to Gemini's ${gemini.environment} (${publicUrl}). ` +
-          "Unset it, or set it to that same host.",
-      );
-    }
-    publicClient = createGeminiClient({ maxRetries: 1, timeoutMs: 8_000, baseUrl: override || publicUrl });
+    // the orders go to: the stack's market data source, which follows GEMINI_ENV here and refuses a
+    // GEMINI_API_URL naming another host (a loopback fake in tests is allowed).
+    publicClient = createGeminiClient({ maxRetries: 1, timeoutMs: 8_000, baseUrl: marketData.baseUrl });
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -173,19 +176,24 @@ if (settings.venue === "gemini") {
 console.log(
   `[executor] ${describeVenue}; serving ${deployment.address} and every mandate's contract that names this ` +
     `executor (listed by the console at ${consoleUrl}), polling every ${String(pollingIntervalMs ?? 1_000)} ms; ` +
-    "checks every approved intent against Gemini first; " +
+    `checks every approved intent against Gemini's ${marketData.environment} first (${marketData.settings}); ` +
     `settles expired positions every ${String(settleIntervalMs / 1_000)} s into the console`,
 );
 
-/** Tells the console which venue fills this contract's orders (its Sandbox badge), until it is stored. */
-function announce(announcement: ExecutorVenue): void {
-  void (async () => {
+/**
+ * Tells the console which venue fills this contract's orders (its Sandbox badge). The console may start
+ * after the executor, so this tries again with growing waits until it is stored; it asks nothing of Gemini.
+ * A console that reads another Gemini refuses it (environment_mismatch), and the executor stops there.
+ */
+function announce(announcement: ExecutorVenue): Promise<void> {
+  return (async () => {
     for (let attempt = 0; ; attempt += 1) {
       const problem = await announceVenue({ consoleUrl, sign }, announcement);
       if (problem === null) return;
+      if (problem.mismatch) fail(`The console refused this executor: ${problem.message}`);
       if (attempt === 0) {
         console.warn(
-          `[executor] Could not tell the console the venue of ${announcement.policy} yet (${problem}); trying again.`,
+          `[executor] Could not tell the console the venue of ${announcement.policy} yet (${problem.message}); trying again.`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(5_000 * 2 ** attempt, 60_000)));
@@ -207,7 +215,9 @@ async function serve(contract: ExecutorContract): Promise<Executor | { refused: 
     return { refused: `its executor is ${named}, not this one` };
   }
   const { venue, announcement } = venueFor(policy);
-  announce(announcement);
+  const announced = announce(announcement);
+  // On Gemini, nothing is traded for a contract before the console has agreed to its venue.
+  if (settings.venue === "gemini") await announced;
   return startExecutor({
     client: policyClient,
     venue,

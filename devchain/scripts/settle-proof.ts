@@ -9,7 +9,7 @@
  */
 import { createGeminiClient, type MarketEvent } from "@mandate/gemini";
 import { planHedge } from "@mandate/planner";
-import { Category } from "@mandate/shared";
+import { Category, formatCents, settlementTotals, type Settlement } from "@mandate/shared";
 import { DEMO_POLICY, simulatedVenue, startExecutor, type SettlementSink } from "../src";
 import { deployTestPolicy, startTestAnvil } from "../test/harness";
 
@@ -59,9 +59,11 @@ for (const order of orders) {
 }
 
 const stored = new Set<number>();
+const documents: Settlement[] = [];
 const sink: SettlementSink = {
   record(request) {
     stored.add(request.document.intentId);
+    documents.push(request.document);
     say(
       `stored the settlement of intent #${String(request.document.intentId)}: ${JSON.stringify(request.document)}`,
     );
@@ -98,5 +100,12 @@ say(
 );
 executor.stop();
 await anvil.stop();
+// The same numbers the console and the agent report: cost, the estimated fee when any, payout, net after fees.
+const totals = settlementTotals(documents);
+say(
+  `settled totals: cost ${formatCents(totals.costCents)}, ` +
+    (totals.feesEstimated ? `fees ${formatCents(totals.feeCents)} (estimated), ` : "") +
+    `paid ${formatCents(totals.payoutCents)}, net ${formatCents(totals.pnlCents)}`,
+);
 say(`done: ${String(stored.size)} of ${String(ids.length)} positions settled`);
 process.exit(stored.size === ids.length ? 0 : 1);

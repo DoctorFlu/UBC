@@ -11,6 +11,8 @@ import {
   eventTickerCandidates,
   findInstrument,
   isGeminiError,
+  marketDataSource,
+  type MarketDataSource,
 } from "@mandate/gemini";
 import { type CategoryId, categoryFromGemini } from "@mandate/shared";
 
@@ -215,16 +217,33 @@ export function ladderQuotes(ladder: Ladder): LadderQuotes {
   };
 }
 
+const SOURCE_KEY = Symbol.for("mandate.market-data");
+
+/**
+ * Which Gemini this console reads, from EXECUTOR_VENUE, GEMINI_ENV and GEMINI_API_URL (`marketDataSource`):
+ * the executor's environment when it trades on Gemini, production otherwise. Read once per process; a
+ * contradiction throws, naming the settings, and `/api/health` reports it.
+ */
+export function consoleMarketData(): MarketDataSource {
+  const holder = globalThis as unknown as Record<typeof SOURCE_KEY, MarketDataSource | undefined>;
+  let source = holder[SOURCE_KEY];
+  if (!source) {
+    source = marketDataSource(process.env);
+    holder[SOURCE_KEY] = source;
+    console.log(`[console] market data from Gemini's ${source.environment} (${source.settings})`);
+  }
+  return source;
+}
+
 const KEY = Symbol.for("mandate.market-quotes");
 type Holder = Record<typeof KEY, MarketQuotes | undefined>;
 
-/** The process-wide quotes source, reading `GEMINI_API_URL` (default: Gemini's public API) once. */
+/** The process-wide quotes source, from the console's market data source (`consoleMarketData`). */
 export function getMarketQuotes(): MarketQuotes {
   const holder = globalThis as unknown as Holder;
   let quotes = holder[KEY];
   if (!quotes) {
-    const baseUrl = process.env.GEMINI_API_URL?.trim();
-    quotes = new MarketQuotes(baseUrl ? { baseUrl } : {});
+    quotes = new MarketQuotes({ baseUrl: consoleMarketData().baseUrl });
     holder[KEY] = quotes;
   }
   return quotes;

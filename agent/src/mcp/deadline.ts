@@ -55,6 +55,7 @@ export const STEPS = {
   "console.plan": ["console", "the plan"],
   "console.change_request": ["console", "the change request"],
   "console.pairing": ["console", "the pairing"],
+  "console.health": ["console", "its Gemini environment"],
   "console.signal_payment": ["console", "the signal payment report"],
   "console.signal_budget": ["console", "the signal budget report"],
   "console.settlements": ["console", "the settlements"],

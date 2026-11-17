@@ -10,7 +10,8 @@
  * Error messages name a setting, never its value, except GEMINI_ENV and GEMINI_LIVE_TRADING, which hold
  * no secret.
  */
-import type { GeminiCredentials, GeminiEnvironment } from "./private";
+import { geminiEnvironmentSetting, type GeminiEnvironment } from "./environment";
+import type { GeminiCredentials } from "./private";
 
 export interface GeminiTradingSettings {
   environment: GeminiEnvironment;
@@ -21,11 +22,7 @@ export interface GeminiTradingSettings {
 }
 
 export function geminiTradingSettings(env: Record<string, string | undefined>): GeminiTradingSettings {
-  const rawEnvironment = env.GEMINI_ENV?.trim().toLowerCase() ?? "";
-  const environment = rawEnvironment === "" ? "sandbox" : rawEnvironment;
-  if (environment !== "sandbox" && environment !== "production") {
-    throw new Error(`GEMINI_ENV must be sandbox or production, got "${rawEnvironment}"`);
-  }
+  const environment = geminiEnvironmentSetting(env);
   const live = env.GEMINI_LIVE_TRADING?.trim() ?? "";
   if (live !== "" && live !== "on") {
     throw new Error(`GEMINI_LIVE_TRADING must be "on" or unset, got "${live}"`);

@@ -99,6 +99,8 @@ function scopedConsole(client: ConsoleClient, deadline: CallDeadline): ConsoleCl
     putPairing: (request, own) =>
       deadline.step("console.pairing", (signal) => client.putPairing(request, both(signal, own))),
     getPairing: (own) => deadline.step("console.pairing", (signal) => client.getPairing(both(signal, own))),
+    getMarketEnvironment: (own) =>
+      deadline.step("console.health", (signal) => client.getMarketEnvironment(both(signal, own))),
     putSignalPayment: (receiptId, request, own) =>
       deadline.step("console.signal_payment", (signal) =>
         client.putSignalPayment(receiptId, request, both(signal, own)),

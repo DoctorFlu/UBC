@@ -16,6 +16,7 @@ import {
   Category,
   hashSettlement,
   settlementMessage,
+  settlementProblems,
   type CategoryId,
   type IntentStatus,
   type PolicyClient,
@@ -370,6 +371,29 @@ describe("settling filled positions at expiry (issue #92)", () => {
     expect(sink.calls).toBe(1);
   });
 
+  it("signs a Gemini position's settlement net of the fee the journal estimated, and says so", async () => {
+    const venue = fakeVenue();
+    venue.outcome = { ...RESOLVED_NO, feeCents: 60, venue: "gemini" };
+    const sink = fakeSink();
+    const executor = start(venue, sink);
+    const id = await filledPosition(executor, venue);
+    clock.now = DUE;
+    await executor.settleNow();
+    const stored = sink.stored.get(id);
+    expect(stored?.document).toMatchObject({
+      costCents: 1_240,
+      feeCents: 60,
+      payoutCents: 4_000,
+      pnlCents: 2_700,
+      venue: "gemini",
+    });
+    if (stored === undefined) throw new Error("nothing was stored");
+    expect(settlementProblems(stored.document)).toEqual([]);
+    expect(lines.join("\n")).toContain(
+      "SETTLED: GEMI-BTC2611202200-HI65000 resolved NO; cost $12.40, fee $0.60 (estimated), paid $40.00, net $27.00",
+    );
+  });
+
   it("records a settlement exactly once across a restart, and keeps the first record on a conflict", async () => {
     const venue = fakeVenue();
     venue.outcome = { ...RESOLVED_NO, resolution: "yes", payoutCents: 0 };
@@ -566,7 +590,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
 
   it("places an approved order once, follows it until it fills, and records the fill", async () => {
     start();
-    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     await vi.waitFor(() => {
       expect(fake.orders.size).toBe(1);
     });
@@ -596,7 +620,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
       body: { error: "InsufficientFunds", message: "no" },
     });
     start();
-    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
     expect(statuses.get(id)).toBe("failed");
     expect((await chain.outsider.getSnapshot()).committedCents).toBe(0);
@@ -609,7 +633,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
   it("holds an order while the terms are not accepted, records nothing, and places it once they are", async () => {
     fake.termsAccepted = false;
     start();
-    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     await vi.waitFor(() => {
       expect(fake.callsTo("/v1/prediction-markets/order").length).toBeGreaterThan(1);
     });
