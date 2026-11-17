@@ -209,6 +209,8 @@ test.describe("a second workspace", () => {
     await page.goto("/activity");
     await expect(page.getByRole("heading", { level: 1, name: "Activity" })).toBeVisible();
     await expect(page.getByText("No Policy contract yet", { exact: true })).toBeVisible();
+    // The console deploys his contract and holds its owner key: the dev signer never signs here.
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
   });
 
   test("makes an agent token in Setup, shown once, that reaches his agent only", async ({
@@ -333,10 +335,21 @@ test.describe("a second workspace", () => {
     const testInfo = test.info();
     await page.goto("/rules");
     await hydrated(page);
+    // His passkey is the owner here, never the dev signer's public anvil key.
+    await expect(page.getByTestId("passkey-owner")).toBeVisible();
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
     await page.getByRole("button", { name: "Review and confirm" }).click();
     const review = page.getByRole("dialog", { name: "Review the first rules" });
     await shotOf(review, testInfo, "rules-passkey-1440-light");
+    // The console signs and sends the setPolicy call, then the toast says so: wait for the owner call's
+    // answer (on `next dev` its route also compiles on this first call), then check the toast it raises.
+    const sent = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/console/owner-calls",
+    );
     await review.getByRole("button", { name: "Confirm rules with passkey" }).click();
+    expect((await sent).status()).toBe(201);
     await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Rules set");
     await review.getByRole("button", { name: "Done" }).click();
     await expect(page.getByText(/^Version 1, set /)).toBeVisible();
@@ -354,6 +367,7 @@ test.describe("a second workspace", () => {
     const problems = watchConsole(page);
     await page.goto("/mandates/new");
     await hydrated(page);
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
     await page.getByLabel("Mandate name").fill("Hedge ETH");
     const created = page.waitForResponse(
       (response) =>
@@ -377,6 +391,7 @@ test.describe("a second workspace", () => {
     await page.goto("/");
     await expect(page.getByTestId("mandate-row")).toHaveCount(2);
     await expect(page.getByTestId("mandate-row").filter({ hasText: "Hedge ETH" })).toHaveCount(1);
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
     for (const width of [1440, 390]) {
       for (const scheme of ["light", "dark"] as const) {
         await page.setViewportSize({ width, height: 900 });
@@ -407,6 +422,40 @@ test.describe("a second workspace", () => {
     const first = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
     expect(hedge.chain?.rules).toMatchObject({ budgetCents: 20_000 });
     expect(hedge.contract?.address.toLowerCase()).not.toBe(first.contract?.address.toLowerCase());
+    expect(problems).toEqual([]);
+  });
+
+  test("renames his second mandate in Setup on his session, and Audit records it", async () => {
+    const problems = watchConsole(page);
+    const hedgeSetup = page.url().replace(/\/rules$/, "/setup");
+    await page.goto(hedgeSetup);
+    await hydrated(page);
+    const card = page.getByRole("region", { name: "Mandate name" });
+    const name = card.getByLabel("Name");
+    await expect(name).toHaveValue("Hedge ETH");
+    // Unchanged, there is nothing to save.
+    await expect(card.getByRole("button", { name: "Rename" })).toBeDisabled();
+    await name.fill(" ");
+    await card.getByRole("button", { name: "Rename" }).click();
+    await expect(card.getByText("Name the mandate, like “Hedge my BTC”.")).toBeVisible();
+    await name.fill("Hedge ETH weekly");
+    const renamed = page.waitForResponse((response) => response.request().method() === "PATCH");
+    await card.getByRole("button", { name: "Rename" }).click();
+    expect((await renamed).status()).toBe(200);
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Mandate renamed");
+    // The switcher reads the new name at once, with no reload.
+    await expect(page.getByTestId("mandate-switcher").filter({ visible: true })).toContainText(
+      "Hedge ETH weekly",
+    );
+    expect(await axe(page)).toEqual([]);
+    await shotOf(card, test.info(), "rename-1440-light");
+    await page.goto(hedgeSetup.replace(/\/setup$/, "/audit"));
+    const actions = page.getByRole("region", { name: "Owner actions" });
+    const row = actions.getByRole("row").filter({ hasText: "Renamed the mandate" });
+    await expect(row).toContainText('from "Hedge ETH" to "Hedge ETH weekly"');
+    await expect(row).toContainText("Session (a name needs no passkey)");
+    await page.goto("/");
+    await expect(page.getByTestId("mandate-row").filter({ hasText: "Hedge ETH weekly" })).toHaveCount(1);
     expect(problems).toEqual([]);
   });
 

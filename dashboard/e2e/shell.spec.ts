@@ -128,20 +128,41 @@ test.describe("live connection behind a proxy", () => {
     page,
     baseURL,
   }) => {
+    const path = await firstMandatePath(baseURL ?? "");
+    const mandateId = path.split("/m/")[1]?.split("/")[0] ?? "";
+    // This page's own stream (#95): the events route with this mandate's `?mandate=`, and no other request.
+    const isStream = (url: URL | string) => {
+      const parsed = new URL(url);
+      return parsed.pathname === "/api/console/events" && parsed.searchParams.get("mandate") === mandateId;
+    };
+    const lamp = page.getByTestId("live-indicator").filter({ visible: true });
+    // First the page and its stream unheld: `next dev` compiles both on their first request, so the held
+    // stream below measures only the proxy's delay, never a compile that happens to follow the release.
+    const firstStream = page.waitForResponse((response) => isStream(response.url()));
+    await page.goto(path);
+    expect((await firstStream).status()).toBe(200);
+    await expect(lamp).toHaveAttribute("data-health", "live");
+
     // A proxy in front of an idle console can take seconds to answer the first request.
     let release = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/api/console/events?*", async (route) => {
+    let heldStreams = 0;
+    await page.route(isStream, async (route) => {
+      heldStreams += 1;
       await held;
       await route.continue().catch(() => {});
     });
-    await page.goto(await firstMandatePath(baseURL ?? ""));
-    const lamp = page.getByTestId("live-indicator").filter({ visible: true });
+    const released = page.waitForResponse((response) => isStream(response.url()));
+    await page.reload();
     await expect(lamp).toHaveAttribute("data-health", "connecting");
     await expect(lamp).toHaveText(/^Connecting/);
+    // The lamp reads Connecting because this page's stream is the one held, not for another reason.
+    expect(heldStreams).toBeGreaterThan(0);
     release();
+    // The stream's headers are what turn the lamp: wait for them, then for the lamp.
+    expect((await released).status()).toBe(200);
     await expect(lamp).toHaveAttribute("data-health", "live");
     await expect(lamp).toHaveText(/^Live/);
   });
