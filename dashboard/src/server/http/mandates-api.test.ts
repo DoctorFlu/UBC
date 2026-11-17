@@ -805,7 +805,8 @@ describe("mandates on the demo chain", () => {
       () => snapshotOf(twinB.mandate.id).chain?.intents.find((i) => i.id === 0)?.status === "executed",
       "B's intent executed",
     );
-    const settlementFor = (policy: `0x${string}`, costCents: number): Settlement => {
+    // A's fill paid an estimated fee (#113); B's paid none. Each mandate's records carry only its own.
+    const settlementFor = (policy: `0x${string}`, costCents: number, feeCents?: number): Settlement => {
       const contracts = contractsBought(costCents, trade.limitPrice);
       return {
         version: 1,
@@ -822,14 +823,15 @@ describe("mandates on the demo chain", () => {
         contractsHundredths: contracts,
         resolution: "yes",
         payoutCents: contracts,
-        pnlCents: contracts - costCents,
+        ...(feeCents === undefined ? {} : { feeCents }),
+        pnlCents: contracts - costCents - (feeCents ?? 0),
         settlementValue: "65100.5",
         resolvedAt: "2026-11-20T22:00:08.232Z",
         venue: "gemini",
       };
     };
     const sink = consoleSettlementSink({ consoleUrl: ORIGIN, fetch: executorFetch });
-    for (const document of [settlementFor(policyA, 1_300), settlementFor(policyB, 1_400)]) {
+    for (const document of [settlementFor(policyA, 1_300, 12), settlementFor(policyB, 1_400)]) {
       const signature = await executorWallet.signMessage({
         account: executorWallet.account,
         message: settlementMessage(hashSettlement(document)),
@@ -846,6 +848,15 @@ describe("mandates on the demo chain", () => {
     };
     expect((await settlementsOf(resolvedA.agentId)).map((s) => s.document.costCents)).toEqual([1_300]);
     expect((await settlementsOf(resolvedB.agentId)).map((s) => s.document.costCents)).toEqual([1_400]);
+    expect((await settlementsOf(resolvedA.agentId)).map((s) => s.document.feeCents)).toEqual([12]);
+    expect((await settlementsOf(resolvedB.agentId)).map((s) => s.document.feeCents)).toEqual([undefined]);
+    // The owner's views sum one result per position, each mandate's own: A's net is after its fee.
+    const feesOf = (id: string) =>
+      Object.values(snapshotOf(id).chain?.settlements ?? {}).map((s) =>
+        s.status === "verified" ? (s.document.feeCents ?? null) : "tampered",
+      );
+    expect(feesOf(twinA.mandate.id)).toEqual([12]);
+    expect(feesOf(twinB.mandate.id)).toEqual([null]);
 
     // The digest: only A filed a change request and a goal; B's summary shows neither, and each link
     // opens its own mandate.
