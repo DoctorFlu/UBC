@@ -496,6 +496,10 @@ With 5 minutes left, InstaBox looks at the last 30 minutes: 5 or more minutes of
 When a run ends, the machine pauses for a cooldown of 5 to 20 minutes (60 to 75 for a second one in a row, 120 to 135 after that).
 During a cooldown nothing wakes the machine: the published URL fails (InstaBox documents `409 machine_cooldown` with a `Retry-After`; this setup has not met a cooldown yet), so the console, the scorecard and Grok Bot's connector are all unreachable until it ends.
 An idle pause owes no cooldown and ends the run, so a machine that rests between visits rarely meets one.
+
+Event wake-ups of Grok Bot's routine ([event-wake.md](event-wake.md)) add no timer: chain triggers ride on the console's poll and price checks run on it at most every 5 minutes.
+While the machine is paused nothing is watched; the first poll after it wakes checks spot at once, and the hourly scheduled run stays the backstop.
+A wake-up the console sends makes Grok Bot call `/mcp`, which is use and keeps the machine awake for that run.
 A cooldown comes when a run reaches its limit: after 8 hours of steady use, or when light use (a request now and then) keeps the machine from idling but is too little to extend the run.
 
 Before a demo, wake the machine and check it:
