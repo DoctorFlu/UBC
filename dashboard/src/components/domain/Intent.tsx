@@ -3,7 +3,7 @@ import {
   type MarketListing,
   intentAnomalies,
   isValidLimitPrice,
-  quantityFromAmount,
+  quantityHundredthsFromAmount,
 } from "@mandate/shared";
 import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
@@ -78,10 +78,9 @@ export function MarketName({
 
 type OrderFields = Pick<IntentView, "isBuy" | "outcome" | "amountCents" | "limitPrice" | "outOfRange">;
 
-/** "40" for whole contracts, "29.30" otherwise. */
-function contracts(amountCents: number, limitPrice: number): string {
-  const quantity = quantityFromAmount(amountCents, limitPrice);
-  return Number.isInteger(quantity) ? quantity.toString() : quantity.toFixed(2);
+/** "40" for whole contracts, "29.30" otherwise, from hundredths. */
+function contractsText(hundredths: number): string {
+  return hundredths % 100 === 0 ? (hundredths / 100).toString() : (hundredths / 100).toFixed(2);
 }
 
 /** " YES", " NO", nothing when unknown, or a description of anything else (never its text). */
@@ -94,8 +93,19 @@ function isOutOfRange(intent: OrderFields, field: "amountCents" | "limitPrice"):
   return intent.outOfRange?.[field] !== undefined;
 }
 
-/** "Buy NO, 40 at 31¢": the side, outcome, contracts the amount buys at the limit, and the limit. */
-export function OrderSummary({ intent }: { intent: OrderFields }) {
+/**
+ * "Buy NO, 40 at 31¢": the side, outcome, contracts and the limit. The contracts are the order the executor
+ * placed on the venue when there is one (`placedHundredths`, issue #117): it is sized so the cost and
+ * Gemini's fee fit the amount, so it can be fewer than the amount buys at the limit, which Advanced view adds.
+ * Before an order is placed, and on the simulated venue, it is what the amount buys at the limit.
+ */
+export function OrderSummary({
+  intent,
+  placedHundredths = null,
+}: {
+  intent: OrderFields;
+  placedHundredths?: number | null;
+}) {
   const amountKnown = intent.amountCents !== null || isOutOfRange(intent, "amountCents");
   const limitKnown = intent.limitPrice !== null || isOutOfRange(intent, "limitPrice");
   if (intent.isBuy === null || !amountKnown || !limitKnown) {
@@ -113,10 +123,21 @@ export function OrderSummary({ intent }: { intent: OrderFields }) {
       </span>
     );
   }
+  const nominal = quantityHundredthsFromAmount(intent.amountCents, intent.limitPrice);
+  const shown = placedHundredths ?? nominal;
   return (
-    <span className="num">
+    <span
+      className="num"
+      data-testid="order-summary"
+      data-placed={placedHundredths === null ? undefined : ""}
+    >
       {side}
-      {outcome}, {contracts(intent.amountCents, intent.limitPrice)} at {intent.limitPrice.toString()}¢
+      {outcome}, {contractsText(shown)} at {intent.limitPrice.toString()}¢
+      {shown === nominal ? null : (
+        <Advanced>
+          <span className={styles.orderNominal}> ({contractsText(nominal)} before the fee)</span>
+        </Advanced>
+      )}
     </span>
   );
 }
@@ -128,12 +149,18 @@ export function amountLabel(intent: Pick<OrderFields, "amountCents" | "outOfRang
 }
 
 /** Amount over order, for tables short on width: "$12.40" over "Buy NO, 40 at 31¢". */
-export function OrderAmount({ intent }: { intent: OrderFields }) {
+export function OrderAmount({
+  intent,
+  placedHundredths = null,
+}: {
+  intent: OrderFields;
+  placedHundredths?: number | null;
+}) {
   return (
     <span className={styles.orderAmount}>
       <span className="num">{amountLabel(intent)}</span>
       <span className={styles.orderLine}>
-        <OrderSummary intent={intent} />
+        <OrderSummary intent={intent} placedHundredths={placedHundredths} />
       </span>
     </span>
   );

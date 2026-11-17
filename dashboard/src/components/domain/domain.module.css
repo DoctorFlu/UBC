@@ -110,6 +110,11 @@
   color: var(--color-text-muted);
 }
 
+/* What the amount buys at the limit, after the order placed when the two differ (Advanced view). */
+.orderNominal {
+  color: var(--color-text-muted);
+}
+
 .approvalBlock {
   display: flex;
   flex-direction: column;
