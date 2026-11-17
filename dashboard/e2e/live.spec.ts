@@ -180,6 +180,45 @@ test("the owner signs the first rules", async ({ page }) => {
   expect(rules).toMatchObject({ budgetCents: 20_000, maxTradeCents: 2_500, approvalAboveCents: 2_000 });
 });
 
+test("a rules change signed while the live stream is quiet still syncs, and every view shows it", async ({
+  page,
+}) => {
+  // Behind the public proxy the event stream can stall; the owner's own transaction must still sync.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/console/events", async (route) => {
+    await held;
+    await route.abort().catch(() => {});
+  });
+  const before = (await snapshot(baseURL)).chain?.rules;
+  if (!before) throw new Error("no rules");
+  await open(page, "/rules");
+  await expect(page.getByText(/^Version 1, set /)).toBeVisible();
+  const dailyLoss = page.getByRole("textbox", { name: "Daily loss limit" });
+
+  const sign = async (value: string, version: number) => {
+    await dailyLoss.fill(value);
+    await page.getByRole("button", { name: "Review and sign" }).click();
+    const review = page.getByRole("dialog", { name: "Review the new rules" });
+    await review.getByRole("button", { name: "Sign in wallet" }).click();
+    const status = review.getByTestId("owner-tx-status");
+    await expect(status).toHaveAttribute("data-phase", "done");
+    await expect(status).toContainText("Done. Every view now shows it.");
+    await review.getByRole("button", { name: "Done" }).click();
+    // The modal blocks the page until it has finished leaving, as it does for the owner.
+    await expect(review).toHaveCount(0);
+    await expect(page.getByText(new RegExp(`^Version ${version.toString()}, set `))).toBeVisible();
+    await expect(dailyLoss).toHaveValue(value);
+  };
+  await sign("41", 2);
+  // And back, so the tests after this one see the first rules' limits.
+  await sign((before.dailyLossCents / 100).toString(), 3);
+  expect((await snapshot(baseURL)).chain?.rules).toEqual(before);
+  release();
+});
+
 test("a proposal shows up within 2 seconds, without a refresh", async ({ page }) => {
   await open(page, "/activity");
   await expect(page.getByRole("heading", { level: 1, name: "Activity" })).toBeVisible();
