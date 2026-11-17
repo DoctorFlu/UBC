@@ -52,7 +52,13 @@ export const settlementSchema = z.strictObject({
   resolution: resolutionSchema,
   /** What the position paid at settlement. */
   payoutCents: z.int().nonnegative(),
-  /** `payoutCents - costCents`. */
+  /**
+   * The venue's fee on the fill, estimated from its published schedule (no venue answer reports it), as
+   * the order's journal recorded it. Absent when the venue charged none: the simulated venue trades nowhere.
+   * Settlement itself is free on Gemini (a payout carried no fee on the sandbox).
+   */
+  feeCents: z.int().nonnegative().optional(),
+  /** The net after fees: `payoutCents - costCents - feeCents`. */
   pnlCents: z.int(),
   /** The index level the market settled on, exactly as the venue sent it, when it sent one. */
   settlementValue: z.string().max(64).nullable(),
@@ -86,14 +92,17 @@ export function payoutFor(
 }
 
 /**
- * Why a settlement does not add up, or [] when it does: the profit must be payout minus cost, the payout
+ * Why a settlement does not add up, or [] when it does: the net must be payout minus cost and fee, the payout
  * must be what the contracts held pay on that resolution, and on the simulated venue the contracts must
  * be what the cost buys at the limit price (a real venue reports what it actually filled).
  */
 export function settlementProblems(doc: Settlement): string[] {
   const problems: string[] = [];
-  if (doc.pnlCents !== doc.payoutCents - doc.costCents)
-    problems.push("pnlCents is not payoutCents - costCents");
+  if (doc.pnlCents !== doc.payoutCents - doc.costCents - (doc.feeCents ?? 0))
+    problems.push("pnlCents is not payoutCents - costCents - feeCents");
+  if (doc.venue === "simulated" && doc.feeCents !== undefined) {
+    problems.push("the simulated venue charges no fee");
+  }
   if (doc.payoutCents !== payoutFor(doc.outcome, doc.resolution, doc.contractsHundredths)) {
     problems.push("payoutCents is not what the contracts pay on this resolution");
   }
@@ -125,12 +134,22 @@ export function settlementMessage(hash: Hex): { raw: Hex } {
   return { raw: hash };
 }
 
-/** The money side of a set of settlements, for a sentence: cost, payout and the net. */
+/** The money side of a set of settlements, for a sentence: cost, estimated fees, payout and the net after fees. */
 export interface SettlementTotals {
   positions: number;
   costCents: number;
+  /** The venues' fees, estimated; 0 when every position was simulated. */
+  feeCents: number;
   payoutCents: number;
+  /** `payoutCents - costCents - feeCents`. */
   pnlCents: number;
+  /** True when any fee is counted, so a reader says once that fees are estimated. */
+  feesEstimated: boolean;
+}
+
+/** A settlement's estimated fee, 0 when it has none. */
+export function settlementFeeCents(doc: Pick<Settlement, "feeCents">): number {
+  return doc.feeCents ?? 0;
 }
 
 /** The asset of a Gemini crypto ladder's event ticker ("BTC2611202200" is BTC), or null for another. */
@@ -139,14 +158,25 @@ export function eventTickerAsset(eventTicker: string): string | null {
 }
 
 export function settlementTotals(
-  docs: Iterable<Pick<Settlement, "costCents" | "payoutCents">>,
+  docs: Iterable<Pick<Settlement, "costCents" | "payoutCents" | "feeCents">>,
 ): SettlementTotals {
-  const totals: SettlementTotals = { positions: 0, costCents: 0, payoutCents: 0, pnlCents: 0 };
+  const totals: SettlementTotals = {
+    positions: 0,
+    costCents: 0,
+    feeCents: 0,
+    payoutCents: 0,
+    pnlCents: 0,
+    feesEstimated: false,
+  };
   for (const doc of docs) {
     totals.positions += 1;
     totals.costCents += doc.costCents;
     totals.payoutCents += doc.payoutCents;
+    if (doc.feeCents !== undefined) {
+      totals.feeCents += doc.feeCents;
+      totals.feesEstimated = true;
+    }
   }
-  totals.pnlCents = totals.payoutCents - totals.costCents;
+  totals.pnlCents = totals.payoutCents - totals.costCents - totals.feeCents;
   return totals;
 }

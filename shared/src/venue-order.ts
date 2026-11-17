@@ -86,6 +86,12 @@ export const venueOrderRecordSchema = z.strictObject({
   filledHundredths: z.int().nonnegative(),
   /** What the fills cost, in cents (rounded up). */
   filledCents: z.int().nonnegative(),
+  /**
+   * Gemini's fee on the fills so far, estimated from its published schedule at the taker rate (see
+   * `estimatedFeeCents` in @mandate/gemini), because no answer reports it. Absent until something fills,
+   * and on records written before the executor estimated fees.
+   */
+  feeCents: z.int().nonnegative().optional(),
   /** One plain sentence: why it closed, why it was refused, what the executor is waiting for. */
   detail: z.string().max(500).nullable(),
   /** When this attempt was sent. */

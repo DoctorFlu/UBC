@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { affordableHundredths, orderCostCents, predictionFeeCents, worstCaseSpendCents } from "../src/fees";
+import {
+  affordableHundredths,
+  estimatedFeeCents,
+  orderCostCents,
+  predictionFeeCents,
+  worstCaseSpendCents,
+} from "../src/fees";
 
 describe("Gemini's prediction-market fees", () => {
   it("matches every example on Gemini's fee page", () => {
@@ -48,5 +54,25 @@ describe("Gemini's prediction-market fees", () => {
         }
       }
     }
+  });
+
+  it("estimates the fee on fills at the taker rate and their average price, the same as at a whole-cent price", () => {
+    // The sandbox fill: 1 contract at 97c paid 1c (0.2c at the taker rate, rounded up).
+    expect(estimatedFeeCents(100, 9_700)).toBe(1);
+    // 10 contracts at 97c: 2.037c, so 3c at the taker rate (the maker rate would give 1c).
+    expect(estimatedFeeCents(1_000, 9_700)).toBe(3);
+    for (const [hundredths, cents] of [
+      [1_000, 50],
+      [10_000, 40],
+      [10_000, 90],
+      [37, 13],
+    ] as const) {
+      expect(estimatedFeeCents(hundredths, cents * 100)).toBe(predictionFeeCents(hundredths, cents, "taker"));
+    }
+    // Between cents: 12 contracts at an average of 30.5c, 0.07 x 12 x 0.305 x 0.695 = /bin/zsh.178.
+    expect(estimatedFeeCents(1_200, 3_050)).toBe(18);
+    expect(estimatedFeeCents(0, 5_000)).toBe(0);
+    expect(() => estimatedFeeCents(100, 0)).toThrow(RangeError);
+    expect(() => estimatedFeeCents(100, 10_000)).toThrow(RangeError);
   });
 });

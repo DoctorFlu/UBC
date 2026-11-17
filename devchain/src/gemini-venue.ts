@@ -26,6 +26,7 @@
  */
 import {
   affordableHundredths,
+  estimatedFeeCents,
   findInstrument,
   MIN_ORDER_COST_CENTS,
   toHundredths,
@@ -98,17 +99,32 @@ function step(value: string | null, fallback: number): number | null {
   return scaled === null || scaled <= 0n ? null : Number(scaled);
 }
 
-/** What fills cost, in cents rounded up: hundredths times the average price. */
-function costCents(
-  filledHundredths: number,
-  averagePrice: string | null | undefined,
-  limitPrice: number,
-): number {
-  // The average in ten-thousandths of a dollar; Gemini's own grid is cents, so this is exact for it.
+/**
+ * The fills' average price in ten-thousandths of a dollar, from Gemini's `avgExecutionPrice` (exact on its
+ * cent grid), or the limit when it sent none or one that is not a price between 0 and $1.
+ */
+function averageTenThousandths(averagePrice: string | null | undefined, limitPrice: number): number {
   const average = averagePrice ? scaleDecimal(averagePrice, 4, "up") : null;
-  const tenThousandths = average !== null && average > 0n ? average : BigInt(limitPrice) * 100n;
-  const units = BigInt(filledHundredths) * tenThousandths;
+  if (average === null || average <= 0n || average >= 10_000n) return limitPrice * 100;
+  return Number(average);
+}
+
+/** What fills cost, in cents rounded up: hundredths times the average price. */
+function costCents(filledHundredths: number, average: number): number {
+  const units = BigInt(filledHundredths) * BigInt(average);
   return Number((units + 9_999n) / 10_000n);
+}
+
+/**
+ * The fee a record's fills paid, estimated: the one the journal recorded at the fill, or for a record
+ * written before the executor estimated fees, the estimate at the average its cost implies (never above
+ * the limit). Undefined when nothing filled.
+ */
+export function journalFeeCents(record: VenueOrderRecord): number | undefined {
+  if (record.feeCents !== undefined) return record.feeCents;
+  if (record.filledHundredths === 0) return undefined;
+  const implied = Math.ceil((record.filledCents * 10_000) / record.filledHundredths);
+  return estimatedFeeCents(record.filledHundredths, Math.min(Math.max(implied, 1), record.limitPrice * 100));
 }
 
 type Lookup = { found: PrivateOrder } | { found: null; detail: string };
@@ -194,13 +210,15 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       record.quantityHundredths,
     );
     const state = stateOf(order, filledHundredths);
-    const filledCents = costCents(filledHundredths, order.avgExecutionPrice, record.limitPrice);
+    const average = averageTenThousandths(order.avgExecutionPrice, record.limitPrice);
     const change: Partial<VenueOrderRecord> = {
       venueOrderId: order.orderId,
       state,
       filledHundredths,
-      filledCents,
+      filledCents: costCents(filledHundredths, average),
     };
+    // No answer reports Gemini's fee, so the journal keeps the estimate from its schedule (taker rate).
+    if (filledHundredths > 0) change.feeCents = estimatedFeeCents(filledHundredths, average);
     change.detail = isFinalVenueOrderState(state)
       ? closedDetail(state, { ...record, filledHundredths })
       : filledHundredths > 0
@@ -505,10 +523,12 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
         if (record.detail !== detail) await update(record, { detail });
         return { status: "disputed", detail };
       }
+      const feeCents = journalFeeCents(record);
       return {
         ...outcome,
         contractsHundredths: record.filledHundredths,
         payoutCents: payoutFor(position.outcome, outcome.resolution, record.filledHundredths),
+        ...(feeCents === undefined ? {} : { feeCents }),
       };
     },
   };

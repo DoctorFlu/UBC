@@ -16,6 +16,7 @@ import {
   Category,
   hashSettlement,
   settlementMessage,
+  settlementProblems,
   type CategoryId,
   type IntentStatus,
   type PolicyClient,
@@ -368,6 +369,29 @@ describe("settling filled positions at expiry (issue #92)", () => {
     await executor.settleNow();
     expect(venue.outcomeCalls).toBe(asked);
     expect(sink.calls).toBe(1);
+  });
+
+  it("signs a Gemini position's settlement net of the fee the journal estimated, and says so", async () => {
+    const venue = fakeVenue();
+    venue.outcome = { ...RESOLVED_NO, feeCents: 60, venue: "gemini" };
+    const sink = fakeSink();
+    const executor = start(venue, sink);
+    const id = await filledPosition(executor, venue);
+    clock.now = DUE;
+    await executor.settleNow();
+    const stored = sink.stored.get(id);
+    expect(stored?.document).toMatchObject({
+      costCents: 1_240,
+      feeCents: 60,
+      payoutCents: 4_000,
+      pnlCents: 2_700,
+      venue: "gemini",
+    });
+    if (stored === undefined) throw new Error("nothing was stored");
+    expect(settlementProblems(stored.document)).toEqual([]);
+    expect(lines.join("\n")).toContain(
+      "SETTLED: GEMI-BTC2611202200-HI65000 resolved NO; cost $12.40, fee $0.60 (estimated), paid $40.00, net $27.00",
+    );
   });
 
   it("records a settlement exactly once across a restart, and keeps the first record on a conflict", async () => {

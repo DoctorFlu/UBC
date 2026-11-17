@@ -13,6 +13,7 @@ export {
 export type { RequestOptions } from "./abort";
 export {
   affordableHundredths,
+  estimatedFeeCents,
   MIN_ORDER_COST_CENTS,
   orderCostCents,
   predictionFeeCents,

@@ -6,10 +6,10 @@
  *   maker fee = 0.0175 x contracts x price x (1 - price), charged only when a resting order is matched
  *
  * "Fees are rounded up to the next cent." Settlement and cancelling cost nothing. An order that crosses the
- * book pays the taker fee on what matches at once and the maker fee on what matches later, so the taker
- * fee at the limit price is the most an order can pay: price x (1 - price) only grows towards 50c, and a
- * fill below the limit costs less and pays a fee no larger than the limit's (the fee at P and at 1 - P is
- * the same, and a buy never fills above its limit).
+ * book pays the taker fee on what matches at once and the maker fee on what matches later. What a buy takes
+ * from the account, cost plus the taker fee, is C x P x (1.07 - 0.07 x P) dollars, which grows with P at
+ * every price; a buy never fills above its limit, so cost plus the taker fee at the limit is the most it
+ * can take. (The fee alone can be larger below the limit, for a limit above 50c, but the cost falls more.)
  *
  * Not stated: whether the rounding applies per fill or per order. This module rounds once per order. If
  * Gemini rounds per fill, every fill after the first can add up to one more cent; no bound holds for every
@@ -43,6 +43,37 @@ export function predictionFeeCents(contractsHundredths: number, priceCents: numb
   const numerator =
     RATE_MILLIONTHS[role] * BigInt(contractsHundredths) * BigInt(priceCents) * BigInt(100 - priceCents);
   const denominator = 10_000_000_000n;
+  return Number((numerator + denominator - 1n) / denominator);
+}
+
+/**
+ * Gemini's fee on fills, estimated: no API answer reports the fee, so it is computed from the published
+ * schedule at the taker rate (the higher one; what matched as a maker paid a quarter of it), for the
+ * contracts filled at their average price, rounded up to the next cent once. The average is in
+ * ten-thousandths of a dollar (9700 for 97c), as `avgExecutionPrice` can fall between cents.
+ *
+ * In cents: 0.07 x (H / 100) x (A / 10^4) x ((10^4 - A) / 10^4) x 100 = rate x H x A x (10^4 - A) / 10^14,
+ * with the rate in millionths.
+ */
+export function estimatedFeeCents(filledHundredths: number, averageTenThousandths: number): number {
+  if (!Number.isSafeInteger(filledHundredths) || filledHundredths < 0) {
+    throw new RangeError(`contracts must be whole hundredths, got ${String(filledHundredths)}`);
+  }
+  if (
+    !Number.isInteger(averageTenThousandths) ||
+    averageTenThousandths < 1 ||
+    averageTenThousandths > 9_999
+  ) {
+    throw new RangeError(
+      `the average price must be 1 to 9999 ten-thousandths, got ${String(averageTenThousandths)}`,
+    );
+  }
+  const numerator =
+    RATE_MILLIONTHS.taker *
+    BigInt(filledHundredths) *
+    BigInt(averageTenThousandths) *
+    BigInt(10_000 - averageTenThousandths);
+  const denominator = 100_000_000_000_000n;
   return Number((numerator + denominator - 1n) / denominator);
 }
 

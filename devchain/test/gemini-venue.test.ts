@@ -359,10 +359,12 @@ describe("following an order", () => {
     const gemini = venue();
     const placed = placedOf(await gemini.placeOrder(order()));
     expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 0 });
+    expect(journal.records.get(7)).not.toHaveProperty("feeCents");
 
     fake.fill(placed.venueOrderId, 1_000, 30);
     expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 300 });
-    expect(journal.records.get(7)).toMatchObject({ state: "open", filledHundredths: 1_000 });
+    // Gemini reports no fee, so the journal keeps the estimate: 0.07 x 10 x 0.30 x 0.70 = 14.7c, so 15c.
+    expect(journal.records.get(7)).toMatchObject({ state: "open", filledHundredths: 1_000, feeCents: 15 });
 
     fake.fill(placed.venueOrderId);
     const done = await gemini.readFill(placed);
@@ -372,6 +374,8 @@ describe("following an order", () => {
       state: "filled",
       filledHundredths: 4_000,
       filledCents: 1_230,
+      // At the average of 30.75c: 0.07 x 40 x 0.3075 x 0.6925 = 59.6c, so 60c.
+      feeCents: 60,
     });
   });
 
@@ -437,7 +441,19 @@ describe("settling a position", () => {
       resolution: "no",
       contractsHundredths: 4_000,
       payoutCents: 4_000,
+      // The journal's estimate at the fill: 0.07 x 40 x 0.31 x 0.69 = 59.9c, so 60c.
+      feeCents: 60,
     });
+  });
+
+  it("settles a journal record written before fees were estimated with the estimate its cost implies", async () => {
+    const gemini = await filledOn(SETTLED_NO);
+    const record = journal.records.get(7);
+    if (!record) throw new Error("no journal record");
+    const { feeCents: _, ...older } = record;
+    journal.records.set(7, older);
+    fake.settle(SETTLED_NO, "no", "BTC2611132200");
+    expect(await gemini.positionOutcome(position())).toMatchObject({ status: "resolved", feeCents: 60 });
   });
 
   it("never settles when the account's settled position disagrees with the public outcome", async () => {
@@ -469,11 +485,9 @@ describe("settling a position", () => {
   });
 
   it("settles a fill from before the executor traded on Gemini on the public outcome, as simulated", async () => {
-    expect(await venue().positionOutcome(position())).toMatchObject({
-      status: "resolved",
-      venue: "simulated",
-      contractsHundredths: 4_000,
-    });
+    const outcome = await venue().positionOutcome(position());
+    expect(outcome).toMatchObject({ status: "resolved", venue: "simulated", contractsHundredths: 4_000 });
+    expect(outcome).not.toHaveProperty("feeCents");
     expect(fake.requests).toHaveLength(0);
   });
 });
