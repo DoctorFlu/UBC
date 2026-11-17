@@ -190,7 +190,7 @@ test.describe("a second workspace", () => {
       for (const view of ["", "/approvals", "/setup"]) {
         const opened = await page.goto(`/m/${encodeURIComponent(id)}${view}`);
         expect(opened?.status(), `/m/${id}${view}`).toBe(404);
-        await expect(page.getByText("Nothing at this address", { exact: true })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 1, name: "Nothing at this address" })).toBeVisible();
       }
     }
     // Making a token for the first workspace's agent is refused, and its tokens stay as they were.
@@ -270,6 +270,41 @@ test.describe("a second workspace", () => {
     await expect(page.getByRole("region", { name: "Notifications" })).toContainText('Revoked "Grok Bot"');
     await expect(agents.getByText(/^Revoked /)).toBeVisible();
     expect(await resolveToken(baseURL ?? "", token)).toBeNull();
+  });
+
+  test("deploys his mandate's contract from Setup, and its pages follow it", async ({
+    baseURL,
+  }, testInfo) => {
+    const problems = watchConsole(page);
+    await page.goto("/setup");
+    await hydrated(page);
+    const card = page.getByTestId("deploy-card");
+    await expect(card).toBeVisible();
+    await shotOf(
+      page.getByRole("region", { name: "Deploy this mandate's contract" }),
+      testInfo,
+      "deploy-1440-light",
+    );
+    const deployed = page.waitForResponse(
+      (response) => response.request().method() === "POST" && response.url().endsWith("/deployment"),
+    );
+    await card.getByRole("button", { name: "Deploy contract" }).click();
+    expect((await deployed).status()).toBe(200);
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Contract deployed");
+    await expect(card).toHaveCount(0);
+
+    // His own contract now: on his snapshot, his Activity and his Home row, and not the first workspace's.
+    const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(his.contract?.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(his.contract?.address.toLowerCase()).not.toBe(
+      (await snapshot(baseURL ?? "")).contract?.address.toLowerCase(),
+    );
+    await page.goto("/activity");
+    await expect(page.getByRole("heading", { level: 1, name: "Activity" })).toBeVisible();
+    await expect(page.getByText("No Policy contract yet", { exact: true })).toHaveCount(0);
+    await page.goto("/");
+    await expect(page.getByTestId("mandate-row").getByText("No contract yet")).toHaveCount(0);
+    expect(problems).toEqual([]);
   });
 
   test("signs out, is kept out, and signs back in with the same passkey", async () => {

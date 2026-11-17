@@ -191,7 +191,7 @@ test("an intent the contract rejects sends one event; a second one waits for the
     count: 1,
     attempt: 1,
     summary: `The contract rejected intent #${rejected.intentId.toString()}: over max trade size.`,
-    link: `${baseURL}/activity/${rejected.intentId.toString()}`,
+    link: `${baseURL}${await firstMandatePath(baseURL, `/activity/${rejected.intentId.toString()}`)}`,
   });
 
   const again = await chain.agent.proposeTrade(noBuy(BTC_64K, 3_000, 24));
@@ -251,7 +251,7 @@ test("the owner's kill switch in the console sends one event", async ({ page }) 
     kind: "mandate_changed",
     summary: "The owner paused the agent.",
     detail: { change: "paused", paused: true },
-    link: `${baseURL}/rules`,
+    link: `${baseURL}${await firstMandatePath(baseURL, "/rules")}`,
   });
 });
 
@@ -277,7 +277,7 @@ test("spot falling below the floor of the agent's plan sends one event", async (
   expect(all[4]).toMatchObject({
     kind: "price_below_floor",
     detail: { asset: "BTC", planId: request.planId, floorCents: floor, spotCents: floor - 50_000 },
-    link: `${baseURL}/hedge`,
+    link: `${baseURL}${await firstMandatePath(baseURL, "/hedge")}`,
   });
   // Still below on the next checks: the same fall, never sent again.
   await new Promise((resolve) => setTimeout(resolve, 3_000));
