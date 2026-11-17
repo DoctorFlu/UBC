@@ -299,6 +299,26 @@ export class AccountStore {
     return { address: getAddress(row.owner_address), sealed: row.sealed_owner_key };
   }
 
+  /**
+   * The owner key the console holds for a mandate with no contract yet, created and sealed now when it
+   * has none (a sign-up's first mandate, made before anyone knew who would deploy it). Null once the
+   * mandate has a contract without one: an owner wallet's, never to be replaced.
+   */
+  ensureOwnerKey(mandateId: string, master: MasterKey): { address: Address; sealed: string } | null {
+    return transaction(this.db, () => {
+      const existing = this.ownerKeyOf(mandateId);
+      if (existing) return existing;
+      const key = createSealedOwnerKey(master, mandateId);
+      const changed = this.db
+        .prepare(
+          `UPDATE mandates SET owner_address = ?, sealed_owner_key = ?
+           WHERE id = ? AND deployment IS NULL AND sealed_owner_key IS NULL`,
+        )
+        .run(key.address, key.sealed, mandateId);
+      return Number(changed.changes) === 1 ? this.ownerKeyOf(mandateId) : null;
+    });
+  }
+
   // ---------------------------------------------------------------- owner actions
 
   /** Records an owner call the console signed, or tried to: who authorised it, with which passkey. */

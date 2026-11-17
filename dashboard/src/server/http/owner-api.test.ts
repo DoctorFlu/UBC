@@ -15,6 +15,7 @@ import {
   consoleHeaders,
   envMandate,
   envSnapshot,
+  mandateOf,
   signUpWorkspace,
 } from "../../../test/support/accounts";
 import { type TestChain, startTestChain } from "../../../test/support/devchain";
@@ -44,6 +45,8 @@ describe("owner-signed console routes", () => {
   /** Headers of a request from the console's pages, signed in as `member`. */
   const headers = (member: Member = owner) => consoleHeaders(service, member);
   const mandateId = () => envMandate(service).id;
+  /** Where the console's pages send a write: naming the mandate it is for. */
+  const consoleUrl = () => `http://console.test/api/console?mandate=${mandateId()}`;
 
   /** A request body signed the way the console's browser code signs it. */
   async function signed(
@@ -65,7 +68,7 @@ describe("owner-signed console routes", () => {
       nonce,
     });
     const signature = await wallet.signMessage({ account: wallet.account, message });
-    return new Request("http://console.test/api/console", {
+    return new Request(consoleUrl(), {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ payload, auth: { issuedAt, nonce, signature } }),
@@ -96,19 +99,19 @@ describe("owner-signed console routes", () => {
   it("answers 401 without a session and 403 for a write from another site, before reading the body", async () => {
     const request = await signed(chain.user, "holdings.save", holdings);
     const body = await request.text();
-    const anonymous = new Request("http://console.test/api/console", {
+    const anonymous = new Request(consoleUrl(), {
       method: "POST",
       headers: { "content-type": "application/json", origin: service.config.accounts.origin },
       body,
     });
     await expectError(await saveHoldings(anonymous, service), 401, "unauthenticated");
-    const crossSite = new Request("http://console.test/api/console", {
+    const crossSite = new Request(consoleUrl(), {
       method: "POST",
       headers: { ...headers(), origin: "https://evil.example" },
       body,
     });
     await expectError(await saveHoldings(crossSite, service), 403, "cross_origin");
-    const noOrigin = new Request("http://console.test/api/console", {
+    const noOrigin = new Request(consoleUrl(), {
       method: "POST",
       headers: { "content-type": "application/json", cookie: headers().cookie ?? "" },
       body,
@@ -122,7 +125,11 @@ describe("owner-signed console routes", () => {
     // Even the contract owner's own signature does nothing in a workspace without that contract.
     const request = await signed(chain.user, "holdings.save", holdings);
     const response = await saveHoldings(
-      new Request(request.url, { method: "POST", headers: headers(stranger), body: await request.text() }),
+      new Request(`http://console.test/api/console?mandate=${mandateOf(service, stranger)}`, {
+        method: "POST",
+        headers: headers(stranger),
+        body: await request.text(),
+      }),
       service,
     );
     await expectError(response, 409, "no_contract");
@@ -183,7 +190,7 @@ describe("owner-signed console routes", () => {
 
     const request = await signed(chain.user, "holdings.save", holdings);
     const body = (await request.json()) as { payload: unknown; auth: unknown };
-    const swapped = new Request("http://console.test/api/console", {
+    const swapped = new Request(consoleUrl(), {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ ...body, payload: { holdings: [{ asset: "BTC", quantity: "50" }] } }),
@@ -198,7 +205,7 @@ describe("owner-signed console routes", () => {
       422,
       "invalid_body",
     );
-    const unsigned = new Request("http://console.test/api/console", {
+    const unsigned = new Request(consoleUrl(), {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ payload: holdings }),
@@ -282,7 +289,7 @@ describe("owner-signed console routes", () => {
     });
     const applied = (txHash: string) =>
       markChangeRequestApplied(
-        new Request("http://console.test/api/console", {
+        new Request(consoleUrl(), {
           method: "POST",
           headers: headers(),
           body: JSON.stringify({ txHash }),
@@ -308,7 +315,7 @@ describe("owner-signed console routes", () => {
     });
     await expectError(
       await markChangeRequestApplied(
-        new Request("http://console.test/api/console", {
+        new Request(consoleUrl(), {
           method: "POST",
           headers: headers(),
           body: JSON.stringify({ txHash: matching.txHash }),

@@ -70,6 +70,10 @@ export interface RateLimits {
   failedTokens: RateLimit;
   /** Tokens a member creates. */
   tokenCreation: RateLimit;
+  /** Passkey prompts for owner actions (#95): enough to approve a queue one by one. */
+  stepUps: RateLimit;
+  /** Mandates a member creates; the workspace's cap bounds the total, this the pace. */
+  mandateCreation: RateLimit;
 }
 
 export function defaultRateLimits(now?: () => number): RateLimits {
@@ -92,6 +96,16 @@ export function defaultRateLimits(now?: () => number): RateLimits {
     tokenCreation: new RateLimit(
       { capacity: 10, refillPerSecond: 1 / 60 },
       { capacity: 100, refillPerSecond: 1 },
+      now,
+    ),
+    stepUps: new RateLimit(
+      { capacity: 30, refillPerSecond: 1 / 2 },
+      { capacity: 300, refillPerSecond: 5 },
+      now,
+    ),
+    mandateCreation: new RateLimit(
+      { capacity: 5, refillPerSecond: 1 / 120 },
+      { capacity: 50, refillPerSecond: 1 / 10 },
       now,
     ),
   };

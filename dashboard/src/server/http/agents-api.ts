@@ -10,7 +10,7 @@ import type { Agent, Mandate } from "../accounts/store";
 import { clientKey } from "../accounts/rate-limit";
 import type { ConsoleService } from "../console-service";
 import { apiError, json, readBody } from "./responses";
-import { type ConsoleScope, consoleRoute } from "./session";
+import { type ConsoleScope, WORKSPACE, consoleRoute } from "./session";
 
 /**
  * The Setup page's Agents section: the workspace's agents, and creating and revoking their tokens
@@ -48,7 +48,7 @@ export const listAgents = consoleRoute((_request, service, scope) => {
     })),
   };
   return json(body);
-});
+}, WORKSPACE);
 
 const createTokenSchema = z.strictObject({
   name: z
@@ -83,7 +83,7 @@ export const createToken = consoleRoute(async (request, service, scope, params) 
   const { token, view } = service.accounts.store.createToken(own.agent.id, body.data.name);
   const created: CreatedToken = { token, view };
   return json(created, 201);
-});
+}, WORKSPACE);
 
 /** DELETE /api/console/agents/:agentId/tokens/:tokenId: revokes a token at once. Revoking twice is fine. */
 export const revokeToken = consoleRoute((_request, service, scope, params) => {
@@ -93,4 +93,4 @@ export const revokeToken = consoleRoute((_request, service, scope, params) => {
   const revoked = own ? service.accounts.store.revokeToken(own.agent.id, params.tokenId ?? "") : null;
   if (!revoked) return apiError(404, "not_found", "This agent has no such token.");
   return json(revoked);
-});
+}, WORKSPACE);

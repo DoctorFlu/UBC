@@ -49,6 +49,13 @@ export function signUpWorkspace(service: ConsoleService, name: string): Member {
   return created.member;
 }
 
+/** The first mandate of the member's workspace: the one sign-up made. */
+export function mandateOf(service: ConsoleService, member: Member): string {
+  const mandate = service.accounts.store.mandates(member.workspaceId)[0];
+  if (!mandate) throw new Error("the workspace has no mandate");
+  return mandate.id;
+}
+
 /** A session for the member, as the `Cookie` header a browser would send. */
 export function sessionHeader(service: ConsoleService, member: Member): string {
   return `${sessionCookieName(service.config.accounts)}=${service.accounts.openSession(member)}`;

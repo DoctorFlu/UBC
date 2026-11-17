@@ -40,6 +40,8 @@ import { buildChainView } from "@/lib/live/chain-view";
 import { OWNER_REQUEST_MAX_AGE_MS } from "@/lib/owner-request";
 
 import { Accounts } from "./accounts/accounts";
+import { StepUp } from "./accounts/step-up";
+import { MandateManager } from "./mandates/manager";
 import type { Mandate } from "./accounts/store";
 import type { ConsoleConfig } from "./config";
 import type { Database } from "./db";
@@ -106,6 +108,10 @@ export class ConsoleService {
    * that follows the server's contract only. Every other mandate sends none (per-agent wake-ups: #112).
    */
   readonly wake: ConsoleWake;
+  /** Creating mandates, deploying their contracts, and the owner calls the console signs (#95). */
+  readonly mandates: MandateManager;
+  /** Passkey confirmation of each owner action the console signs (#95). */
+  readonly stepUp: StepUp;
 
   /** The server's configured contract. */
   private readonly envFollower: ContractFollower;
@@ -158,6 +164,8 @@ export class ConsoleService {
           logger: this.log,
         })
       : null;
+    this.mandates = new MandateManager(this);
+    this.stepUp = new StepUp(config.accounts, this.accounts.store);
     this.envMandateId = this.accounts.store.envMandate().id;
     this.wake = new ConsoleWake(config, db, this.envMandateId, {
       logger: this.log,

@@ -1,0 +1,389 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  Category,
+  PolicyClient,
+  type PolicyRules,
+  consoleErrorSchema,
+  policyAbi,
+  signerAccount,
+} from "@mandate/shared";
+import { type Address, createWalletClient, http } from "viem";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import type { CreatedMandateResponse, MandateView, MandatesResponse } from "@/lib/accounts/types";
+import type { OwnerCall } from "@/lib/owner/calls";
+
+import {
+  claimFirstWorkspace,
+  consoleHeaders,
+  envMandate,
+  mandateOf,
+  signUpWorkspace,
+} from "../../../test/support/accounts";
+import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
+import { SoftPasskey } from "../../../test/support/passkey";
+import { localAgentSigner } from "../accounts/keys";
+import type { StepUpAction } from "../accounts/step-up";
+import type { Member } from "../accounts/store";
+import { readMandatesConfig, testConsoleConfig } from "../config";
+import { ConsoleService } from "../console-service";
+import { openDatabase } from "../db";
+import {
+  createMandate,
+  listMandates,
+  listOwnerActions,
+  postDeployment,
+  postOwnerCall,
+  startStepUp,
+} from "./mandates-api";
+
+const silent = { info: () => undefined, warn: () => undefined };
+const ORIGIN = "http://console.test";
+const RULES: PolicyRules = {
+  budgetCents: 10_000,
+  maxTradeCents: 3_000,
+  allowedCategories: 1 << Category.Crypto,
+  approvalAboveCents: 2_000,
+  dailyLossCents: 0,
+  paused: false,
+};
+const trade = { category: Category.Crypto, outcome: "YES" as const, isBuy: true, limitPrice: 65 };
+
+async function errorCode(response: Response): Promise<string> {
+  return consoleErrorSchema.parse(await response.json()).error.code;
+}
+
+async function until(check: () => boolean, what: string, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/**
+ * Several mandates per workspace on the demo chain (#95), through the console's routes: the console
+ * deploys each mandate's contract from an owner key it holds, signs owner calls only after the member's
+ * passkey confirms that exact call (pause excepted), and no mandate reaches another's.
+ */
+describe("mandates on the demo chain", () => {
+  let chain: TestChain;
+  let service: ConsoleService;
+  let owner: Member;
+  let bob: Member;
+  let carol: Member;
+  const keys = new Map<string, SoftPasskey>();
+
+  function member(name: string): Member {
+    const created = signUpWorkspace(service, name);
+    const key = new SoftPasskey(ORIGIN);
+    service.accounts.store.addPasskey(created.id, key.stored());
+    keys.set(created.id, key);
+    return created;
+  }
+
+  function post(who: Member, path: string, body: unknown): Request {
+    return new Request(`${ORIGIN}/api/console/${path}`, {
+      method: "POST",
+      headers: consoleHeaders(service, who),
+      body: JSON.stringify(body),
+    });
+  }
+
+  function get(who: Member, path: string): Request {
+    const { cookie } = consoleHeaders(service, who);
+    return new Request(`${ORIGIN}/api/console/${path}`, { headers: { cookie: cookie ?? "" } });
+  }
+
+  /** The member's passkey answer to a challenge for `action`, as the browser would send it. */
+  async function confirm(who: Member, action: StepUpAction) {
+    const started = await startStepUp(post(who, "step-up", { action }), service);
+    expect(started.status, JSON.stringify(action)).toBe(201);
+    const { id, options } = (await started.json()) as { id: string; options: never };
+    const key = keys.get(who.id);
+    if (!key) throw new Error("no passkey");
+    return { id, response: key.get(options) };
+  }
+
+  async function create(
+    who: Member,
+    name: string,
+    rules: PolicyRules = RULES,
+  ): Promise<CreatedMandateResponse> {
+    const stepUp = await confirm(who, { kind: "create-mandate", name, rules });
+    const response = await createMandate(post(who, "mandates", { name, rules, stepUp }), service);
+    expect(response.status).toBe(201);
+    return (await response.json()) as CreatedMandateResponse;
+  }
+
+  function call(who: Member, mandateId: string, ownerCall: OwnerCall, stepUp: unknown = null) {
+    return postOwnerCall(post(who, `owner-calls?mandate=${mandateId}`, { call: ownerCall, stepUp }), service);
+  }
+
+  /** The mandate's agent, signing with the key the console sealed for it. */
+  function agentOf(mandate: MandateView): PolicyClient {
+    const agent = service.accounts.store.agentOf(mandate.id);
+    if (!agent.address || !agent.sealedKey || !mandate.contract) throw new Error("no agent key or contract");
+    const account = signerAccount(
+      localAgentSigner(service.accounts.master, {
+        id: agent.id,
+        address: agent.address,
+        sealedKey: agent.sealedKey,
+      }),
+    );
+    const session = service.serverContract;
+    if (!session) throw new Error("no chain");
+    return new PolicyClient({
+      address: mandate.contract.address,
+      publicClient: session.client,
+      walletClient: createWalletClient({
+        chain: session.deployment.chain,
+        transport: http(chain.rpcUrl),
+        account,
+      }),
+      minMaxFeePerGas: 0n,
+      receiptPollingMs: 50,
+    });
+  }
+
+  function snapshotOf(mandateId: string) {
+    const mandate = service.accounts.store.mandate(mandateId);
+    if (!mandate) throw new Error("no mandate");
+    return service.snapshot(mandate);
+  }
+
+  async function read<T>(address: Address, functionName: "user" | "agent" | "executor"): Promise<T> {
+    const session = service.serverContract;
+    if (!session) throw new Error("no chain");
+    return (await session.client.readContract({ address, abi: policyAbi, functionName }));
+  }
+
+  beforeAll(async () => {
+    chain = await startTestChain();
+    const dataDir = mkdtempSync(join(tmpdir(), "mandate-mandates-"));
+    service = new ConsoleService(
+      testConsoleConfig(dataDir, { mandates: { ...readMandatesConfig({}), maxPerWorkspace: 3 } }),
+      openDatabase(dataDir),
+      { env: chain.env, logger: silent },
+    );
+    owner = claimFirstWorkspace(service);
+    keys.set(owner.id, new SoftPasskey(ORIGIN));
+    service.accounts.store.addPasskey(
+      owner.id,
+      keys.get(owner.id)?.stored() ?? new SoftPasskey(ORIGIN).stored(),
+    );
+    bob = member("Bob");
+    carol = member("Carol");
+    service.start();
+    if (!(await service.whenSynced(15_000))) throw new Error("the console did not sync");
+  }, 60_000);
+
+  afterAll(async () => {
+    await service.stop();
+    await chain.stop();
+  });
+
+  it("lists the workspace's own mandates, with the console as the deployer on the demo chain", async () => {
+    const response = await listMandates(get(bob, "mandates"), service);
+    const body = (await response.json()) as MandatesResponse;
+    expect(body.deployer).toBe("server");
+    expect(body.limit).toBe(3);
+    expect(body.mandates.map((m) => m.id)).toEqual([mandateOf(service, bob)]);
+    expect(body.mandates[0]?.contract).toBeNull();
+  });
+
+  it("creates a mandate only with a passkey confirming that name and those rules, and deploys it", async () => {
+    const missing = await createMandate(
+      post(bob, "mandates", { name: "Hedge", rules: RULES, stepUp: null }),
+      service,
+    );
+    expect(missing.status).toBe(422);
+    expect(await errorCode(missing)).toBe("step_up_required");
+
+    const looser = await confirm(bob, { kind: "create-mandate", name: "Hedge", rules: RULES });
+    const swapped = await createMandate(
+      post(bob, "mandates", { name: "Hedge", rules: { ...RULES, maxTradeCents: 10_000 }, stepUp: looser }),
+      service,
+    );
+    expect(swapped.status).toBe(401);
+    expect(await errorCode(swapped)).toBe("step_up_refused");
+
+    const created = await create(bob, "Hedge");
+    expect(created.token.token).toMatch(/^mdt_/);
+    expect(created.deployProblem).toBeNull();
+    expect(created.mandate.ownerSigner).toBe("console");
+    const contract = created.mandate.contract;
+    if (!contract) throw new Error("no contract");
+    const ownerKey = service.accounts.store.ownerKeyOf(created.mandate.id);
+    expect(await read<Address>(contract.address, "user")).toBe(ownerKey?.address);
+    expect(await read<Address>(contract.address, "agent")).toBe(created.mandate.agent.address);
+    expect(await read<Address>(contract.address, "executor")).toBe(chain.executor.account?.address);
+    await until(() => snapshotOf(created.mandate.id).chain?.rules !== null, "the new mandate's rules");
+    expect(snapshotOf(created.mandate.id).chain?.rules).toEqual(RULES);
+  });
+
+  it("deploys a sign-up's first mandate on a session alone, with no rules: it allows nothing yet", async () => {
+    const first = mandateOf(service, carol);
+    const response = await postDeployment(
+      post(carol, `mandates/${first}/deployment`, { txHash: null }),
+      service,
+      {
+        mandateId: first,
+      },
+    );
+    expect(response.status).toBe(200);
+    const view = (await response.json()) as MandateView;
+    expect(view.deployment).toBe("server");
+    await until(() => snapshotOf(first).chain !== null, "carol's first mandate");
+    expect(snapshotOf(first).chain?.rules).toBeNull();
+    // Another workspace's member cannot deploy it, nor learn it exists.
+    const foreign = await postDeployment(
+      post(bob, `mandates/${first}/deployment`, { txHash: null }),
+      service,
+      {
+        mandateId: first,
+      },
+    );
+    expect(foreign.status).toBe(404);
+  });
+
+  it("approves only with the passkey confirming that intent on that mandate; pauses on the session alone", async () => {
+    const created = await create(bob, "Approvals");
+    const mandateId = created.mandate.id;
+    const agent = agentOf(created.mandate);
+    const held = await agent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 2_500 });
+    await until(
+      () => snapshotOf(mandateId).chain?.intents.some((i) => i.id === held.intentId) ?? false,
+      "the held intent",
+    );
+    const approveCall: OwnerCall = { functionName: "approveIntent", intentId: held.intentId };
+
+    const bare = await call(bob, mandateId, approveCall);
+    expect(bare.status).toBe(422);
+    expect(await errorCode(bare)).toBe("step_up_required");
+
+    const otherIntent = await confirm(bob, {
+      kind: "owner-call",
+      mandateId,
+      call: { functionName: "approveIntent", intentId: held.intentId + 1 },
+    });
+    expect(await errorCode(await call(bob, mandateId, approveCall, otherIntent))).toBe("step_up_refused");
+
+    const otherMandate = mandateOf(service, bob);
+    const elsewhere = await confirm(bob, { kind: "owner-call", mandateId, call: approveCall });
+    const moved = await call(bob, otherMandate, approveCall, elsewhere);
+    expect(moved.status).toBe(409); // that mandate has no console-held contract to act on
+
+    const confirmed = await confirm(bob, { kind: "owner-call", mandateId, call: approveCall });
+    const approved = await call(bob, mandateId, approveCall, confirmed);
+    expect(approved.status).toBe(201);
+    expect((await agent.getIntent(held.intentId))?.status).toBe("approved");
+    // The same confirmation, replayed, is refused.
+    expect(await errorCode(await call(bob, mandateId, approveCall, confirmed))).toBe("step_up_expired");
+
+    const paused = await call(bob, mandateId, { functionName: "setPaused", paused: true });
+    expect(paused.status).toBe(201);
+    expect((await agent.getRules()).paused).toBe(true);
+    const unpause = await call(bob, mandateId, { functionName: "setPaused", paused: false });
+    expect(await errorCode(unpause)).toBe("step_up_required");
+    const unpaused = await call(
+      bob,
+      mandateId,
+      { functionName: "setPaused", paused: false },
+      await confirm(bob, {
+        kind: "owner-call",
+        mandateId,
+        call: { functionName: "setPaused", paused: false },
+      }),
+    );
+    expect(unpaused.status).toBe(201);
+
+    // The audit trail names who authorised each call, and with which passkey.
+    const audit = (await (
+      await listOwnerActions(get(bob, `owner-actions?mandate=${mandateId}`), service)
+    ).json()) as {
+      actions: { functionName: string; memberName: string; credentialId: string | null; status: string }[];
+    };
+    const sent = audit.actions.filter((a) => a.status === "sent");
+    expect(sent.map((a) => a.functionName).sort()).toEqual(["approveIntent", "setPaused", "setPaused"]);
+    expect(sent.find((a) => a.functionName === "approveIntent")?.credentialId).toBe(keys.get(bob.id)?.id);
+    expect(sent.every((a) => a.memberName === "Bob")).toBe(true);
+  });
+
+  it("refuses owner calls on another workspace's mandate, and on the server's own contract", async () => {
+    const bobs = service.accounts.store.mandates(bob.workspaceId).find((m) => m.deployment === "server");
+    if (!bobs) throw new Error("bob has no deployed mandate");
+    const pause = await call(owner, bobs.id, { functionName: "setPaused", paused: true });
+    expect(pause.status).toBe(404);
+    const startForeign = await startStepUp(
+      post(owner, "step-up", {
+        action: {
+          kind: "owner-call",
+          mandateId: bobs.id,
+          call: { functionName: "approveIntent", intentId: 0 },
+        },
+      }),
+      service,
+    );
+    expect(startForeign.status).toBe(404);
+    const env = envMandate(service).id;
+    const own = await call(owner, env, { functionName: "setPaused", paused: true });
+    expect(await errorCode(own)).toBe("not_console_owned");
+  });
+
+  it("keeps two mandates' agents apart when they act at the same moment", async () => {
+    const left = await create(carol, "Left");
+    const leftAgent = agentOf(left.mandate);
+    const bobsApprovals = service.accounts.store
+      .mandates(bob.workspaceId)
+      .find((m) => m.name === "Approvals");
+    if (!bobsApprovals) throw new Error("no mandate");
+    const rightView = (await (await listMandates(get(bob, "mandates"), service)).json()) as MandatesResponse;
+    const right = rightView.mandates.find((m) => m.id === bobsApprovals.id);
+    if (!right) throw new Error("no view");
+    const rightAgent = agentOf(right);
+    const before = snapshotOf(right.id).chain?.committedCents ?? 0;
+    const [a, b] = await Promise.all([
+      leftAgent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_500 }),
+      rightAgent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_200 }),
+    ]);
+    await until(
+      () => snapshotOf(left.mandate.id).chain?.intents.some((i) => i.id === a.intentId) ?? false,
+      "left",
+    );
+    await until(() => snapshotOf(right.id).chain?.intents.some((i) => i.id === b.intentId) ?? false, "right");
+    const leftChain = snapshotOf(left.mandate.id).chain;
+    const rightChain = snapshotOf(right.id).chain;
+    expect(leftChain?.intents.map((i) => i.amountCents)).toEqual([1_500]);
+    expect(leftChain?.committedCents).toBe(1_500);
+    expect(rightChain?.committedCents).toBe(before + 1_200);
+    expect(rightChain?.intents.some((i) => i.amountCents === 1_500)).toBe(false);
+    // Each agent can only write to its own contract.
+    const crossed = new PolicyClient({
+      address: left.mandate.contract?.address ?? "0x",
+      publicClient: rightAgent.publicClient,
+      walletClient: rightAgent.walletClient,
+      minMaxFeePerGas: 0n,
+      receiptPollingMs: 50,
+    });
+    await expect(
+      crossed.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 100 }),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a mandate past the workspace's cap, with what to do about it", async () => {
+    // Carol has her first mandate and "Left"; the cap is 3.
+    await create(carol, "Third");
+    const name = "Fourth";
+    const stepUp = await confirm(carol, { kind: "create-mandate", name, rules: RULES });
+    const refused = await createMandate(post(carol, "mandates", { name, rules: RULES, stepUp }), service);
+    expect(refused.status).toBe(409);
+    const body = consoleErrorSchema.parse(await refused.json());
+    expect(body.error.code).toBe("mandate_limit");
+    expect(body.error.message).toContain("CONSOLE_MANDATES_PER_WORKSPACE");
+    expect(service.accounts.store.mandates(carol.workspaceId)).toHaveLength(3);
+  });
+});

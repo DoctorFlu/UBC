@@ -270,6 +270,22 @@ export function ownerAccount(
   return account;
 }
 
+/**
+ * A mandate's owner key as a signer that decrypts it for each transaction and keeps it no longer. Callers
+ * decide what may be signed (the owner call route, after a passkey; the server deployer).
+ */
+export function localOwnerSigner(
+  master: MasterKey,
+  mandateId: string,
+  key: { address: Address; sealed: string },
+): AgentSigner {
+  return {
+    address: key.address,
+    signTransaction: (transaction: TransactionSerializable) =>
+      ownerAccount(master, mandateId, key).signTransaction(transaction),
+  };
+}
+
 /** A new agent key, sealed, with its public address. The key itself is gone when this returns. */
 export function createSealedAgentKey(
   master: MasterKey,
