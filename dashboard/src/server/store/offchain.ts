@@ -84,6 +84,9 @@ const holdingsSchema = z.array(holdingSchema);
 /**
  * The records the console is the system of record for. Nothing here is onchain and nothing here can
  * change the mandate: change requests only become rules when the owner signs `setPolicy`.
+ *
+ * Every record belongs to one mandate, and every method takes the mandate first: a read never returns, and
+ * a write never touches, another mandate's record, whatever id or hash the caller names.
  */
 export class OffchainStore {
   constructor(
@@ -93,43 +96,46 @@ export class OffchainStore {
 
   // ---------------------------------------------------------------- holdings
 
-  holdings(): StoredHoldings {
-    const row = this.db.prepare("SELECT payload, updated_at FROM holdings WHERE id = 1").get() as
-      { payload: string; updated_at: string } | undefined;
+  holdings(mandateId: string): StoredHoldings {
+    const row = this.db
+      .prepare("SELECT payload, updated_at FROM holdings WHERE mandate_id = ?")
+      .get(mandateId) as { payload: string; updated_at: string } | undefined;
     if (!row) return { holdings: [], updatedAt: null };
     return { holdings: holdingsSchema.parse(JSON.parse(row.payload)), updatedAt: row.updated_at };
   }
 
-  saveHoldings(holdings: readonly ConsoleHolding[]): StoredHoldings {
+  saveHoldings(mandateId: string, holdings: readonly ConsoleHolding[]): StoredHoldings {
     const valid = holdingsSchema.parse(holdings);
     const updatedAt = this.now().toISOString();
     this.db
       .prepare(
-        `INSERT INTO holdings (id, payload, updated_at) VALUES (1, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`,
+        `INSERT INTO holdings (mandate_id, payload, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (mandate_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`,
       )
-      .run(JSON.stringify(valid), updatedAt);
+      .run(mandateId, JSON.stringify(valid), updatedAt);
     return { holdings: valid, updatedAt };
   }
 
   // ---------------------------------------------------------------- decision contexts
 
   /** Stores a context under its hash. A hash stored before keeps its first document and time. */
-  putContext(hash: Hex, document: unknown): { context: StoredContext; created: boolean } {
+  putContext(mandateId: string, hash: Hex, document: unknown): { context: StoredContext; created: boolean } {
     const key = hash.toLowerCase() as Hex;
     const storedAt = this.now().toISOString();
     const result = this.db
-      .prepare("INSERT OR IGNORE INTO decision_contexts (hash, document, stored_at) VALUES (?, ?, ?)")
-      .run(key, JSON.stringify(document), storedAt);
-    const context = this.context(key);
+      .prepare(
+        "INSERT OR IGNORE INTO decision_contexts (mandate_id, hash, document, stored_at) VALUES (?, ?, ?, ?)",
+      )
+      .run(mandateId, key, JSON.stringify(document), storedAt);
+    const context = this.context(mandateId, key);
     if (!context) throw new Error(`decision context ${key} vanished after insert`);
     return { context, created: Number(result.changes) > 0 };
   }
 
-  context(hash: string): StoredContext | null {
+  context(mandateId: string, hash: string): StoredContext | null {
     const row = this.db
-      .prepare("SELECT hash, document, stored_at FROM decision_contexts WHERE hash = ?")
-      .get(hash.toLowerCase()) as { hash: Hex; document: string; stored_at: string } | undefined;
+      .prepare("SELECT hash, document, stored_at FROM decision_contexts WHERE mandate_id = ? AND hash = ?")
+      .get(mandateId, hash.toLowerCase()) as { hash: Hex; document: string; stored_at: string } | undefined;
     if (!row) return null;
     let document: unknown;
     try {
@@ -140,10 +146,10 @@ export class OffchainStore {
     return { hash: row.hash, document, storedAt: row.stored_at };
   }
 
-  contexts(hashes: Iterable<string>): Map<string, StoredContext> {
+  contexts(mandateId: string, hashes: Iterable<string>): Map<string, StoredContext> {
     const found = new Map<string, StoredContext>();
     for (const hash of new Set([...hashes].map((value) => value.toLowerCase()))) {
-      const context = this.context(hash);
+      const context = this.context(mandateId, hash);
       if (context) found.set(hash, context);
     }
     return found;
@@ -155,46 +161,61 @@ export class OffchainStore {
    * Links an intent of one deployment to its decision-context hash. The same link again is a no-op;
    * a different hash for a linked intent is refused, so a link can never be rewritten after the fact.
    */
-  linkIntentContext(deploymentId: string, intentId: number, hash: Hex, txHash: Hex): LinkResult {
+  linkIntentContext(
+    mandateId: string,
+    deploymentId: string,
+    intentId: number,
+    hash: Hex,
+    txHash: Hex,
+  ): LinkResult {
     const key = hash.toLowerCase() as Hex;
     const tx = txHash.toLowerCase() as Hex;
     const result = this.db
       .prepare(
-        `INSERT OR IGNORE INTO intent_context_links (deployment_id, intent_id, hash, tx_hash, linked_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO intent_context_links
+           (mandate_id, deployment_id, intent_id, hash, tx_hash, linked_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(deploymentId, intentId, key, tx, this.now().toISOString());
-    const link = this.intentContextLink(deploymentId, intentId);
+      .run(mandateId, deploymentId, intentId, key, tx, this.now().toISOString());
+    const link = this.intentContextLink(mandateId, deploymentId, intentId);
     if (!link) throw new Error(`intent context link ${String(intentId)} vanished after insert`);
     if (link.hash !== key || link.txHash !== tx) return { ok: false, existing: link };
     return { ok: true, link, created: Number(result.changes) > 0 };
   }
 
-  intentContextLink(deploymentId: string, intentId: number): StoredIntentContextLink | null {
+  intentContextLink(
+    mandateId: string,
+    deploymentId: string,
+    intentId: number,
+  ): StoredIntentContextLink | null {
     const row = this.db
-      .prepare("SELECT * FROM intent_context_links WHERE deployment_id = ? AND intent_id = ?")
-      .get(deploymentId, intentId) as LinkRow | undefined;
+      .prepare(
+        "SELECT * FROM intent_context_links WHERE mandate_id = ? AND deployment_id = ? AND intent_id = ?",
+      )
+      .get(mandateId, deploymentId, intentId) as LinkRow | undefined;
     return row ? linkFromRow(row) : null;
   }
 
-  intentContextLinks(deploymentId: string): Map<number, StoredIntentContextLink> {
+  intentContextLinks(mandateId: string, deploymentId: string): Map<number, StoredIntentContextLink> {
     const rows = this.db
-      .prepare("SELECT * FROM intent_context_links WHERE deployment_id = ?")
-      .all(deploymentId) as unknown as LinkRow[];
+      .prepare("SELECT * FROM intent_context_links WHERE mandate_id = ? AND deployment_id = ?")
+      .all(mandateId, deploymentId) as unknown as LinkRow[];
     return new Map(rows.map((row) => [row.intent_id, linkFromRow(row)]));
   }
 
   // ---------------------------------------------------------------- hedge plans
 
   /** Stores a plan. Posting the same `planId` again replaces nothing and returns the stored record. */
-  putPlan(input: PostPlanRequest): { plan: StoredPlan; created: boolean } {
+  putPlan(mandateId: string, input: PostPlanRequest): { plan: StoredPlan; created: boolean } {
     const storedAt = this.now().toISOString();
     const result = this.db
       .prepare(
-        `INSERT OR IGNORE INTO hedge_plans (plan_id, asset, request_text, created_at, plan, stored_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO hedge_plans
+           (mandate_id, plan_id, asset, request_text, created_at, plan, stored_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
+        mandateId,
         input.planId,
         input.asset,
         input.requestText,
@@ -202,29 +223,30 @@ export class OffchainStore {
         JSON.stringify(input.plan),
         storedAt,
       );
-    const plan = this.plan(input.planId);
+    const plan = this.plan(mandateId, input.planId);
     if (!plan) throw new Error(`plan ${input.planId} vanished after insert`);
     return { plan, created: Number(result.changes) > 0 };
   }
 
-  plan(planId: string): StoredPlan | null {
-    const row = this.db.prepare("SELECT * FROM hedge_plans WHERE plan_id = ?").get(planId) as
-      PlanRow | undefined;
+  plan(mandateId: string, planId: string): StoredPlan | null {
+    const row = this.db
+      .prepare("SELECT * FROM hedge_plans WHERE mandate_id = ? AND plan_id = ?")
+      .get(mandateId, planId) as PlanRow | undefined;
     return row ? planFromRow(row) : null;
   }
 
   /** The most recently stored plan of each asset, newest first. */
-  latestPlans(): StoredPlan[] {
+  latestPlans(mandateId: string): StoredPlan[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM hedge_plans AS p
-         WHERE p.rowid = (
-           SELECT q.rowid FROM hedge_plans AS q WHERE q.asset = p.asset
+         WHERE p.mandate_id = ? AND p.rowid = (
+           SELECT q.rowid FROM hedge_plans AS q WHERE q.mandate_id = p.mandate_id AND q.asset = p.asset
            ORDER BY q.stored_at DESC, q.rowid DESC LIMIT 1
          )
          ORDER BY p.stored_at DESC, p.rowid DESC`,
       )
-      .all() as unknown as PlanRow[];
+      .all(mandateId) as unknown as PlanRow[];
     return rows.map(planFromRow);
   }
 
@@ -235,58 +257,66 @@ export class OffchainStore {
    * stores nothing and returns the first record, whatever its body says.
    */
   putSignalPayment(
+    mandateId: string,
     receiptId: string,
     payment: PutSignalPaymentRequest,
   ): { payment: SignalPaymentView; created: boolean } {
     const id = receiptId.toLowerCase();
     const result = this.db
       .prepare(
-        `INSERT OR IGNORE INTO signal_payments (receipt_id, paid_at, payment, recorded_at)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO signal_payments (mandate_id, receipt_id, paid_at, payment, recorded_at)
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(id, new Date(payment.paidAt).toISOString(), JSON.stringify(payment), this.now().toISOString());
-    const stored = this.signalPayment(id);
+      .run(
+        mandateId,
+        id,
+        new Date(payment.paidAt).toISOString(),
+        JSON.stringify(payment),
+        this.now().toISOString(),
+      );
+    const stored = this.signalPayment(mandateId, id);
     if (!stored) throw new Error(`payment ${id} vanished after insert`);
     return { payment: stored, created: Number(result.changes) > 0 };
   }
 
-  signalPayment(receiptId: string): SignalPaymentView | null {
+  signalPayment(mandateId: string, receiptId: string): SignalPaymentView | null {
     const row = this.db
-      .prepare("SELECT * FROM signal_payments WHERE receipt_id = ?")
-      .get(receiptId.toLowerCase()) as PaymentRow | undefined;
+      .prepare("SELECT * FROM signal_payments WHERE mandate_id = ? AND receipt_id = ?")
+      .get(mandateId, receiptId.toLowerCase()) as PaymentRow | undefined;
     return row ? paymentFromRow(row) : null;
   }
 
   /** Newest payment first. */
-  signalPayments(limit = 500): SignalPaymentView[] {
+  signalPayments(mandateId: string, limit = 500): SignalPaymentView[] {
     const rows = this.db
-      .prepare("SELECT * FROM signal_payments ORDER BY paid_at DESC, rowid DESC LIMIT ?")
-      .all(limit) as unknown as PaymentRow[];
+      .prepare("SELECT * FROM signal_payments WHERE mandate_id = ? ORDER BY paid_at DESC, rowid DESC LIMIT ?")
+      .all(mandateId, limit) as unknown as PaymentRow[];
     return rows.map(paymentFromRow);
   }
 
   /** Keeps the snapshot with the latest `asOf`; an older one is ignored. Returns what is now stored. */
-  putSignalBudget(snapshot: PutSignalBudgetRequest): SignalBudgetView {
+  putSignalBudget(mandateId: string, snapshot: PutSignalBudgetRequest): SignalBudgetView {
     const asOf = new Date(snapshot.asOf).toISOString();
     return transaction(this.db, () => {
-      const current = this.signalBudget();
+      const current = this.signalBudget(mandateId);
       if (!current || Date.parse(current.asOf) < Date.parse(asOf)) {
         this.db
           .prepare(
-            `INSERT INTO signal_budget (id, as_of, snapshot, stored_at) VALUES (1, ?, ?, ?)
-             ON CONFLICT (id) DO UPDATE SET as_of = excluded.as_of, snapshot = excluded.snapshot,
+            `INSERT INTO signal_budget (mandate_id, as_of, snapshot, stored_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT (mandate_id) DO UPDATE SET as_of = excluded.as_of, snapshot = excluded.snapshot,
                stored_at = excluded.stored_at`,
           )
-          .run(asOf, JSON.stringify(snapshot), this.now().toISOString());
+          .run(mandateId, asOf, JSON.stringify(snapshot), this.now().toISOString());
       }
-      const stored = this.signalBudget();
+      const stored = this.signalBudget(mandateId);
       if (!stored) throw new Error("the signal budget vanished after insert");
       return stored;
     });
   }
 
-  signalBudget(): SignalBudgetView | null {
-    const row = this.db.prepare("SELECT * FROM signal_budget WHERE id = 1").get() as BudgetRow | undefined;
+  signalBudget(mandateId: string): SignalBudgetView | null {
+    const row = this.db.prepare("SELECT * FROM signal_budget WHERE mandate_id = ?").get(mandateId) as
+      BudgetRow | undefined;
     return row
       ? { ...putSignalBudgetRequestSchema.parse(JSON.parse(row.snapshot)), storedAt: row.stored_at }
       : null;
@@ -294,7 +324,7 @@ export class OffchainStore {
 
   // ---------------------------------------------------------------- policy change requests
 
-  createChangeRequest(input: PostPolicyChangeRequest): PolicyChangeRequest {
+  createChangeRequest(mandateId: string, input: PostPolicyChangeRequest): PolicyChangeRequest {
     const request: PolicyChangeRequest = {
       id: `pcr_${randomUUID()}`,
       agentAddress: getAddress(input.agentAddress),
@@ -308,11 +338,12 @@ export class OffchainStore {
     this.db
       .prepare(
         `INSERT INTO policy_change_requests
-           (id, agent_address, proposed, reason, status, created_at, resolved_at, applied_tx_hash)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)`,
+           (id, mandate_id, agent_address, proposed, reason, status, created_at, resolved_at, applied_tx_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
       )
       .run(
         request.id,
+        mandateId,
         request.agentAddress,
         JSON.stringify(request.proposed),
         request.reason,
@@ -322,17 +353,20 @@ export class OffchainStore {
     return request;
   }
 
-  changeRequest(id: string): PolicyChangeRequest | null {
-    const row = this.db.prepare("SELECT * FROM policy_change_requests WHERE id = ?").get(id) as
-      ChangeRequestRow | undefined;
+  changeRequest(mandateId: string, id: string): PolicyChangeRequest | null {
+    const row = this.db
+      .prepare("SELECT * FROM policy_change_requests WHERE mandate_id = ? AND id = ?")
+      .get(mandateId, id) as ChangeRequestRow | undefined;
     return row ? changeRequestFromRow(row) : null;
   }
 
   /** Newest first. */
-  changeRequests(): PolicyChangeRequest[] {
+  changeRequests(mandateId: string): PolicyChangeRequest[] {
     const rows = this.db
-      .prepare("SELECT * FROM policy_change_requests ORDER BY created_at DESC, rowid DESC")
-      .all() as unknown as ChangeRequestRow[];
+      .prepare(
+        "SELECT * FROM policy_change_requests WHERE mandate_id = ? ORDER BY created_at DESC, rowid DESC",
+      )
+      .all(mandateId) as unknown as ChangeRequestRow[];
     return rows.map(changeRequestFromRow);
   }
 
@@ -341,23 +375,26 @@ export class OffchainStore {
    * is already closed is returned unchanged.
    */
   resolveChangeRequest(
+    mandateId: string,
     id: string,
     resolution: { status: "dismissed" } | { status: "applied"; txHash: Hex },
   ): PolicyChangeRequest | null {
     return transaction(this.db, () => {
-      const existing = this.changeRequest(id);
+      const existing = this.changeRequest(mandateId, id);
       if (!existing || existing.status !== "pending") return existing;
       this.db
         .prepare(
-          "UPDATE policy_change_requests SET status = ?, resolved_at = ?, applied_tx_hash = ? WHERE id = ?",
+          `UPDATE policy_change_requests SET status = ?, resolved_at = ?, applied_tx_hash = ?
+           WHERE mandate_id = ? AND id = ?`,
         )
         .run(
           resolution.status,
           this.now().toISOString(),
           resolution.status === "applied" ? resolution.txHash : null,
+          mandateId,
           id,
         );
-      return this.changeRequest(id);
+      return this.changeRequest(mandateId, id);
     });
   }
 
@@ -367,48 +404,48 @@ export class OffchainStore {
    * Records that an agent announced itself. Idempotent: announcing again refreshes the name and version and
    * keeps a confirmation the owner already gave.
    */
-  announce(input: PutPairingRequest): StoredPairing {
+  announce(mandateId: string, input: PutPairingRequest): StoredPairing {
     const address = getAddress(input.agentAddress);
     this.db
       .prepare(
-        `INSERT INTO pairings (agent_address, agent_name, server_version, status, announced_at)
-         VALUES (?, ?, ?, 'pending', ?)
-         ON CONFLICT (agent_address) DO UPDATE SET
+        `INSERT INTO pairings (mandate_id, agent_address, agent_name, server_version, status, announced_at)
+         VALUES (?, ?, ?, ?, 'pending', ?)
+         ON CONFLICT (mandate_id, agent_address) DO UPDATE SET
            agent_name = excluded.agent_name,
            server_version = excluded.server_version,
            announced_at = excluded.announced_at`,
       )
-      .run(address, input.agentName, input.serverVersion, this.now().toISOString());
-    const pairing = this.pairing(address);
+      .run(mandateId, address, input.agentName, input.serverVersion, this.now().toISOString());
+    const pairing = this.pairing(mandateId, address);
     if (!pairing) throw new Error(`pairing ${address} vanished after insert`);
     return pairing;
   }
 
-  pairing(agentAddress: string): StoredPairing | null {
+  pairing(mandateId: string, agentAddress: string): StoredPairing | null {
     const row = this.db
-      .prepare("SELECT * FROM pairings WHERE agent_address = ?")
-      .get(getAddress(agentAddress)) as PairingRow | undefined;
+      .prepare("SELECT * FROM pairings WHERE mandate_id = ? AND agent_address = ?")
+      .get(mandateId, getAddress(agentAddress)) as PairingRow | undefined;
     return row ? pairingFromRow(row) : null;
   }
 
   /** The agent that announced itself most recently, or null when none has. */
-  latestPairing(): StoredPairing | null {
+  latestPairing(mandateId: string): StoredPairing | null {
     const row = this.db
-      .prepare("SELECT * FROM pairings ORDER BY announced_at DESC, rowid DESC LIMIT 1")
-      .get() as PairingRow | undefined;
+      .prepare("SELECT * FROM pairings WHERE mandate_id = ? ORDER BY announced_at DESC, rowid DESC LIMIT 1")
+      .get(mandateId) as PairingRow | undefined;
     return row ? pairingFromRow(row) : null;
   }
 
   /** Marks an announced agent as claimed by the owner. Returns null when it never announced itself. */
-  confirmPairing(agentAddress: string, owner: Address): StoredPairing | null {
+  confirmPairing(mandateId: string, agentAddress: string, owner: Address): StoredPairing | null {
     const address = getAddress(agentAddress);
     this.db
       .prepare(
         `UPDATE pairings SET status = 'confirmed', confirmed_at = ?, confirmed_by = ?
-         WHERE agent_address = ? AND status = 'pending'`,
+         WHERE mandate_id = ? AND agent_address = ? AND status = 'pending'`,
       )
-      .run(this.now().toISOString(), getAddress(owner), address);
-    return this.pairing(address);
+      .run(this.now().toISOString(), getAddress(owner), mandateId, address);
+    return this.pairing(mandateId, address);
   }
 }
 

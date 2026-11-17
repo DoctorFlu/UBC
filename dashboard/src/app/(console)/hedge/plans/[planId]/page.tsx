@@ -7,16 +7,18 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { EvidenceView } from "@/features/evidence";
 import { previewState } from "@/lib/preview";
+import type { MandateScope } from "@/server/console-service";
 import { getConsoleService } from "@/server/console";
+import { pageScope } from "@/server/page-access";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Evidence chain" };
 
 /** The agent API accepts plan ids of 1 to 128 characters; anything else names no stored plan. */
-function storedPlan(planId: string) {
+function storedPlan(mandate: MandateScope, planId: string) {
   if (planId.length === 0 || planId.length > 128) return null;
-  return getConsoleService().planView(planId);
+  return getConsoleService().planView(mandate, planId);
 }
 
 /**
@@ -24,6 +26,7 @@ function storedPlan(planId: string) {
  * hedge page still has its chain; the chain itself follows the live snapshot in the browser.
  */
 export default async function PlanEvidencePage({ params, searchParams }: PageProps<"/hedge/plans/[planId]">) {
+  const { mandate } = await pageScope();
   const { planId } = await params;
   const preview = previewState(await searchParams);
   if (preview === "loading") return <ViewSkeleton title="Evidence chain" />;
@@ -34,7 +37,7 @@ export default async function PlanEvidencePage({ params, searchParams }: PagePro
   } catch {
     // Not percent-encoded: the id as given.
   }
-  const view = storedPlan(id) ?? (id === planId ? null : storedPlan(planId));
+  const view = storedPlan(mandate, id) ?? (id === planId ? null : storedPlan(mandate, planId));
   if (!view) {
     return (
       <div>

@@ -8,23 +8,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { ConsoleSnapshot } from "@/lib/live/types";
 
+import { envSnapshot } from "../../test/support/accounts";
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../test/support/devchain";
-import type { ConsoleConfig } from "./config";
+import { type ConsoleConfig, testConsoleConfig } from "./config";
 import { ConsoleService } from "./console-service";
 import { openDatabase } from "./db";
 
 const silent = { info: () => undefined, warn: () => undefined };
 
 function config(dataDir: string): ConsoleConfig {
-  return {
-    dataDir,
-    eventSource: "rpc",
-    pollIntervalMs: 50,
-    serviceToken: null,
-    streamSecurityToken: null,
-    publicUrl: "http://localhost:3000",
-    mcpPublicUrl: null,
-  };
+  return testConsoleConfig(dataDir, { publicUrl: "http://localhost:3000" });
 }
 
 function startService(chain: TestChain, dataDir: string): ConsoleService {
@@ -41,7 +34,7 @@ async function caughtUp(service: ConsoleService, chain: TestChain): Promise<Cons
   const head = Number(await chain.user.publicClient.getBlockNumber({ cacheTime: 0 }));
   const deadline = Date.now() + 15_000;
   for (;;) {
-    const snapshot = service.snapshot();
+    const snapshot = envSnapshot(service);
     if (snapshot.feed.health === "live" && (snapshot.feed.syncedBlock ?? -1) >= head) {
       const missing = snapshot.chain?.intents.some((intent) => intent.market === null);
       if (!missing) return snapshot;
@@ -171,8 +164,8 @@ describe("ConsoleService when the deployment changes", () => {
     let first: TestChain | undefined;
     let second: TestChain | undefined;
     try {
-      await expect.poll(() => service.snapshot().feed.health).toBe("unconfigured");
-      expect(service.snapshot().contract).toBeNull();
+      await expect.poll(() => envSnapshot(service).feed.health).toBe("unconfigured");
+      expect(envSnapshot(service).contract).toBeNull();
 
       first = await startTestChain({ dir });
       await first.agent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_000 });
@@ -245,12 +238,12 @@ describe("ConsoleService with onchain values offchain code cannot hold", () => {
       });
       const next = await chain.agent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 500 });
       await expect
-        .poll(() => service.snapshot().chain?.intents.some((intent) => intent.id === next.intentId), {
+        .poll(() => envSnapshot(service).chain?.intents.some((intent) => intent.id === next.intentId), {
           timeout: 15_000,
         })
         .toBe(true);
-      await expect.poll(() => service.snapshot().feed.health).toBe("lagging");
-      expect(service.snapshot().feed.detail).toContain("1 Policy event");
+      await expect.poll(() => envSnapshot(service).feed.health).toBe("lagging");
+      expect(envSnapshot(service).feed.detail).toContain("1 Policy event");
     } finally {
       await service.stop();
       await chain.stop();
@@ -309,14 +302,14 @@ describe("ConsoleService with Gemini's listing", () => {
       const current = restarted;
       await caughtUp(current, chain);
       await expect
-        .poll(() => current.snapshot().chain?.intents.every((intent) => intent.listing !== undefined), {
+        .poll(() => envSnapshot(current).chain?.intents.every((intent) => intent.listing !== undefined), {
           timeout: 15_000,
         })
         .toBe(true);
       expect(
-        current
-          .snapshot()
-          .chain?.intents.map((intent) => intentAnomalies(intent).map((anomaly) => anomaly.text)),
+        envSnapshot(current).chain?.intents.map((intent) =>
+          intentAnomalies(intent).map((anomaly) => anomaly.text),
+        ),
       ).toEqual([
         [],
         ["Gemini lists this market as Sports, the intent says Crypto"],

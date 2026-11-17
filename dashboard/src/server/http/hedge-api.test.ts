@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 import type { HedgeMarketResponse } from "@/lib/hedge/types";
 
 import { RECORDED_EVENT, recordedResponse } from "../../../e2e/support/fake-gemini";
-import type { ConsoleConfig } from "../config";
+import { claimFirstWorkspace, envMandate, envSnapshot, sessionHeader } from "../../../test/support/accounts";
+import { testConsoleConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { previewPlan } from "../market/preview";
@@ -20,21 +21,18 @@ import { getHedgeMarket } from "./hedge-api";
 const NOW = Date.parse("2026-11-15T20:19:00Z");
 const silent = { info: () => undefined, warn: () => undefined };
 
+/** The session cookie of the member the latest `makeService` signed in. */
+let signedIn = "";
+
 function makeService(): ConsoleService {
   const dataDir = mkdtempSync(join(tmpdir(), "mandate-hedge-"));
-  const config: ConsoleConfig = {
-    dataDir,
-    eventSource: "rpc",
-    pollIntervalMs: 50,
-    serviceToken: "hedge-test-token-0123456789abcdef",
-    streamSecurityToken: null,
-    publicUrl: "http://console.test",
-    mcpPublicUrl: null,
-  };
-  return new ConsoleService(config, openDatabase(dataDir), {
+  const config = testConsoleConfig(dataDir, { serviceToken: "hedge-test-token-0123456789abcdef" });
+  const service = new ConsoleService(config, openDatabase(dataDir), {
     env: { POLICY_DEPLOYMENT_FILE: join(dataDir, "missing.json") },
     logger: silent,
   });
+  signedIn = sessionHeader(service, claimFirstWorkspace(service));
+  return service;
 }
 
 /** A stand-in for Gemini's public API that answers from the recorded fixtures, or fails on demand. */
@@ -66,7 +64,10 @@ function quotesFor(gemini: ReturnType<typeof fakeGemini>, clock = { now: NOW }) 
   });
 }
 
-const get = (query: string) => new Request(`http://console.test/api/console/hedge/market?${query}`);
+const get = (query: string, cookie: string | null = signedIn) =>
+  new Request(`http://console.test/api/console/hedge/market?${query}`, {
+    headers: cookie === null ? {} : { cookie },
+  });
 
 async function read(response: Response): Promise<HedgeMarketResponse> {
   expect(response.status).toBe(200);
@@ -83,6 +84,14 @@ const RULES: PolicyRules = {
 };
 
 describe("GET /api/console/hedge/market", () => {
+  it("answers 401 without a session, without asking Gemini", async () => {
+    const service = makeService();
+    const gemini = fakeGemini();
+    const quotes = quotesFor(gemini);
+    expect((await getHedgeMarket(get("asset=BTC&preview=1", null), service, quotes)).status).toBe(401);
+    expect(gemini.state.requests).toEqual([]);
+  });
+
   it("refuses an asset Gemini does not list, without asking Gemini", async () => {
     const service = makeService();
     const gemini = fakeGemini();
@@ -131,7 +140,7 @@ describe("GET /api/console/hedge/market", () => {
       reason: "Save your BTC holding to see a preview.",
     });
 
-    service.offchain.saveHoldings([{ asset: "BTC", quantity: "0.05" }]);
+    service.offchain.saveHoldings(envMandate(service).id, [{ asset: "BTC", quantity: "0.05" }]);
     service.changed();
     const withHolding = await read(
       await getHedgeMarket(get("asset=BTC&preview=1"), service, quotesFor(fakeGemini())),
@@ -155,7 +164,7 @@ describe("GET /api/console/hedge/market", () => {
       maxCostCents: 5_000,
       limits: { maxTradeCents: 2_500, remainingBudgetCents: 20_000, categoryAllowed: true },
     });
-    service.offchain.putPlan({
+    service.offchain.putPlan(envMandate(service).id, {
       planId: plan.planId,
       asset: "BTC",
       requestText: "Protect my BTC",
@@ -163,7 +172,7 @@ describe("GET /api/console/hedge/market", () => {
       plan: plan as unknown as Record<string, unknown>,
     });
     service.changed();
-    expect(service.snapshot().offchain.plans).toEqual([
+    expect(envSnapshot(service).offchain.plans).toEqual([
       expect.objectContaining({ planId: plan.planId, asset: "BTC", plan }),
     ]);
 

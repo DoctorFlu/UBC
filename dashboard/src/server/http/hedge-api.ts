@@ -4,10 +4,11 @@ import { KNOWN_ASSETS } from "@mandate/gemini";
 
 import type { HedgeMarketResponse, PreviewState } from "@/lib/hedge/types";
 
-import type { ConsoleService } from "../console-service";
+import type { ConsoleService, MandateScope } from "../console-service";
 import { type MarketQuotes, ladderQuotes } from "../market/quotes";
 import { previewPlan } from "../market/preview";
 import { apiError, json } from "./responses";
+import { consoleRoute } from "./session";
 
 const ASSETS: ReadonlySet<string> = new Set(KNOWN_ASSETS);
 
@@ -19,14 +20,26 @@ const ASSETS: ReadonlySet<string> = new Set(KNOWN_ASSETS);
  * Read-only: it changes nothing and needs no signature, like the snapshot. Gemini failing is part of the
  * answer, not an error status, so the view can keep showing the stored plan.
  *
- * It is public once the console is hosted, and every distinct question costs a Gemini request from the
- * shared rate limit. So a caller cannot choose what is asked: the asset must be one Gemini lists, and
- * `event`, when given, must be the event of the plan the console stores for that asset. Anything else is
+ * It needs a session, and every distinct question costs a Gemini request from the shared rate limit. So
+ * a caller cannot choose what is asked: the asset must be one Gemini lists, and `event`, when given, must
+ * be the event of the plan the console stores for that asset in the session's mandate. Anything else is
  * refused before Gemini is called.
  */
-export async function getHedgeMarket(
+export function getHedgeMarket(
   request: Request,
   service: ConsoleService,
+  quotes: MarketQuotes,
+): Promise<Response> {
+  return consoleRoute((_request, _service, { mandate }) => hedgeMarket(request, service, mandate, quotes))(
+    request,
+    service,
+  );
+}
+
+async function hedgeMarket(
+  request: Request,
+  service: ConsoleService,
+  mandate: MandateScope,
   quotes: MarketQuotes,
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -38,7 +51,7 @@ export async function getHedgeMarket(
       `asset must be one Gemini lists ladders for: ${KNOWN_ASSETS.join(", ")}.`,
     );
   }
-  const snapshot = service.snapshot();
+  const snapshot = service.snapshot(mandate);
   const agentPlan = snapshot.offchain.plans.find((plan) => plan.asset === asset) ?? null;
   const event = url.searchParams.get("event");
   if (event !== null && event !== agentPlan?.plan.eventTicker) {

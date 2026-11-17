@@ -8,6 +8,5 @@ export async function POST(
   request: Request,
   context: RouteContext<"/api/console/change-requests/[id]/applied">,
 ) {
-  const { id } = await context.params;
-  return markChangeRequestApplied(request, getConsoleService(), id);
+  return markChangeRequestApplied(request, getConsoleService(), await context.params);
 }

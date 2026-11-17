@@ -7,8 +7,9 @@ import { FILTER_SCHEMA, computeQuickNodeSignature } from "@mandate/streams";
 import { type Hex, toHex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { envSnapshot } from "../../../test/support/accounts";
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
-import type { ConsoleConfig } from "../config";
+import { type ConsoleConfig, testConsoleConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { receiveStreamDelivery } from "./stream-webhook";
@@ -17,17 +18,13 @@ const TOKEN = "qn-test-security-token-0123456789";
 const silent = { info: () => undefined, warn: () => undefined };
 
 function config(dataDir: string, streamSecurityToken: string | null): ConsoleConfig {
-  return {
-    dataDir,
+  return testConsoleConfig(dataDir, {
     // The Stream is the primary source, so the RPC only polls every 15 s: anything that shows up
     // sooner came through the webhook.
     eventSource: "stream",
-    pollIntervalMs: 50,
-    serviceToken: null,
     streamSecurityToken,
     publicUrl: "http://localhost:3000",
-    mcpPublicUrl: null,
-  };
+  });
 }
 
 let counter = 0;
@@ -102,14 +99,16 @@ describe("QuickNode Stream webhook", () => {
       amountCents: 1_000,
       limitPrice: 65,
     });
-    expect(service.snapshot().chain?.intents.some((intent) => intent.id === proposal.intentId)).toBe(false);
+    expect(envSnapshot(service).chain?.intents.some((intent) => intent.id === proposal.intentId)).toBe(false);
 
     const body = await envelopeForBlock(chain, BigInt(proposal.blockNumber));
     const response = await receiveStreamDelivery(delivery(body), service);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "stored", received: 1, stored: 1 });
     await expect
-      .poll(() => service.snapshot().chain?.intents.find((intent) => intent.id === proposal.intentId)?.status)
+      .poll(
+        () => envSnapshot(service).chain?.intents.find((intent) => intent.id === proposal.intentId)?.status,
+      )
       .toBe("approved");
   });
 
@@ -125,7 +124,7 @@ describe("QuickNode Stream webhook", () => {
     const body = await envelopeForBlock(chain, BigInt(proposal.blockNumber));
     const first = await receiveStreamDelivery(delivery(body, { nonce: "replayed-nonce" }), service);
     expect(await first.json()).toMatchObject({ status: "stored", stored: 1 });
-    const eventsAfterFirst = service.snapshot().chain?.events.length;
+    const eventsAfterFirst = envSnapshot(service).chain?.events.length;
 
     const replay = await receiveStreamDelivery(delivery(body, { nonce: "replayed-nonce" }), service);
     expect(replay.status).toBe(200);
@@ -134,7 +133,7 @@ describe("QuickNode Stream webhook", () => {
     const redelivered = await receiveStreamDelivery(delivery(body), service);
     expect(redelivered.status).toBe(200);
     expect(await redelivered.json()).toEqual({ status: "stored", received: 1, stored: 0 });
-    expect(service.snapshot().chain?.events.length).toBe(eventsAfterFirst);
+    expect(envSnapshot(service).chain?.events.length).toBe(eventsAfterFirst);
   });
 
   it("refuses a tampered body, a wrong token, a stale timestamp and missing headers with 401", async () => {

@@ -1,0 +1,130 @@
+import "server-only";
+
+import { isIP } from "node:net";
+
+/**
+ * In-memory token buckets: each key starts with `capacity` tokens and regains `refillPerSecond` a second.
+ * One console process, one set of buckets (docs/accounts.md says what a fleet would use instead).
+ */
+export class TokenBuckets {
+  private readonly buckets = new Map<string, { tokens: number; at: number }>();
+
+  constructor(
+    private readonly capacity: number,
+    private readonly refillPerSecond: number,
+    private readonly now: () => number = () => performance.now(),
+  ) {}
+
+  /** Takes one token: 0 when allowed, otherwise the whole seconds until one is available. */
+  take(key: string): number {
+    const now = this.now();
+    const bucket = this.buckets.get(key) ?? { tokens: this.capacity, at: now };
+    bucket.tokens = Math.min(
+      this.capacity,
+      bucket.tokens + (Math.max(0, now - bucket.at) / 1000) * this.refillPerSecond,
+    );
+    bucket.at = now;
+    this.buckets.set(key, bucket);
+    if (this.buckets.size > 10_000) this.prune(now);
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      return 0;
+    }
+    return Math.ceil((1 - bucket.tokens) / this.refillPerSecond);
+  }
+
+  /** Forgets full buckets, so a stream of new keys cannot grow the map without bound. */
+  private prune(now: number): void {
+    for (const [key, bucket] of this.buckets) {
+      const tokens = bucket.tokens + (Math.max(0, now - bucket.at) / 1000) * this.refillPerSecond;
+      if (tokens >= this.capacity) this.buckets.delete(key);
+    }
+  }
+}
+
+/** One limit: a bucket per client and one shared by everyone, so neither one client nor many can flood it. */
+export class RateLimit {
+  private readonly perClient: TokenBuckets;
+  private readonly total: TokenBuckets;
+
+  constructor(
+    perClient: { capacity: number; refillPerSecond: number },
+    total: { capacity: number; refillPerSecond: number },
+    now?: () => number,
+  ) {
+    this.perClient = new TokenBuckets(perClient.capacity, perClient.refillPerSecond, now);
+    this.total = new TokenBuckets(total.capacity, total.refillPerSecond, now);
+  }
+
+  /** 0 when allowed, otherwise the seconds to wait. */
+  take(client: string): number {
+    return Math.max(this.perClient.take(client), this.total.take("*"));
+  }
+}
+
+/** Every rate limit the console applies (docs/accounts.md). */
+export interface RateLimits {
+  /** Passkey ceremonies: sign-in, sign-up, claim, recovery and adding a passkey. */
+  ceremonies: RateLimit;
+  /** Checks of a typed code: invite, claim and recovery codes. */
+  codes: RateLimit;
+  /** Token lookups that found no live token (the MCP server's checks). */
+  failedTokens: RateLimit;
+  /** Tokens a member creates. */
+  tokenCreation: RateLimit;
+}
+
+export function defaultRateLimits(now?: () => number): RateLimits {
+  return {
+    ceremonies: new RateLimit(
+      { capacity: 20, refillPerSecond: 1 / 6 },
+      { capacity: 300, refillPerSecond: 5 },
+      now,
+    ),
+    codes: new RateLimit(
+      { capacity: 10, refillPerSecond: 1 / 30 },
+      { capacity: 60, refillPerSecond: 1 },
+      now,
+    ),
+    failedTokens: new RateLimit(
+      { capacity: 30, refillPerSecond: 0.5 },
+      { capacity: 60, refillPerSecond: 1 },
+      now,
+    ),
+    tokenCreation: new RateLimit(
+      { capacity: 10, refillPerSecond: 1 / 60 },
+      { capacity: 100, refillPerSecond: 1 },
+      now,
+    ),
+  };
+}
+
+function isPrivate(address: string): boolean {
+  const ip = address.replace(/^::ffff:/, "");
+  if (isIP(ip) === 4) {
+    const [a = 0, b = 0] = ip.split(".").map(Number);
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 0;
+  }
+  if (isIP(ip) === 6) return ip === "::1" || /^f[cd]/i.test(ip) || /^fe80/i.test(ip);
+  return true;
+}
+
+/**
+ * Who a request comes from, for rate limits. Behind a trusted proxy, the right-most public address in
+ * `X-Forwarded-For`: proxies append the peer they saw, so the addresses to its left are whatever the client
+ * claimed. Without a trusted proxy the header is the client's own claim, so every request shares one key and
+ * only the totals apply.
+ */
+export function clientKey(request: Request, trustProxy: boolean): string {
+  if (!trustProxy) return "direct";
+  const chain = (request.headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => isIP(entry.replace(/^::ffff:/, "")) !== 0);
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const address = chain[index] ?? "";
+    if (!isPrivate(address)) return address;
+  }
+  // Only private addresses: the nearest peer, which the client cannot choose.
+  return chain.at(-1) ?? "unknown";
+}

@@ -5,21 +5,28 @@ import { join } from "node:path";
 import type * as Sqlite from "node:sqlite";
 import type { DatabaseSync } from "node:sqlite";
 
+import { newId } from "./accounts/secrets";
+
 /**
  * The console's durable store: one SQLite file under `CONSOLE_DATA_DIR`, opened with Node's built-in
  * `node:sqlite`, so there is no native dependency to build.
  *
- * It holds two kinds of data:
+ * It holds:
  * - a cache of Policy contract events, keyed by deployment, transaction hash and log index, so
  *   repeated deliveries are ignored and a restart resumes instead of rescanning the chain;
  * - the offchain records the console is the system of record for: holdings, decision contexts, hedge
- *   plans, policy change requests, agent pairing and intent-to-context links;
+ *   plans, policy change requests, agent pairing and intent-to-context links, each keyed by mandate;
+ * - accounts: workspaces, members, passkeys, sessions, mandates, agents and agent tokens, with every
+ *   secret stored as a hash and every agent key sealed (docs/accounts.md);
  * - what Gemini said about each intent's market the first time the console checked it.
  */
 export type Database = DatabaseSync;
 
-/** Each entry upgrades the schema by one version. Never edit a shipped entry; append a new one. */
-const MIGRATIONS: readonly string[] = [
+/**
+ * Each entry upgrades the schema by one version, as SQL or as a function for steps that need values made
+ * in code. Never edit a shipped entry; append a new one.
+ */
+const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
   `
   CREATE TABLE policy_events (
     deployment_id   TEXT    NOT NULL,
@@ -128,7 +135,202 @@ const MIGRATIONS: readonly string[] = [
     checked_at TEXT    NOT NULL
   ) STRICT;
   `,
+  // 5: accounts (#94). Workspaces, members, passkeys, sessions, mandates, agents and their tokens; every
+  // offchain record now belongs to a mandate. The single-tenant data becomes the first workspace's mandate.
+  migrateToAccounts,
 ];
+
+/**
+ * Version 5. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
+ * (which follows the contract the server is configured with) and that mandate's agent (whose key the MCP
+ * server holds), and moves every existing offchain row into that mandate without losing one.
+ */
+function migrateToAccounts(db: Database): void {
+  db.exec(`
+  CREATE TABLE workspaces (
+    id         TEXT NOT NULL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    claimed_at TEXT
+  ) STRICT;
+
+  CREATE TABLE members (
+    id               TEXT NOT NULL PRIMARY KEY,
+    workspace_id     TEXT NOT NULL REFERENCES workspaces (id),
+    name             TEXT NOT NULL,
+    role             TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
+    webauthn_user_id TEXT NOT NULL UNIQUE,
+    created_at       TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX members_workspace ON members (workspace_id);
+
+  CREATE TABLE passkeys (
+    credential_id TEXT    NOT NULL PRIMARY KEY,
+    member_id     TEXT    NOT NULL REFERENCES members (id),
+    public_key    BLOB    NOT NULL,
+    counter       INTEGER NOT NULL,
+    transports    TEXT    NOT NULL,
+    device_type   TEXT    NOT NULL,
+    backed_up     INTEGER NOT NULL,
+    created_at    TEXT    NOT NULL,
+    last_used_at  TEXT
+  ) STRICT;
+  CREATE INDEX passkeys_member ON passkeys (member_id);
+
+  CREATE TABLE sessions (
+    id_hash      TEXT NOT NULL PRIMARY KEY,
+    member_id    TEXT NOT NULL REFERENCES members (id),
+    workspace_id TEXT NOT NULL REFERENCES workspaces (id),
+    created_at   TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    expires_at   TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX sessions_member ON sessions (member_id);
+
+  CREATE TABLE recovery_codes (
+    member_id  TEXT NOT NULL PRIMARY KEY REFERENCES members (id),
+    code_hash  TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+  ) STRICT;
+
+  CREATE TABLE ceremonies (
+    id_hash    TEXT NOT NULL PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    challenge  TEXT NOT NULL,
+    payload    TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  ) STRICT;
+
+  CREATE TABLE access_codes (
+    code_hash    TEXT NOT NULL PRIMARY KEY,
+    kind         TEXT NOT NULL CHECK (kind IN ('claim', 'invite')),
+    workspace_id TEXT REFERENCES workspaces (id),
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    used_at      TEXT,
+    CHECK ((kind = 'claim') = (workspace_id IS NOT NULL))
+  ) STRICT;
+
+  CREATE TABLE mandates (
+    id             TEXT NOT NULL PRIMARY KEY,
+    workspace_id   TEXT NOT NULL REFERENCES workspaces (id),
+    name           TEXT NOT NULL,
+    deployment     TEXT CHECK (deployment IN ('env')),
+    chain_id       INTEGER,
+    policy_address TEXT,
+    deploy_block   INTEGER,
+    created_at     TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX mandates_workspace ON mandates (workspace_id);
+  CREATE UNIQUE INDEX mandates_env ON mandates (deployment) WHERE deployment IS NOT NULL;
+
+  CREATE TABLE agents (
+    id         TEXT NOT NULL PRIMARY KEY,
+    mandate_id TEXT NOT NULL UNIQUE REFERENCES mandates (id),
+    name       TEXT NOT NULL,
+    signer     TEXT NOT NULL CHECK (signer IN ('env', 'console')),
+    address    TEXT,
+    sealed_key TEXT,
+    created_at TEXT NOT NULL,
+    CHECK ((signer = 'env') = (sealed_key IS NULL)),
+    CHECK ((signer = 'env') = (id = 'env'))
+  ) STRICT;
+
+  CREATE TABLE agent_tokens (
+    id           TEXT NOT NULL PRIMARY KEY,
+    agent_id     TEXT NOT NULL REFERENCES agents (id),
+    name         TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    source       TEXT NOT NULL CHECK (source IN ('console', 'env')),
+    created_at   TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at   TEXT
+  ) STRICT;
+  CREATE INDEX agent_tokens_agent ON agent_tokens (agent_id);
+  `);
+
+  const now = new Date().toISOString();
+  const workspaceId = newId("wsp");
+  const mandateId = newId("mnd");
+  db.prepare("INSERT INTO workspaces (id, name, created_at, claimed_at) VALUES (?, ?, ?, NULL)").run(
+    workspaceId,
+    "First workspace",
+    now,
+  );
+  db.prepare(
+    "INSERT INTO mandates (id, workspace_id, name, deployment, created_at) VALUES (?, ?, ?, 'env', ?)",
+  ).run(mandateId, workspaceId, "Mandate", now);
+  db.prepare(
+    "INSERT INTO agents (id, mandate_id, name, signer, created_at) VALUES ('env', ?, ?, 'env', ?)",
+  ).run(mandateId, "Agent", now);
+
+  // Each offchain table is rebuilt with its mandate in the key, copying the rows in their original order
+  // (plans and payments are ordered by rowid among equal times).
+  const scoped: { table: string; create: string; columns: string }[] = [
+    {
+      table: "holdings",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id) PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL`,
+      columns: "payload, updated_at",
+    },
+    {
+      table: "decision_contexts",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), hash TEXT NOT NULL, document TEXT NOT NULL, stored_at TEXT NOT NULL,
+        PRIMARY KEY (mandate_id, hash)`,
+      columns: "hash, document, stored_at",
+    },
+    {
+      table: "hedge_plans",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), plan_id TEXT NOT NULL, asset TEXT NOT NULL, request_text TEXT NOT NULL,
+        created_at TEXT NOT NULL, plan TEXT NOT NULL, stored_at TEXT NOT NULL, PRIMARY KEY (mandate_id, plan_id)`,
+      columns: "plan_id, asset, request_text, created_at, plan, stored_at",
+    },
+    {
+      table: "policy_change_requests",
+      create: `id TEXT NOT NULL PRIMARY KEY, mandate_id TEXT NOT NULL REFERENCES mandates (id), agent_address TEXT NOT NULL,
+        proposed TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+        resolved_at TEXT, applied_tx_hash TEXT`,
+      columns: "id, agent_address, proposed, reason, status, created_at, resolved_at, applied_tx_hash",
+    },
+    {
+      table: "pairings",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), agent_address TEXT NOT NULL, agent_name TEXT NOT NULL,
+        server_version TEXT NOT NULL, status TEXT NOT NULL, announced_at TEXT NOT NULL, confirmed_at TEXT,
+        confirmed_by TEXT, PRIMARY KEY (mandate_id, agent_address)`,
+      columns: "agent_address, agent_name, server_version, status, announced_at, confirmed_at, confirmed_by",
+    },
+    {
+      table: "intent_context_links",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), deployment_id TEXT NOT NULL, intent_id INTEGER NOT NULL,
+        hash TEXT NOT NULL, tx_hash TEXT NOT NULL, linked_at TEXT NOT NULL,
+        PRIMARY KEY (mandate_id, deployment_id, intent_id)`,
+      columns: "deployment_id, intent_id, hash, tx_hash, linked_at",
+    },
+    {
+      table: "signal_payments",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), receipt_id TEXT NOT NULL, paid_at TEXT NOT NULL, payment TEXT NOT NULL,
+        recorded_at TEXT NOT NULL, PRIMARY KEY (mandate_id, receipt_id)`,
+      columns: "receipt_id, paid_at, payment, recorded_at",
+    },
+    {
+      table: "signal_budget",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id) PRIMARY KEY, as_of TEXT NOT NULL, snapshot TEXT NOT NULL,
+        stored_at TEXT NOT NULL`,
+      columns: "as_of, snapshot, stored_at",
+    },
+  ];
+  for (const { table, create, columns } of scoped) {
+    db.exec(`CREATE TABLE ${table}_v5 (${create}) STRICT`);
+    db.prepare(
+      `INSERT INTO ${table}_v5 (mandate_id, ${columns}) SELECT ?, ${columns} FROM ${table} ORDER BY rowid`,
+    ).run(mandateId);
+    db.exec(`DROP TABLE ${table}`);
+    db.exec(`ALTER TABLE ${table}_v5 RENAME TO ${table}`);
+  }
+  db.exec(`
+  CREATE INDEX policy_change_requests_created ON policy_change_requests (mandate_id, created_at);
+  CREATE INDEX signal_payments_paid ON signal_payments (mandate_id, paid_at);
+  `);
+}
 
 /**
  * `node:sqlite` is loaded through `process.getBuiltinModule` so bundlers never try to resolve it, and its
@@ -163,12 +365,15 @@ export function openDatabase(dataDir: string): Database {
   return db;
 }
 
-function migrate(db: Database): void {
+/** Upgrades the schema to `target` (the latest by default; tests build older versions with it). */
+export function migrate(db: Database, target = MIGRATIONS.length): void {
   const row = db.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
   const current = row?.user_version ?? 0;
-  for (let version = current; version < MIGRATIONS.length; version += 1) {
+  for (let version = current; version < target; version += 1) {
+    const step = MIGRATIONS[version];
     transaction(db, () => {
-      db.exec(MIGRATIONS[version] ?? "");
+      if (typeof step === "function") step(db);
+      else db.exec(step ?? "");
       db.exec(`PRAGMA user_version = ${String(version + 1)}`);
     });
   }
