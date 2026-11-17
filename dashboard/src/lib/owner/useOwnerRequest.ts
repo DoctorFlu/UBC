@@ -5,7 +5,7 @@ import { BaseError, UserRejectedRequestError } from "viem";
 import { useConfig } from "wagmi";
 import { signMessage } from "wagmi/actions";
 
-import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useLiveConsole } from "@/lib/live/LiveConsole";
 import { type OwnerAction, newNonce, ownerRequestMessage } from "@/lib/owner-request";
 
 import { useOwnerAccess } from "./access";
@@ -30,7 +30,7 @@ async function errorMessage(response: Response): Promise<string> {
 export function useOwnerRequest() {
   const config = useConfig();
   const access = useOwnerAccess();
-  const snapshot = useSnapshot();
+  const { snapshot, refresh } = useLiveConsole();
   const [pending, setPending] = useState(false);
 
   const request = useCallback(
@@ -64,7 +64,9 @@ export function useOwnerRequest() {
           body: JSON.stringify({ payload, auth: { issuedAt, nonce, signature } }),
         });
         if (!response.ok) return { ok: false, message: await errorMessage(response) };
-        return { ok: true, data: (await response.json()) as T };
+        const data = (await response.json()) as T;
+        await refresh();
+        return { ok: true, data };
       } catch (error) {
         if (error instanceof BaseError && error.walk((cause) => cause instanceof UserRejectedRequestError)) {
           return { ok: false, message: "You declined the signature in your wallet. Nothing changed." };
@@ -77,7 +79,7 @@ export function useOwnerRequest() {
         setPending(false);
       }
     },
-    [access, config, snapshot.contract?.address, snapshot.network.chainId],
+    [access, config, refresh, snapshot.contract?.address, snapshot.network.chainId],
   );
 
   return { request, pending, access };

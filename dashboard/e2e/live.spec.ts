@@ -366,6 +366,45 @@ test("the owner can dismiss a change request, and the rules stay as they are", a
   expect((await snapshot(baseURL)).chain?.rules).toEqual(rules);
 });
 
+test("saved holdings show as saved, with their preview, even while the live stream is quiet", async ({
+  page,
+}) => {
+  // Behind the public proxy the event stream can stall or drop; the owner's own save must still show.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/console/events", async (route) => {
+    await held;
+    await route.abort().catch(() => {});
+  });
+  await open(page, "/hedge");
+  const preview = page.getByTestId("hedge-preview");
+  await expect(preview).toHaveText("No preview: Save your BTC holding to see a preview.");
+  const status = page.getByTestId("holdings-status");
+  await expect(status).toHaveText("Never saved.");
+
+  const save = page.getByRole("button", { name: "Sign and save" });
+  await page.getByRole("button", { name: "Add an asset" }).click();
+  const holding = page.getByTestId("holding-row").last();
+  await holding.getByRole("textbox", { name: "Asset" }).fill("BTC");
+  await holding.getByRole("textbox", { name: "Quantity" }).fill("0.05");
+  // While edited, the line under the rows says the list is not saved yet.
+  await expect(status).toHaveText("Not saved yet.");
+  await save.click();
+  await expect(toast(page)).toContainText("Holdings saved");
+  await expect(status).toHaveText(/^Saved just now/);
+  await expect(save).toBeDisabled();
+  await expect(preview).toContainText("Preview, not the agent’s plan.");
+  await expect(preview).toContainText("on your 0.05 BTC");
+
+  // Leave the holdings empty again for the next test.
+  await holding.getByRole("button", { name: /Remove/ }).click();
+  await save.click();
+  await expect(preview).toHaveText("No preview: Save your BTC holding to see a preview.");
+  release();
+});
+
 test("the hedge view: an honest empty state and preview, then the agent's plan, executed onchain", async ({
   page,
 }) => {

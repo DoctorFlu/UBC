@@ -15,12 +15,18 @@ interface LiveConsoleValue {
     test: (snapshot: ConsoleSnapshot) => boolean,
     timeoutMs: number,
   ) => Promise<ConsoleSnapshot | null>;
+  /**
+   * Reads the snapshot once over plain HTTP. An owner's write calls it after it succeeds, so the page shows
+   * the change even when the event stream is stalled or reconnecting, as it can be behind a proxy.
+   */
+  refresh: () => Promise<void>;
 }
 
 const LiveConsoleContext = createContext<LiveConsoleValue | null>(null);
 const NetworkContext = createContext<ConsoleNetwork | null>(null);
 
 export const EVENTS_PATH = "/api/console/events";
+export const SNAPSHOT_PATH = "/api/console/snapshot";
 const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
 
@@ -43,6 +49,11 @@ export function LiveConsoleProvider({
   const [connection, setConnection] = useState<StreamConnection>("connecting");
   const latest = useRef(initial);
   const waiters = useRef(new Set<(snapshot: ConsoleSnapshot) => void>());
+  const accept = useCallback((next: ConsoleSnapshot) => {
+    latest.current = next;
+    setSnapshot(next);
+    for (const waiter of [...waiters.current]) waiter(next);
+  }, []);
 
   useEffect(() => {
     if (!follow) return undefined;
@@ -50,11 +61,6 @@ export function LiveConsoleProvider({
     let retry: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let fresh = true;
-    const accept = (next: ConsoleSnapshot) => {
-      latest.current = next;
-      setSnapshot(next);
-      for (const waiter of [...waiters.current]) waiter(next);
-    };
     const connect = () => {
       const current = new EventSource(EVENTS_PATH);
       source = current;
@@ -90,7 +96,20 @@ export function LiveConsoleProvider({
       clearTimeout(retry);
       source?.close();
     };
-  }, [follow]);
+  }, [follow, accept]);
+
+  const refresh = useCallback(async () => {
+    if (!follow) return;
+    try {
+      const response = await fetch(SNAPSHOT_PATH, { cache: "no-store" });
+      if (!response.ok) return;
+      const next = (await response.json()) as ConsoleSnapshot;
+      // Newer only: the stream may already have delivered this change, or a later one.
+      if (next.seq > latest.current.seq) accept(next);
+    } catch {
+      // The stream still brings the change once it is back.
+    }
+  }, [follow, accept]);
 
   const waitFor = useCallback(
     (test: (snapshot: ConsoleSnapshot) => boolean, timeoutMs: number) =>
@@ -113,7 +132,10 @@ export function LiveConsoleProvider({
     [],
   );
 
-  const value = useMemo(() => ({ snapshot, connection, waitFor }), [snapshot, connection, waitFor]);
+  const value = useMemo(
+    () => ({ snapshot, connection, waitFor, refresh }),
+    [snapshot, connection, waitFor, refresh],
+  );
   return (
     <LiveConsoleContext value={value}>
       <NetworkContext value={snapshot.network}>{children}</NetworkContext>
