@@ -385,23 +385,26 @@ test.describe("seeded demo", () => {
     await expect(intents.nth(1)).toContainText("No result recorded yet.");
     await expect(intents.nth(0).getByRole("button", { name: "Copy transaction" })).toHaveCount(3);
 
-    // Each link opens its record: the intent, the payment row, and the plan on the hedge page.
+    // Each link opens its record: the intent, the payment row, and the plan on the hedge page. Each step
+    // waits for its navigation, not a fixed time, so a busy machine cannot run a check out mid-load.
     await intents
       .nth(0)
       .getByRole("link", { name: `Intent #${filled.id.toString()}`, exact: true })
       .click();
+    await page.waitForURL(new RegExp(`/activity/${filled.id.toString()}$`));
     await expect(
       page.getByRole("heading", { level: 1, name: `Intent #${filled.id.toString()}` }),
     ).toBeVisible();
     // ...and the intent page leads back to the chain of the plan its reason names.
     await page.getByTestId("sealed-reason").getByRole("link", { name: stored.planId }).click();
+    await page.waitForURL(/\/hedge\/plans\//);
     await expect(page.getByRole("heading", { level: 1, name: "Evidence chain" })).toBeVisible();
     await signal.getByRole("link", { name: "Payment record" }).click();
-    await expect(page).toHaveURL(new RegExp(`/payments#payment-${DEMO_RECEIPT}$`));
+    await page.waitForURL(new RegExp(`/payments#payment-${DEMO_RECEIPT}$`));
     await expect(page.locator(`#payment-${DEMO_RECEIPT}`)).toBeVisible();
     await page.goBack();
     await page.getByTestId("evidence-plan").getByRole("link", { name: "Hedge page" }).click();
-    await expect(page).toHaveURL(/\/hedge\?asset=BTC$/);
+    await page.waitForURL(/\/hedge\?asset=BTC$/);
     await expect(page.getByTestId("agent-plan")).toHaveAttribute("data-plan-id", stored.planId);
   });
 

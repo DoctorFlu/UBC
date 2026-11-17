@@ -211,7 +211,13 @@ test.describe("a second workspace", () => {
     await expect(agents.getByText("No tokens yet. Create one to connect Grok Bot.")).toBeVisible();
     await hydrated(page);
     await agents.getByLabel("New token").fill("Grok Bot");
+    // Wait for the console's answer, not a fixed time: the dialog opens once it arrives.
+    const made = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && /\/tokens$/.test(new URL(response.url()).pathname),
+    );
     await agents.getByRole("button", { name: "Create token" }).click();
+    expect((await made).status()).toBe(201);
     const dialog = page.getByRole("dialog", { name: "Copy your token now" });
     await expect(dialog).toBeVisible();
     token = (await dialog.getByTestId("new-token").textContent())?.trim() ?? "";
@@ -249,7 +255,9 @@ test.describe("a second workspace", () => {
     const agents = page.getByRole("region", { name: "Agents" });
     await agents.getByRole("button", { name: "Revoke" }).click();
     const confirm = page.getByRole("dialog", { name: 'Revoke "Grok Bot"?' });
+    const revoked = page.waitForResponse((response) => response.request().method() === "DELETE");
     await confirm.getByRole("button", { name: "Revoke token" }).click();
+    expect((await revoked).status()).toBe(200);
     await expect(page.getByRole("region", { name: "Notifications" })).toContainText('Revoked "Grok Bot"');
     await expect(agents.getByText(/^Revoked /)).toBeVisible();
     expect(await resolveToken(baseURL ?? "", token)).toBeNull();
