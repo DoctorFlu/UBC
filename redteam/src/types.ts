@@ -2,10 +2,14 @@ import type { Address, Hex } from "viem";
 import type { RefusalCode, Venue } from "@mandate/devchain";
 import type { PolicyClient, PolicyRules } from "@mandate/shared";
 import type { ChainAttacker } from "./chain";
+import type { ConsoleApi } from "./console";
 import type { McpAttacker } from "./mcp";
 
-/** Where the attack comes from: the MCP server (a hostile Grok Bot) or the chain (a stolen agent key). */
-export type Surface = "mcp" | "chain";
+/**
+ * Where the attack comes from: the MCP server (a hostile Grok Bot, or another workspace's), the chain (a
+ * stolen agent key), or the console's API (a signed-in member of another workspace).
+ */
+export type Surface = "mcp" | "chain" | "console";
 
 /**
  * - `held`: the mandate (or the server in front of it) stopped the attempt.
@@ -106,7 +110,26 @@ export interface AttackContext {
   outsider: Address;
   /** The MCP server's log lines, when the red team runs the server itself; null against the live stack. */
   serverLogs: readonly string[] | null;
+  /** Another workspace's agent on the same MCP server; null against the live stack. */
+  intruder: Intruder | null;
+  /** The real console's API with two workspaces; null against the live stack. */
+  consoleApi: ConsoleApi | null;
   state: SharedState;
+}
+
+/**
+ * The agent of a workspace that signed up on its own, with a console-issued token for the same MCP
+ * server, the way a phase 1 sign-up gets one: no contract yet and no key in the console.
+ */
+export interface Intruder {
+  agentId: string;
+  mandateId: string;
+  /** The MCP surface with the intruder's token. */
+  mcp: McpAttacker;
+  /** Revokes the intruder's token in the console, as its owner does in Setup. */
+  revoke: () => void;
+  /** The first mandate's records in the console, summarized, to show the intruder changed none. */
+  firstMandateRecords: () => string;
 }
 
 export interface AttackRecord {

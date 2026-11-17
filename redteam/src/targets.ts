@@ -13,7 +13,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
 import { createLogger, createMandateServer, parseConfig } from "@mandate/agent";
-import { createFakeConsole } from "@mandate/agent/testing";
+import { createFakeConsole, type FakeConsoleState } from "@mandate/agent/testing";
 import {
   buildContracts,
   devAccount,
@@ -36,7 +36,9 @@ import {
 import { localDeploymentPath, resolvePolicyDeployment } from "@mandate/shared/node";
 import { ChainAttacker, readClient } from "./chain";
 import { CRYPTO_SYMBOL, fixtureMarkets, SPORTS_SYMBOL } from "./fixtures";
+import { type ConsoleApi, startConsoleApi } from "./console";
 import { field, McpAttacker } from "./mcp";
+import type { Intruder } from "./types";
 
 /** Ports the live stack uses. The self-contained run never binds them. */
 const RESERVED_PORTS = new Set([3000, 8545, 8787, 8788]);
@@ -59,6 +61,10 @@ export interface TargetHandle {
   venue: Venue;
   /** The server's log lines, for the self-contained run only. */
   serverLogs: string[];
+  /** Another workspace's agent on the same MCP server, for the self-contained run only. */
+  intruder: Intruder | null;
+  /** The real console's API with two workspaces, for the self-contained run only. */
+  consoleApi: ConsoleApi | null;
   stop: () => Promise<void>;
 }
 
@@ -95,6 +101,21 @@ function agentAttacker(rpcUrl: string, chainId: number, policy: Address): ChainA
   return new ChainAttacker({ rpcUrl, chainId, policy, account: privateKeyToAccount(devPrivateKey("agent")) });
 }
 
+/** Every record of one mandate in the fake console, as one comparable string (requests excluded). */
+function recordsSummary(state: FakeConsoleState): string {
+  return JSON.stringify({
+    holdings: state.holdings,
+    contexts: [...state.contexts.keys()].sort(),
+    intentContexts: [...state.intentContexts.entries()].sort(([a], [b]) => a - b),
+    plans: [...state.plans.keys()].sort(),
+    changeRequests: [...state.changeRequests.values()].map((r) => [r.id, r.status]),
+    pairing: state.pairing,
+    signalPayments: [...state.signalPayments.keys()].sort(),
+    signalBudget: state.signalBudget,
+    settlements: [...state.settlements.keys()].sort((a, b) => a - b),
+  });
+}
+
 // ------------------------------------------------------------------ self-contained
 
 export async function startSelf(options: {
@@ -104,6 +125,7 @@ export async function startSelf(options: {
   if (options.build !== false) buildContracts();
   const devchain = await startDevchain({ contract: options.contract, port: await freePort() });
   const servers: ServerType[] = [];
+  let consoleApi: ConsoleApi | null = null;
   try {
     const policy = devchain.deployment.address;
     const chainId = await readClient(devchain.rpcUrl).getChainId();
@@ -144,6 +166,21 @@ export async function startSelf(options: {
     servers.push(serve({ fetch: server.fetch, port: mcpPort, hostname: "127.0.0.1" }));
     const mcpUrl = `http://127.0.0.1:${mcpPort}`;
 
+    // A workspace that signed up on its own: its agent has a console-issued token for the same server.
+    const other = fakeConsole.addAgent();
+    const intruder: Intruder = {
+      agentId: other.agentId,
+      mandateId: other.mandateId,
+      mcp: new McpAttacker(mcpUrl, other.token),
+      revoke: () => {
+        fakeConsole.revokeToken(other.token);
+      },
+      firstMandateRecords: () => recordsSummary(fakeConsole.state),
+    };
+    // The real console's API, for attacks between two signed-in workspaces.
+    consoleApi = await startConsoleApi(await freePort());
+    const api = consoleApi;
+
     return {
       target: "self",
       contract: options.contract,
@@ -159,14 +196,16 @@ export async function startSelf(options: {
       markets: { crypto: CRYPTO_SYMBOL, sports: SPORTS_SYMBOL },
       venue: simulatedVenue(fixtureMarkets()),
       serverLogs,
+      intruder,
+      consoleApi: api,
       stop: async () => {
         await server.endpoint.close();
-        await Promise.all(servers.map(close));
+        await Promise.all([...servers.map(close), api.stop()]);
         await devchain.stop();
       },
     };
   } catch (error) {
-    await Promise.all(servers.map(close));
+    await Promise.all([...servers.map(close), consoleApi?.stop()]);
     await devchain.stop();
     throw error;
   }
@@ -311,6 +350,8 @@ export async function connectStack(): Promise<TargetHandle> {
     markets: { crypto, sports },
     venue: simulatedVenue(createGeminiClient({ maxRetries: 1, timeoutMs: 8_000 })),
     serverLogs: [],
+    intruder: null,
+    consoleApi: null,
     stop: () => Promise.resolve(),
   };
 }

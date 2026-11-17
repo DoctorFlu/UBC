@@ -39,6 +39,8 @@ export async function runRedTeam(
     venue: target.venue,
     outsider: devAccount("outsider").address,
     serverLogs: target.target === "self" ? target.serverLogs : null,
+    intruder: target.intruder,
+    consoleApi: target.consoleApi,
     state: { heldIntentId: null, heldIntentIds: [], approved: [], injectionIntentId: null, untradeable: [] },
   };
   const before = {
