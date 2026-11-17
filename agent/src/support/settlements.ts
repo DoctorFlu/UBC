@@ -13,8 +13,15 @@ export const SettlementRowSchema = z.object({
   expiresAt: z.string(),
   resolution: z.enum(["yes", "no"]).describe("How Gemini resolved the contract"),
   costCents: z.int().describe("What the position cost: the fill"),
+  feeCents: z
+    .int()
+    .optional()
+    .describe(
+      "Gemini's fee on the fill, estimated from its published schedule (no Gemini answer reports it). " +
+        "Absent when there is none: a simulated fill pays no fee",
+    ),
   payoutCents: z.int().describe("What it paid at settlement: $1 per contract on the winning side"),
-  pnlCents: z.int().describe("payoutCents - costCents"),
+  pnlCents: z.int().describe("The net after fees: payoutCents - costCents - feeCents"),
   resolvedAt: z.string().describe("When Gemini published the outcome"),
 });
 export type SettlementRow = z.infer<typeof SettlementRowSchema>;
@@ -22,9 +29,23 @@ export type SettlementRow = z.infer<typeof SettlementRowSchema>;
 export const SettlementTotalsSchema = z.object({
   positions: z.int(),
   costCents: z.int(),
+  feeCents: z
+    .int()
+    .optional()
+    .describe(
+      "Gemini's fees on these fills, estimated from its published schedule; absent when none was charged " +
+        "(simulated fills). When present, say once that fees are estimated.",
+    ),
   payoutCents: z.int(),
-  pnlCents: z.int(),
+  pnlCents: z.int().describe("The net after fees: payoutCents - costCents - feeCents"),
 });
+export type SettlementTotalsRow = z.infer<typeof SettlementTotalsSchema>;
+
+/** Settlement totals as the tools report them: the fee only when one was estimated. */
+export function totalsRow(docs: Iterable<Settlement>): SettlementTotalsRow {
+  const { positions, costCents, feeCents, payoutCents, pnlCents, feesEstimated } = settlementTotals(docs);
+  return { positions, costCents, ...(feesEstimated ? { feeCents } : {}), payoutCents, pnlCents };
+}
 
 export const LadderSettlementSchema = SettlementTotalsSchema.extend({
   eventTicker: z.string(),
@@ -38,6 +59,7 @@ export function settlementRow(doc: Settlement): SettlementRow {
     expiresAt: doc.expiresAt,
     resolution: doc.resolution,
     costCents: doc.costCents,
+    ...(doc.feeCents === undefined ? {} : { feeCents: doc.feeCents }),
     payoutCents: doc.payoutCents,
     pnlCents: doc.pnlCents,
     resolvedAt: doc.resolvedAt,
@@ -73,15 +95,29 @@ export function settledLadders(settlements: readonly StoredSettlement[]): Ladder
           .map((doc) => doc.expiresAt)
           .sort()
           .at(-1) ?? "",
-      ...settlementTotals(docs),
+      ...totalsRow(docs),
     }))
     .sort((a, b) => b.expiresAt.localeCompare(a.expiresAt) || a.eventTicker.localeCompare(b.eventTicker));
 }
 
-/** "cost $34.00, paid $40.00, net +$6.00" */
-export function moneyLine(totals: { costCents: number; payoutCents: number; pnlCents: number }): string {
+/**
+ * "cost $34.00, paid $40.00, net +$6.00", or with Gemini's fee "cost $0.97, fees $0.01 (estimated), paid
+ * $1.00, net after fees +$0.02": the fee is said once, as estimated.
+ */
+export function moneyLine(totals: {
+  costCents: number;
+  feeCents?: number | undefined;
+  payoutCents: number;
+  pnlCents: number;
+}): string {
   const net = totals.pnlCents > 0 ? `+${formatCents(totals.pnlCents)}` : formatCents(totals.pnlCents);
-  return `cost ${formatCents(totals.costCents)}, paid ${formatCents(totals.payoutCents)}, net ${net}`;
+  if (totals.feeCents === undefined) {
+    return `cost ${formatCents(totals.costCents)}, paid ${formatCents(totals.payoutCents)}, net ${net}`;
+  }
+  return (
+    `cost ${formatCents(totals.costCents)}, fees ${formatCents(totals.feeCents)} (estimated), ` +
+    `paid ${formatCents(totals.payoutCents)}, net after fees ${net}`
+  );
 }
 
 /** "Ladder BTC2611202200 (expired 2026-11-20T22:00:00.000Z) settled: 2 positions, cost ..., paid ..., net ...." */

@@ -53,6 +53,7 @@ function main(): void {
         version: SERVER_VERSION,
         keepAliveTimeoutMs: KEEP_ALIVE_TIMEOUT_MS,
         tools: server.tools.map((tool) => tool.name),
+        marketData: `${config.marketData.environment} (${config.marketData.settings})`,
         envFile: envFileLabel,
       });
     },

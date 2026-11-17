@@ -4,6 +4,7 @@
  * into a verdict the agent can explain.
  */
 import * as z from "zod";
+import { environmentMismatch } from "@mandate/gemini";
 import {
   categoryLabel,
   type CategoryId,
@@ -15,6 +16,7 @@ import type { ToolContext } from "../context";
 import { approved, held, rejected, type Verdict } from "../mcp/envelope";
 import type { AgentPolicy } from "../services";
 import { describeFailure, type Failure } from "../support/failures";
+import { reason } from "../mcp/envelope";
 import {
   AFTER_REJECTION,
   approvalHit,
@@ -101,6 +103,22 @@ export async function proposeIntent(
   context: Omit<DecisionContext, "version" | "createdAt">,
   options: { linkContext?: boolean } = {},
 ): Promise<ProposalOutcome> {
+  const disagreement = await consoleDisagreement(ctx);
+  if (disagreement !== null) {
+    return {
+      kind: "failed",
+      failure: disagreement,
+      proposal: {
+        trade: tradeView(trade),
+        context: null,
+        intentId: null,
+        decision: null,
+        rule: null,
+        txHash: null,
+        explorerUrl: null,
+      },
+    };
+  }
   const sealed = await sealContext(ctx, context);
   const base = {
     trade: tradeView(trade),
@@ -165,6 +183,48 @@ export async function proposeIntent(
     context: { ...base.context, contextHashRecorded: result.contextHashRecorded, contextLinked },
   };
   return { kind: "submitted", proposal, result, verdict: verdictOf(result, rule) };
+}
+
+/** When the console last agreed, per server configuration: a proposal in the next minute does not ask again. */
+const agreedAt = new WeakMap<ToolContext["config"], number>();
+const AGREEMENT_TTL_MS = 60_000;
+
+/**
+ * Whether the console reads another Gemini than this server plans on. The owner approves on the console's
+ * prices and strikes, and the executor trades where the console is configured to read (it refuses to start
+ * otherwise), so a proposal planned on the other exchange is never sent: it would name strikes the venue
+ * does not list. A console that does not answer does not stop the proposal, as before.
+ */
+async function consoleDisagreement(ctx: ToolContext): Promise<Failure | null> {
+  const client = ctx.console;
+  if (client === undefined) return null;
+  const now = ctx.clock.now().getTime();
+  if (now - (agreedAt.get(ctx.config) ?? Number.NEGATIVE_INFINITY) < AGREEMENT_TTL_MS) return null;
+  let theirs: Awaited<ReturnType<typeof client.getMarketEnvironment>>;
+  try {
+    theirs = await client.getMarketEnvironment();
+  } catch (error) {
+    ctx.logger.warn("console.market_environment_unknown", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+  const mismatch = environmentMismatch(
+    { name: "This MCP server", ...ctx.config.marketData },
+    { name: "the console", environment: theirs, settings: "its /api/health" },
+  );
+  if (mismatch === null) {
+    agreedAt.set(ctx.config, now);
+    return null;
+  }
+  ctx.logger.error("console.market_environment_mismatch", { message: mismatch });
+  return {
+    reason: reason("MARKET_ENVIRONMENT_MISMATCH", `${mismatch} Nothing was proposed.`),
+    nextAction: {
+      actor: "owner",
+      hint: "Give the MCP server the same EXECUTOR_VENUE and GEMINI_ENV as the console and the executor, then restart it.",
+    },
+  };
 }
 
 function verdictOf(result: ProposeResult, rule: RuleHit | null): Verdict {

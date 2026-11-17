@@ -21,19 +21,12 @@
  */
 import { createHmac } from "node:crypto";
 import { z } from "zod";
+import { GEMINI_HOSTS, isLoopbackTestUrl, type GeminiEnvironment } from "./environment";
 import type { FetchLike } from "./http";
 import { classifyAnswer, GeminiPrivateError } from "./private-errors";
 import { TokenBucket } from "./rate-limiter";
 
-/** Gemini's REST hosts. The sandbox (exchange.sandbox.gemini.com accounts) trades test funds only. */
-export const GEMINI_HOSTS = {
-  sandbox: "https://api.sandbox.gemini.com",
-  production: "https://api.gemini.com",
-} as const;
-
-export type GeminiEnvironment = keyof typeof GEMINI_HOSTS;
-
-export const GEMINI_ENVIRONMENTS = Object.keys(GEMINI_HOSTS) as GeminiEnvironment[];
+export { GEMINI_ENVIRONMENTS, GEMINI_HOSTS, isLoopbackTestUrl, type GeminiEnvironment } from "./environment";
 
 export interface GeminiCredentials {
   apiKey: string;
@@ -204,21 +197,6 @@ export interface GeminiPrivateClient {
   orderHistory(symbol?: string): Promise<PrivateOrder[]>;
   /** The account's settled positions, most recent first (at most 1000). */
   settledPositions(): Promise<SettledPosition[]>;
-}
-
-/** True for `http://127.0.0.1:<port>` and `http://localhost:<port>`, with nothing after the port. */
-export function isLoopbackTestUrl(value: string): boolean {
-  if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  return (
-    url.protocol === "http:" &&
-    (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
-    url.pathname.replace(/\/+$/, "") === "" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.search === "" &&
-    url.hash === ""
-  );
 }
 
 /** The host a redirect names, for the error message only; never requested. */

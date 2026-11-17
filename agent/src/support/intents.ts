@@ -32,7 +32,14 @@ export const IntentRowSchema = z.object({
   reasonCode: z.string().nullable(),
   proposedAt: z.string(),
   filledCents: z.int().nullable().describe("Amount filled, once the executor recorded a result"),
-  pnlCents: z.int().nullable(),
+  pnlCents: z
+    .int()
+    .nullable()
+    .describe(
+      "What the contract recorded as the result at the fill: 0 for every fill today, because the contract " +
+        "cannot record the settlement (contract request 2.4). Never report it as profit: the position's result " +
+        "is settlement.pnlCents once it settles, and there is none before its market expires.",
+    ),
   contextHash: z.string().nullable().describe("Hash of the sealed decision context, when known"),
   outOfRange: z
     .record(z.string(), z.string())

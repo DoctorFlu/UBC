@@ -32,18 +32,24 @@ import { verifiedSettlements } from "@/lib/settlement/settlement";
 
 import styles from "./activity.module.css";
 
-/** What a filled position paid when its market resolved; empty until it settles. */
+/**
+ * What a filled position paid when its market resolved and its net, after Gemini's estimated fee when it
+ * paid one (the page's totals say once that fees are estimated); empty until it settles.
+ */
 function SettledCell({ settlement }: { settlement: Settlement | undefined }) {
   if (!settlement) return null;
   return (
     <span className={styles.settled} data-testid="intent-settled">
-      {settlement.payoutCents > 0 ? (
-        <>
-          Paid <Money cents={settlement.payoutCents} />
-        </>
-      ) : (
-        "Paid nothing"
-      )}
+      {/* One line: in the column below, bare text and the amount would each take a line of their own. */}
+      <span>
+        {settlement.payoutCents > 0 ? (
+          <>
+            Paid <Money cents={settlement.payoutCents} />
+          </>
+        ) : (
+          "Paid nothing"
+        )}
+      </span>
       <span className={styles.net}>
         Net <Money cents={settlement.pnlCents} sign="always" />
       </span>
@@ -230,7 +236,10 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           hint={
             settled.positions === 0
               ? "Nothing has settled yet"
-              : `${formatCount(settled.positions)} settled, cost ${formatUsdCents(settled.costCents)}, net ${formatUsdCents(settled.pnlCents, { sign: "always" })}`
+              : `${formatCount(settled.positions)} settled, cost ${formatUsdCents(settled.costCents)}, ` +
+                (settled.feesEstimated ? `fees ${formatUsdCents(settled.feeCents)}, ` : "") +
+                `net ${formatUsdCents(settled.pnlCents, { sign: "always" })}` +
+                (settled.feesEstimated ? " (fees estimated)" : "")
           }
         />
       </StatGroup>

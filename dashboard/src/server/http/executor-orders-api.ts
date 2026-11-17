@@ -1,5 +1,6 @@
 import "server-only";
 
+import { announcedSource, environmentMismatch, type MarketDataSource } from "@mandate/gemini";
 import {
   hashExecutorRecord,
   isFinalVenueOrderState,
@@ -239,37 +240,52 @@ export const putVenueOrder = guarded("put venue order", async (request, service,
   return json(storedView(row), 201);
 });
 
-export const putExecutorVenue = guarded("put executor venue", async (request, service) => {
-  const body = await readBody(request, putExecutorVenueRequestSchema);
-  if (!body.ok) return body.response;
-  const { document, signature } = body.data;
-  if ((document.venue === "simulated") !== (document.environment === null)) {
-    return apiError(
-      422,
-      "invalid_body",
-      "The simulated venue has no environment, and Gemini always has one.",
+/**
+ * PUT /api/executor/v1/venue for a console that reads `marketData()` (the route passes `consoleMarketData`).
+ * An executor whose venue reads another Gemini than this console is refused with 409
+ * `environment_mismatch`, naming both sides' settings, and stops there: the owner would otherwise see
+ * prices and strikes from one exchange while orders went to the other.
+ */
+export function putExecutorVenue(
+  marketData: () => Pick<MarketDataSource, "environment" | "settings">,
+): Handler {
+  return guarded("put executor venue", async (request, service) => {
+    const body = await readBody(request, putExecutorVenueRequestSchema);
+    if (!body.ok) return body.response;
+    const { document, signature } = body.data;
+    if ((document.venue === "simulated") !== (document.environment === null)) {
+      return apiError(
+        422,
+        "invalid_body",
+        "The simulated venue has no environment, and Gemini always has one.",
+      );
+    }
+    const hash = hashExecutorRecord(document);
+    const verified = await verifySigned(service, document, hash, signature);
+    if (!verified.ok) return verified.response;
+    const mismatch = environmentMismatch(
+      { name: "This console", ...marketData() },
+      { name: "the executor", ...announcedSource(document.venue, document.environment) },
     );
-  }
-  const hash = hashExecutorRecord(document);
-  const verified = await verifySigned(service, document, hash, signature);
-  if (!verified.ok) return verified.response;
-  const existing = service.venueOrders.venue(verified.deploymentId);
-  const previous = existing ? (existing.document as Partial<ExecutorVenue>) : null;
-  if (
-    previous?.announcedAt !== undefined &&
-    Date.parse(previous.announcedAt) > Date.parse(document.announcedAt)
-  ) {
-    return apiError(409, "stale", "The console holds a newer announcement from the executor.");
-  }
-  service.venueOrders.putVenue(verified.deploymentId, {
-    hash,
-    document,
-    signature: signature.toLowerCase() as Hex,
-    signer: verified.signer,
+    if (mismatch !== null) return apiError(409, "environment_mismatch", mismatch);
+    const existing = service.venueOrders.venue(verified.deploymentId);
+    const previous = existing ? (existing.document as Partial<ExecutorVenue>) : null;
+    if (
+      previous?.announcedAt !== undefined &&
+      Date.parse(previous.announcedAt) > Date.parse(document.announcedAt)
+    ) {
+      return apiError(409, "stale", "The console holds a newer announcement from the executor.");
+    }
+    service.venueOrders.putVenue(verified.deploymentId, {
+      hash,
+      document,
+      signature: signature.toLowerCase() as Hex,
+      signer: verified.signer,
+    });
+    service.venueChanged();
+    return json(
+      { venue: document.venue, environment: document.environment, announcedAt: document.announcedAt },
+      201,
+    );
   });
-  service.venueChanged();
-  return json(
-    { venue: document.venue, environment: document.environment, announcedAt: document.announcedAt },
-    201,
-  );
-});
+}

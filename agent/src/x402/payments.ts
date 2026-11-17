@@ -24,6 +24,7 @@ import {
   type HedgeSignalQuery,
   type SignalErrorCode,
 } from "@mandate/shared";
+import { environmentMismatch, type MarketDataSource } from "@mandate/gemini";
 import { formatUnits } from "viem";
 import {
   PaymentNotSentError,
@@ -77,6 +78,11 @@ export type BuySignalOutcome =
   | { kind: "payment_rejected"; reason: string; budget: BudgetState }
   /** The signal API could not be reached before paying. */
   | { kind: "seller_unreachable"; message: string; budget: BudgetState }
+  /**
+   * The signal API prices another Gemini than the one this server plans on (its free health route says
+   * which). Nothing was signed: a signal on the other exchange's ladder would be paid for and misleading.
+   */
+  | { kind: "environment_mismatch"; message: string; budget: BudgetState }
   /** The paid request failed in a way that leaves it unknown whether it was charged; it counts against the budget. */
   | { kind: "payment_unknown"; message: string; budget: BudgetState };
 
@@ -95,6 +101,11 @@ export interface SignalPaymentsOptions {
   maxPrice: bigint;
   /** Used for the free probe; defaults to the global fetch. */
   fetch?: typeof fetch;
+  /**
+   * Which Gemini this server plans on. When given, the signal API's free `GET /health` must name the same
+   * environment before anything is signed; a signal API that names none reads production.
+   */
+  marketData?: Pick<MarketDataSource, "environment" | "settings">;
 }
 
 export class SignalPayments {
@@ -167,6 +178,8 @@ export class SignalPayments {
       return { kind: "budget_exhausted", price: null, budget: this.budget(at) };
     }
 
+    const agreement = await this.checkEnvironment(request.signal);
+    if (agreement !== null) return { ...agreement, budget: this.budget(at) };
     const probe = await this.probe(url, request.signal);
     if (probe.kind !== "price") return { ...probe, budget: this.budget(at) };
     const { price } = probe;
@@ -261,6 +274,48 @@ export class SignalPayments {
   }
 
   /** The unpaid request: the seller's price, or why it will not sell. */
+  /** Null when the signal API reads the same Gemini as this server (or no environment is configured). */
+  private async checkEnvironment(
+    signal: AbortSignal | undefined,
+  ): Promise<{ kind: "environment_mismatch" | "seller_unreachable"; message: string } | null> {
+    const own = this.options.marketData;
+    if (own === undefined) return null;
+    const origin = new URL(this.options.signalsUrl).origin;
+    let body: unknown;
+    try {
+      const timeout = AbortSignal.timeout(PROBE_TIMEOUT_MS);
+      const response = await this.fetchImpl(`${this.options.signalsUrl.replace(/\/+$/, "")}/health`, {
+        headers: { accept: "application/json" },
+        signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
+      });
+      if (!response.ok) {
+        return {
+          kind: "seller_unreachable",
+          message: `The signal API answered HTTP ${response.status} on /health.`,
+        };
+      }
+      body = await response.json();
+    } catch (error) {
+      if (signal?.aborted === true) throw signal.reason;
+      return {
+        kind: "seller_unreachable",
+        message: `The signal API at ${origin} did not answer (${error instanceof Error ? error.name : "error"}).`,
+      };
+    }
+    const named = (body as { marketEnvironment?: unknown } | null)?.marketEnvironment;
+    const theirs = named === "sandbox" ? "sandbox" : "production";
+    const mismatch = environmentMismatch(
+      { name: "This MCP server", ...own },
+      {
+        name: `the signal API at ${origin}`,
+        environment: theirs,
+        settings:
+          named === undefined ? "it names no environment, so production" : `its health says ${theirs}`,
+      },
+    );
+    return mismatch === null ? null : { kind: "environment_mismatch", message: mismatch };
+  }
+
   private async probe(
     url: string,
     signal: AbortSignal | undefined,
@@ -334,6 +389,7 @@ function matchesQuery(signal: HedgeSignal, query: HedgeSignalQuery): boolean {
 export function createSignalPayments(config: {
   payments: PaymentsConfig;
   signalsUrl: string;
+  marketData?: Pick<MarketDataSource, "environment" | "settings">;
 }): SignalPayments | undefined {
   const key = config.payments.buyerPrivateKey;
   if (key === undefined) return undefined;
@@ -343,6 +399,7 @@ export function createSignalPayments(config: {
     ledger: SpendLedger.open(join(config.payments.dataDir, "signal-spend.jsonl")),
     store: SignalStore.open(join(config.payments.dataDir, "signals")),
     signalsUrl: config.signalsUrl,
+    ...(config.marketData === undefined ? {} : { marketData: config.marketData }),
     dailyBudget: BigInt(config.payments.dailyBudgetBaseUnits),
     maxPrice: BigInt(config.payments.maxPriceBaseUnits),
   });

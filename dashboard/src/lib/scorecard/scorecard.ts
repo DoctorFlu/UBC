@@ -93,7 +93,11 @@ export interface PublicScorecard {
     notFilled: Counted;
     /** Sums over fills whose amounts fit offchain numbers. */
     filledCents: number;
-    realizedPnlCents: number;
+    /**
+     * The results the executor recorded onchain with the fills. Not a result: the contract records 0 at
+     * every fill because it cannot record the settlement (contract request 2.4); `settled` holds the results.
+     */
+    recordedPnlCents: number;
     /** Fills whose filled amount or result is out of range: counted, but left out of the sums. */
     outOfRange: number;
     /** Approved intents the executor has not reported on yet. */
@@ -149,7 +153,7 @@ export function buildScorecard(
   let version = 0;
   let setBy: Proof | null = null;
   let filledCents = 0;
-  let realizedPnlCents = 0;
+  let recordedPnlCents = 0;
   let fillsOutOfRange = 0;
 
   for (const event of chain.events) {
@@ -193,7 +197,7 @@ export function buildScorecard(
             fillsOutOfRange += 1;
           } else {
             filledCents += event.filledCents;
-            realizedPnlCents += event.pnlCents;
+            recordedPnlCents += event.pnlCents;
           }
         } else {
           notFilled.add(event);
@@ -242,7 +246,7 @@ export function buildScorecard(
       filled: filled.done(),
       notFilled: notFilled.done(),
       filledCents,
-      realizedPnlCents,
+      recordedPnlCents,
       outOfRange: fillsOutOfRange,
       open: chain.intents.filter((intent) => intent.status === "approved").length,
     },

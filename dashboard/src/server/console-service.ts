@@ -993,6 +993,7 @@ function checkVenueOrder(row: VenueOrderRow): VenueOrderView | null {
     quantityHundredths: doc.quantityHundredths,
     filledHundredths: doc.filledHundredths,
     filledCents: doc.filledCents,
+    feeCents: doc.feeCents ?? null,
     detail: doc.detail,
     updatedAt: doc.updatedAt,
   };

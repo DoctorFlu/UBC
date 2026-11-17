@@ -305,6 +305,13 @@ function fromOutcome(outcome: BuySignalOutcome, paymentRecorded: boolean | null)
       });
       return result(v, { receiptId: null, signalId: null, priceUsdc: null, budget, signal: null });
     }
+    case "environment_mismatch": {
+      const v = unavailable([reason("MARKET_ENVIRONMENT_MISMATCH", `${outcome.message} Nothing was paid.`)], {
+        actor: "owner",
+        hint: "Give the signal API the same EXECUTOR_VENUE and GEMINI_ENV as this server; meanwhile plan without a signal.",
+      });
+      return result(v, { receiptId: null, signalId: null, priceUsdc: null, budget, signal: null });
+    }
     case "payment_unknown": {
       const v = unavailable(
         [reason("PAYMENT_OUTCOME_UNKNOWN", `${outcome.message} It counts against today's budget.`)],

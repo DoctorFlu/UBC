@@ -11,6 +11,29 @@ export {
   type SettledOptions,
 } from "./client";
 export type { RequestOptions } from "./abort";
+export {
+  affordableHundredths,
+  estimatedFeeCents,
+  MIN_ORDER_COST_CENTS,
+  orderCostCents,
+  predictionFeeCents,
+  worstCaseSpendCents,
+  type FeeRole,
+} from "./fees";
+export {
+  announcedSource,
+  describeEnvironment,
+  environmentMismatch,
+  executorVenueKind,
+  GEMINI_ENVIRONMENTS,
+  GEMINI_HOSTS,
+  geminiEnvironmentSetting,
+  isLoopbackTestUrl,
+  marketDataSource,
+  type ExecutorVenueKind,
+  type GeminiEnvironment,
+  type MarketDataSource,
+} from "./environment";
 export { GeminiError, isGeminiError, type GeminiErrorCode } from "./errors";
 export type { FetchLike } from "./http";
 export {

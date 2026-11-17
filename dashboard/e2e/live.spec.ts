@@ -131,6 +131,11 @@ async function startConsole(budgetMs = 225_000): Promise<void> {
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
       GEMINI_API_URL: gemini.url,
+      // The Gemini test's executor trades on the sandbox (a fake of it), and the console refuses an
+      // executor that reads another Gemini than itself, so this console reads "the sandbox" too: the fake
+      // above, by its loopback stand-in. The in-process simulated executors never announce a venue.
+      EXECUTOR_VENUE: "gemini",
+      GEMINI_ENV: "sandbox",
       // Never the compile cache an earlier run left (the smoke suite shares this folder's .next): with
       // a stale one, every page reloads in a loop. See next.config.ts.
       NEXT_DEV_CACHE: "off",
@@ -530,7 +535,7 @@ test("the hedge view: an honest empty state and preview, then the agent's plan, 
     "No preview: Save your BTC holding to see a preview.",
   );
   // The ladder is one click away in the default view, and stays open as the page changes.
-  await page.getByRole("button", { name: "Live ladder" }).click();
+  await page.getByRole("button", { name: "Gemini's quotes" }).click();
   await expect(page.getByTestId("live-ladder")).toBeVisible();
 
   // Save a holding through the UI: the preview follows at once, made by the same planner.
@@ -1285,6 +1290,12 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     const card = page.getByTestId("intent-settlement");
     await expect(card).toHaveAttribute("data-sealed", "verified");
     await expect(card).toContainText("It settled at $64,250.42");
+    // One result per position: the settlement's net, not what the contract recorded at the fill.
+    const result = page.getByTestId("intent-result");
+    await expect(result).toHaveAttribute("data-result", "settled");
+    await expect(result).toHaveText(`${formatUsdCents(first.pnlCents, { sign: "always" })} at expiry`);
+    await expect(page.getByTestId("intent-fee")).toHaveCount(0);
+    await expect(page.getByTestId("intent-onchain-result")).toBeHidden();
     await shoot(page, testInfo, "intent-settled", card);
 
     // The public scorecard counts the settled positions, from the verified records only.
@@ -1292,6 +1303,8 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     const counted = page.getByTestId("count-settled");
     await expect(counted).toHaveAttribute("data-count", documents.length.toString());
     await expect(counted).toContainText(`paid ${formatUsdCents(paid)}`);
+    await expect(page.getByText("Settled result", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("realized")).toHaveCount(0);
     await shoot(page, testInfo, "scorecard-settled", counted);
   } finally {
     executor.stop();
@@ -1308,20 +1321,20 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
   const sign = (hash: `0x${string}`) => devAccount("executor").signMessage({ message: { raw: hash } });
   const chainId = chain.executor.publicClient.chain.id;
   const policy = chain.address.toLowerCase() as `0x${string}`;
+  const announcement = {
+    kind: "executor-venue",
+    version: 1,
+    chainId,
+    policy,
+    venue: "gemini",
+    environment: "sandbox",
+    announcedAt: new Date().toISOString(),
+  } as const;
+  // An executor on Gemini's production would read another exchange than this console: refused, never shown.
   expect(
-    await announceVenue(
-      { consoleUrl: baseURL, sign },
-      {
-        kind: "executor-venue",
-        version: 1,
-        chainId,
-        policy,
-        venue: "gemini",
-        environment: "sandbox",
-        announcedAt: new Date().toISOString(),
-      },
-    ),
-  ).toBeNull();
+    await announceVenue({ consoleUrl: baseURL, sign }, { ...announcement, environment: "production" }),
+  ).toMatchObject({ mismatch: true, message: expect.stringContaining("GEMINI_ENV=production") });
+  expect(await announceVenue({ consoleUrl: baseURL, sign }, announcement)).toBeNull();
   // The test waits on what happens, never on a clock: the order reaching the fake, and the executor's own
   // line for the fill. Its log is attached to the test, so a failure shows what it did and when.
   const logs: string[] = [];
@@ -1403,7 +1416,8 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
       symbol: market,
       side: "buy",
       outcome: "no",
-      quantity: 967,
+      // $3.00 at 31c: 9.22 contracts cost $2.86, and with the worst-case fee $3.00 (9.23 would be $3.01).
+      quantity: 922,
       priceCents: 31,
     });
 
@@ -1412,6 +1426,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await expect(page.getByTestId("intent-venue-order")).toHaveCount(0);
     await page.getByRole("switch", { name: "Advanced view" }).click();
     await expect(page.getByTestId("intent-venue-order")).toHaveText(`Gemini sandbox #${order.orderId}`);
+    await expect(page.getByTestId("intent-venue-size")).toHaveText("9.22 contracts");
     await expect(page.getByTestId("intent-venue-state")).toHaveText("Open");
     await expect(page.getByTestId("intent-venue-note")).toHaveText("Resting on Gemini's sandbox at 31c");
 
@@ -1423,7 +1438,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
     expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
     const view = (await snapshot(baseURL)).chain?.venueOrders[intentId];
-    expect(view).toMatchObject({ state: "filled", venueOrderId: order.orderId, filledCents: 300 });
+    expect(view).toMatchObject({ state: "filled", venueOrderId: order.orderId, filledCents: 286 });
     await shoot(
       page,
       testInfo,

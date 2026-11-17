@@ -198,9 +198,14 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
             hint={`${formatCount(decisions.waiting)} waiting now`}
           />
           <Stat
-            label="Realized result"
-            value={<span className="num">{formatUsdCentsDelta(fills.realizedPnlCents)}</span>}
-            hint={`Across ${formatCount(fills.filled.count)} ${fills.filled.count === 1 ? "fill" : "fills"}`}
+            label="Settled result"
+            value={<span className="num">{formatUsdCentsDelta(settled.pnlCents)}</span>}
+            hint={
+              settled.positions === 0
+                ? "Nothing settled yet"
+                : `Across ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"}` +
+                  (settled.feesEstimated ? ", after fees (estimated)" : "")
+            }
           />
         </StatGroup>
       </Card>
@@ -283,12 +288,6 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
               testId="count-filled"
             />
             <CountRow label="Did not fill" counted={fills.notFilled} testId="count-not-filled" />
-            <CountRow
-              label="Realized result"
-              counted={fills.filled}
-              value={formatUsdCentsDelta(fills.realizedPnlCents)}
-              testId="realized"
-            />
             <li className={styles.row} data-testid="count-settled" data-count={settled.positions}>
               <div className={styles.rowHead}>
                 <span className={styles.rowLabel}>Settled at expiry</span>
@@ -297,7 +296,9 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
                   <span className={styles.rowSub}>
                     {settled.positions === 0
                       ? "none yet"
-                      : `paid ${formatUsdCents(settled.payoutCents)}, net ${formatUsdCentsDelta(settled.pnlCents)}`}
+                      : `paid ${formatUsdCents(settled.payoutCents)}` +
+                        (settled.feesEstimated ? `, fees ${formatUsdCents(settled.feeCents)}` : "") +
+                        `, net ${formatUsdCentsDelta(settled.pnlCents)}`}
                   </span>
                 </span>
               </div>
@@ -308,7 +309,11 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
               ? "No filled position has reached its market's expiry and settled yet."
               : `${formatCount(settled.paidOut)} of ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"} paid out. `}
             Settlements are recorded offchain by the console, each signed by the contract&rsquo;s executor,
-            because the contract cannot record a payout.
+            because the contract cannot record a payout: it records each fill with a result of $0, so a
+            position&rsquo;s result is its settlement.
+            {settled.feesEstimated
+              ? " Nets are after Gemini's fees, estimated from its published schedule (no Gemini answer reports them)."
+              : null}
           </p>
           <p className={styles.note}>
             {fills.open === 0

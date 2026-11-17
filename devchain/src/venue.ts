@@ -91,6 +91,8 @@ export type PositionOutcome =
       settlementValue: string | null;
       contractsHundredths: number;
       payoutCents: number;
+      /** The venue's fee on the fill, estimated (`Settlement.feeCents`); absent when it charged none. */
+      feeCents?: number;
       venue?: SettlementVenue;
     }
   | { status: "disputed"; detail: string };

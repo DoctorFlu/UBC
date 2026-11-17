@@ -174,7 +174,7 @@ function describe(
         group: "result",
         label: event.filled ? "Fill recorded" : "No fill recorded",
         summary: event.filled
-          ? `The executor recorded a fill of ${amount(event.filledCents)}, realized ${event.pnlCents === null ? "an amount too large to show" : formatUsdCentsDelta(event.pnlCents)}`
+          ? `The executor recorded a fill of ${amount(event.filledCents)} with a result at the fill of ${event.pnlCents === null ? "an amount too large to show" : formatUsdCentsDelta(event.pnlCents)}`
           : "The executor recorded that the order did not fill",
         status: event.filled ? "executed" : "failed",
         reason: null,
