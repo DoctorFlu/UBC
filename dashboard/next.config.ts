@@ -30,6 +30,12 @@ const nextConfig: NextConfig = {
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   // The rules page was /mandate before the console named it Rules; old links and bookmarks still land.
   redirects: () => Promise.resolve([{ source: "/mandate", destination: "/rules", permanent: true }]),
+  experimental: {
+    // `next dev` keeps Turbopack's compile cache in .next/dev/cache between runs. A stale one makes every
+    // page reload in a loop (see devchain/scripts/stack.ts). The end-to-end suites set NEXT_DEV_CACHE=off,
+    // so each run compiles the source as it is, whatever an earlier run or checkout left behind.
+    turbopackFileSystemCacheForDev: process.env.NEXT_DEV_CACHE !== "off",
+  },
 };
 
 export default nextConfig;

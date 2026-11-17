@@ -91,13 +91,13 @@ async function startConsole(): Promise<void> {
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
       GEMINI_API_URL: gemini.url,
+      // Never the compile cache an earlier run left (the smoke suite shares this folder's .next): with
+      // a stale one, every page reloads in a loop. See next.config.ts.
+      NEXT_DEV_CACHE: "off",
     },
   });
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
-  // `next dev` compiles a route on its first request and then tells open pages to reload. With a
-  // Turbopack cache left by an earlier run (the smoke suite compiles every route), a page that connects
-  // before those routes are compiled again reloads over and over. Compiling every route first, as the
-  // smoke warm-up does, removes that.
+  // `next dev` compiles a route on its first request; compile every route now, so no test waits on it.
   for (const path of LIVE_ROUTES) {
     const response = await fetch(new URL(path, baseURL));
     await response.arrayBuffer();

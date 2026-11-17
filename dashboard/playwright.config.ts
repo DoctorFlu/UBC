@@ -94,6 +94,8 @@ export default defineConfig({
             MCP_PUBLIC_URL: "https://mcp.example.test/mcp",
             // Never the real Gemini: the suite's quotes come from recorded responses.
             GEMINI_API_URL: `http://127.0.0.1:${GEMINI_PORT.toString()}`,
+            // `next dev` starts without the compile cache an earlier run left: see next.config.ts.
+            NEXT_DEV_CACHE: "off",
           },
         },
       ],
