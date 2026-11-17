@@ -5,8 +5,13 @@
  * position is settled exactly once, only after its outcome is published. The venue and the console are
  * fakes, so no network is needed.
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { recoverMessageAddress } from "viem";
+import { eventSchema, normalizeEvent } from "@mandate/gemini";
+import { createGeminiPrivateClient } from "@mandate/gemini/private";
+import { FakeGeminiPrivate, unpacedLimiter } from "@mandate/gemini/testing";
 import {
   Category,
   hashSettlement,
@@ -20,6 +25,8 @@ import {
   checkApprovedIntent,
   DEMO_POLICY,
   devAccount,
+  geminiVenue,
+  memoryOrderJournal,
   POLICY_CONTRACTS,
   startExecutor,
   type Executor,
@@ -60,7 +67,11 @@ function fakeVenue(options: { downFor?: number } = {}): FakeVenue {
       }
       return Promise.resolve(LISTED[symbol] ?? null);
     },
-    placeOrder: (order) => Promise.resolve({ order, venueOrderId: `fake-${String(order.intentId)}` }),
+    placeOrder: (order) =>
+      Promise.resolve({
+        status: "placed",
+        placed: { order, venueOrderId: `fake-${String(order.intentId)}` },
+      }),
     readFill: (placed) =>
       Promise.resolve({ state: "closed", filledCents: placed.order.amountCents, detail: "fake full fill" }),
     positionOutcome() {
@@ -449,6 +460,27 @@ describe("settling filled positions at expiry (issue #92)", () => {
     expect(sink.calls).toBe(3);
   });
 
+  it("never settles a position whose venue reports a disagreement, and says so once", async () => {
+    const venue = fakeVenue();
+    const sink = fakeSink();
+    const executor = start(venue, sink);
+    const id = await filledPosition(executor, venue);
+    clock.now = DUE;
+    venue.outcome = {
+      status: "disputed",
+      detail:
+        "settlement disagreement: the public event says NO won, the account's settled position says YES",
+    };
+    for (const step of [0, 60_000, 120_000, 240_000]) {
+      clock.now += step;
+      await executor.settleNow();
+    }
+    expect(sink.calls).toBe(0);
+    const said = lines.filter((line) => line.includes(`intent #${String(id)}: NOT SETTLED`));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("settlement disagreement");
+  });
+
   it("settles nothing that is not a filled buy", async () => {
     const venue = fakeVenue();
     venue.outcome = RESOLVED_NO;
@@ -463,5 +495,142 @@ describe("settling filled positions at expiry (issue #92)", () => {
       expect(lines.some((line) => line.includes(`intent #${String(sell)}: nothing to settle`))).toBe(true);
     });
     expect(sink.calls).toBe(0);
+  });
+});
+
+describe("the executor on Gemini's sandbox (issue #93), against a fake of its private API", () => {
+  const FIXTURES = fileURLToPath(new URL("../../gemini/test/fixtures/", import.meta.url));
+  const OPEN_EVENT = normalizeEvent(
+    eventSchema.parse(JSON.parse(readFileSync(`${FIXTURES}event-BTC2611202200.json`, "utf8"))),
+  );
+  let anvil: TestAnvil;
+  let chain: TestPolicy;
+  let fake: FakeGeminiPrivate;
+  let journal: ReturnType<typeof memoryOrderJournal>;
+  let lines: string[];
+  const executors: Executor[] = [];
+
+  beforeAll(async () => {
+    anvil = await startTestAnvil();
+  });
+  afterAll(async () => {
+    for (const executor of executors.splice(0)) executor.stop();
+    await anvil.stop();
+  });
+  beforeEach(async () => {
+    for (const executor of executors.splice(0)) executor.stop();
+    chain = await deployTestPolicy(anvil, "production");
+    await chain.user.setPolicy(DEMO_POLICY);
+    fake = new FakeGeminiPrivate({ apiKey: "account-FAKEKEY", apiSecret: "fake-secret" });
+    journal = memoryOrderJournal();
+    lines = [];
+  });
+
+  const start = (): Executor => {
+    const executor = startExecutor({
+      client: chain.executor,
+      venue: geminiVenue({
+        publicClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
+        trading: createGeminiPrivateClient({
+          environment: "sandbox",
+          credentials: { apiKey: "account-FAKEKEY", apiSecret: "fake-secret" },
+          fetch: fake.fetch,
+          limiter: unpacedLimiter(),
+        }),
+        journal,
+        deployment: {
+          chainId: chain.executor.publicClient.chain.id,
+          policy: chain.address.toLowerCase() as `0x${string}`,
+        },
+      }),
+      settlements: fakeSink(),
+      fromBlock: chain.deployBlock,
+      fillDelayMs: 0,
+      fillPollMs: 50,
+      venueRetryMs: 50,
+      pollingIntervalMs: 50,
+      log: (line) => lines.push(line),
+    });
+    executors.push(executor);
+    return executor;
+  };
+
+  it("asks Gemini's private API nothing while no order is open and no position is unsettled", async () => {
+    const executor = start();
+    for (let pass = 0; pass < 5; pass += 1) {
+      await executor.settleNow();
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    expect(fake.requests).toEqual([]);
+  });
+
+  it("places an approved order once, follows it until it fills, and records the fill", async () => {
+    start();
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    await vi.waitFor(() => {
+      expect(fake.orders.size).toBe(1);
+    });
+    const [placed] = [...fake.orders.values()];
+    if (placed === undefined) throw new Error("no order");
+    expect(placed).toMatchObject({
+      symbol: BTC,
+      side: "buy",
+      outcome: "no",
+      quantity: 4_000,
+      priceCents: 31,
+    });
+    expect((await chain.outsider.getIntent(id))?.status).toBe("approved");
+
+    fake.fill(placed.orderId);
+    const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+    expect(statuses.get(id)).toBe("executed");
+    expect((await chain.outsider.getIntent(id))?.filledCents).toBe(1_240);
+    expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+    expect(journal.records.get(id)).toMatchObject({ state: "filled", venueOrderId: String(placed.orderId) });
+  });
+
+  it("records an order Gemini refuses as not filled, so its budget is released", async () => {
+    fake.failNextPlacement({
+      kind: "refuse",
+      status: 422,
+      body: { error: "InsufficientFunds", message: "no" },
+    });
+    start();
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+    expect(statuses.get(id)).toBe("failed");
+    expect((await chain.outsider.getSnapshot()).committedCents).toBe(0);
+    await vi.waitFor(() => {
+      expect(lines.join("\n")).toContain("REFUSED by the venue");
+    });
+    expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+  });
+
+  it("holds an order while the terms are not accepted, records nothing, and places it once they are", async () => {
+    fake.termsAccepted = false;
+    start();
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
+    await vi.waitFor(() => {
+      expect(fake.callsTo("/v1/prediction-markets/order").length).toBeGreaterThan(1);
+    });
+    expect((await chain.outsider.getIntent(id))?.status).toBe("approved");
+    expect(fake.orders.size).toBe(0);
+    // Said once while the reason stays the same.
+    expect(
+      lines.filter((line) => line.includes("has not accepted the Prediction Markets terms")),
+    ).toHaveLength(1);
+
+    fake.termsAccepted = true;
+    await vi.waitFor(
+      () => {
+        expect(fake.orders.size).toBe(1);
+      },
+      { timeout: 5_000 },
+    );
+    const [placed] = [...fake.orders.values()];
+    if (placed === undefined) throw new Error("no order");
+    fake.fill(placed.orderId);
+    const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+    expect(statuses.get(id)).toBe("executed");
   });
 });

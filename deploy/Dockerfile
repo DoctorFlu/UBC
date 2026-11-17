@@ -156,6 +156,8 @@ COPY shared/package.json shared/tsconfig.json shared/
 COPY shared/src shared/src
 COPY gemini/package.json gemini/tsconfig.json gemini/
 COPY gemini/src gemini/src
+# The Gemini doctor, run in the executor's container to check its key (docs/gemini-venue.md).
+COPY gemini/scripts gemini/scripts
 COPY planner/package.json planner/tsconfig.json planner/
 COPY planner/src planner/src
 COPY agent/package.json agent/tsconfig.json agent/

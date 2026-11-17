@@ -104,8 +104,9 @@ describe("the simulated venue's outcomes", () => {
       amountCents: 1_240,
       limitPrice: 31,
     };
-    const placed = await venue.placeOrder(order);
-    expect(await venue.readFill(placed)).toEqual({
+    const placement = await venue.placeOrder(order);
+    if (placement.status !== "placed") throw new Error("the simulated venue places every order");
+    expect(await venue.readFill(placement.placed)).toEqual({
       state: "closed",
       filledCents: 1_240,
       detail: "simulated full fill",

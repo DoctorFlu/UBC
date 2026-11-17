@@ -165,7 +165,7 @@ It drops one trailing newline and refuses an empty value, a line break or other 
 It writes the line as `NAME='value'`, because docker compose would otherwise expand a `$` in the value and cut it at ` #`.
 The file is rebuilt next to itself with mode 600 and moved over the old one, so it is never half written, and a failure leaves no temporary file; run it as the file's owner, so the owner stays.
 It prints only the name, the value's length and the first 12 hex digits of its SHA-256, which the owner can compare with `printf %s "$(pbpaste)" | shasum -a 256 | cut -c1-12` on their own computer.
-Nothing reads `GEMINI_API_KEY` or `GEMINI_API_SECRET` yet; they are on the list for the Gemini sandbox keys to come.
+The executor reads `GEMINI_API_KEY` and `GEMINI_API_SECRET` when `EXECUTOR_VENUE=gemini` ([gemini-venue.md](gemini-venue.md)); it trades on Gemini's sandbox only, and the demo chain refuses production.
 
 For the Arc testnet mode, set `COMPOSE_FILE=compose.yml:compose.arc.yml` and fill `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and `AGENT_PRIVATE_KEY`, and `ARC_RPC_URL` if you use a provider.
 Nothing executes approved intents in this mode yet: there is no executor for Arc testnet in this setup.
@@ -487,7 +487,8 @@ instabox ssh mandate -- 'cd /data/mandate/repo/deploy && docker compose --env-fi
 ```
 
 The console answers 502 for a few seconds while it restarts (about 3 seconds when an update recreated only the console and Caddy).
-Nothing reads `GEMINI_API_KEY` or `GEMINI_API_SECRET` yet, so setting them needs no restart until a service does.
+Only the executor reads `GEMINI_ENV`, `GEMINI_API_KEY`, `GEMINI_API_SECRET` and `EXECUTOR_VENUE`, so after setting them recreate the executor alone (`... up -d --no-deps --no-build executor`).
+Check the key first with the doctor in the executor's container, which prints neither value: `docker compose --env-file /data/mandate/mandate.env run --rm --no-deps executor node --import tsx gemini/scripts/doctor.ts`.
 Then check that wake-ups are on, without showing either value: the console's Setup page says so in Advanced view, or from the laptop:
 
 ```sh

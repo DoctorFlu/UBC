@@ -5,17 +5,27 @@
  */
 import { type Chain, defineChain } from "viem";
 
-import type { ConsoleNetwork, NetworkKind } from "@/lib/live/types";
+import type { ConsoleNetwork, ExecutorVenueView, NetworkKind } from "@/lib/live/types";
 
 /** The short tag beside the logo, from the chain the console actually resolved. */
 export const NETWORK_TAGS: Record<NetworkKind, string> = { local: "Local", "arc-testnet": "Arc testnet" };
 
 /**
- * Whether fills are simulated. On the local devchain the executor is the devchain's simulator, so a
- * recorded fill never touched an exchange; elsewhere the contract only knows the executor recorded it.
+ * Whether a fill is simulated. On the local devchain a fill is the devchain's simulator's unless the
+ * executor journaled a Gemini order for that intent (issue #93: `hasVenueOrder`); elsewhere the contract
+ * only knows the executor recorded it.
  */
-export function fillsAreSimulated(network: Pick<ConsoleNetwork, "kind">): boolean {
-  return network.kind === "local";
+export function fillsAreSimulated(network: Pick<ConsoleNetwork, "kind">, hasVenueOrder = false): boolean {
+  return network.kind === "local" && !hasVenueOrder;
+}
+
+/**
+ * The badge for a venue that trades for real: "Sandbox" (Gemini's test funds) or "Live" (real money).
+ * Null for the simulated venue, or before the executor said which venue it uses.
+ */
+export function venueBadge(venue: ExecutorVenueView | null): "Sandbox" | "Live" | null {
+  if (venue?.venue !== "gemini") return null;
+  return venue.environment === "production" ? "Live" : "Sandbox";
 }
 
 /** A viem chain for the network: the RPC the browser may use and, on Arc, the explorer. */

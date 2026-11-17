@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { decisionContextSchema } from "./context";
 import { settlementSchema, signatureSchema } from "./settlement";
+import { executorVenueSchema, venueOrderRecordSchema } from "./venue-order";
 import { addressSchema, bytes32Schema, intentIdSchema, policyRulesSchema, txHashSchema } from "./types";
 
 /**
@@ -71,6 +72,15 @@ export const CONSOLE_EXECUTOR_ROUTES = {
    * a different one is 409 `conflict`.
    */
   settlement: (intentId: number | string) => `${CONSOLE_EXECUTOR_API_BASE}/settlements/${String(intentId)}`,
+  /**
+   * The executor's journal of the order it placed for an intent (issue #93). GET returns the latest
+   * version (404 when there is none). PUT stores a new version: 201 when stored, 200 when the console
+   * already holds this exact version, 409 `stale` for an older revision and 409 `conflict` for a change
+   * the record does not allow (another market or quantity, or anything after it closed).
+   */
+  order: (intentId: number | string) => `${CONSOLE_EXECUTOR_API_BASE}/orders/${String(intentId)}`,
+  /** PUT announces the venue the executor fills orders on (issue #93). The latest announcement wins. */
+  venue: `${CONSOLE_EXECUTOR_API_BASE}/venue`,
 } as const;
 
 const isoDateTime = z.iso.datetime({ offset: true });
@@ -352,3 +362,30 @@ export const settlementsResponseSchema = z.strictObject({
   settlements: z.array(storedSettlementSchema),
 });
 export type SettlementsResponse = z.infer<typeof settlementsResponseSchema>;
+
+// Venue orders and the executor's venue (#93)
+
+/** PUT body: one version of an intent's venue order record, signed with the executor key. */
+export const putVenueOrderRequestSchema = z.strictObject({
+  document: venueOrderRecordSchema,
+  signature: signatureSchema,
+});
+export type PutVenueOrderRequest = z.infer<typeof putVenueOrderRequestSchema>;
+
+/** The version the console holds. */
+export const storedVenueOrderSchema = z.strictObject({
+  intentId: intentIdSchema,
+  hash: bytes32Schema,
+  document: venueOrderRecordSchema,
+  signature: signatureSchema,
+  signer: addressSchema,
+  storedAt: isoDateTime,
+});
+export type StoredVenueOrder = z.infer<typeof storedVenueOrderSchema>;
+
+/** PUT body: the executor's announcement of its venue, signed with the executor key. */
+export const putExecutorVenueRequestSchema = z.strictObject({
+  document: executorVenueSchema,
+  signature: signatureSchema,
+});
+export type PutExecutorVenueRequest = z.infer<typeof putExecutorVenueRequestSchema>;

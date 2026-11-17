@@ -13,12 +13,15 @@ import {
   decisionContextSchema,
   decodePolicyLogs,
   emptyPolicyViewState,
+  executorVenueSchema,
+  hashExecutorRecord,
   hashSettlement,
   intentsMissingDetails,
   reduceEvents,
   settlementSchema,
   type StoredSettlement,
   toSafeNumber,
+  venueOrderRecordSchema,
   verifyContext,
 } from "@mandate/shared";
 import type { EnvVars, ResolvedDeployment } from "@mandate/shared/node";
@@ -39,6 +42,8 @@ import type {
   SealedReason,
   SealedSource,
   SettlementView,
+  VenueOrderView,
+  ExecutorVenueView,
 } from "@/lib/live/types";
 import { readClaims } from "@/lib/evidence/claims";
 import { readHedgePlan } from "@/lib/hedge/plan-schema";
@@ -63,6 +68,7 @@ import {
 } from "./store/offchain";
 import { ConsoleWake, type LadderSource, NO_WAKE_TARGET_REASON, wakeOffStatus } from "./wake";
 import { type SettlementRow, SettlementStore } from "./store/settlements";
+import { type SignedRow, type VenueOrderRow, VenueOrderStore } from "./store/venue-orders";
 
 export interface Logger {
   info: (message: string) => void;
@@ -126,6 +132,8 @@ export class ConsoleService {
   readonly accounts: Accounts;
   /** What filled positions paid at settlement, as the executor signed it (#92). */
   readonly settlements: SettlementStore;
+  /** The executor's venue order journal and the venue it announced (#93). */
+  readonly venueOrders: VenueOrderStore;
   readonly stream: StreamReceiver;
   /** Gemini's listing of each intent's market, when the console has a way to ask Gemini. */
   readonly listings: ListingChecker | null;
@@ -179,6 +187,7 @@ export class ConsoleService {
       log: (message) => this.log.info(message),
     });
     this.settlements = new SettlementStore(db);
+    this.venueOrders = new VenueOrderStore(db);
     this.stream = new StreamReceiver(config.streamSecurityToken);
     this.listings = options.marketLookup
       ? new ListingChecker({
@@ -742,7 +751,39 @@ export class ConsoleService {
       intents,
       sealed: this.sealedReasons(mandate, intents),
       settlements: this.settlementViews(mandate),
+      venueOrders: this.venueOrderViews(mandate),
+      venue: this.venueView(mandate),
     };
+  }
+
+  /** After the executor stored a venue order version or announced its venue: pushes the new state. */
+  venueChanged(): void {
+    this.changed();
+  }
+
+  /**
+   * The latest verified version of each venue order of the deployment `mandate` follows: none for a
+   * mandate without a contract, like settlements.
+   */
+  private venueOrderViews(mandate: MandateScope): Record<number, VenueOrderView> {
+    const session = this.follows(mandate) ? this.session : null;
+    const views: Record<number, VenueOrderView> = {};
+    if (!session) return views;
+    for (const row of this.venueOrders.orders(session.id)) {
+      const view = checkVenueOrder(row);
+      if (view) views[row.intentId] = view;
+    }
+    return views;
+  }
+
+  /**
+   * The venue the executor last announced for the deployment `mandate` follows, when it still verifies:
+   * none for a mandate without a contract.
+   */
+  private venueView(mandate: MandateScope): ExecutorVenueView | null {
+    const session = this.follows(mandate) ? this.session : null;
+    const row = session ? this.venueOrders.venue(session.id) : null;
+    return row ? checkExecutorVenue(row) : null;
   }
 
   /**
@@ -930,6 +971,38 @@ function checkSettlement(row: SettlementRow): SettlementView {
         document: document.data,
       }
     : { status: "tampered", hash: row.hash, storedAt: row.storedAt };
+}
+
+/** A stored venue order version, when its document still hashes to the hash it was stored under. */
+function checkVenueOrder(row: VenueOrderRow): VenueOrderView | null {
+  const parsed = venueOrderRecordSchema.safeParse(row.document);
+  if (!parsed.success || hashExecutorRecord(parsed.data).toLowerCase() !== row.hash.toLowerCase())
+    return null;
+  const doc = parsed.data;
+  return {
+    venue: doc.venue,
+    environment: doc.environment,
+    state: doc.state,
+    venueOrderId: doc.venueOrderId,
+    clientOrderId: doc.clientOrderId,
+    quantityHundredths: doc.quantityHundredths,
+    filledHundredths: doc.filledHundredths,
+    filledCents: doc.filledCents,
+    detail: doc.detail,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+/** The stored announcement of the executor's venue, when it still hashes to what was stored. */
+function checkExecutorVenue(row: SignedRow): ExecutorVenueView | null {
+  const parsed = executorVenueSchema.safeParse(row.document);
+  if (!parsed.success || hashExecutorRecord(parsed.data).toLowerCase() !== row.hash.toLowerCase())
+    return null;
+  return {
+    venue: parsed.data.venue,
+    environment: parsed.data.environment,
+    announcedAt: parsed.data.announcedAt,
+  };
 }
 
 /** Reads `signal.aborted` afresh: it can flip during any await, which control-flow narrowing ignores. */

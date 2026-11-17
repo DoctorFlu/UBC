@@ -58,13 +58,19 @@ See [agent/README.md](../agent/README.md).
 
 The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
 
-## Simulated executor
+## Executor
 
-The executor (`npm run dev:executor`, and the `executor` service of the hosted demo chain) fills approved intents and settles filled positions at expiry; [order-lifecycle.md](order-lifecycle.md) explains both.
+The executor (`npm run dev:executor`, and the `executor` service of the hosted demo chain) fills approved intents and settles filled positions at expiry; [order-lifecycle.md](order-lifecycle.md) explains both, and [gemini-venue.md](gemini-venue.md) the Gemini venue.
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `CONSOLE_URL` | no | The console the executor records settlements in, through `PUT /api/executor/v1/settlements/:intentId`. Defaults to `http://localhost:3000`; the compose files set `http://console:3000`, inside the stack. The route is not public: Caddy answers 404 for `/api/executor/*`. |
+| `CONSOLE_URL` | no | The console the executor records settlements in, through `PUT /api/executor/v1/settlements/:intentId`, and, on Gemini, its order journal and venue (`/api/executor/v1/orders/:intentId`, `/api/executor/v1/venue`). Defaults to `http://localhost:3000`; the compose files set `http://console:3000`, inside the stack. The route is not public: Caddy answers 404 for `/api/executor/*`. |
+| `EXECUTOR_VENUE` | no | What fills approved orders: `simulated` (default, places nothing anywhere) or `gemini` (Gemini Prediction Markets, on the sandbox unless `GEMINI_ENV` says otherwise; the dev and demo executor refuses production). Run `npm run gemini:doctor` first. |
+| `EXECUTOR_ORDER_TTL_MS` | no | `gemini` only: how long an order may rest unfilled before the rest is cancelled, at least `10000`. Defaults to `600000` (10 minutes), and never later than a minute before the market stops trading. |
+| `GEMINI_ENV` | no | `sandbox` (default, test funds) or `production` (real money, which also needs `GEMINI_LIVE_TRADING=on`). Read by the executor and `npm run gemini:doctor`. |
+| `GEMINI_LIVE_TRADING` | no | `on` to allow `GEMINI_ENV=production`; anything but `on` or empty is refused. The dev and demo executor refuses production even then, and the demo compose file does not pass it. |
+| `GEMINI_API_KEY` | with `gemini` | An account-scoped API key with the Trader role, from a separate account on exchange.sandbox.gemini.com for the sandbox. A secret: never printed or logged. |
+| `GEMINI_API_SECRET` | with `gemini` | The key's secret. Never printed or logged; the doctor shows only whether it is set and its length. |
 | `EXECUTOR_SETTLE_MS` | no | How often the executor looks for a filled position that is due to be settled, at least `1000`. Defaults to `60000`. The look is local: Gemini and the console are asked only once a position's market has expired, then with waits of 1, 2, 5, 10 and then every 30 minutes while Gemini has not published the outcome. |
 | `SIM_EXECUTOR_DELAY_MS` | no | How long the executor waits after an approval before filling it. Defaults to `1500`. |
 | `SIM_EXECUTOR_POLL_MS` | no | How often the executor asks the chain for new approvals and fills. Defaults to `1000`. |

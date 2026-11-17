@@ -19,7 +19,12 @@ import type { DatabaseSync } from "node:sqlite";
  *   secret stored as a hash and every agent key sealed (docs/accounts.md);
  * - what Gemini said about each intent's market the first time the console checked it;
  * - the event wake-ups of each mandate's Grok Bot routine (docs/event-wake.md);
- * - what each filled position paid at settlement, as the executor signed it (the contract cannot hold it).
+ * - what each filled position paid at settlement, as the executor signed it (the contract cannot hold it);
+ * - the executor's journal of each intent's venue order, and the venue it announced.
+ *
+ * Settlements, venue orders and the executor's venue are keyed by deployment, like the event cache: they
+ * describe one Policy contract and its executor, not a mandate. Only the mandate that follows that
+ * contract (`deployment = 'env'`) sees them (docs/accounts.md).
  */
 export type Database = DatabaseSync;
 
@@ -184,14 +189,39 @@ export const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
     PRIMARY KEY (deployment_id, intent_id)
   ) STRICT;
   `,
-  // 7: accounts (#94). Workspaces, members, passkeys, sessions, mandates, agents and their tokens; every
+  // 7: the executor's journal of each intent's venue order, latest signed version only, and the venue it
+  // announced (#93).
+  `
+  CREATE TABLE venue_orders (
+    deployment_id TEXT    NOT NULL,
+    intent_id     INTEGER NOT NULL,
+    revision      INTEGER NOT NULL,
+    hash          TEXT    NOT NULL,
+    document      TEXT    NOT NULL,
+    signature     TEXT    NOT NULL,
+    signer        TEXT    NOT NULL,
+    stored_at     TEXT    NOT NULL,
+    PRIMARY KEY (deployment_id, intent_id)
+  ) STRICT;
+
+  CREATE TABLE executor_venues (
+    deployment_id TEXT NOT NULL PRIMARY KEY,
+    hash          TEXT NOT NULL,
+    document      TEXT NOT NULL,
+    signature     TEXT NOT NULL,
+    signer        TEXT NOT NULL,
+    stored_at     TEXT NOT NULL
+  ) STRICT;
+  `,
+  // 8: accounts (#94). Workspaces, members, passkeys, sessions, mandates, agents and their tokens; every
   // offchain record and every wake-up record now belongs to a mandate. The single-tenant data becomes the
-  // first workspace's mandate. Every migration above is applied on the hosted database: never reorder them.
+  // first workspace's mandate. Settlements and venue orders stay keyed by deployment (see above).
+  // Every migration above is applied on the hosted database: never reorder them.
   migrateToAccounts,
 ];
 
 /**
- * Version 7. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
+ * Version 8. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
  * (which follows the contract the server is configured with) and that mandate's agent (whose key the MCP
  * server holds), and moves every existing offchain row into that mandate without losing one.
  */

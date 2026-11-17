@@ -13,6 +13,7 @@ import { DevSignerBadge } from "./DevSignerBadge";
 import { Isolator } from "./Isolator";
 import { NavLinks } from "./NavLinks";
 import styles from "./Shell.module.css";
+import { VenueBadge } from "./VenueBadge";
 import { WalletButton } from "./WalletButton";
 
 export interface TopBarProps {
@@ -35,7 +36,10 @@ function useSlowToConnect(connection: StreamConnection): boolean {
   return slow && connection === "connecting";
 }
 
-/** The status strip: the live lamp, dev signer, wallet and the isolator. On phones, also the menu. */
+/**
+ * The status strip: the live lamp, the venue (Sandbox or Live), dev signer, wallet and the isolator. On
+ * phones, also the menu.
+ */
 export function TopBar({ navCounts, foot }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { snapshot, connection } = useLiveConsole();
@@ -80,6 +84,12 @@ export function TopBar({ navCounts, foot }: TopBarProps) {
       <div className={styles.topbarEnd}>
         <span className={styles.mobileOnly}>
           <LiveIndicator {...live} compact />
+        </span>
+        <span className={styles.desktopOnly}>
+          <VenueBadge />
+        </span>
+        <span className={styles.mobileOnly}>
+          <VenueBadge short />
         </span>
         <span className={styles.desktopOnly}>
           <DevSignerBadge />

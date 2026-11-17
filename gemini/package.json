@@ -3,9 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Read-only client for Gemini prediction-market data.",
+  "description": "Client for Gemini prediction-market data, and (./private) the signed trading client.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./private": "./src/private-index.ts",
+    "./testing": "./testing/fake-private.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -103,6 +103,14 @@ services:
       CONSOLE_URL: http://console:3000
       # How often it checks positions on expired markets for Gemini's published outcome.
       EXECUTOR_SETTLE_MS: ${EXECUTOR_SETTLE_MS:-60000}
+      # What fills approved orders: simulated (default, places nothing) or gemini (Gemini's sandbox, with the
+      # key below; run npm run gemini:doctor first). Live trading is refused on the demo chain, so no
+      # GEMINI_LIVE_TRADING is passed here.
+      EXECUTOR_VENUE: ${EXECUTOR_VENUE:-simulated}
+      EXECUTOR_ORDER_TTL_MS: ${EXECUTOR_ORDER_TTL_MS:-600000}
+      GEMINI_ENV: ${GEMINI_ENV:-sandbox}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_API_SECRET: ${GEMINI_API_SECRET:-}
       NODE_OPTIONS: --max-old-space-size=192
     volumes:
       - chain:/data/chain:ro

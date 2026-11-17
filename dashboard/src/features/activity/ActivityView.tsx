@@ -214,7 +214,11 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           hint={
             <>
               {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded`}
-              {fillsAreSimulated(snapshot.network) && executed > 0 ? (
+              {intents.some(
+                (intent) =>
+                  intent.status === "executed" &&
+                  fillsAreSimulated(snapshot.network, chain.venueOrders[intent.id] !== undefined),
+              ) ? (
                 <SimulatedFill className={styles.statMarker} />
               ) : null}
             </>
