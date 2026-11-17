@@ -277,7 +277,7 @@ describe("placing an order", () => {
 
     fake.termsAccepted = true;
     placedOf(await venue().placeOrder(order()));
-    expect(fake.callsTo(ORDER_ROUTE).map((call) => call.fields?.clientOrderId)).toEqual([
+    expect(fake.callsTo(ORDER_ROUTE).map((call) => call.fields.clientOrderId)).toEqual([
       "mandate-5042002-5fbdb231-a1b2c3d4-7",
       "mandate-5042002-5fbdb231-7",
     ]);
@@ -326,7 +326,7 @@ describe("an attempt whose answer never came", () => {
     const placed = placedOf(await restarted().placeOrder(order()));
     const sent = [...fake.orders.values()].find((made) => made.clientOrderId === legacy);
     expect(placed.venueOrderId).toBe(sent?.orderId);
-    expect(fake.callsTo(ORDER_ROUTE).filter((call) => call.fields?.clientOrderId === legacy)).toHaveLength(1);
+    expect(fake.callsTo(ORDER_ROUTE).filter((call) => call.fields.clientOrderId === legacy)).toHaveLength(1);
     expect(journal.records.get(7)).toMatchObject({ clientOrderId: legacy, state: "open" });
   });
 
