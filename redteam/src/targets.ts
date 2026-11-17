@@ -12,7 +12,7 @@ import { createServer } from "node:net";
 import { serve, type ServerType } from "@hono/node-server";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
-import { createLogger, createMandateServer, parseConfig } from "@mandate/agent";
+import { createLogger, createMandateServer, parseConfig, type MarketsClient } from "@mandate/agent";
 import { createFakeConsole } from "@mandate/agent/testing";
 import {
   buildContracts,
@@ -91,6 +91,11 @@ function close(server: ServerType): Promise<void> {
   });
 }
 
+/** The event lookup the simulated venue reads outcomes with, from the agent's market data. */
+function eventsOf(markets: MarketsClient): Parameters<typeof simulatedVenue>[0] {
+  return { getEvent: (eventTicker) => markets.getEvent(eventTicker) };
+}
+
 function agentAttacker(rpcUrl: string, chainId: number, policy: Address): ChainAttacker {
   return new ChainAttacker({ rpcUrl, chainId, policy, account: privateKeyToAccount(devPrivateKey("agent")) });
 }
@@ -157,7 +162,7 @@ export async function startSelf(options: {
       owner: devPolicyClient(devchain.rpcUrl, policy, "user"),
       executor: devPolicyClient(devchain.rpcUrl, policy, "executor"),
       markets: { crypto: CRYPTO_SYMBOL, sports: SPORTS_SYMBOL },
-      venue: simulatedVenue(fixtureMarkets()),
+      venue: simulatedVenue(eventsOf(fixtureMarkets())),
       serverLogs,
       stop: async () => {
         await server.endpoint.close();

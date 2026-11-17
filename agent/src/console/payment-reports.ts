@@ -15,7 +15,12 @@
  * Only public data leaves: amounts, times, addresses, the receipt id (the payment nonce), Gateway's
  * settlement reference and what was bought. Never a key and never the payment signature.
  */
-import { ARC_TESTNET, type PutSignalBudgetRequest, type PutSignalPaymentRequest } from "@mandate/shared";
+import {
+  ARC_TESTNET,
+  raceAbort,
+  type PutSignalBudgetRequest,
+  type PutSignalPaymentRequest,
+} from "@mandate/shared";
 import type { Clock } from "../context";
 import { scrubText, type Logger } from "../logger";
 import type { ConsoleClient, PaymentsClient } from "../services";
@@ -64,9 +69,10 @@ export class PaymentReporter {
 
   /**
    * Reports a purchase that just happened, together with a fresh budget snapshot. Returns true when
-   * the console has the payment on record. Never throws.
+   * the console has the payment on record. Never throws. When `signal` aborts, the report stops
+   * and stays pending: the background flush sends it later.
    */
-  async reportPurchase(receiptId: string): Promise<boolean> {
+  async reportPurchase(receiptId: string, signal?: AbortSignal): Promise<boolean> {
     try {
       const entry = this.#payments
         .paidSignals()
@@ -75,7 +81,7 @@ export class PaymentReporter {
         this.#logger.error("payments.report_missing_entry", { reason: "no paid ledger entry" });
         return false;
       }
-      const [delivery] = await Promise.all([this.#deliverPayment(entry), this.syncBudget()]);
+      const [delivery] = await Promise.all([this.#deliverPayment(entry, signal), this.syncBudget(signal)]);
       // The console answers: send what it missed earlier, without holding up this result.
       if (delivery === "recorded" && this.pending()) void this.flush();
       return delivery === "recorded";
@@ -85,12 +91,17 @@ export class PaymentReporter {
     }
   }
 
-  /** Sends the current budget snapshot. Returns true when the console stored it. Never throws. */
-  async syncBudget(): Promise<boolean> {
+  /**
+   * Sends the current budget snapshot. Returns true when the console stored it. Never throws. When
+   * `signal` aborts, it stops and the snapshot stays pending.
+   */
+  async syncBudget(signal?: AbortSignal): Promise<boolean> {
     try {
-      const snapshot = await this.#snapshot();
-      const delivery = await this.#attempt("budget", (signal) =>
-        this.#console.putSignalBudget(snapshot, signal),
+      const snapshot = await this.#snapshot(signal);
+      const delivery = await this.#attempt(
+        "budget",
+        (request) => this.#console.putSignalBudget(snapshot, request),
+        signal,
       );
       if (delivery === "recorded") this.#budgetDay = snapshot.day;
       return delivery === "recorded";
@@ -146,15 +157,17 @@ export class PaymentReporter {
     }
   }
 
-  async #deliverPayment(entry: PaidSignalEntry): Promise<Delivery> {
+  async #deliverPayment(entry: PaidSignalEntry, signal?: AbortSignal): Promise<Delivery> {
     const id = entry.receiptId.toLowerCase();
     if (!receiptIdSchema.safeParse(entry.receiptId).success) {
       this.#logger.error("payments.report_refused", { what: "payment", reason: "not a receipt id" });
       this.#settled.add(id);
       return "refused";
     }
-    const delivery = await this.#attempt("payment", (signal) =>
-      this.#console.putSignalPayment(entry.receiptId, this.#record(entry), signal),
+    const delivery = await this.#attempt(
+      "payment",
+      (request) => this.#console.putSignalPayment(entry.receiptId, this.#record(entry), request),
+      signal,
     );
     if (delivery === "recorded" || delivery === "refused") this.#settled.add(id);
     if (delivery === "recorded") this.#logger.info("payments.reported", { amount: entry.amount.toString() });
@@ -188,15 +201,16 @@ export class PaymentReporter {
     };
   }
 
-  async #snapshot(): Promise<PutSignalBudgetRequest> {
+  async #snapshot(signal?: AbortSignal): Promise<PutSignalBudgetRequest> {
     const now = this.#clock.now();
     const budget = this.#payments.budget(now);
-    const balance = await withTimeout(this.#payments.gatewayBalance(), BALANCE_TIMEOUT_MS).catch(
-      (error: unknown) => {
-        this.#logger.debug("payments.balance_unknown", { message: describe(error) });
-        return null;
-      },
-    );
+    const balance = await raceAbort(
+      withTimeout(this.#payments.gatewayBalance(), BALANCE_TIMEOUT_MS),
+      signal,
+    ).catch((error: unknown) => {
+      this.#logger.debug("payments.balance_unknown", { message: describe(error) });
+      return null;
+    });
     return {
       buyerAddress: this.#payments.payer,
       day: budget.day,
@@ -209,14 +223,20 @@ export class PaymentReporter {
     };
   }
 
-  /** One request with a bounded timeout and one retry when the console does not answer. */
+  /**
+   * One request with a bounded timeout and one retry when the console does not answer. When the
+   * caller's `signal` aborts, it stops at once without retrying and the delivery stays pending.
+   */
   async #attempt(
     what: "payment" | "budget",
     call: (signal: AbortSignal) => Promise<unknown>,
+    signal?: AbortSignal,
   ): Promise<Delivery> {
     for (let attempt = 1; ; attempt += 1) {
+      if (signal?.aborted) return "pending";
       try {
-        const answer = await call(AbortSignal.timeout(REPORT_TIMEOUT_MS));
+        const timeout = AbortSignal.timeout(REPORT_TIMEOUT_MS);
+        const answer = await call(signal === undefined ? timeout : AbortSignal.any([signal, timeout]));
         if (answer === null) {
           this.#logger.debug("payments.console_route_missing", { what });
           return "not_yet";
@@ -224,9 +244,12 @@ export class PaymentReporter {
         this.#lastProblem = null;
         return "recorded";
       } catch (error) {
+        if (signal?.aborted) return "pending";
         const kind = error instanceof ConsoleClientError ? error.kind : "invalid";
         if (kind === "unreachable" && attempt === 1) {
-          await new Promise((resolve) => setTimeout(resolve, REPORT_RETRY_DELAY_MS));
+          await raceAbort(new Promise((resolve) => setTimeout(resolve, REPORT_RETRY_DELAY_MS)), signal).catch(
+            () => undefined,
+          );
           continue;
         }
         const refused = kind === "rejected" || kind === "conflict" || kind === "invalid";

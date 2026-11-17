@@ -31,9 +31,17 @@ import {
   type RuleInput,
   type TradeIntentInput,
 } from "@mandate/shared";
+import { raceAbort } from "@mandate/shared";
 import type { Address, Config } from "../config";
-import type { AgentPolicy } from "../services";
+import type { AgentPolicy, ProposeOptions } from "../services";
 import { EventIndex } from "./event-index";
+import { scopedFetch, shieldCurrentScope, unscoped, withSignal } from "./rpc-scope";
+
+/**
+ * Most a proposal waits for its receipt once it is broadcast. Arc confirms in about a second; a
+ * transaction still unconfirmed after this is reported as `TX_UNCONFIRMED`, and nothing sends it again.
+ */
+export const RECEIPT_TIMEOUT_MS = 10_000;
 
 /** A loopback RPC is the local devchain (anvil): no explorer, and receipts arrive in milliseconds. */
 function isLoopback(rpcUrl: string): boolean {
@@ -66,48 +74,92 @@ export class ChainAgentPolicy implements AgentPolicy {
       publicClient: options.publicClient,
       ...(options.walletClient === undefined ? {} : { walletClient: options.walletClient }),
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
-      receiptTimeoutMs: 45_000,
+      receiptTimeoutMs: RECEIPT_TIMEOUT_MS,
     });
     this.#events = new EventIndex(this.#client, options.deployBlock);
   }
 
-  capabilities(): Promise<Capabilities> {
-    return this.#client.getCapabilities();
+  /**
+   * Runs one read with its RPC requests aborted when `signal` aborts, and stops waiting for it at
+   * once then (viem may still be between retries).
+   */
+  #read<T>(signal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> {
+    if (signal === undefined) return work();
+    if (signal.aborted) return Promise.reject(signal.reason as Error);
+    return raceAbort(
+      withSignal(signal, () => work()),
+      signal,
+    );
   }
 
-  snapshot(): Promise<PolicySnapshot> {
-    return this.#client.getSnapshot();
+  /**
+   * Which extensions the contract has, detected once for the process. The probes count any failure as
+   * "no extension", so they never run under one caller's signal: an aborted probe would be cached as a
+   * wrong answer for good. The caller only stops waiting.
+   */
+  #capabilities(signal: AbortSignal | undefined): Promise<Capabilities> {
+    return raceAbort(
+      unscoped(() => this.#client.getCapabilities()),
+      signal,
+    );
   }
 
-  roles(): Promise<Roles> {
-    return this.#client.getRoles();
+  capabilities(signal?: AbortSignal): Promise<Capabilities> {
+    return this.#capabilities(signal);
   }
 
-  async agentGasBalance(): Promise<bigint | null> {
-    if (this.agentAddress === undefined) return null;
-    return this.#publicClient.getBalance({ address: this.agentAddress });
+  snapshot(signal?: AbortSignal): Promise<PolicySnapshot> {
+    return this.#read(signal, () => this.#client.getSnapshot());
   }
 
-  intentCount(): Promise<number> {
-    return this.#client.getIntentCount();
+  roles(signal?: AbortSignal): Promise<Roles> {
+    return this.#read(signal, () => this.#client.getRoles());
   }
 
-  intent(id: number): Promise<Intent | null> {
-    return this.#client.getIntent(id);
+  async agentGasBalance(signal?: AbortSignal): Promise<bigint | null> {
+    const address = this.agentAddress;
+    if (address === undefined) return null;
+    return this.#read(signal, () => this.#publicClient.getBalance({ address }));
   }
 
-  async intentEvents(): Promise<ReadonlyMap<number, IntentView>> {
-    return this.#events.intents();
+  intentCount(signal?: AbortSignal): Promise<number> {
+    return this.#read(signal, () => this.#client.getIntentCount());
   }
 
-  preview(input: RuleInput): Promise<PreviewResult> {
-    return this.#client.previewTrade(input);
+  intent(id: number, signal?: AbortSignal): Promise<Intent | null> {
+    return this.#read(signal, () => this.#client.getIntent(id));
   }
 
-  async propose(input: TradeIntentInput): Promise<ProposeResult> {
+  intentEvents(signal?: AbortSignal): Promise<ReadonlyMap<number, IntentView>> {
+    return this.#read(signal, () => this.#events.intents(signal));
+  }
+
+  async preview(input: RuleInput, signal?: AbortSignal): Promise<PreviewResult> {
+    await this.#capabilities(signal);
+    return this.#read(signal, () => this.#client.previewTrade(input));
+  }
+
+  /**
+   * Proposes one intent. `signal` stops it only before the broadcast (see `WriteOptions` in
+   * `@mandate/shared`): this never races the signal, because a proposal that may be out must be
+   * followed to its receipt and reported, not abandoned.
+   */
+  async propose(input: TradeIntentInput, options: ProposeOptions = {}): Promise<ProposeResult> {
     if (this.agentAddress === undefined)
       throw new Error("No agent key is configured, so nothing can be proposed");
-    return this.#client.proposeTrade(input);
+    const { signal, beforeBroadcast } = options;
+    await this.#capabilities(signal);
+    const write = () =>
+      this.#client.proposeTrade(input, {
+        signal,
+        beforeBroadcast: () => {
+          const bound = beforeBroadcast?.();
+          // From here on only the bound aborts the broadcast and the receipt polls, not `signal`.
+          shieldCurrentScope(bound);
+          return bound;
+        },
+      });
+    return signal === undefined ? write() : withSignal(signal, write);
   }
 
   explorerTxUrl(txHash: `0x${string}`): string | null {
@@ -121,7 +173,7 @@ export function createAgentPolicy(config: Config): AgentPolicy | undefined {
   const rpcUrl = config.arcRpcUrl.reveal();
   const local = isLoopback(rpcUrl);
   const chain: Chain = local ? { ...devchain, rpcUrls: { default: { http: [rpcUrl] } } } : arcTestnet;
-  const transport = http(rpcUrl, { timeout: 10_000, retryCount: 1 });
+  const transport = http(rpcUrl, { timeout: 10_000, retryCount: 1, fetchFn: scopedFetch });
   const publicClient = createPublicClient({ chain, transport, pollingInterval: local ? 100 : 1_000 });
   const key = config.agentPrivateKey;
   const walletClient =

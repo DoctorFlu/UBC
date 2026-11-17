@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { FlaggedBadge, IntentLink, MarketName, amountLabel, intentFlags } from "@/components/domain/Intent";
+import { RequestText } from "@/components/domain/RequestText";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Advanced, useAdvanced } from "@/lib/advanced/Advanced";
 import { Card } from "@/components/ui/Card";
@@ -39,7 +40,6 @@ import styles from "./evidence.module.css";
 /** Agent-supplied and onchain strings are clipped to these lengths; the full value stays copyable. */
 const MAX_SYMBOL = 64;
 const MAX_ID = 48;
-const MAX_TEXT = 2_000;
 
 const STATUS: Record<ChainStatus, { label: string; tone: "good" | "bad" | "attention" | "muted" }> = {
   verified: { label: "Verified", tone: "good" },
@@ -160,7 +160,7 @@ function RequestLink({ view }: { view: AgentPlanView }) {
     <ChainLink index={1} tone="good" title="Your request" testId="evidence-request">
       {view.requestText ? (
         <blockquote className={styles.quote}>
-          <p>{clip(view.requestText, MAX_TEXT)}</p>
+          <RequestText text={view.requestText} />
         </blockquote>
       ) : (
         <p className={styles.muted}>The agent stored the plan without the request that led to it.</p>

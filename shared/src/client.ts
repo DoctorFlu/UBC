@@ -1,10 +1,11 @@
 import {
   BaseError,
   ContractFunctionRevertedError,
-  TransactionReceiptNotFoundError,
+  RpcRequestError,
   decodeFunctionData,
   encodeFunctionData,
   getContractError,
+  keccak256,
   parseEventLogs,
   type Account,
   type Address,
@@ -17,6 +18,7 @@ import {
   type WalletClient,
 } from "viem";
 import { policyAbi } from "./abi";
+import { raceAbort } from "./abort";
 import { evaluateIntent, headroom, type Headroom, type PolicyState, type RuleInput } from "./evaluate";
 import { decodePolicyLogs, rulesFromTuple, rulesToChain } from "./events";
 import { ARC_MIN_MAX_FEE_PER_GAS, applyFeeFloor } from "./fees";
@@ -108,6 +110,24 @@ export interface PolicyClientOptions {
 
 export class PolicyClientError extends Error {
   override name = "PolicyClientError";
+}
+
+/**
+ * Options for one write. A write has two parts: everything before the broadcast (waiting for earlier
+ * writes from this client, fees, the simulation, signing), which `signal` can stop with nothing sent,
+ * and the broadcast with the wait for its receipt, which `signal` never cuts short: once a
+ * transaction may have reached the node, the write only ends with its receipt or with "no receipt"
+ * (`PolicyClientError`, "no receipt for <hash>"), never with an error that looks safe to retry.
+ */
+export interface WriteOptions {
+  /** Stops the write while it has not been broadcast; the write then rejects with the signal's reason. */
+  signal?: AbortSignal | undefined;
+  /**
+   * Called right before the broadcast. It may throw, and then nothing is sent. It may return a bound
+   * for the rest of the write: when that signal aborts, the write stops waiting for the receipt and
+   * rejects with "no receipt" (the transaction may still land).
+   */
+  beforeBroadcast?: (() => AbortSignal | undefined) | undefined;
 }
 
 /** A write the contract refused, with its custom error name when the ABI knows it (for example "NotUser"). */
@@ -378,9 +398,10 @@ export class PolicyClient {
    * Proposes an intent and returns the contract's verdict. A rejection is a result, not an error.
    * The context hash is recorded only when the contract has the `proposeTrade` overload for it.
    */
-  async proposeTrade(input: TradeIntentInput): Promise<ProposeResult> {
+  async proposeTrade(input: TradeIntentInput, options: WriteOptions = {}): Promise<ProposeResult> {
     const intent = tradeIntentSchema.parse(input);
     const { proposeWithContext } = await this.getCapabilities();
+    options.signal?.throwIfAborted();
     const base = [
       intent.market,
       intent.category,
@@ -396,7 +417,7 @@ export class PolicyClient {
           args: [...base, intent.contextHash],
         })
       : encodeFunctionData({ abi: policyAbi, functionName: "proposeTrade", args: base });
-    const receipt = await this.send(data);
+    const receipt = await this.send(data, options);
     const intentId = this.verdictIntentId(receipt);
     return {
       ...this.verdictFor(receipt, intentId),
@@ -476,15 +497,24 @@ export class PolicyClient {
 
   /**
    * Simulates, sends and awaits one write. The call data is encoded by the caller with
-   * `encodeFunctionData`, which keeps every call site fully typed against the ABI.
+   * `encodeFunctionData`, which keeps every call site fully typed against the ABI. See `WriteOptions`
+   * for what `signal` can stop.
    */
-  private send(data: Hex): Promise<TransactionReceipt> {
+  private send(data: Hex, options: WriteOptions = {}): Promise<TransactionReceipt> {
     const { functionName, args } = decodeFunctionData({ abi: policyAbi, data });
+    const { signal, beforeBroadcast } = options;
+    let started = false;
+    let cancelled = false;
     const run = async (): Promise<TransactionReceipt> => {
+      // Given up while waiting for an earlier write: this one is never started.
+      if (cancelled) throw new PolicyClientError(`${functionName} was cancelled before it started`);
+      started = true;
+      signal?.throwIfAborted();
       const wallet = this.walletClient;
       if (!wallet) throw new PolicyClientError(`${functionName} needs a wallet client`);
       const account = wallet.account;
       const fees = await this.fees();
+      signal?.throwIfAborted();
       try {
         await this.publicClient.call({ account, to: this.address, data, ...fees });
       } catch (error) {
@@ -498,14 +528,8 @@ export class PolicyClient {
         });
         throw new PolicyRevertError(functionName, revertErrorName(decoded), decoded);
       }
-      const hash = await wallet.sendTransaction({
-        account,
-        chain: wallet.chain,
-        to: this.address,
-        data,
-        ...fees,
-      });
-      const receipt = await this.waitForReceipt(hash);
+      const { hash, bound } = await this.broadcast(wallet, data, fees, { signal, beforeBroadcast });
+      const receipt = await this.waitForReceipt(hash, bound);
       if (receipt.status !== "success") {
         throw new PolicyClientError(`${functionName} transaction ${hash} reverted`);
       }
@@ -513,29 +537,91 @@ export class PolicyClient {
     };
     const result = this.writeQueue.then(run, run);
     this.writeQueue = result.catch(() => undefined);
-    return result;
+    if (signal === undefined) return result;
+    return new Promise<TransactionReceipt>((resolve, reject) => {
+      const onAbort = () => {
+        if (started) return;
+        cancelled = true;
+        reject(signal.reason as Error);
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+      void result.then(resolve, reject).finally(() => {
+        signal.removeEventListener("abort", onAbort);
+      });
+    });
+  }
+
+  /**
+   * Signs the transaction and sends it, returning its hash. With a local account the hash is known
+   * before anything is sent, so a broadcast that fails without the node refusing it (a timeout, a
+   * dropped connection) is still followed to its receipt: it may have reached the node.
+   */
+  private async broadcast(
+    wallet: WalletClient<Transport, Chain, Account>,
+    data: Hex,
+    fees: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint },
+    options: WriteOptions,
+  ): Promise<{ hash: Hex; bound: AbortSignal | undefined }> {
+    const account = wallet.account;
+    if (account.type !== "local") {
+      options.signal?.throwIfAborted();
+      const bound = options.beforeBroadcast?.();
+      const hash = await wallet.sendTransaction({
+        account,
+        chain: wallet.chain,
+        to: this.address,
+        data,
+        ...fees,
+      });
+      return { hash, bound };
+    }
+    const request = await wallet.prepareTransactionRequest({
+      account,
+      chain: wallet.chain,
+      to: this.address,
+      data,
+      ...fees,
+    });
+    const serializedTransaction = await wallet.signTransaction(request);
+    const hash = keccak256(serializedTransaction);
+    options.signal?.throwIfAborted();
+    const bound = options.beforeBroadcast?.();
+    try {
+      await wallet.sendRawTransaction({ serializedTransaction });
+    } catch (error) {
+      if (!mayHaveReachedNode(error)) throw error;
+    }
+    return { hash, bound };
   }
 
   /**
    * Polls `eth_getTransactionReceipt` directly. viem's `waitForTransactionReceipt` compares against a
    * cached block number, which adds a full polling interval per write on a fast chain such as anvil.
+   * A failed poll is polled again: the transaction is out, so only its receipt, the timeout or the
+   * write's `bound` ends the wait.
    */
-  private async waitForReceipt(hash: Hex): Promise<TransactionReceipt> {
+  private async waitForReceipt(hash: Hex, bound?: AbortSignal): Promise<TransactionReceipt> {
     const deadline = Date.now() + this.receiptTimeoutMs;
     // Back off from 10 ms: anvil mines within milliseconds, Arc within about a second.
     let delay = 10;
     for (;;) {
       try {
-        return await this.publicClient.getTransactionReceipt({ hash });
+        return await raceAbort(this.publicClient.getTransactionReceipt({ hash }), bound);
       } catch (error) {
-        if (!(error instanceof TransactionReceiptNotFoundError)) throw error;
+        if (!(error instanceof BaseError) && bound?.aborted !== true) throw error;
+      }
+      if (bound?.aborted === true) {
+        throw new PolicyClientError(
+          `no receipt for ${hash} within the time this write had; it may still land`,
+        );
       }
       if (Date.now() > deadline) {
         throw new PolicyClientError(
           `no receipt for ${hash} after ${this.receiptTimeoutMs} ms; on Arc this usually means the fee was too low`,
         );
       }
-      await sleep(delay);
+      await raceAbort(sleep(delay), bound).catch(() => undefined);
       delay = Math.min(delay * 2, this.receiptPollingMs);
     }
   }
@@ -596,6 +682,20 @@ export function revertErrorName(error: unknown): string | null {
   const reverted = error.walk((e) => e instanceof ContractFunctionRevertedError);
   if (reverted instanceof ContractFunctionRevertedError) return reverted.data?.errorName ?? null;
   return null;
+}
+
+/**
+ * Whether a failed broadcast may still have reached the node. Only an answer from the node that
+ * refuses the transaction means it was not taken; "already known" or "nonce too low" can be the node
+ * telling a retry that it already has this very transaction.
+ */
+function mayHaveReachedNode(error: unknown): boolean {
+  if (!(error instanceof BaseError)) return true;
+  const answer = error.walk((e) => e instanceof RpcRequestError);
+  if (answer === null) return true;
+  return /already known|known transaction|already imported|nonce too low/i.test(
+    answer instanceof BaseError ? answer.details : "",
+  );
 }
 
 function txResult(receipt: TransactionReceipt): TxResult {

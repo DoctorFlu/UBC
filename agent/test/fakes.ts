@@ -30,8 +30,10 @@ import {
   type TradeIntentInput,
 } from "@mandate/shared";
 import { HttpConsoleClient } from "../src/console/client";
-import { createAppContext, type ToolContext } from "../src/context";
+import { createAppContext, type AppContext, type ToolContext } from "../src/context";
 import { silentLogger } from "../src/logger";
+import { CallDeadline } from "../src/mcp/deadline";
+import { toolContext } from "../src/mcp/tool";
 import { createHedgePlanner } from "../src/planning/planner";
 import { Secret } from "../src/secret";
 import type { AgentPolicy, MarketsClient, Services } from "../src/services";
@@ -390,7 +392,10 @@ export class FakeMarkets implements MarketsClient {
 export const CONSOLE_TOKEN = "console-service-token-for-tests";
 
 export interface Harness {
+  /** The context one tool call gets, its services bound to one call deadline. */
   ctx: ToolContext;
+  /** The same services unbound, for a server that binds them per call itself. */
+  app: AppContext;
   policy: FakePolicy;
   markets: FakeMarkets;
   console: FakeConsole;
@@ -442,7 +447,10 @@ export function harness(
   };
   const app = createAppContext(config, silentLogger, { clock: fixedClock, ...services });
   return {
-    ctx: { ...app, requestId: "test", signal: new AbortController().signal },
+    ctx: toolContext(app, new CallDeadline({ budgetMs: config.limits.toolDeadlineMs }), {
+      requestId: "test",
+    }),
+    app,
     policy: policy ?? new FakePolicy(),
     markets,
     console: fakeConsole,

@@ -4,6 +4,7 @@ import { Plus, Power, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { MarketName, OrderSummary } from "@/components/domain/Intent";
+import { RequestText } from "@/components/domain/RequestText";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -61,6 +62,16 @@ function Specimen({ label, children }: { label: string; children: ReactNode }) {
     </div>
   );
 }
+
+/** As the agent may report them: short, long, and one 600-character word. */
+const REQUESTS = [
+  { label: "short", text: "Protect my 0.05 BTC below $66,000 this week." },
+  {
+    label: "long",
+    text: "Protect my 0.05 BTC below $66,000 this week, for at most $60. I am travelling until Sunday and cannot watch the market, so if the price falls hard while I am away I want the ladder to pay out without me. Keep the rungs near spot first, skip anything the mandate would hold for my approval, and tell me what you bought when I am back.",
+  },
+  { label: "unbroken", text: "W".repeat(600) },
+];
 
 const swatches = [
   ["Ground", "--color-ground"],
@@ -272,6 +283,15 @@ export function GalleryView() {
           <code className={styles.code}>
             {[formatUsdCents(100_000), formatUsdCentsDelta(-1_820), formatPercentBps(9_999)].join("   ")}
           </code>
+        </Specimen>
+        <Specimen label="The owner's request">
+          <div className={styles.requests}>
+            {REQUESTS.map((request) => (
+              <blockquote key={request.label} className={styles.request} data-specimen={request.label}>
+                <RequestText text={request.text} />
+              </blockquote>
+            ))}
+          </div>
         </Specimen>
         <Specimen label="Address and transaction">
           <HexValue label="Agent" value={AGENT_ADDRESS} kind="address" />

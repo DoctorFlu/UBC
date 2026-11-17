@@ -6,7 +6,7 @@
  */
 import type { Ladder, MarketEvent } from "@mandate/gemini";
 import { formatPrice } from "@mandate/planner";
-import { hashContext, type DecisionContext, type LadderSummary } from "@mandate/shared";
+import { hashContext, raceAbort, type DecisionContext, type LadderSummary } from "@mandate/shared";
 import { ConsoleClientError } from "../console/client";
 import type { ToolContext } from "../context";
 import { scrubText } from "../logger";
@@ -162,9 +162,16 @@ async function deliverLink(ctx: ToolContext, intentId: number, link: ContextLink
       ctx.logger.info("intent.context_linked", { intentId, attempts: attempt });
       return true;
     } catch (error) {
+      // The call was stopped (deadline or client gone), not refused: the link stays queued.
+      if (ctx.signal.aborted) {
+        ctx.logger.debug("intent.context_link_deferred", { intentId, attempts: attempt });
+        return false;
+      }
       const kind = error instanceof ConsoleClientError ? error.kind : "invalid";
-      if (kind === "unreachable" && attempt === 1 && !ctx.signal.aborted) {
-        await new Promise((resolve) => setTimeout(resolve, LINK_RETRY_DELAY_MS));
+      if (kind === "unreachable" && attempt === 1) {
+        await raceAbort(new Promise((resolve) => setTimeout(resolve, LINK_RETRY_DELAY_MS)), ctx.signal).catch(
+          () => undefined,
+        );
         continue;
       }
       // A conflict or a refused body will never be accepted; anything else may be, later.

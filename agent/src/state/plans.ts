@@ -85,16 +85,33 @@ export class PlanStore {
   /**
    * Runs `work` for one key at a time, so two calls for the same key never interleave. Keys are plan
    * ids, or `ladderLockKey` for everything that reads and then adds positions on one ladder.
+   *
+   * `whileWaiting` gets the wait for the key's previous holder and returns the wait to use, for
+   * example one that gives up when the caller's deadline passes. A caller that gives up never runs
+   * `work`, and the callers after it wait only for the holder before it.
    */
-  exclusive<T>(planId: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.#locks.get(planId) ?? Promise.resolve();
-    const run = previous.then(work, work);
-    const settled = run.catch(() => undefined);
-    this.#locks.set(planId, settled);
-    void settled.then(() => {
-      if (this.#locks.get(planId) === settled) this.#locks.delete(planId);
+  async exclusive<T>(
+    key: string,
+    work: () => Promise<T>,
+    options: { whileWaiting?: (wait: Promise<unknown>) => Promise<unknown> } = {},
+  ): Promise<T> {
+    // Every entry is a slot that only ever resolves, so a waiter never sees a rejection.
+    const previous = this.#locks.get(key) ?? Promise.resolve();
+    let release: () => void = () => undefined;
+    const mine = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    return run;
+    const slot = previous.then(() => mine);
+    this.#locks.set(key, slot);
+    void slot.then(() => {
+      if (this.#locks.get(key) === slot) this.#locks.delete(key);
+    });
+    try {
+      await (options.whileWaiting === undefined ? previous : options.whileWaiting(previous));
+      return await work();
+    } finally {
+      release();
+    }
   }
 
   #evict(now: Date): void {

@@ -15,18 +15,25 @@ import {
   type Reason,
   type Verdict,
 } from "../mcp/envelope";
+import { PROPOSAL_RESERVE_MS, reserveWithin } from "../mcp/scoped-services";
 import { defineTool } from "../mcp/tool";
 import type { AgentPolicy } from "../services";
 import { ladderLockKey, PLAN_EXECUTABLE_FOR_MS, type OrderOutcome, type StoredPlan } from "../state/plans";
-import { describeFailure, notConfigured, unavailableFor, type Failure } from "../support/failures";
+import {
+  describeFailure,
+  NOT_STARTED,
+  notConfigured,
+  stoppedFailure,
+  TIMED_OUT,
+  unavailableFor,
+  type Failure,
+} from "../support/failures";
 import { AFTER_REJECTION } from "../support/rules";
 import { linkPending, relinkContext } from "../trading/context";
 import { heldPositions } from "../trading/positions";
 import { proposeIntent } from "../trading/propose";
 import { decisionReasonArg, signalReceiptIdsArg } from "./propose-trade";
 
-/** Stop starting new orders after this long, so one call stays inside the client's patience. */
-export const EXECUTION_BUDGET_MS = 40_000;
 const MAX_ROWS = 20;
 
 const OrderRowSchema = z.object({
@@ -117,7 +124,15 @@ function citedReceipts(signal: HedgePlan["signal"], named: readonly string[]): s
   return [...new Set(receipts)].slice(0, 10);
 }
 
-/** Submits the plan's orders from where it left off. Returns why it stopped early, if it did. */
+/**
+ * Submits the plan's orders from where it left off. Returns why it stopped early, if it did.
+ *
+ * The call's deadline (issue #105) ends a run between two orders, never inside one: an order starts
+ * only while there is time for its proposal and receipt, a proposal is broadcast only with that time
+ * still left (`beginCommit`), and a broadcast proposal is always followed to its receipt. So when a
+ * run stops, every order is either recorded in `stored.outcomes` or was never sent, and the next call
+ * goes on from the first unrecorded order, after the same cover check as always.
+ */
 async function runOrders(
   ctx: ToolContext,
   policy: AgentPolicy,
@@ -129,13 +144,15 @@ async function runOrders(
   outOfTime: boolean;
   coverChangedBy: number[] | null;
 }> {
-  const started = Date.now();
   let recorded: boolean | null = null;
   // Once the console failed to take a link, later orders only queue theirs instead of waiting again.
   let consoleDown = false;
   const { plan } = stored;
+  const orderNeedsMs = reserveWithin(PROPOSAL_RESERVE_MS, ctx.deadline.budgetMs);
   while (stored.stoppedAt === null && stored.outcomes.length < plan.orders.length) {
-    if (Date.now() - started > EXECUTION_BUDGET_MS) {
+    const stopped = stoppedFailure(ctx.deadline);
+    if (stopped !== undefined) return { failure: stopped, recorded, outOfTime: true, coverChangedBy: null };
+    if (ctx.deadline.remainingMs() < orderNeedsMs) {
       return { failure: null, recorded, outOfTime: true, coverChangedBy: null };
     }
     const orderIndex = stored.outcomes.length;
@@ -147,7 +164,7 @@ async function runOrders(
     );
     // Reading the positions and adding one is a single step per ladder, so two runs at the same
     // moment, or a stale plan, can never both count the same gap and fill it twice.
-    const step = await ctx.plans.exclusive(ladderLockKey(plan.eventTicker), async (): Promise<OrderStep> => {
+    const runStep = async (): Promise<OrderStep> => {
       let newer: number[];
       try {
         newer = await newerPositions(policy, stored);
@@ -177,7 +194,16 @@ async function runOrders(
         { linkContext: !consoleDown },
       );
       return { kind: "proposed", outcome: proposed };
-    });
+    };
+    let step: OrderStep;
+    try {
+      step = await ctx.plans.exclusive(ladderLockKey(plan.eventTicker), runStep, {
+        whileWaiting: (wait) => ctx.deadline.waitFor("lock.ladder", wait),
+      });
+    } catch (error) {
+      // Stopped while another run held the ladder: this order was never started.
+      return { failure: describeFailure(error, ctx), recorded, outOfTime: true, coverChangedBy: null };
+    }
     if (step.kind === "unreadable")
       return { failure: step.failure, recorded, outOfTime: false, coverChangedBy: null };
     if (step.kind === "cover_changed") {
@@ -194,6 +220,10 @@ async function runOrders(
         outcome.proposal.context === null ? null : (outcome.proposal.context.hash as `0x${string}`),
     };
     if (outcome.kind === "failed") {
+      // Too little time was left to broadcast: nothing was sent, and the next call sends this order.
+      if (outcome.failure.reason.code === NOT_STARTED) {
+        return { failure: null, recorded, outOfTime: true, coverChangedBy: null };
+      }
       // Nothing reached the chain, so the next call can retry this order, unless it may have.
       if (outcome.failure.reason.code === "TX_UNCONFIRMED") {
         stored.outcomes.push({
@@ -271,6 +301,22 @@ function verdictFor(
       AFTER_REJECTION,
     );
   }
+  if (failure?.reason.code === TIMED_OUT) {
+    const total = stored.plan.orders.length;
+    return unavailable(
+      [
+        failure.reason,
+        reason(
+          "IN_PROGRESS",
+          `${outcomes.length.toString()} of ${total.toString()} orders are submitted; the others were not sent.`,
+        ),
+      ],
+      {
+        actor: "agent",
+        hint: `Call execute_plan again with planId ${stored.plan.planId} in a minute to continue; orders already sent are never sent twice. If it times out again, tell the owner what was slow.`,
+      },
+    );
+  }
   if (failure !== null) return unavailableFor(failure);
   if (stopped?.decision === "error") {
     return unavailable(
@@ -326,7 +372,6 @@ export const executePlan = defineTool({
   }),
   outputSchema: verdictSchema({ execution: ExecutionSchema.nullable() }),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  timeoutMs: 90_000,
   handler: async (input, ctx) => {
     const policy = ctx.policy;
     if (policy === undefined || policy.agentAddress === undefined) {
@@ -361,45 +406,66 @@ export const executePlan = defineTool({
       return { structured: { ...v, execution: executionView(stored, null) }, summary: summarizeVerdict(v) };
     }
 
-    return ctx.plans.exclusive(stored.plan.planId, async () => {
-      await relinkOrders(ctx, stored);
-      const already = stored.stoppedAt !== null || stored.outcomes.length === stored.plan.orders.length;
-      const run =
-        already || !fresh
-          ? { failure: null, recorded: null, outOfTime: false, coverChangedBy: null }
-          : await runOrders(ctx, policy, stored, input);
-      const v =
-        !already && !fresh
-          ? unavailable(
-              [
-                reason(
-                  "PLAN_EXPIRED",
-                  "The rest of this plan is more than 30 minutes old and its prices are stale.",
-                ),
-              ],
-              {
-                actor: "agent",
-                hint: "Tell the owner which orders went through, then call plan_hedge again for the rest.",
-              },
-            )
-          : verdictFor(stored, run.failure, run.outOfTime, already, run.coverChangedBy);
-      const recorded =
-        run.recorded ??
-        (stored.outcomes.length === 0
-          ? null
-          : (ctx.ledger.lookup(stored.outcomes[0]?.intentId ?? -1)?.contextHashRecorded ?? null));
-      const execution = executionView(stored, recorded, run.coverChangedBy);
-      const tally = (d: OrderOutcome["decision"]) => stored.outcomes.filter((o) => o.decision === d).length;
-      const spent = stored.outcomes
-        .filter((o) => o.decision === "approved")
-        .reduce((sum, o) => sum + o.amountCents, 0);
-      const counts = `${execution.submitted} of ${execution.totalOrders} orders submitted: ${tally("approved")} approved (${formatCents(spent)}), ${tally("needs_approval")} waiting for the owner, ${tally("rejected")} rejected.`;
-      return {
-        structured: { ...v, execution },
-        summary: [`Plan ${stored.plan.planId}: ${counts}`, verdictDetails(v)]
-          .filter((part) => part !== "")
-          .join(" "),
-      };
-    });
+    const run = () =>
+      ctx.plans.exclusive(stored.plan.planId, () => executeStored(ctx, policy, stored, fresh, input), {
+        whileWaiting: (wait) => ctx.deadline.waitFor("lock.plan", wait),
+      });
+    try {
+      return await run();
+    } catch (error) {
+      // Stopped while another call ran this plan: nothing was started.
+      const failure = stoppedFailure(ctx.deadline);
+      if (failure === undefined) throw error;
+      const v = unavailableFor(failure);
+      return { structured: { ...v, execution: executionView(stored, null) }, summary: summarizeVerdict(v) };
+    }
   },
 });
+
+/** Runs, or reports, one stored plan. Called while holding the plan's lock. */
+async function executeStored(
+  ctx: ToolContext,
+  policy: AgentPolicy,
+  stored: StoredPlan,
+  fresh: boolean,
+  input: { reason: string; signalReceiptIds: string[] },
+) {
+  await relinkOrders(ctx, stored);
+  const already = stored.stoppedAt !== null || stored.outcomes.length === stored.plan.orders.length;
+  const run =
+    already || !fresh
+      ? { failure: null, recorded: null, outOfTime: false, coverChangedBy: null }
+      : await runOrders(ctx, policy, stored, input);
+  const v =
+    !already && !fresh
+      ? unavailable(
+          [
+            reason(
+              "PLAN_EXPIRED",
+              "The rest of this plan is more than 30 minutes old and its prices are stale.",
+            ),
+          ],
+          {
+            actor: "agent",
+            hint: "Tell the owner which orders went through, then call plan_hedge again for the rest.",
+          },
+        )
+      : verdictFor(stored, run.failure, run.outOfTime, already, run.coverChangedBy);
+  const recorded =
+    run.recorded ??
+    (stored.outcomes.length === 0
+      ? null
+      : (ctx.ledger.lookup(stored.outcomes[0]?.intentId ?? -1)?.contextHashRecorded ?? null));
+  const execution = executionView(stored, recorded, run.coverChangedBy);
+  const tally = (d: OrderOutcome["decision"]) => stored.outcomes.filter((o) => o.decision === d).length;
+  const spent = stored.outcomes
+    .filter((o) => o.decision === "approved")
+    .reduce((sum, o) => sum + o.amountCents, 0);
+  const counts = `${execution.submitted} of ${execution.totalOrders} orders submitted: ${tally("approved")} approved (${formatCents(spent)}), ${tally("needs_approval")} waiting for the owner, ${tally("rejected")} rejected.`;
+  return {
+    structured: { ...v, execution },
+    summary: [`Plan ${stored.plan.planId}: ${counts}`, verdictDetails(v)]
+      .filter((part) => part !== "")
+      .join(" "),
+  };
+}
