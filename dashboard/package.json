@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "typegen": "next typegen",
-    "typecheck": "npm run typegen && tsc --noEmit",
+    "typecheck": "npm run typegen && tsc --noEmit -p tsconfig.typecheck.json",
     "e2e": "playwright test --project=smoke && E2E_SUITE=live playwright test --project=live",
     "screenshots": "E2E_SERVER=prod playwright test --project=screenshots"
   },
