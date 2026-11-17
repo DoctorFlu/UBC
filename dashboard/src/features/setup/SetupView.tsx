@@ -16,6 +16,7 @@ import { setupSteps } from "@/lib/setup";
 import { Advanced } from "@/lib/advanced/Advanced";
 import { When } from "@/components/ui/When";
 
+import { AgentsSection } from "./AgentsSection";
 import styles from "./setup.module.css";
 import { WakeUpsCard } from "./WakeUps";
 
@@ -191,6 +192,9 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
           </Advanced>
         </div>
       </div>
+
+      {/* The fixture preview has no workspace to list agents from. */}
+      {preview ? null : <AgentsSection />}
     </div>
   );
 }

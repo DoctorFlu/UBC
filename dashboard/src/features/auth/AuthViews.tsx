@@ -3,7 +3,7 @@
 import { CircleAlert, KeyRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type SyntheticEvent, type ReactNode, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { CopyButton } from "@/components/ui/CopyButton";
@@ -140,7 +140,7 @@ function RegisterForm({
   const { busy, error, attempt } = useAttempt();
   const [done, setDone] = useState<Registered | null>(null);
   if (done?.recoveryCode) return <RecoveryCode code={done.recoveryCode} next="/" />;
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const registered = await attempt(() => registerPasskey(url, body()));
     if (registered) setDone(registered);

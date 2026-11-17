@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyRound, Plus } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type SyntheticEvent, useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -18,11 +18,10 @@ import type { AgentTokenView, AgentView, AgentsResponse, CreatedToken } from "@/
 
 import styles from "./setup.module.css";
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
-  });
+async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "application/json");
+  const response = await fetch(url, { ...init, headers });
   const body = (await response.json().catch(() => ({}))) as T & { error?: { message?: string } };
   if (!response.ok) throw new Error(body.error?.message ?? "The console could not do that. Try again.");
   return body;
@@ -32,17 +31,27 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function AgentsSection() {
   const [data, setData] = useState<AgentsResponse | null>(null);
   const [failed, setFailed] = useState(false);
-  const load = useCallback(async () => {
-    try {
-      setData(await request<AgentsResponse>("/api/console/agents"));
-      setFailed(false);
-    } catch {
-      setFailed(true);
-    }
+  // Bumped to load the list again after a change or a failed load.
+  const [version, setVersion] = useState(0);
+  const load = useCallback(() => {
+    setVersion((current) => current + 1);
   }, []);
   useEffect(() => {
-    void load();
-  }, [load]);
+    let current = true;
+    request<AgentsResponse>("/api/console/agents").then(
+      (loaded) => {
+        if (!current) return;
+        setData(loaded);
+        setFailed(false);
+      },
+      () => {
+        if (current) setFailed(true);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [version]);
 
   return (
     <section className={styles.agents} aria-labelledby="agents-heading">
@@ -56,7 +65,14 @@ export function AgentsSection() {
         </p>
       </div>
       {failed ? (
-        <ErrorState title="Agents did not load" onRetry={() => void load()}>
+        <ErrorState
+          title="Agents did not load"
+          action={
+            <Button variant="secondary" size="sm" onClick={load}>
+              Try again
+            </Button>
+          }
+        >
           The console could not list this workspace&apos;s agents.
         </ErrorState>
       ) : data === null ? (
@@ -65,7 +81,7 @@ export function AgentsSection() {
         </Card>
       ) : (
         data.agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} mcpUrl={data.mcpUrl} onChange={() => void load()} />
+          <AgentCard key={agent.id} agent={agent} mcpUrl={data.mcpUrl} onChange={load} />
         ))
       )}
       <PasskeyCard />
@@ -82,7 +98,7 @@ function AgentCard({ agent, mcpUrl, onChange }: { agent: AgentView; mcpUrl: stri
   const [revoking, setRevoking] = useState<AgentTokenView | null>(null);
   const [busyRevoke, setBusyRevoke] = useState(false);
 
-  async function create(event: FormEvent<HTMLFormElement>) {
+  async function create(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreating(true);
     setError(undefined);
@@ -109,7 +125,11 @@ function AgentCard({ agent, mcpUrl, onChange }: { agent: AgentView; mcpUrl: stri
       setRevoking(null);
       onChange();
     } catch (failure) {
-      toast({ title: "Not revoked", description: failure instanceof Error ? failure.message : String(failure), tone: "error" });
+      toast({
+        title: "Not revoked",
+        description: failure instanceof Error ? failure.message : String(failure),
+        tone: "danger",
+      });
     } finally {
       setBusyRevoke(false);
     }
@@ -264,7 +284,7 @@ function PasskeyCard() {
       toast({
         title: "No passkey added",
         description: failure instanceof AuthFailure ? failure.message : "Something went wrong. Try again.",
-        tone: "error",
+        tone: "danger",
       });
     } finally {
       setBusy(false);
