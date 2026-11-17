@@ -141,7 +141,7 @@ describe("buildScorecard", () => {
   it("adds the hedge outcome from the recorded results, as the reducer does", () => {
     const chain = longHistory(60);
     const card = buildScorecard(chain);
-    expect(card.fills.realizedPnlCents).toBe(chain.realizedPnlCents);
+    expect(card.fills.recordedPnlCents).toBe(chain.realizedPnlCents);
     expect(card.fills.filledCents).toBe(10 * 500);
     expect(card.proposed.count).toBe(chain.intents.length);
   });
@@ -162,7 +162,7 @@ describe("buildScorecard", () => {
     expect(card.fills.filled.count).toBe(buildScorecard(chain).fills.filled.count);
     expect(card.fills.outOfRange).toBe(1);
     expect(card.fills.filledCents).toBe(buildScorecard(chain).fills.filledCents - 500);
-    expect(card.fills.realizedPnlCents).toBe(buildScorecard(chain).fills.realizedPnlCents + 20);
+    expect(card.fills.recordedPnlCents).toBe(buildScorecard(chain).fills.recordedPnlCents + 20);
   });
 
   it("lists the newest transactions behind each number, and no more than the cap", () => {

@@ -20,59 +20,79 @@ import styles from "./CoverNow.module.css";
 
 const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 
-const positionColumns: readonly Column<Settlement>[] = [
-  {
-    key: "strike",
-    header: "Pays if below",
-    cell: (doc) => <span className="num">{doc.strikeCents === null ? "-" : usd(doc.strikeCents)}</span>,
-    nowrap: true,
-  },
-  {
-    key: "contracts",
-    header: "Held",
-    cell: (doc) => (
-      <span className="num">
-        {formatContractsHundredths(doc.contractsHundredths)} {doc.outcome}
-      </span>
-    ),
-    align: "end",
-    nowrap: true,
-  },
-  {
-    key: "limit",
-    header: "Limit",
-    cell: (doc) => <span className="num">{formatContractPrice(doc.limitPrice)}</span>,
-    align: "end",
-    nowrap: true,
-    advanced: true,
-  },
-  {
-    key: "resolved",
-    header: "Resolved",
-    cell: (doc) => doc.resolution.toUpperCase(),
-    nowrap: true,
-  },
-  { key: "cost", header: "Cost", cell: (doc) => <Money cents={doc.costCents} />, align: "end", nowrap: true },
-  {
-    key: "paid",
-    header: "Paid",
-    cell: (doc) => <Money cents={doc.payoutCents} />,
-    align: "end",
-    nowrap: true,
-  },
-  {
-    key: "net",
-    header: "Net",
-    cell: (doc) => <Money cents={doc.pnlCents} sign="always" />,
-    align: "end",
-    nowrap: true,
-  },
-  { key: "intent", header: "Intent", cell: (doc) => <IntentLink id={doc.intentId} />, nowrap: true },
-];
+/** The positions table; a fee column and "Net after fees" only when a Gemini fill paid an estimated fee. */
+function positionColumns(withFee: boolean): readonly Column<Settlement>[] {
+  return [
+    {
+      key: "strike",
+      header: "Pays if below",
+      cell: (doc) => <span className="num">{doc.strikeCents === null ? "-" : usd(doc.strikeCents)}</span>,
+      nowrap: true,
+    },
+    {
+      key: "contracts",
+      header: "Held",
+      cell: (doc) => (
+        <span className="num">
+          {formatContractsHundredths(doc.contractsHundredths)} {doc.outcome}
+        </span>
+      ),
+      align: "end",
+      nowrap: true,
+    },
+    {
+      key: "limit",
+      header: "Limit",
+      cell: (doc) => <span className="num">{formatContractPrice(doc.limitPrice)}</span>,
+      align: "end",
+      nowrap: true,
+      advanced: true,
+    },
+    {
+      key: "resolved",
+      header: "Resolved",
+      cell: (doc) => doc.resolution.toUpperCase(),
+      nowrap: true,
+    },
+    {
+      key: "cost",
+      header: "Cost",
+      cell: (doc) => <Money cents={doc.costCents} />,
+      align: "end",
+      nowrap: true,
+    },
+    ...(withFee
+      ? [
+          {
+            key: "fee",
+            header: "Fee (estimated)",
+            cell: (doc: Settlement) => <Money cents={doc.feeCents ?? 0} />,
+            align: "end" as const,
+            nowrap: true,
+          },
+        ]
+      : []),
+    {
+      key: "paid",
+      header: "Paid",
+      cell: (doc) => <Money cents={doc.payoutCents} />,
+      align: "end",
+      nowrap: true,
+    },
+    {
+      key: "net",
+      header: withFee ? "Net after fees" : "Net",
+      cell: (doc) => <Money cents={doc.pnlCents} sign="always" />,
+      align: "end",
+      nowrap: true,
+    },
+    { key: "intent", header: "Intent", cell: (doc) => <IntentLink id={doc.intentId} />, nowrap: true },
+  ];
+}
 
 /** Every settled position of a ladder, one row per strike: the detail behind the plain sentence. */
 function SettledPositions({ ladder }: { ladder: SettledLadder }) {
-  const columns = useAdvancedColumns(positionColumns);
+  const columns = useAdvancedColumns(positionColumns(ladder.totals.feesEstimated));
   return (
     <Advanced>
       <p className={styles.detail}>

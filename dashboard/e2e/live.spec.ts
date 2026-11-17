@@ -1290,6 +1290,12 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     const card = page.getByTestId("intent-settlement");
     await expect(card).toHaveAttribute("data-sealed", "verified");
     await expect(card).toContainText("It settled at $64,250.42");
+    // One result per position: the settlement's net, not what the contract recorded at the fill.
+    const result = page.getByTestId("intent-result");
+    await expect(result).toHaveAttribute("data-result", "settled");
+    await expect(result).toHaveText(`${formatUsdCents(first.pnlCents, { sign: "always" })} at expiry`);
+    await expect(page.getByTestId("intent-fee")).toHaveCount(0);
+    await expect(page.getByTestId("intent-onchain-result")).toBeHidden();
     await shoot(page, testInfo, "intent-settled", card);
 
     // The public scorecard counts the settled positions, from the verified records only.
@@ -1297,6 +1303,8 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     const counted = page.getByTestId("count-settled");
     await expect(counted).toHaveAttribute("data-count", documents.length.toString());
     await expect(counted).toContainText(`paid ${formatUsdCents(paid)}`);
+    await expect(page.getByText("Settled result", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("realized")).toHaveCount(0);
     await shoot(page, testInfo, "scorecard-settled", counted);
   } finally {
     executor.stop();
