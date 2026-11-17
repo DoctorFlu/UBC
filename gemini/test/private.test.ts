@@ -300,7 +300,10 @@ describe("a redirect", () => {
   it("would carry the signed headers to the host it names if fetch followed it (why it never does)", async () => {
     const servers = await redirectingPair(302);
     try {
-      await fetch(`${servers.redirecting.url}/v1/roles`, { method: "POST", headers: { "X-GEMINI-APIKEY": KEY } });
+      await fetch(`${servers.redirecting.url}/v1/roles`, {
+        method: "POST",
+        headers: { "X-GEMINI-APIKEY": KEY },
+      });
       expect(servers.target.received.map((request) => request.headers["x-gemini-apikey"])).toEqual([KEY]);
     } finally {
       await servers.close();
@@ -311,7 +314,8 @@ describe("a redirect", () => {
     "is never followed (HTTP %i): nothing reaches the host it names, and a placement's outcome is unknown",
     async (status) => {
       const { caught, servers } = await redirected(
-        (g) => g.placeOrder({ symbol: "GEMI-X-Y", side: "buy", outcome: "yes", quantity: "1", price: "0.50" }),
+        (g) =>
+          g.placeOrder({ symbol: "GEMI-X-Y", side: "buy", outcome: "yes", quantity: "1", price: "0.50" }),
         status,
       );
       expect(servers.redirecting.received).toHaveLength(1);

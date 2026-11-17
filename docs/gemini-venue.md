@@ -11,6 +11,7 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
   The dev and demo executor (`devchain/scripts/executor.ts`) refuses production all the same, because the devchain's owner and agent keys are public test keys.
 - **Signed requests go to Gemini's own hosts only.**
   The private client (`@mandate/gemini/private`) sends to `https://api.sandbox.gemini.com` or `https://api.gemini.com`, never to `GEMINI_API_URL`; tests may use a loopback address only.
+  It never follows a redirect, because fetch keeps custom headers across hosts and would hand the key, payload and signature to whatever host the answer names; a redirect is reported as `redirected`, an unknown outcome.
   The executor's market checks read the public data of the environment its orders go to, because the sandbox lists other strikes than production.
 - **One order per intent, whatever fails.**
   Every order carries our client order id, `mandate-<chain id>-<first 8 hex digits of the contract>-<intent id>`, but safety does not depend on Gemini honouring it (see below).
@@ -39,7 +40,7 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 | Order made | `open`, then `filled`, `partly_filled` or `cancelled` | the fill, as before |
 | The order refused (`InsufficientFunds`, a bad price, any 4xx about the order) | `rejected` | recorded as not filled, so the budget is released |
 | The request refused (key, nonce, terms, account, rate limit) | `not_placed` | nothing; held, tried again with waits of 15 s doubling to 10 minutes |
-| No answer (timeout, network, 5xx) | `unknown` | nothing; held and looked up, never sent again |
+| No answer (timeout, network, 5xx, a redirect) | `unknown` | nothing; held and looked up, never sent again |
 
 The cost recorded is what the fills cost at their prices, rounded up to the cent.
 It does not include Gemini's fees, which the docs do not state for prediction markets, so the account can spend slightly more than the approved amount.
