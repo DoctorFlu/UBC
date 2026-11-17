@@ -309,7 +309,9 @@ async function main(): Promise<void> {
   // Empty values beat whatever `.env` configures: every process must use this run's chain.
   const localChain = { POLICY_ADDRESS: "", POLICY_DEPLOY_BLOCK: "", POLICY_DEPLOYMENT_FILE: deploymentPath };
 
-  start("signals", ["run", "start", "-w", "@mandate/signals"], {});
+  // The port it is waited on: the signal API's own default (4021) is not the stack's, so a clean clone
+  // without SIGNALS_PORT in `.env` would never be found (issue #26).
+  start("signals", ["run", "start", "-w", "@mandate/signals"], { SIGNALS_PORT: String(signalsPort) });
 
   const consoleEnv = {
     ...localChain,
@@ -358,6 +360,7 @@ async function main(): Promise<void> {
     CONSOLE_URL: consoleUrl,
     CONSOLE_SERVICE_TOKEN: serviceToken,
     SIGNALS_URL: signalsUrl,
+    MCP_PORT: String(mcpPort),
   });
 
   if (!values["no-executor"]) {
