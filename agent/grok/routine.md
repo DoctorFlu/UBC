@@ -20,6 +20,8 @@ On each run:
 1. Call `get_setup_state`. If setup is incomplete, report what is missing and stop.
 2. Call `get_policy`. If the mandate is paused or the daily loss limit is reached, report that and stop.
 3. Call `get_activity`. Report any new fills, any order still waiting for my approval, and any rejection since the last run.
+   If a ladder expired and settled since the last run, report what it cost, what it paid and the net, exactly as `get_activity` gives them; never work out a payout yourself.
+   An expired ladder is over: step 4 plans on the next one.
 4. Call `plan_hedge` for the goal, without a signal.
    The server counts the protection already held on that ladder (filled, waiting to fill, waiting for my approval) and answers in `cover`.
    If `cover.state` is `met` (reason `ALREADY_COVERED`), say that my holding is covered, give the numbers it reports, and stop without trading.

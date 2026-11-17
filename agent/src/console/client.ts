@@ -20,6 +20,7 @@ import {
   putPairingRequestSchema,
   putSignalBudgetRequestSchema,
   putSignalPaymentRequestSchema,
+  settlementsResponseSchema,
   signalBudgetResponseSchema,
   signalPaymentResponseSchema,
   type ContextResponse,
@@ -35,6 +36,7 @@ import {
   type PutPairingRequest,
   type PutSignalBudgetRequest,
   type PutSignalPaymentRequest,
+  type SettlementsResponse,
   type SignalBudgetResponse,
   type SignalPaymentResponse,
 } from "@mandate/shared";
@@ -169,6 +171,13 @@ export class HttpConsoleClient implements ConsoleClient {
     const body = putSignalBudgetRequestSchema.parse(request);
     return this.#call("PUT", CONSOLE_AGENT_ROUTES.signalBudget, signalBudgetResponseSchema, {
       body,
+      signal,
+      notFoundAsNull: true,
+    });
+  }
+
+  async getSettlements(signal?: AbortSignal): Promise<SettlementsResponse | null> {
+    return this.#call("GET", CONSOLE_AGENT_ROUTES.settlements, settlementsResponseSchema, {
       signal,
       notFoundAsNull: true,
     });

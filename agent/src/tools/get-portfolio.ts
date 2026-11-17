@@ -1,10 +1,18 @@
 import * as z from "zod";
 import { formatUsd, HOLDING_SCALE, parseHoldingUnits } from "@mandate/planner";
+import { settlementTotals } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { capList } from "../support/format";
+import {
+  LadderSettlementSchema,
+  ladderSentence,
+  readSettlements,
+  settledLadders,
+  SettlementTotalsSchema,
+} from "../support/settlements";
 
 const MAX_HOLDINGS = 20;
 /** Spot prices fetched per call; each is one Gemini request. */
@@ -34,10 +42,17 @@ export const getPortfolio = defineTool({
     holdings: z.array(HoldingSchema).nullable(),
     updatedAt: z.string().nullable().describe("When the owner last saved the holdings"),
     truncated: z.boolean(),
+    settled: SettlementTotalsSchema.extend({
+      lastLadder: LadderSettlementSchema.nullable().describe("The settled ladder with the latest expiry"),
+    })
+      .nullable()
+      .describe(
+        "Protection that already settled: every position whose market resolved, as the executor signed it and the console stored it. An expired ladder is over; new protection goes on the next ladder. null when the console cannot say.",
+      ),
   }),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   handler: async (_input, ctx) => {
-    const empty = { holdings: null, updatedAt: null, truncated: false };
+    const empty = { holdings: null, updatedAt: null, truncated: false, settled: null };
     if (ctx.console === undefined) {
       const v = unavailableFor(notConfigured.console());
       return { structured: { ...v, ...empty }, summary: summarizeVerdict(v) };
@@ -49,6 +64,19 @@ export const getPortfolio = defineTool({
       const v = unavailableFor(describeFailure(error, ctx));
       return { structured: { ...v, ...empty }, summary: summarizeVerdict(v) };
     }
+
+    const stored = await readSettlements(ctx);
+    const settled =
+      stored === null
+        ? null
+        : {
+            ...settlementTotals(stored.map((settlement) => settlement.document)),
+            lastLadder: settledLadders(stored)[0] ?? null,
+          };
+    const settledText =
+      settled?.lastLadder == null
+        ? ""
+        : ` Last settled: ${ladderSentence(settled.lastLadder)} That ladder is over; plan new protection on the next one.`;
 
     const { items, truncated } = capList(response.holdings, MAX_HOLDINGS);
     const markets = ctx.markets;
@@ -79,8 +107,8 @@ export const getPortfolio = defineTool({
         hint: "Enter the holdings to protect (asset and quantity) in the console.",
       });
       return {
-        structured: { ...v, holdings, updatedAt: response.updatedAt, truncated },
-        summary: summarizeVerdict(v),
+        structured: { ...v, holdings, updatedAt: response.updatedAt, truncated, settled },
+        summary: `${summarizeVerdict(v)}${settledText}`,
       };
     }
     const v = ok([], { actor: "agent", hint: "Call get_ladder for the asset to protect, then plan_hedge." });
@@ -88,8 +116,8 @@ export const getPortfolio = defineTool({
       (h) => `${h.quantity} ${h.asset}${h.valueCents === null ? "" : ` (about ${formatUsd(h.valueCents)})`}`,
     );
     return {
-      structured: { ...v, holdings, updatedAt: response.updatedAt, truncated },
-      summary: `Holdings: ${lines.join(", ")}${truncated ? `, and ${response.holdings.length - items.length} more` : ""}.`,
+      structured: { ...v, holdings, updatedAt: response.updatedAt, truncated, settled },
+      summary: `Holdings: ${lines.join(", ")}${truncated ? `, and ${response.holdings.length - items.length} more` : ""}.${settledText}`,
     };
   },
 });

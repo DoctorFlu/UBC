@@ -10,9 +10,10 @@
  * must leave the same protection as running it once.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { devAccount } from "@mandate/devchain";
 import type { Intent } from "@mandate/shared";
-import { ladderSymbol } from "./fakes";
-import { field, startStack, type Stack, type ToolResult } from "./stack";
+import { LADDER_TICKER, ladderSymbol } from "./fakes";
+import { field, NEXT_LADDER_TICKER, startStack, type Stack, type ToolResult } from "./stack";
 
 const GOAL = {
   asset: "BTC",
@@ -193,5 +194,90 @@ describe("the hedge routine against the real server, chain and executor (issue #
     expect(field(third.plan.structured, "plan", "cover", "state")).toBe("met");
     await s.settled();
     expect(bought(await s.intents())).toEqual(done);
+  });
+});
+
+describe("settling an expired ladder and rolling to the next (issue #92)", () => {
+  /** Resolves once the console holds a settlement for every intent in `ids`. */
+  async function untilSettled(s: Stack, ids: readonly number[]): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (ids.every((id) => s.console.state.settlements.has(id))) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`the executor did not settle intents ${ids.join(", ")}`);
+  }
+
+  it("settles each filled position once at expiry, reports it, and plans on the next ladder only", async () => {
+    stack = await startStack({ holdings: [{ asset: "BTC", quantity: "0.05" }], spotCents: SPOT });
+    const s = stack;
+
+    const first = await routineRun(s);
+    expect(field(first.plan.structured, "plan", "eventTicker")).toBe(LADDER_TICKER);
+    await s.settled();
+    const filled = (await s.intents()).filter((intent) => intent.status === "executed");
+    expect(filled.map((intent) => intent.market).sort()).toEqual(
+      [ladderSymbol(64_000), ladderSymbol(63_500), ladderSymbol(63_000)].sort(),
+    );
+
+    // Before expiry nothing settles, however often the executor looks.
+    await s.executor.settleNow();
+    await s.executor.settleNow();
+    expect(s.console.state.settlements.size).toBe(0);
+
+    // The ladder expires with BTC at $63,250: the $63,500 and $64,000 NO contracts pay, the $63,000 does not.
+    s.markets.expire(6_325_000);
+    const ids = filled.map((intent) => intent.id);
+    await untilSettled(s, ids);
+    // More passes, as after a restart or the next timer, record nothing twice.
+    await s.executor.settleNow();
+    await s.executor.settleNow();
+    const puts = s.console.state.requests.filter((request) => request.startsWith("PUT /api/executor/"));
+    expect(puts).toHaveLength(ids.length);
+    const byMarket = Object.fromEntries(
+      [...s.console.state.settlements.values()].map(({ document }) => [document.market, document]),
+    );
+    for (const intent of filled) {
+      const document = byMarket[intent.market];
+      const contracts = Math.floor(((intent.filledCents ?? 0) * 100) / (intent.limitPrice ?? 1));
+      const paid = intent.market !== ladderSymbol(63_000);
+      expect(document).toMatchObject({
+        intentId: intent.id,
+        eventTicker: LADDER_TICKER,
+        resolution: paid ? "no" : "yes",
+        costCents: intent.filledCents,
+        payoutCents: paid ? contracts : 0,
+        pnlCents: (paid ? contracts : 0) - (intent.filledCents ?? 0),
+        venue: "simulated",
+      });
+    }
+    // Signed by the contract's executor: the console refuses any other signer.
+    for (const stored of s.console.state.settlements.values()) {
+      expect(stored.signer).toBe(devAccount("executor").address);
+    }
+
+    // The next run reports the settlement and plans on the next ladder only.
+    const activity = await s.call("get_activity");
+    expect(activity.text).toContain(
+      `Ladder ${LADDER_TICKER} (expired 2026-11-20T22:00:00.000Z) settled: 3 positions`,
+    );
+    expect(field(activity.structured, "settlements", "positions")).toBe(3);
+    const second = await routineRun(s);
+    expect(field(second.plan.structured, "plan", "eventTicker")).toBe(NEXT_LADDER_TICKER);
+    // Nothing held on the new ladder, so the plan buys the full goal there, and nothing on the old one.
+    expect(field(second.plan.structured, "plan", "cover", "heldPayoutCents")).toBe(0);
+    await s.settled();
+    const after = bought(await s.intents());
+    const nextSymbol = (strike: number) => ladderSymbol(strike).replace(LADDER_TICKER, NEXT_LADDER_TICKER);
+    expect(Object.keys(after).sort()).toEqual(
+      [
+        ladderSymbol(64_000),
+        ladderSymbol(63_500),
+        ladderSymbol(63_000),
+        nextSymbol(64_000),
+        nextSymbol(63_500),
+        nextSymbol(63_000),
+      ].sort(),
+    );
+    for (const strike of [64_000, 63_500, 63_000]) expect(after[ladderSymbol(strike)]?.orders).toBe(1);
   });
 });
