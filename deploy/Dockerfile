@@ -8,6 +8,8 @@
 #
 # Both run as the unprivileged `node` user, carry no secret (every secret comes from the environment at
 # run time, see mandate.env.template), and build on arm64 and amd64 alike.
+#
+# The `site` stage is not an image: it is the landing page's static files (see deploy/build-site.sh).
 
 # Node 24 LTS on Debian bookworm, pinned by the digest of the multi-arch index.
 ARG NODE_IMAGE=node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
@@ -98,6 +100,24 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 CMD ["node", "dashboard/server.js"]
+
+# --------------------------------------------------------------------------------------------- landing page
+# The static export of site/, built from the same install as the console. It is files, not an image to run:
+# deploy/build-site.sh writes this stage to a folder with `docker build --output`, and compose.site.yml has
+# Caddy serve that folder. The three settings are public and baked into the pages.
+FROM deps AS site-build
+COPY . .
+ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_SCORECARD_AGENT
+ARG NEXT_PUBLIC_REPO_URL
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL} \
+    NEXT_PUBLIC_SCORECARD_AGENT=${NEXT_PUBLIC_SCORECARD_AGENT} \
+    NEXT_PUBLIC_REPO_URL=${NEXT_PUBLIC_REPO_URL}
+RUN test -n "$NEXT_PUBLIC_APP_URL" || { echo "NEXT_PUBLIC_APP_URL is required: the app's public URL." >&2; exit 1; }
+RUN npm run build -w @mandate/site
+
+FROM scratch AS site
+COPY --from=site-build /app/site/out /
 
 # ----------------------------------------------------------------------------------------------- services
 # The Policy contracts, compiled once here so the demo chain can deploy them without forge.
