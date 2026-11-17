@@ -584,7 +584,7 @@ describe("agent API: pairing", () => {
       agentAddress: AGENT,
       agentName: "Grok Bot",
       status: "pending",
-      claimUrl: `http://console.test/setup/pair/${AGENT}`,
+      claimUrl: `http://console.test/m/${envMandate(service).id}/setup/pair/${AGENT}`,
       isContractAgent: true,
     });
 

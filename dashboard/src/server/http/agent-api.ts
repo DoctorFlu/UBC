@@ -330,9 +330,9 @@ export const getPairing = agentRoute(async (_request, service, { mandate }) => {
   return json(await pairingResponse(service, mandate, pairing));
 });
 
-/** The owner's page for confirming an agent. */
-export function claimUrl(service: ConsoleService, agentAddress: Address): string {
-  return `${service.config.publicUrl}/setup/pair/${agentAddress}`;
+/** The owner's page for confirming an agent, under the mandate it acts for (#95). */
+export function claimUrl(service: ConsoleService, mandate: Mandate, agentAddress: Address): string {
+  return `${service.config.publicUrl}${mandatePath(mandate.id, `/setup/pair/${agentAddress}`)}`;
 }
 
 async function pairingResponse(service: ConsoleService, mandate: Mandate, pairing: StoredPairing) {
@@ -341,7 +341,7 @@ async function pairingResponse(service: ConsoleService, mandate: Mandate, pairin
     agentAddress: pairing.agentAddress,
     agentName: pairing.agentName,
     status: pairing.status,
-    claimUrl: claimUrl(service, pairing.agentAddress),
+    claimUrl: claimUrl(service, mandate, pairing.agentAddress),
     isContractAgent: roles ? isAddressEqual(roles.agent, pairing.agentAddress) : false,
   });
 }
