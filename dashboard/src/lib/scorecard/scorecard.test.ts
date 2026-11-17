@@ -206,6 +206,8 @@ describe("buildScorecard", () => {
     expect(buildScorecard(fixture).settled).toEqual({
       positions: 0,
       costCents: 0,
+      feeCents: 0,
+      feesEstimated: false,
       payoutCents: 0,
       pnlCents: 0,
       paidOut: 0,
@@ -250,6 +252,8 @@ describe("buildScorecard", () => {
     expect(card.settled).toEqual({
       positions: 2,
       costCents: 2_480,
+      feeCents: 0,
+      feesEstimated: false,
       payoutCents: 4_000,
       pnlCents: 1_520,
       paidOut: 1,
