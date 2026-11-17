@@ -39,6 +39,9 @@ export function DeployCard() {
   const wallet = useWalletState();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // A contract the wallet deployed but the console has not accepted yet: a retry sends it again rather
+  // than deploying a second one.
+  const [deployedTx, setDeployedTx] = useState<`0x${string}` | null>(null);
   if (!scope || scope.mandate.contract !== null || scope.mandate.deployment === "env") return null;
   const { mandate, deployer } = scope;
   const url = `/api/console/mandates/${encodeURIComponent(mandate.id)}/deployment`;
@@ -47,8 +50,8 @@ export function DeployCard() {
     setBusy(true);
     setProblem(null);
     try {
-      let txHash: `0x${string}` | null = null;
-      if (deployer === "wallet") {
+      let txHash: `0x${string}` | null = deployedTx;
+      if (deployer === "wallet" && txHash === null) {
         if (wallet.kind !== "connected") {
           setProblem("Connect the wallet that will own this mandate first.");
           return;
@@ -66,6 +69,7 @@ export function DeployCard() {
           chainId: view.chainId,
           account: wallet.address,
         });
+        setDeployedTx(txHash);
         await waitForTransactionReceipt(config, { hash: txHash, chainId: view.chainId });
       }
       const response = await fetch(url, {
@@ -74,9 +78,16 @@ export function DeployCard() {
         body: JSON.stringify({ txHash }),
       });
       if (!response.ok) {
-        setProblem(await errorText(response));
+        // 422: the console checked the transaction and it is not this mandate's contract; start over.
+        if (response.status === 422) setDeployedTx(null);
+        setProblem(
+          txHash === null || response.status === 422
+            ? await errorText(response)
+            : `${await errorText(response)} Your contract is deployed; try again to send it to the console.`,
+        );
         return;
       }
+      setDeployedTx(null);
       toast({
         title: "Contract deployed",
         description: "Set its first rules on the Rules page: until then it rejects every intent.",
@@ -116,7 +127,7 @@ export function DeployCard() {
           disabled={!scope.canAct || deployer === null}
           onClick={() => void deploy()}
         >
-          {byWallet ? "Deploy with wallet" : "Deploy contract"}
+          {deployedTx ? "Send deployment again" : byWallet ? "Deploy with wallet" : "Deploy contract"}
         </Button>
         {!scope.canAct ? <p className={styles.muted}>Only a workspace admin can deploy it.</p> : null}
         {problem ? (
