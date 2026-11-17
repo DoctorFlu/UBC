@@ -24,8 +24,10 @@ import { TopBar } from "./TopBar";
 export function AppShell({ account, children }: { account: AccountView; children: ReactNode }) {
   const snapshot = useSnapshot();
   const navCounts = { "/approvals": needsOwner(snapshot).total };
-  const agent = snapshot.contract?.roles?.agent ?? null;
   const scope = useMandateScope();
+  // Only the first mandate's agent has a public scorecard (the server's own contract, docs/accounts.md):
+  // another mandate's link would be a 404.
+  const agent = scope?.mandate.deployment === "env" ? (snapshot.contract?.roles?.agent ?? null) : null;
   const switcher = scope ? <MandateSwitcher mandates={scope.mandates} current={scope.mandate} /> : null;
   return (
     <div className={styles.shell}>

@@ -75,6 +75,12 @@ for (const scheme of schemes) {
             await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
             // The badge renders once for wide screens and once for phones; one of them shows.
             await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toHaveCount(1);
+            // The first mandate's agent is the one with a public scorecard; the sidebar links it.
+            if (viewport.name === "desktop") {
+              await expect(
+                page.getByRole("link", { name: "Public scorecard" }).filter({ visible: true }),
+              ).toHaveCount(1);
+            }
           } else {
             await expect(page.getByTestId("owner-address")).toHaveCount(0);
             // Outside a mandate (Home, New mandate) the dev signer signs nothing, so it is not shown.
