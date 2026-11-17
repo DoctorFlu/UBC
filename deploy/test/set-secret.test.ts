@@ -138,7 +138,7 @@ describe.skipIf(!hasBash)("deploy/set-secret.sh", () => {
     const result = run([name], "some-value-here\n");
     expect(result.status).toBe(2);
     expect(result.output).toContain(
-      "NAME is one of: GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET",
+      "NAME is one of: GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY",
     );
     expect(read()).toBe(before);
   });
@@ -205,6 +205,27 @@ describe.skipIf(!hasBash)("deploy/set-secret.sh", () => {
       before,
       value === "https://" ? "" : value,
     );
+  });
+
+  it("takes an Arc key from standard input, as arc:keygen wrote it, and prints only length and hash", () => {
+    const key = `0x${"ab".repeat(32)}`;
+    writeFileSync(envFile, "AGENT_PRIVATE_KEY=\nEXECUTOR_PRIVATE_KEY=\n", { mode: 0o600 });
+    const result = run(["EXECUTOR_PRIVATE_KEY"], `${key}\n`);
+    expect(result.status).toBe(0);
+    expect(result.output).not.toContain("ab".repeat(8));
+    expect(read()).toBe(`AGENT_PRIVATE_KEY=\nEXECUTOR_PRIVATE_KEY='${key}'\n`);
+  });
+
+  it.each([
+    ["ab".repeat(32)],
+    [`0x${"ab".repeat(31)}`],
+    [`0x${"ab".repeat(33)}`],
+    [`0x${"g".repeat(64)}`],
+    [`1x${"ab".repeat(32)}`],
+  ])("refuses an Arc key %j that is not 0x and 64 hex digits", (value) => {
+    writeFileSync(envFile, "AGENT_PRIVATE_KEY=\n", { mode: 0o600 });
+    const before = read();
+    expectRefused(run(["AGENT_PRIVATE_KEY"], `${value}\n`), "0x and 64 hex digits", before, value);
   });
 
   it("refuses a file with the name twice", () => {

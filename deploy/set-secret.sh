@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sets one secret in the env file, for values the owner copies from another product (a webhook URL, an API
-# key), so that the value never passes through a person, a terminal's output, shell history or a process
-# argument list:
+# key) or from another machine (the Arc testnet keys `npm run arc:keygen` made), so that the value never
+# passes through a person, a terminal's output, shell history or a process argument list:
 #
 #   pbpaste | deploy/set-secret.sh GROK_WEBHOOK_URL       # from standard input (one trailing newline is dropped)
 #   deploy/set-secret.sh GROK_WEBHOOK_KEY                 # from a terminal: asks, and shows nothing typed
@@ -9,7 +9,8 @@
 # Only the names on the allow-list below are accepted; the tokens and keys the stack generates
 # (deploy/init-env.sh) are never set by hand.
 # The value must be printable ASCII without a single quote, with no space at either end; GROK_WEBHOOK_URL
-# must also start with https:// and hold no space. Anything else is refused and nothing changes.
+# must also start with https:// and hold no space, and AGENT_PRIVATE_KEY and EXECUTOR_PRIVATE_KEY must be
+# 0x and 64 hex digits. Anything else is refused and nothing changes.
 #
 # The line is written as NAME='value': single quotes make docker compose take the value literally (no "$"
 # interpolation, no " #" comment). The file is rebuilt next to itself (mode 600) by bash alone and moved over
@@ -24,7 +25,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 env_file="${MANDATE_ENV_FILE:-$here/.env}"
 umask 077
 
-ALLOWED="GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET"
+ALLOWED="GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY"
 MAX_BYTES=8192
 
 usage() {
@@ -95,6 +96,18 @@ if [ "$name" = GROK_WEBHOOK_URL ]; then
     *) refuse "the URL must start with https://." ;;
   esac
 fi
+case "$name" in
+  AGENT_PRIVATE_KEY | EXECUTOR_PRIVATE_KEY)
+    if [ "${#value}" -ne 66 ]; then refuse "a private key is 0x and 64 hex digits."; fi
+    case "$value" in
+      0x*) ;;
+      *) refuse "a private key is 0x and 64 hex digits." ;;
+    esac
+    case "${value#0x}" in
+      *[!0-9a-fA-F]*) refuse "a private key is 0x and 64 hex digits." ;;
+    esac
+    ;;
+esac
 
 sha256_short() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -c1-12

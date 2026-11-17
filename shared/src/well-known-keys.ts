@@ -1,5 +1,5 @@
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
-import type { Address, Hex } from "viem";
+import type { Hex } from "viem";
 
 /**
  * Keys everyone has: the accounts anvil and Hardhat derive from the published mnemonic "test test test
@@ -24,12 +24,12 @@ function wellKnownAddresses(): Set<string> {
 }
 
 /** Whether `address` belongs to one of the published test accounts. */
-export function isWellKnownAddress(address: Address | string): boolean {
+export function isWellKnownAddress(address: string): boolean {
   return wellKnownAddresses().has(address.toLowerCase());
 }
 
 /** Whether `privateKey` is one of the published test keys. False for anything that is not a key. */
-export function isWellKnownKey(privateKey: Hex | string): boolean {
+export function isWellKnownKey(privateKey: string): boolean {
   try {
     return isWellKnownAddress(privateKeyToAccount(privateKey as Hex).address);
   } catch {
@@ -47,7 +47,7 @@ export function isWellKnownKey(privateKey: Hex | string): boolean {
  */
 export function wellKnownKeyRefusal(
   variable: string,
-  privateKey: Hex | string,
+  privateKey: string,
   target: { local: boolean; network: string },
 ): string | null {
   if (target.local || !isWellKnownKey(privateKey)) return null;
