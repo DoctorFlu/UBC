@@ -3,15 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Design tokens and self-hosted fonts shared by the console and the landing page.",
+  "description": "Design tokens, self-hosted fonts and app icons shared by the console and the landing page.",
   "exports": {
     "./tokens.css": "./tokens.css",
     "./fonts": "./fonts.ts"
   },
   "scripts": {
+    "icons": "tsx scripts/render-icons.ts",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "next": "^16.4.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
   }
 }
