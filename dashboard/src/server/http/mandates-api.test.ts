@@ -424,7 +424,8 @@ describe("mandates on the demo chain", () => {
     const right = rightView.mandates.find((m) => m.id === bobsApprovals.id);
     if (!right) throw new Error("no view");
     const rightAgent = agentOf(right);
-    const before = snapshotOf(right.id).chain?.committedCents ?? 0;
+    // From the contract: the follower may not have read an earlier test's intents yet.
+    const before = (await rightAgent.getSnapshot()).committedCents;
     const [a, b] = await Promise.all([
       leftAgent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_500 }),
       rightAgent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_200 }),
