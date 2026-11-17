@@ -1,7 +1,8 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["DOM", "ES2023"]
+    "lib": ["DOM", "ES2023"],
+    "types": ["node"]
   },
-  "include": ["fonts.ts"]
+  "include": ["fonts.ts", "icons.test.ts", "scripts"]
 }

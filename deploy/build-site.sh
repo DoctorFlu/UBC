@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Builds the landing page (site/) into the folder compose.site.yml serves, with Docker, so the host needs no
-# Node.js. It uses the Dockerfile's `site` stage, the same install as the console, and bakes in three public
+# Node.js. It uses the Dockerfile's `site` stage, the same install as the console, and bakes in four public
 # settings, each taken from the environment, else from the env file:
 #
 #   NEXT_PUBLIC_APP_URL          the app's public URL. Default MANDATE_PUBLIC_URL, else https://<MANDATE_HOST>.
+#   NEXT_PUBLIC_SITE_URL         the landing page's own public URL, which link previews need. Default
+#                                https://<MANDATE_SITE_ADDRESS> when that is a name; behind a proxy
+#                                (MANDATE_SITE_ADDRESS http://:8081) only the proxy knows it, so set it.
 #   NEXT_PUBLIC_SCORECARD_AGENT  the agent whose scorecard the page links to. Default: the site's own (the
 #                                demo chain's agent).
 #   NEXT_PUBLIC_REPO_URL         the source link in the footer. Default empty: no link.
@@ -41,6 +44,19 @@ if [ -z "$app_url" ]; then
   echo "Set MANDATE_HOST (or NEXT_PUBLIC_APP_URL): the landing page links to the app." >&2
   exit 1
 fi
+site_url="$(setting NEXT_PUBLIC_SITE_URL)"
+if [ -z "$site_url" ]; then
+  site_address="$(setting MANDATE_SITE_ADDRESS)"
+  case "$site_address" in
+    "" | http://* | :*) ;;
+    https://*) site_url="$site_address" ;;
+    *) site_url="https://$site_address" ;;
+  esac
+fi
+if [ -z "$site_url" ]; then
+  echo "Set NEXT_PUBLIC_SITE_URL to the landing page's public URL (on InstaBox https://8081-<machine id>.instabox.tech): link previews point at it." >&2
+  exit 1
+fi
 agent="$(setting NEXT_PUBLIC_SCORECARD_AGENT)"
 repo_url="$(setting NEXT_PUBLIC_REPO_URL)"
 out="$(setting MANDATE_SITE_DIR)"
@@ -51,6 +67,7 @@ case "$out" in
 esac
 
 echo "NEXT_PUBLIC_APP_URL=$app_url"
+echo "NEXT_PUBLIC_SITE_URL=$site_url"
 site_default="(the site's default)"
 echo "NEXT_PUBLIC_SCORECARD_AGENT=${agent:-$site_default}"
 echo "NEXT_PUBLIC_REPO_URL=${repo_url:-(none)}"
@@ -66,6 +83,7 @@ staging="$(mktemp -d "$out.build.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
 docker build --file "$here/Dockerfile" --target site \
   --build-arg NEXT_PUBLIC_APP_URL="$app_url" \
+  --build-arg NEXT_PUBLIC_SITE_URL="$site_url" \
   --build-arg NEXT_PUBLIC_SCORECARD_AGENT="$agent" \
   --build-arg NEXT_PUBLIC_REPO_URL="$repo_url" \
   --output "type=local,dest=$staging" \

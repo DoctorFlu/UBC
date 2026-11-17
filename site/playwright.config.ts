@@ -6,6 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
  * `npx playwright install chromium`.
  *
  * - `phone-*` and `desktop-*` run e2e/site.spec.ts at 360 and 1440 px in each colour scheme.
+ * - `icons` runs e2e/icons.spec.ts once: the icons and the link preview image.
  * - `screenshots` writes docs/screenshots/ (`npm run screenshots -w @mandate/site`).
  *
  * The build bakes in example settings, so the tests prove the links follow them. Never run this while
@@ -15,6 +16,7 @@ const PORT = Number(process.env.E2E_SITE_PORT ?? 3200);
 const baseURL = `http://localhost:${PORT.toString()}`;
 
 export const TEST_APP_URL = "https://app.example.test";
+export const TEST_SITE_URL = "https://site.example.test";
 export const TEST_SCORECARD_AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
 const phone = { ...devices["Pixel 7"], viewport: { width: 360, height: 780 }, deviceScaleFactor: 2 };
@@ -33,6 +35,7 @@ export default defineConfig({
     { name: "phone-dark", testMatch: /site\.spec\.ts/, use: { ...phone, colorScheme: "dark" } },
     { name: "desktop-light", testMatch: /site\.spec\.ts/, use: { ...desktop, colorScheme: "light" } },
     { name: "desktop-dark", testMatch: /site\.spec\.ts/, use: { ...desktop, colorScheme: "dark" } },
+    { name: "icons", testMatch: /icons\.spec\.ts/, use: desktop },
     { name: "screenshots", testMatch: /screenshots\.spec\.ts/, use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
@@ -42,6 +45,7 @@ export default defineConfig({
     timeout: 180_000,
     env: {
       NEXT_PUBLIC_APP_URL: TEST_APP_URL,
+      NEXT_PUBLIC_SITE_URL: TEST_SITE_URL,
       NEXT_PUBLIC_SCORECARD_AGENT: TEST_SCORECARD_AGENT,
       NEXT_PUBLIC_REPO_URL: "",
     },

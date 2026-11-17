@@ -150,6 +150,11 @@ if [ -n "$agent" ]; then
 else
   fail "the agent's address, for the scorecard (from the MCP server, or set SMOKE_AGENT_ADDRESS)"
 fi
+# Every page links these, the login page's browser tab included.
+for path in /favicon.ico /icon.svg /apple-icon.png; do
+  expect "the $path icon without a login" none GET "$path" 200
+  check "$path is an image" 'grep -qi "^content-type: *image/" "$work/headers"'
+done
 # 401 for a delivery without a valid signature, or 503 while QUICKNODE_STREAM_SECURITY_TOKEN is unset.
 request none POST /api/webhooks/quicknode --header "Content-Type: application/json" --data-binary '{"data":[]}'
 check "QuickNode webhook is public and checks its own signature (POST /api/webhooks/quicknode -> $status)" \

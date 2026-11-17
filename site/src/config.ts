@@ -10,3 +10,6 @@ export const SCORECARD_URL = `${APP_URL}/agent/${SCORECARD_AGENT}`;
 
 /** The repository link in the footer; empty (the default) hides it, so publishing it is the owner's choice. */
 export const REPO_URL = process.env.NEXT_PUBLIC_REPO_URL ?? "";
+
+/** The page's own public origin, which link previews resolve the preview image against. */
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3001";

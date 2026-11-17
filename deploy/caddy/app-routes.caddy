@@ -10,7 +10,8 @@
 #   public, nothing private      /agent/*                  the agent's public scorecard
 #                                /_next/static/*           the scripts, styles and fonts every page loads
 #                                /api/health, /mcp/health  liveness, no data
-#                                /favicon.ico
+#                                /favicon.ico, /icon.svg,  the browser's tab and home-screen icons
+#                                /apple-icon.png
 #   internal only (404 here)     /api/agent/*              the console's agent API: the MCP server calls it
 #                                                          on the private network, nobody else needs it
 #   owner (HTTP basic auth)      everything else           the console's pages, /api/console/* (snapshot,
@@ -53,7 +54,7 @@ handle /api/agent/* {
 	respond 404
 }
 
-@public path /agent/* /_next/static/* /api/health /favicon.ico
+@public path /agent/* /_next/static/* /api/health /favicon.ico /icon.svg /apple-icon.png
 handle @public {
 	reverse_proxy console:3000
 }

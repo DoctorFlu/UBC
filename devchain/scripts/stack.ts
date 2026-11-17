@@ -332,7 +332,11 @@ async function main(): Promise<void> {
 
   if (withSite) {
     // Its links point at this console and at this chain's agent, whose public scorecard it shows.
-    const siteEnv = { NEXT_PUBLIC_APP_URL: consoleUrl, NEXT_PUBLIC_SCORECARD_AGENT: record.agent };
+    const siteEnv = {
+      NEXT_PUBLIC_APP_URL: consoleUrl,
+      NEXT_PUBLIC_SCORECARD_AGENT: record.agent,
+      NEXT_PUBLIC_SITE_URL: siteUrl,
+    };
     if (values.prod) {
       console.log("dev:stack: building the landing page...");
       const build = spawn("npm", ["run", "build", "-w", "@mandate/site"], {

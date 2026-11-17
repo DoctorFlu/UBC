@@ -104,16 +104,19 @@ CMD ["node", "dashboard/server.js"]
 # --------------------------------------------------------------------------------------------- landing page
 # The static export of site/, built from the same install as the console. It is files, not an image to run:
 # deploy/build-site.sh writes this stage to a folder with `docker build --output`, and compose.site.yml has
-# Caddy serve that folder. The three settings are public and baked into the pages.
+# Caddy serve that folder. The four settings are public and baked into the pages.
 FROM deps AS site-build
 COPY . .
 ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_SITE_URL
 ARG NEXT_PUBLIC_SCORECARD_AGENT
 ARG NEXT_PUBLIC_REPO_URL
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL} \
+    NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL} \
     NEXT_PUBLIC_SCORECARD_AGENT=${NEXT_PUBLIC_SCORECARD_AGENT} \
     NEXT_PUBLIC_REPO_URL=${NEXT_PUBLIC_REPO_URL}
 RUN test -n "$NEXT_PUBLIC_APP_URL" || { echo "NEXT_PUBLIC_APP_URL is required: the app's public URL." >&2; exit 1; }
+RUN test -n "$NEXT_PUBLIC_SITE_URL" || { echo "NEXT_PUBLIC_SITE_URL is required: the landing page's public URL." >&2; exit 1; }
 RUN npm run build -w @mandate/site
 
 FROM scratch AS site
