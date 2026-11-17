@@ -1248,7 +1248,20 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
       },
     ),
   ).toBeNull();
+  // The test waits on what happens, never on a clock: the order reaching the fake, and the executor's own
+  // line for the fill. Its log is attached to the test, so a failure shows what it did and when.
   const logs: string[] = [];
+  const say = (line: string) => logs.push(`${new Date().toISOString()} ${line}`);
+  const waiters: { pattern: RegExp; resolve: () => void }[] = [];
+  const untilLogged = (pattern: RegExp) =>
+    logs.some((line) => pattern.test(line))
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => waiters.push({ pattern, resolve }));
+  let orderReachedGemini = () => {};
+  const orderOnFake = new Promise<void>((resolve) => {
+    orderReachedGemini = resolve;
+  });
+  say("[test] starting the executor");
   const executor = startExecutor({
     client: chain.executor,
     venue: geminiVenue({
@@ -1256,7 +1269,14 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
       trading: createGeminiPrivateClient({
         environment: "sandbox",
         credentials: { apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" },
-        fetch: fake.fetch,
+        fetch: async (input, init) => {
+          const answer = await fake.fetch(input, init);
+          if (new URL(input).pathname === "/v1/prediction-markets/order" && answer.status === 201) {
+            say("[test] the fake Gemini took an order");
+            orderReachedGemini();
+          }
+          return answer;
+        },
         limiter: unpacedLimiter(),
       }),
       journal: consoleOrderJournal({ consoleUrl: baseURL, sign }),
@@ -1267,7 +1287,10 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     fillDelayMs: 0,
     fillPollMs: 200,
     pollingIntervalMs: 200,
-    log: (line) => logs.push(line),
+    log: (line) => {
+      say(line);
+      for (const waiter of waiters) if (waiter.pattern.test(line)) waiter.resolve();
+    },
   });
   try {
     // The badge, next to Local and Dev signer, at both widths and in both themes.
@@ -1295,13 +1318,11 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     const market = "GEMI-ETH2611202200-HI2800";
     const { intentId, verdict } = await chain.agent.proposeTrade(noBuy(market, 300, 31));
     expect(verdict).toBe("approved");
-    // The executor first catches up on every earlier intent from block 0, which takes a while under load.
-    await expect
-      .poll(() => fake.orders.size, {
-        timeout: 30_000,
-        message: "the executor placed no order on the fake Gemini",
-      })
-      .toBe(1);
+    say(`[test] proposed intent #${String(intentId)}`);
+    // The executor sees the approval before the console does: its first journal write is answered "not
+    // seen yet" and tried again within moments, and the order follows.
+    await orderOnFake;
+    expect(fake.orders.size).toBe(1);
     const [order] = [...fake.orders.values()];
     if (!order) throw new Error("no order on the fake");
     expect(order).toMatchObject({
@@ -1322,7 +1343,8 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
 
     // Filled on Gemini: recorded onchain once, shown without the simulated marker.
     fake.fill(order.orderId);
-    await expect(page.getByTestId("intent-venue-state")).toHaveText("Filled", { timeout: 20_000 });
+    await untilLogged(new RegExp(`intent #${String(intentId)} buy NO .* filled \\(0x`));
+    await expect(page.getByTestId("intent-venue-state")).toHaveText("Filled");
     await expect(page.locator("main").getByText("Executed").first()).toBeVisible();
     await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
     expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
@@ -1337,6 +1359,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await page.getByRole("switch", { name: "Advanced view" }).click();
   } finally {
     executor.stop();
+    await testInfo.attach("executor-log", { body: logs.join("\n"), contentType: "text/plain" });
   }
 });
 

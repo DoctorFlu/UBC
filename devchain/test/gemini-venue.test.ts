@@ -150,6 +150,47 @@ describe("placing an order", () => {
     expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
   });
 
+  it("places the order on the next try after a first journal write that failed, in the same process", async () => {
+    // The live race: the executor sees the approval before the console does, which refuses the write
+    // ("not_seen"). Nothing was sent, so the next try must send, not wait for an order that never was.
+    const same = venue();
+    const put = journal.put.bind(journal);
+    let seen = false;
+    journal.put = (record: VenueOrderRecord) =>
+      seen ? put(record) : Promise.reject(new Error("the console did not store the order record: not_seen"));
+    await expect(same.placeOrder(order())).rejects.toThrow("not_seen");
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(0);
+    expect(journal.records.get(7)).toBeUndefined();
+
+    seen = true;
+    clock.now += 15_000;
+    placedOf(await same.placeOrder(order()));
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+    expect(journal.records.get(7)).toMatchObject({ state: "open", revision: 2 });
+  });
+
+  it("sends once, after a first write that landed although its answer was lost", async () => {
+    const same = venue();
+    const put = journal.put.bind(journal);
+    let loseNextAnswer = true;
+    journal.put = async (record: VenueOrderRecord) => {
+      await put(record);
+      if (loseNextAnswer) {
+        loseNextAnswer = false;
+        throw new Error("the console at http://console.test did not answer (timeout)");
+      }
+    };
+    await expect(same.placeOrder(order())).rejects.toThrow("did not answer");
+    // The journal holds "placing", but this process knows that version never reached Gemini.
+    expect(journal.records.get(7)?.state).toBe("placing");
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(0);
+
+    placedOf(await same.placeOrder(order()));
+    placedOf(await same.placeOrder(order()));
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+    expect(journal.records.get(7)).toMatchObject({ state: "open", revision: 3 });
+  });
+
   it("rounds down to the contract's quantity grid and refuses a price off its price grid", async () => {
     const coarse = structuredClone(OPEN);
     for (const contract of coarse.contracts) {

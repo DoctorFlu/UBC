@@ -62,6 +62,11 @@ Each version is canonical JSON (`venueOrderRecordSchema` in `shared/src/venue-or
 - the console has seen the intent, and the market, outcome, side and limit price match it;
 - its revision is higher than the stored one, its order terms are unchanged, Gemini's order id never changes once known, what filled never goes down, and a closed order changes only its note.
 
+The executor follows the chain a moment ahead of the console, so its first write for a new intent is often answered `not_seen`.
+The journal client tries a request again after 0.25, 0.5, 1, 2 and 4 seconds when the console has not seen the intent yet, did not answer (for example while `next dev` compiles the route on its first request), or failed with a 5xx; it never tries again after a refusal.
+Only after those 8 seconds does the executor wait its usual 15 seconds and try the intent again.
+A "placing" version whose write failed was never sent, and the next try sends the order; before this rule, that version stayed in the executor's memory and the intent waited for an order that never existed (the live e2e flake of 17 November 2026).
+
 The executor also announces its venue at start (`PUT /api/executor/v1/venue`), which drives the console's badge.
 
 ## The console

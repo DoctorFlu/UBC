@@ -121,6 +121,11 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
   const records = new Map<number, VenueOrderRecord>();
   /** A version not stored in the journal yet (the console was down after Gemini answered). */
   const unsaved = new Set<number>();
+  /**
+   * The revision of a "placing" version whose write failed before anything was sent, by intent. If that
+   * write landed after all, the journal shows an attempt this process knows never reached Gemini.
+   */
+  const neverSent = new Map<number, number>();
   /** When to cancel what is left of each open order, and whether that was asked already. */
   const deadlines = new Map<number, { at: number; cancelAsked: boolean }>();
   const publicOutcomes = simulatedVenue(publicClient, { now });
@@ -329,7 +334,18 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       };
     }
     // Written first: when the journal cannot take it, nothing is sent (this throws and the executor waits).
-    await save(record);
+    // It is not kept as this process's latest version until the journal took it: an attempt whose first
+    // write failed never happened, and must not be mistaken next time for an order that got no answer.
+    try {
+      await journal.put(record);
+    } catch (error) {
+      // The write may still have landed (an answer lost on the way back): that version was never sent.
+      neverSent.set(order.intentId, record.revision);
+      throw error;
+    }
+    records.set(order.intentId, record);
+    unsaved.delete(order.intentId);
+    neverSent.delete(order.intentId);
 
     let answer: PrivateOrder;
     try {
@@ -395,7 +411,8 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
     async placeOrder(order) {
       await flushUnsaved(order.intentId);
       const record = await current(order.intentId);
-      if (record === null || record.state === "not_placed") return attempt(order, record);
+      const unsent = record?.state === "placing" && neverSent.get(order.intentId) === record.revision;
+      if (record === null || record.state === "not_placed" || unsent) return attempt(order, record);
       switch (record.state) {
         case "rejected":
           return { status: "refused", detail: record.detail ?? `${where} refused the order` };
