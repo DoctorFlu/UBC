@@ -552,13 +552,15 @@ test("a signal payment the agent records appears live, linked to the intent that
     },
   });
   const payment = page.locator(`#payment-${receipt}`);
-  await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
+  await expect(payment).toContainText("BTC weekly hedge signal");
   await expect(payment).toContainText("3 cheap, 15 fair, 3 expensive");
   await expect(payment).toContainText("0.001 USDC");
   await expect(payment).toContainText("No intent cites it");
-  // The settlement reference is Advanced detail.
+  // The event ticker and the settlement reference are Advanced detail.
+  await expect(payment).not.toContainText("BTC2611202200");
   await expect(payment).not.toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
   await page.getByRole("switch", { name: "Advanced view" }).click();
+  await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
   await expect(payment).toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
 
   // An intent whose sealed reason cites the receipt links to it, and back.

@@ -45,7 +45,8 @@ function Bought({ payment }: { payment: SignalPaymentView }) {
   return (
     <span className={styles.item}>
       <span>
-        {signal.asset} {signal.horizon} hedge signal, {signal.eventTicker}
+        {signal.asset} {signal.horizon} hedge signal
+        <Advanced>, {signal.eventTicker}</Advanced>
       </span>
       <span className={styles.detail}>
         {cheap} cheap, {fair} fair, {expensive} expensive

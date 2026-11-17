@@ -242,7 +242,9 @@ test.describe("seeded demo", () => {
     await reportSignalBudget(baseURL ?? "", AGENT_ADDRESS);
     await page.goto("/payments");
     const payment = page.locator(`#payment-${DEMO_RECEIPT}`);
-    await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
+    // What was bought, in words; the event ticker is Advanced detail.
+    await expect(payment).toContainText("BTC weekly hedge signal");
+    await expect(payment).not.toContainText("BTC2611202200");
     await expect(payment).toContainText("0.001 USDC");
     await expect(payment.getByRole("link", { name: "Intent #0", exact: true })).toBeVisible();
     await expect(page.getByRole("meter", { name: "Spent" })).toHaveAttribute(
