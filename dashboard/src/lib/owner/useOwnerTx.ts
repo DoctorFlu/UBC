@@ -2,7 +2,6 @@
 
 import {
   ARC_MIN_MAX_FEE_PER_GAS,
-  type PolicyRules,
   applyFeeFloor,
   policyAbi,
   revertErrorName,
@@ -23,32 +22,36 @@ import { sendTransaction } from "wagmi/actions";
 
 import { useLiveConsole } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
+import { useMandateScope, useMandateUrls } from "@/lib/mandate/MandateContext";
 import { viemChain } from "@/lib/network";
 
 import { useOwnerAccess } from "./access";
+import { type OwnerCall, needsPasskey } from "./calls";
+import { PasskeyFailure, confirmWithPasskey, refusal } from "./passkey";
 
-/** One owner write to the Policy contract. */
-export type OwnerCall =
-  | { functionName: "setPolicy"; rules: PolicyRules }
-  | { functionName: "setPaused"; paused: boolean }
-  | { functionName: "approveIntent"; intentId: number }
-  | { functionName: "rejectIntent"; intentId: number };
+export type { OwnerCall };
+
+const OWNER_CALLS_PATH = "/api/console/owner-calls";
 
 /**
- * - `checking`: simulating the call, so a refusal shows before the wallet opens.
- * - `signing`: the wallet prompt is open.
+ * - `checking`: simulating the call, so a refusal shows before any prompt opens.
+ * - `signing`: the wallet prompt, or the passkey prompt (`via`), is open.
  * - `pending`: sent, waiting to be mined.
  * - `syncing`: mined; waiting for the console to read its event, so every view agrees.
+ * - `cancelled`: the person closed the prompt. Nothing was sent; the page is as it was, with a sentence.
  */
 export type OwnerTxState =
   | { phase: "idle" }
-  | { phase: "checking" | "signing"; label: string }
+  | { phase: "checking"; label: string }
+  | { phase: "signing"; label: string; via: "wallet" | "passkey" }
   | { phase: "pending" | "syncing"; label: string; hash: Hex }
   | { phase: "done"; label: string; hash: Hex; synced: boolean }
+  | { phase: "cancelled"; label: string; message: string }
   | { phase: "failed"; label: string; message: string; hash: Hex | null };
 
 export type OwnerTxResult =
-  { ok: false; message: string } | { ok: true; hash: Hex; snapshot: ConsoleSnapshot | null };
+  | { ok: false; message: string; cancelled?: true }
+  | { ok: true; hash: Hex; snapshot: ConsoleSnapshot | null };
 
 /** How long the console may take to show a mined transaction's event before the UI stops waiting. */
 const SYNC_TIMEOUT_MS = 30_000;
@@ -97,7 +100,30 @@ function firstLine(error: unknown): string {
   return String(error);
 }
 
+/**
+ * The console signs with the owner key it holds for this mandate (#95). One passkey prompt confirms
+ * exactly this call; a pause needs none, since stopping the agent must never wait on a device.
+ */
+async function sendThroughConsole(
+  call: OwnerCall,
+  mandateId: string | null,
+  api: (url: string) => string,
+): Promise<Hex> {
+  if (mandateId === null) throw new Error("This page shows no mandate.");
+  const stepUp = needsPasskey(call)
+    ? await confirmWithPasskey({ kind: "owner-call", mandateId, call })
+    : null;
+  const response = await fetch(api(OWNER_CALLS_PATH), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ call, stepUp }),
+  });
+  if (!response.ok) throw new Error(await refusal(response));
+  return ((await response.json()) as { hash: Hex }).hash;
+}
+
 function describeFailure(error: unknown): string {
+  if (error instanceof PasskeyFailure) return error.message;
   const declined =
     (error instanceof BaseError && error.walk((cause) => cause instanceof UserRejectedRequestError)) ||
     (typeof error === "object" && error !== null && "code" in error && error.code === 4001);
@@ -117,6 +143,8 @@ function describeFailure(error: unknown): string {
 export function useOwnerTx() {
   const config = useConfig();
   const access = useOwnerAccess();
+  const mandateId = useMandateScope()?.mandate.id ?? null;
+  const { api } = useMandateUrls();
   const { snapshot, waitFor, refresh } = useLiveConsole();
   const network = snapshot.network;
   const policy = snapshot.contract?.address ?? null;
@@ -157,14 +185,17 @@ export function useOwnerTx() {
           throw refusal;
         }
 
-        setState({ phase: "signing", label });
-        const sent = await sendTransaction(config, {
-          account: access.address,
-          chainId: network.chainId,
-          to: policy,
-          data,
-          ...fees,
-        });
+        setState({ phase: "signing", label, via: access.signer });
+        const sent =
+          access.signer === "passkey"
+            ? await sendThroughConsole(call, mandateId, api)
+            : await sendTransaction(config, {
+                account: access.address,
+                chainId: network.chainId,
+                to: policy,
+                data,
+                ...fees,
+              });
         hash = sent;
         setState({ phase: "pending", label, hash: sent });
 
@@ -188,13 +219,18 @@ export function useOwnerTx() {
         return { ok: true, hash: sent, snapshot: seen };
       } catch (error) {
         const message = describeFailure(error);
+        // A closed passkey prompt sent nothing: the page goes back to exactly how it was, with the sentence.
+        if (error instanceof PasskeyFailure && error.cancelled) {
+          setState({ phase: "cancelled", label, message });
+          return { ok: false, message, cancelled: true };
+        }
         setState({ phase: "failed", label, message, hash });
         return { ok: false, message };
       } finally {
         busy.current = false;
       }
     },
-    [access, config, network, policy, publicClient, refresh, waitFor],
+    [access, api, config, mandateId, network, policy, publicClient, refresh, waitFor],
   );
 
   const reset = useCallback(() => setState({ phase: "idle" }), []);

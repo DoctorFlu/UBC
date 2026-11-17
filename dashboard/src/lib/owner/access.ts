@@ -3,27 +3,44 @@
 import { type Address, isAddressEqual } from "viem";
 
 import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useMandateScope } from "@/lib/mandate/MandateContext";
 import { useWalletState } from "@/lib/wallet/useWalletState";
 
 /**
- * Whether the connected wallet may act as the owner: the Policy contract's `user()`. Every owner
- * control reads this so it can say exactly why it is disabled.
+ * Whether this page may act as the owner: the Policy contract's `user()`. Every owner control reads this so
+ * it can say exactly why it is disabled.
+ *
+ * `signer` says how (#95): `wallet`, the connected wallet is the owner and signs; `passkey`, the console
+ * holds this mandate's owner key and signs once the member confirms each action with their passkey.
  */
 export type OwnerAccess =
-  | { kind: "owner"; address: Address }
+  | { kind: "owner"; address: Address; signer: "wallet" | "passkey" }
   | { kind: "loading" }
   | { kind: "no-contract"; reason: string }
   | { kind: "no-wallet"; reason: string }
   | { kind: "disconnected"; reason: string }
   | { kind: "wrong-network"; reason: string }
+  | { kind: "viewer"; reason: string }
   | { kind: "not-owner"; address: Address; owner: Address; reason: string };
 
 export function useOwnerAccess(): OwnerAccess {
   const wallet = useWalletState();
   const snapshot = useSnapshot();
+  const scope = useMandateScope();
   const roles = snapshot.contract?.roles ?? null;
   if (!snapshot.contract) {
     return { kind: "no-contract", reason: "No Policy contract is configured yet." };
+  }
+  if (scope?.mandate.ownerSigner === "console") {
+    if (!scope.canAct) {
+      return { kind: "viewer", reason: "You can look but not change anything: ask a workspace admin." };
+    }
+    if (!roles) {
+      return snapshot.feed.health === "offline"
+        ? { kind: "no-contract", reason: "The chain is unreachable, so the owner can't be checked." }
+        : { kind: "loading" };
+    }
+    return { kind: "owner", address: roles.user, signer: "passkey" };
   }
   switch (wallet.kind) {
     case "loading":
@@ -48,13 +65,21 @@ export function useOwnerAccess(): OwnerAccess {
           reason: "This wallet is not the Policy contract's owner, so the contract would refuse it.",
         };
       }
-      return { kind: "owner", address: wallet.address };
+      return { kind: "owner", address: wallet.address, signer: "wallet" };
   }
 }
 
 /** The sentence to show next to a disabled owner control, or null when the owner can act. */
 export function ownerBlockedReason(access: OwnerAccess): string | null {
   if (access.kind === "owner") return null;
-  if (access.kind === "loading") return "Checking the owner wallet.";
+  if (access.kind === "loading") return "Checking the owner.";
   return access.reason;
+}
+
+/**
+ * A button's label for an owner action: the action itself when the wallet signs (the wallet then says what
+ * it signs), or what the passkey will confirm, so one prompt is never a surprise.
+ */
+export function ownerActionLabel(access: OwnerAccess, action: string): string {
+  return access.kind === "owner" && access.signer === "passkey" ? `${action} with passkey` : action;
 }

@@ -7,7 +7,7 @@ import { HoldButton } from "@/components/ui/HoldButton";
 import { useToast } from "@/components/ui/Toast";
 import { formatUsdCents } from "@/lib/format";
 import { describeMarket, namingCategory } from "@/lib/markets";
-import { ownerBlockedReason } from "@/lib/owner/access";
+import { ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 
 import styles from "./domain.module.css";
@@ -40,6 +40,7 @@ export function ApprovalActions({
     : `intent ${intent.id.toString()}`;
   const subject = `${amount} on ${market}`;
   const flags = intentAnomalies(intent).map((anomaly) => anomaly.text);
+  const byPasskey = access.kind === "owner" && access.signer === "passkey" ? " with your passkey" : "";
 
   const approve = async () => {
     const result = await send(`Approve intent ${intent.id.toString()}`, {
@@ -82,12 +83,12 @@ export function ApprovalActions({
           block={block}
           icon={<Check aria-hidden />}
           confirmedLabel="Approving"
-          armedLabel="Confirm approval"
-          aria-label={`Approve ${subject}`}
+          armedLabel={ownerActionLabel(access, "Confirm approval")}
+          aria-label={`Approve ${subject}${byPasskey}`}
           disabled={working || blocked !== null}
           onConfirm={() => void approve()}
         >
-          Approve
+          {ownerActionLabel(access, "Approve")}
         </HoldButton>
         <HoldButton
           tone="neutral"
@@ -95,12 +96,12 @@ export function ApprovalActions({
           block={block}
           icon={<X aria-hidden />}
           confirmedLabel="Rejecting"
-          armedLabel="Confirm rejection"
-          aria-label={`Reject ${subject}`}
+          armedLabel={ownerActionLabel(access, "Confirm rejection")}
+          aria-label={`Reject ${subject}${byPasskey}`}
           disabled={working || blocked !== null}
           onConfirm={() => void reject()}
         >
-          Reject
+          {ownerActionLabel(access, "Reject")}
         </HoldButton>
       </div>
       {blocked && access.kind !== "loading" ? <p className={styles.approvalNote}>{blocked}</p> : null}

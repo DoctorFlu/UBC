@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/Toast";
 import { When } from "@/components/ui/When";
 
 import type { ChainView } from "@/lib/live/types";
-import { ownerBlockedReason } from "@/lib/owner/access";
+import { ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
 
 import styles from "./rules.module.css";
@@ -98,7 +98,11 @@ function RequestCard({
     toast(
       result.ok
         ? { title: "Request dismissed", description: "The rules stay as they are." }
-        : { title: "Not dismissed", description: result.message, tone: "danger" },
+        : {
+            title: "Not dismissed",
+            description: result.message,
+            ...(result.cancelled ? {} : { tone: "danger" as const }),
+          },
     );
   };
 
@@ -150,7 +154,9 @@ function RequestCard({
                 onClick={() => setReviewing(true)}
                 disabled={!next || changes.length === 0 || blocked !== null}
               >
-                Review and sign
+                {access.kind === "owner" && access.signer === "passkey"
+                  ? "Review and confirm"
+                  : "Review and sign"}
               </Button>
               <Button
                 variant="secondary"
@@ -159,7 +165,7 @@ function RequestCard({
                 loading={pending}
                 disabled={blocked !== null}
               >
-                Dismiss
+                {ownerActionLabel(access, "Dismiss")}
               </Button>
               {blocked && access.kind !== "loading" ? <p className={styles.blockedNote}>{blocked}</p> : null}
             </div>
