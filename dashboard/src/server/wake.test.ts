@@ -125,7 +125,7 @@ describe("event wake-ups from the console's pipeline", () => {
     expect(rx.bodies.map((b) => [b.kind, b.summary])).toEqual([
       ["mandate_changed", "The owner paused the agent."],
     ]);
-    expect(rx.bodies[0]?.link).toBe("http://localhost:3000/rules");
+    expect(rx.bodies[0]?.link).toBe(`http://localhost:3000/m/${envMandate(service).id}/rules`);
     await chain.user.setPaused(false);
     await caughtUp(service, chain);
     expect(rx.bodies).toHaveLength(1);
@@ -210,7 +210,7 @@ describe("event wake-ups from the console's pipeline", () => {
     expect(rx.bodies.at(-1)).toMatchObject({
       kind: "price_below_floor",
       detail: { asset: "BTC", floorCents: floor, spotCents, planId: request.planId },
-      link: "http://localhost:3000/hedge",
+      link: `http://localhost:3000/m/${envMandate(service).id}/hedge`,
     });
     await new Promise((resolve) => setTimeout(resolve, 300));
     await service.wake.settled();

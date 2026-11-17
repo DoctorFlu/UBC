@@ -152,7 +152,7 @@ describe("the settlement wake-up", () => {
     expect(bodies[0]).toMatchObject({
       kind: "ladder_settled",
       count: 1,
-      link: "http://localhost:3000/hedge",
+      link: `http://localhost:3000/m/${envMandate(service).id}/hedge`,
       summary:
         "The BTC ladder BTC2611202200 settled at $64,250.42: 2 positions cost $24.80, paid $80, net +$55.20. " +
         "Plan on the next ladder.",
