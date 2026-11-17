@@ -160,9 +160,13 @@ else
 fi
 
 echo "-- public routes"
-for path in /sign-in /sign-up /claim /recover; do
+for path in /sign-in /sign-up /recover; do
   expect "account page without a session" none GET "$path" 200 --header "Accept: text/html"
 done
+# The claim page until the first workspace is claimed, then a redirect to sign in.
+request none GET /claim --header "Accept: text/html"
+check "claim page without a session (GET /claim -> $status $(location))" \
+  '[ "$status" = 200 ] || { [ "$status" = 307 ] && location | grep -q "/sign-in$"; }'
 expect "who is signed in, without a session" none GET /api/auth/session 401
 if [ -n "$agent" ]; then
   expect "public scorecard without a session" none GET "/agent/$agent" 200
