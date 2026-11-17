@@ -92,7 +92,8 @@ describe("before the first workspace is claimed", () => {
 
       // The owner's pages and routes: nobody has a session, and a made-up cookie is not one.
       const { GET } = await import("@/app/api/console/snapshot/route");
-      for (const headers of [{}, { cookie: "mandate_session=not-a-session" }]) {
+      const sessions: Record<string, string>[] = [{}, { cookie: "mandate_session=not-a-session" }];
+      for (const headers of sessions) {
         expect((await GET(new Request(`${ORIGIN}/api/console/snapshot`, { headers }))).status).toBe(401);
         expect(
           (await eventStream(new Request(`${ORIGIN}/api/console/events`, { headers }), service)).status,
