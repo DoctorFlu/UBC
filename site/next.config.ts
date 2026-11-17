@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 /**
  * The landing page is a static export (`next build` writes `out/`): no server, no secrets, no cookies.
- * Its three settings are public and read at build time; see docs/configuration.md.
+ * Its settings are public and read at build time; see docs/configuration.md.
  */
 
 function url(name: string, fallback: string): string {
@@ -35,6 +35,8 @@ const nextConfig: NextConfig = {
       "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     ),
     NEXT_PUBLIC_REPO_URL: url("NEXT_PUBLIC_REPO_URL", ""),
+    // The page's own public origin: link previews need absolute image URLs. The stack serves it on 3001.
+    NEXT_PUBLIC_SITE_URL: url("NEXT_PUBLIC_SITE_URL", "http://localhost:3001"),
   },
 };
 
