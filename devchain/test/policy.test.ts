@@ -1,16 +1,18 @@
 /**
  * Behavior tests for both Policy contracts on a real anvil:
- * - `production`: `contracts/src/Policy.sol` compiled as is, base features only.
- * - `reference`: `devchain/contracts/PolicyReference.sol`, the same rules plus the requested extensions.
- * Every rule test runs against both, so the reference can never drift from the production contract.
+ * - `production`: `contracts/src/Policy.sol` compiled as is (v2, issue #23): the requested extensions,
+ *   format checks, an approval that re-runs every rule, and roles that move with events.
+ * - `reference`: `devchain/contracts/PolicyReference.sol`, the first production version plus the extensions.
+ * Every rule test runs against both, and the places where v2 differs say so by name.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Abi } from "viem";
 import {
   Category,
   hashContext,
+  malformedReason,
   policyAbi,
-  policyBaseAbi,
+  policyReferenceAbi,
   policyStateAt,
   reduceEvents,
   revertErrorName,
@@ -23,12 +25,14 @@ import { DEMO_POLICY, devAccount, loadPolicyArtifact, POLICY_CONTRACTS } from ".
 import {
   deployTestPolicy,
   intentsFromEvents,
+  proposeRaw,
   startTestAnvil,
   type TestAnvil,
   type TestPolicy,
 } from "./harness";
 
 const MARKET = "GEMI-BTC2611202200-HI65000";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const crypto = (amountDollars: number, extra: Partial<TradeIntentInput> = {}): TradeIntentInput => ({
   market: MARKET,
@@ -69,14 +73,14 @@ describe("ABI parity", () => {
       )
       .sort();
 
-  it("contracts/src/Policy.sol compiles to exactly the base ABI in @mandate/shared", () => {
-    expect(normalize(loadPolicyArtifact("production").abi)).toEqual(
-      normalize(policyBaseAbi as unknown as Abi),
-    );
+  it("contracts/src/Policy.sol compiles to exactly policyAbi in @mandate/shared", () => {
+    expect(normalize(loadPolicyArtifact("production").abi)).toEqual(normalize(policyAbi as unknown as Abi));
   });
 
   it("the reference contract compiles to the base ABI plus the extensions, nothing else", () => {
-    expect(normalize(loadPolicyArtifact("reference").abi)).toEqual(normalize(policyAbi as unknown as Abi));
+    expect(normalize(loadPolicyArtifact("reference").abi)).toEqual(
+      normalize(policyReferenceAbi as unknown as Abi),
+    );
   });
 });
 
@@ -107,17 +111,14 @@ describe.each(POLICY_CONTRACTS)("Policy (%s) on a real anvil", (kind) => {
     expect(await chain.outsider.getRules()).toEqual(DEMO_POLICY);
   });
 
-  it(`detects ${isReference ? "both extensions" : "no extensions"}`, async () => {
-    expect(await chain.outsider.getCapabilities()).toEqual({
-      previewTrade: isReference,
-      proposeWithContext: isReference,
-    });
+  it("detects both extensions, which the production contract has since v2", async () => {
+    expect(await chain.outsider.getCapabilities()).toEqual({ previewTrade: true, proposeWithContext: true });
   });
 
   it("approves a small allowed buy and stores it, with ids starting at 0", async () => {
     const contextHash = hashContext(CONTEXT);
     const result = await chain.agent.proposeTrade(crypto(10, { contextHash }));
-    expect(result).toMatchObject({ intentId: 0, verdict: "approved", contextHashRecorded: isReference });
+    expect(result).toMatchObject({ intentId: 0, verdict: "approved", contextHashRecorded: true });
 
     expect(await chain.agent.getIntent(0)).toEqual({
       id: 0,
@@ -139,13 +140,9 @@ describe.each(POLICY_CONTRACTS)("Policy (%s) on a real anvil", (kind) => {
     const proposed = (await chain.outsider.getEvents({ fromBlock: chain.deployBlock })).filter(
       (e) => e.type === "IntentProposed",
     );
-    if (isReference) {
-      expect(proposed).toEqual([
-        expect.objectContaining({ intentId: 0, agent: devAccount("agent").address, contextHash }),
-      ]);
-    } else {
-      expect(proposed).toEqual([]);
-    }
+    expect(proposed).toEqual([
+      expect.objectContaining({ intentId: 0, agent: devAccount("agent").address, contextHash }),
+    ]);
   });
 
   it("rejects a zero amount as a verdict, not a revert", async () => {
@@ -203,7 +200,7 @@ describe.each(POLICY_CONTRACTS)("Policy (%s) on a real anvil", (kind) => {
     await expectRevert(chain.user.rejectIntent(held.intentId), "WrongStatus");
   });
 
-  it("approval re-checks only the budget", async () => {
+  it(`approval re-checks ${isReference ? "only the budget" : "every rule (v2)"}`, async () => {
     await chain.user.setPolicy({ ...DEMO_POLICY, budgetCents: 4_000 });
     const held = await chain.agent.proposeTrade(crypto(22));
     expect(held.verdict).toBe("needs_approval");
@@ -213,10 +210,87 @@ describe.each(POLICY_CONTRACTS)("Policy (%s) on a real anvil", (kind) => {
       reason: "over budget",
     });
 
-    // Pause and the other rules are not re-checked: a held intent can still be approved while paused.
+    // A held sell approved while paused: the reference contract approves it; v2 refuses it with the
+    // rule's reason and marks it rejected, as the event says.
     const second = await chain.agent.proposeTrade(crypto(21, { isBuy: false }));
     await chain.user.setPaused(true);
-    expect(await chain.user.approveIntent(second.intentId)).toMatchObject({ verdict: "approved" });
+    expect(await chain.user.approveIntent(second.intentId)).toMatchObject(
+      isReference ? { verdict: "approved" } : { verdict: "rejected", reason: "agent paused" },
+    );
+    expect((await chain.user.getIntent(second.intentId))?.status).toBe(isReference ? "approved" : "rejected");
+    if (isReference) return;
+
+    // A rule tightened while it waited: the category is no longer allowed.
+    await chain.user.setPolicy({ ...DEMO_POLICY, budgetCents: 10_000 });
+    const third = await chain.agent.proposeTrade(crypto(22));
+    await chain.user.setPolicy({ ...DEMO_POLICY, budgetCents: 10_000, allowedCategories: 0 });
+    expect(await chain.user.approveIntent(third.intentId)).toMatchObject({
+      verdict: "rejected",
+      reason: "category not allowed",
+    });
+  });
+
+  it.runIf(!isReference)("records a malformed proposal and rejects it before any rule (v2)", async () => {
+    // Paused, so the format checks are seen to run first. The raw call is what a key outside the MCP
+    // server can send; our own client refuses these before sending.
+    await chain.user.setPaused(true);
+    const raw = {
+      market: MARKET,
+      category: 0,
+      outcome: "YES",
+      isBuy: true,
+      amountCents: 100n,
+      limitPrice: 50n,
+    };
+    const cases: [Partial<typeof raw>, string][] = [
+      [{ market: "" }, "invalid market"],
+      [{ market: "x".repeat(129) }, "invalid market"],
+      [{ market: "é".repeat(65) }, "invalid market"], // 130 bytes in 65 characters
+      [{ outcome: "yes" }, "invalid outcome"],
+      [{ limitPrice: 0n }, "invalid limit price"],
+      [{ limitPrice: 100n }, "invalid limit price"],
+      [{ limitPrice: 2n ** 256n - 1n }, "invalid limit price"],
+      [{ market: "x".repeat(128) }, "agent paused"], // exactly 128 bytes is well formed
+    ];
+    for (const [patch, reason] of cases) {
+      const intentId = await proposeRaw(chain.agent, { ...raw, ...patch });
+      const toBlock = await chain.outsider.publicClient.getBlockNumber({ cacheTime: 0 });
+      const events = await chain.outsider.getEvents({ fromBlock: chain.deployBlock, toBlock });
+      const own = events.filter((e) => "intentId" in e && e.intentId === intentId).map((e) => e.type);
+      expect(own, reason).toEqual(["IntentProposed", "IntentRejected"]);
+      expect(events.at(-1)).toMatchObject({ type: "IntentRejected", intentId, reason });
+      expect(
+        malformedReason({ market: raw.market, outcome: raw.outcome, limitPrice: raw.limitPrice, ...patch }),
+      ).toBe(reason === "agent paused" ? null : reason);
+    }
+  });
+
+  it.runIf(!isReference)("moves roles with events, and refuses the zero address (v2)", async () => {
+    const outsider = devAccount("outsider").address;
+    await expectRevert(chain.user.setAgent(ZERO_ADDRESS), "ZeroAddress");
+    await expectRevert(chain.user.setExecutor(ZERO_ADDRESS), "ZeroAddress");
+    await expectRevert(chain.user.setUser(ZERO_ADDRESS), "ZeroAddress");
+    await expectRevert(chain.agent.setUser(outsider), "NotUser");
+
+    await chain.user.setAgent(outsider);
+    await chain.user.setExecutor(outsider);
+    await chain.user.setUser(outsider);
+    expect(await chain.outsider.getRoles()).toEqual({ user: outsider, agent: outsider, executor: outsider });
+    // The old owner is no longer the user.
+    await expectRevert(chain.user.setPaused(true), "NotUser");
+
+    const toBlock = await chain.outsider.publicClient.getBlockNumber({ cacheTime: 0 });
+    const roles = (await chain.outsider.getEvents({ fromBlock: chain.deployBlock, toBlock }))
+      .filter((e) => e.type === "UserChanged" || e.type === "AgentChanged" || e.type === "ExecutorChanged")
+      .map((e) => [e.type, e.previous, e.current]);
+    expect(roles).toEqual([
+      ["UserChanged", ZERO_ADDRESS, devAccount("user").address],
+      ["AgentChanged", ZERO_ADDRESS, devAccount("agent").address],
+      ["ExecutorChanged", ZERO_ADDRESS, devAccount("executor").address],
+      ["AgentChanged", devAccount("agent").address, outsider],
+      ["ExecutorChanged", devAccount("executor").address, outsider],
+      ["UserChanged", devAccount("user").address, outsider],
+    ]);
   });
 
   it("daily loss: stops new intents once today's realized loss reaches the limit, until the next UTC day", async () => {
@@ -322,8 +396,8 @@ describe.each(POLICY_CONTRACTS)("Policy (%s) on a real anvil", (kind) => {
     await expect(chain.user.approveIntent(5)).rejects.toThrow(/approveIntent reverted/);
   });
 
-  it(`previewTrade answers ${isReference ? "from the contract" : "offchain"} without changing state`, async () => {
-    const source = isReference ? "contract" : "offchain";
+  it("previewTrade answers from the contract without changing state", async () => {
+    const source = "contract";
     const before = await chain.user.getSnapshot();
     expect(
       await chain.outsider.previewTrade({ category: Category.Crypto, isBuy: true, amountCents: 2_200 }),

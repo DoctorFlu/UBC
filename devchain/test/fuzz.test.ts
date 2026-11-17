@@ -3,15 +3,18 @@
  * (committed spend, losses, pause, day changes) and random intents, these answers must match:
  *   1. `evaluateIntent` in TypeScript,
  *   2. the verdict `proposeTrade` actually emits,
- *   3. the contract's `previewTrade`, when the contract has it (reference only).
- * It runs against the production `contracts/src/Policy.sol` and the reference contract. At the end, the
- * event reducer (completed with `getIntent` where the log lacks details) must rebuild the contract's state.
+ *   3. the contract's `previewTrade` (both contracts have it since the production contract's v2).
+ * It runs against the production `contracts/src/Policy.sol` and the reference contract. For proposals our
+ * client would never send, the production contract (v2) checks the format first: `malformedReason` must
+ * then agree too. At the end, the event reducer (completed with `getIntent` where the log lacks details)
+ * must rebuild the contract's state.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   ALL_CATEGORIES_MASK,
   evaluateIntent,
   fitsBudget,
+  malformedReason,
   policyStateAt,
   reduceEvents,
   SECONDS_PER_DAY,
@@ -48,7 +51,9 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
     const rng = seededRandom(SEED);
     const { user, agent, executor, outsider } = chain;
     const { previewTrade: hasPreview } = await outsider.getCapabilities();
-    expect(hasPreview).toBe(kind === "reference");
+    expect(hasPreview).toBe(true);
+    // Only the production contract (v2) checks the format of a proposal.
+    const checksFormat = kind === "production";
     const verdictCounts: Record<string, number> = {};
     let hostile = 0;
     let snapshot: PolicySnapshot = await user.getSnapshot();
@@ -155,19 +160,24 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
         limitPrice: rng.pick([0n, 100n, 1_000_000n, MAX, 2n ** 53n, BigInt(rng.int(1, 99))]),
       };
       // The rules never read the market, outcome or price; a huge amount is over any representable limit,
-      // so the largest safe integer stands in for it when computing the expected verdict.
-      const expected = evaluateIntent(snapshot.rules, snapshot, {
-        category: raw.category,
-        isBuy: raw.isBuy,
-        amountCents: hugeAmount ? Number.MAX_SAFE_INTEGER : Number(raw.amountCents),
-      });
+      // so the largest safe integer stands in for it when computing the expected verdict. The production
+      // contract rejects a malformed proposal before any rule.
+      const malformed = checksFormat ? malformedReason(raw) : null;
+      const expected =
+        malformed !== null
+          ? { verdict: "rejected" as const, reason: malformed }
+          : evaluateIntent(snapshot.rules, snapshot, {
+              category: raw.category,
+              isBuy: raw.isBuy,
+              amountCents: hugeAmount ? Number.MAX_SAFE_INTEGER : Number(raw.amountCents),
+            });
       const label = `hostile case ${i}: ${JSON.stringify(raw, (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v))}`;
       const intentId = await proposeRaw(agent, raw);
       const stored = await outsider.getIntent(intentId);
       expect(stored?.status, label).toBe(expected.verdict);
       expect(stored?.amountCents ?? null, label).toBe(hugeAmount ? null : Number(raw.amountCents));
       if (hugeAmount) expect(stored?.outOfRange?.["amountCents"], label).toBe(raw.amountCents.toString());
-      count(`hostile ${expected.verdict}`);
+      count(malformed !== null ? `hostile ${malformed}` : `hostile ${expected.verdict}`);
       hostile += 1;
       if (expected.verdict === "approved" && rng.chance(0.5)) {
         await recordRandomResult(intentId, Number(raw.amountCents));
@@ -199,8 +209,16 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
       ).toBeGreaterThan(5);
     }
 
-    // Random rules seldom approve a hostile proposal, so finish with some that must be approved: an
-    // out-of-range price lands in an IntentApproved event, and a result is recorded on one of them.
+    if (checksFormat) {
+      for (const reason of ["invalid market", "invalid outcome", "invalid limit price"]) {
+        expect(verdictCounts[`hostile ${reason}`] ?? 0, `${reason} never happened`).toBeGreaterThan(2);
+      }
+    }
+
+    // Random rules seldom approve a hostile proposal, so finish with some the rules approve: the reference
+    // contract approves all three, so an out-of-range price lands in an IntentApproved event and a result
+    // is recorded on one of them; the production contract rejects all three for their format, and its log
+    // still carries the out-of-range prices, in IntentProposed.
     await user.setPolicy({
       ...(await user.getRules()),
       paused: false,
@@ -217,8 +235,20 @@ describe.each(POLICY_CONTRACTS)("evaluateIntent agrees with the %s contract (fuz
       await proposeRaw(agent, { ...base, isBuy: true, limitPrice: 2n ** 53n }),
       await proposeRaw(agent, { ...base, market: "", outcome: "MAYBE", limitPrice: 0n }),
     ];
-    for (const id of pinned) expect((await outsider.getIntent(id))?.status).toBe("approved");
-    await executor.recordResult({ intentId: pinned[1] ?? -1, filled: true, filledCents: 40, pnlCents: -40 });
+    const pinnedStatus = checksFormat
+      ? ["rejected", "rejected", "rejected"]
+      : ["approved", "approved", "approved"];
+    expect(await Promise.all(pinned.map(async (id) => (await outsider.getIntent(id))?.status))).toEqual(
+      pinnedStatus,
+    );
+    if (!checksFormat) {
+      await executor.recordResult({
+        intentId: pinned[1] ?? -1,
+        filled: true,
+        filledCents: 40,
+        pnlCents: -40,
+      });
+    }
     hostile += pinned.length;
 
     // The reducer rebuilds the contract's state from its events (plus getIntent for missing details).

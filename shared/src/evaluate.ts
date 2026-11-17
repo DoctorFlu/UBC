@@ -1,5 +1,5 @@
 import { categoriesFromMask, isCategoryAllowed, type CategoryId } from "./categories";
-import type { ReasonCode } from "./reasons";
+import type { FormatReasonCode, ReasonCode } from "./reasons";
 import type { PolicyRules } from "./types";
 
 /**
@@ -55,6 +55,32 @@ function violation(rules: PolicyRules, state: PolicyState, intent: RuleInput): R
   if (intent.amountCents > rules.maxTradeCents) return "over max trade size";
   if (!isCategoryAllowed(rules.allowedCategories, intent.category)) return "category not allowed";
   if (intent.isBuy && !fitsBudget(rules, state, intent.amountCents)) return "over budget";
+  return null;
+}
+
+/** The parts of an intent only the format checks read. */
+export interface FormatInput {
+  market: string;
+  outcome: string;
+  /** Null when the onchain value does not fit a number, which is over 99 anyway. */
+  limitPrice: number | bigint | null;
+}
+
+/** Longest market symbol the production contract takes, in UTF-8 bytes (`MAX_MARKET_BYTES`). */
+export const MAX_MARKET_BYTES = 128;
+
+/**
+ * Mirror of the production contract's `_malformed` (v2): the format checks it runs on every proposal
+ * before any rule, in this order. The market's length is counted in UTF-8 bytes, untrimmed; the outcome is
+ * compared exactly. `previewTrade` does not run these, so a preview keeps this copy. The reference
+ * contract has no format checks.
+ */
+export function malformedReason(intent: FormatInput): FormatReasonCode | null {
+  const marketBytes = new TextEncoder().encode(intent.market).length;
+  if (marketBytes === 0 || marketBytes > MAX_MARKET_BYTES) return "invalid market";
+  if (intent.outcome !== "YES" && intent.outcome !== "NO") return "invalid outcome";
+  const price = intent.limitPrice;
+  if (price === null || price < 1 || price > 99) return "invalid limit price";
   return null;
 }
 

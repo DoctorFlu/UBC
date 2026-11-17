@@ -109,6 +109,11 @@ export function backtest(chain: Pick<ChainView, "events" | "intents">, draft: Po
       case "IntentProposed":
         // The verdict follows in the same transaction; the proposal itself decides nothing.
         continue;
+      case "UserChanged":
+      case "AgentChanged":
+      case "ExecutorChanged":
+        // Who holds a role does not change any verdict.
+        continue;
       default:
         break;
     }

@@ -119,6 +119,10 @@ export function decodePolicyLogs(logs: readonly Log[], options: DecodeOptions = 
         return { ...meta, type: "PolicyUpdated", rules: rulesFromChain(log.args) };
       case "Paused":
         return { ...meta, type: "Paused", paused: log.args.paused };
+      case "UserChanged":
+      case "AgentChanged":
+      case "ExecutorChanged":
+        return { ...meta, type: log.eventName, previous: log.args.previous, current: log.args.current };
     }
   }
 }

@@ -102,12 +102,21 @@ const ORDER_OPTIONS = [
   { value: "oldest", label: "Oldest first" },
 ] as const satisfies readonly { value: AuditOrder; label: string }[];
 
-const GROUPS: readonly (AuditGroup | "all")[] = ["all", "mandate", "pause", "verdict", "owner", "result"];
+const GROUPS: readonly (AuditGroup | "all")[] = [
+  "all",
+  "mandate",
+  "pause",
+  "roles",
+  "verdict",
+  "owner",
+  "result",
+];
 
 const emptyText: Record<AuditGroup | "all", string> = {
   all: "The first event appears when you set the rules. Every intent after that adds a row.",
   mandate: "No rules have been signed yet.",
   pause: "Trading has not been paused.",
+  roles: "No role change is recorded. Contracts before v2 record none.",
   verdict: "No intent has been proposed yet.",
   owner: "You have not approved or rejected a held intent yet.",
   result: "The executor has not recorded a result yet.",
