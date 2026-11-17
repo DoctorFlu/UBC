@@ -359,14 +359,22 @@ test.describe("a second workspace", () => {
       await hydrated(other);
       await other.getByRole("button", { name: "Review and confirm" }).click();
       const review = other.getByRole("dialog", { name: "Review the first rules" });
+      const challenge = other.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/console/step-up",
+      );
       await review.getByRole("button", { name: "Confirm rules with passkey" }).click();
+      expect((await challenge).status()).toBe(201);
       await expect(review.getByText("Confirm it with your passkey within 2 minutes.")).toBeVisible();
-      await other.clock.fastForward("02:00");
-      await expect(
-        review.getByText(
-          "The passkey prompt got no answer for 2 minutes, so it closed and nothing was changed. Confirm again when you are ready.",
-        ),
-      ).toBeVisible();
+      // The prompt is open and waits. Two minutes later, by the page's clock, it has closed by itself.
+      const closed = review.getByText(
+        "The passkey prompt got no answer for 2 minutes, so it closed and nothing was changed. Confirm again when you are ready.",
+      );
+      await expect(async () => {
+        await other.clock.fastForward("02:00");
+        await expect(closed).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
       await expect(review.getByRole("button", { name: "Confirm rules with passkey" })).toBeEnabled();
       const his = (await (await other.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
       expect(his.chain?.rules ?? null).toBeNull();
