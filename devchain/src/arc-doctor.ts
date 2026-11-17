@@ -31,7 +31,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { startAnvil } from "./anvil";
-import { PRODUCTION_OUT_DIR } from "./foundry";
+import { PRODUCTION_OUT_DIR, buildContracts } from "./foundry";
 
 /** 0 ready, 1 not ready (the next step is printed), 2 Arc could not be reached. */
 export type ArcDoctorStatus = 0 | 1 | 2;
@@ -162,11 +162,21 @@ export async function arcDoctor(options: ArcDoctorOptions): Promise<ArcDoctorSta
   const deployBlock = BigInt(deployBlockText);
   const owner = ownerText === "" ? null : getAddress(ownerText);
 
+  // Compiled from this checkout's contracts/src/Policy.sol now (forge caches), so an old build never
+  // decides whether the deployed code matches.
+  if (options.artifactPath === undefined) {
+    try {
+      buildContracts();
+    } catch (error) {
+      const reason = error instanceof Error ? (error.message.split("\n")[0] ?? error.name) : String(error);
+      return finish(1, `NOT READY: contracts/src/Policy.sol could not be compiled (${reason}). Run npm ci.`);
+    }
+  }
   const artifact = loadArtifact(options.artifactPath ?? DEFAULT_ARTIFACT);
   if (artifact === null) {
     return finish(
       1,
-      "NOT READY: the compiled Policy contract is missing. Run npm run dev:chain once (it builds it), or forge build.",
+      "NOT READY: the compiled Policy contract is missing. Run npm ci, then the doctor again.",
     );
   }
   const client: PublicClient = createPublicClient({
@@ -275,8 +285,12 @@ export async function arcDoctor(options: ArcDoctorOptions): Promise<ArcDoctorSta
         `the contract's owner (user) is ${user}, not ${owner}: the current owner calls setUser(${owner}), or name the right owner`,
       );
     }
-    if (owner === null)
-      notes.push(`the owner was not named, so the user role (${user}) was not checked; pass --owner 0x...`);
+    // The owner's role decides who approves and changes the rules: never READY without checking it.
+    if (owner === null) {
+      steps.push(
+        `name the owner's wallet with --owner 0x... (or ARC_OWNER_ADDRESS), so the doctor can check the contract's user, now ${user}`,
+      );
+    }
 
     // ---------------------------------------------------------------- 4. rules and budget
     say("");

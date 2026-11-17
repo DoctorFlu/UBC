@@ -116,6 +116,14 @@ describe("arc:doctor", () => {
     expect(output).toContain("DIFFERS FROM the compiled contracts/src/Policy.sol");
   });
 
+  it("is never READY without the owner named, and says how to name it", async () => {
+    const { status, verdict } = await run({}, { owner: "" });
+    expect(status).toBe(1);
+    expect(verdict).toBe(
+      `NOT READY: name the owner's wallet with --owner 0x... (or ARC_OWNER_ADDRESS), so the doctor can check the contract's user, now ${OWNER}.`,
+    );
+  });
+
   it("checks the owner the operator names", async () => {
     const { status, verdict } = await run({}, { owner: AGENT });
     expect(status).toBe(1);
