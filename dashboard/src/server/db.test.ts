@@ -41,10 +41,13 @@ function shippedHash(versions: number): string {
 
 /**
  * SHA-256 of the schema a version leaves (every table, index and trigger as SQLite stores it, by name), for
- * the migrations written as code: version 8 is the accounts of #94 as main shipped them at cf43611.
+ * the migrations written as code: version 8 is the accounts of #94 as main shipped them at cf43611, and
+ * version 9 the several mandates of #95. Once 9 is on main, a change here means it was edited after a
+ * console ran it.
  */
 const SHIPPED_SCHEMA_SHA256 = {
   8: "a1b6c0b890cc9585c59d9aad44bcab810a4af2fe052015f46e0f4d8871523e94",
+  9: "2aec9eec5ca927a45ea82498ef77b77c040e31ecee086c921604f28e4fbab6a3",
 } as const;
 
 function schemaHash(version: number): string {
@@ -393,6 +396,7 @@ describe("the migrations", () => {
     expect(shippedHash(6)).toBe(SHIPPED_SHA256[6]);
     expect(shippedHash(7)).toBe(SHIPPED_SHA256[7]);
     expect(schemaHash(8)).toBe(SHIPPED_SCHEMA_SHA256[8]);
+    expect(schemaHash(9)).toBe(SHIPPED_SCHEMA_SHA256[9]);
   });
 
   it("keep main's order: the hosted version is exactly the schema the hosted console has", () => {
