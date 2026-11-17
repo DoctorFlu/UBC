@@ -82,7 +82,8 @@ The console offers the `ladder_settled` wake-up when it stores one of those reco
 
 - One wake-up per ladder, not per position: it is offered when the record of the ladder's last filled buy is stored, so a ladder of three positions wakes the Bot once, with the three positions' cost, payout and net added up.
 - Its trigger id is the deployment and the ladder's event ticker, so a repeated record, an executor restart or a console restart never offers it again.
-- It is never dropped as "the run's own doing" (a run cannot cause a settlement) or as stale: a ladder that settled while the machine was paused is still news when it wakes.
+- It is never dropped as "the run's own doing" (a run cannot cause a settlement), and a ladder that settled while the machine was paused is still news when it wakes.
+  Only a ladder that expired more than a day before its last record is stored wakes nothing (`SETTLED_NEWS_MS`): that is a replay, such as the executor recording old settlements again into a new console data folder.
 - Two ladders settling inside one 10-minute window (BTC and ETH on the same expiry) share one wake-up: the second joins the first if it is still waiting, or waits for the window to end, and `detail.ladders` lists each ladder once.
 - A position whose record is tampered with does not count as settled, so its ladder never wakes the Bot; the console shows the record as tampered.
 Role changes (`setAgent`, `setExecutor`) emit no event, so nothing can wake on them.

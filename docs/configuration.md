@@ -40,7 +40,7 @@ See [agent/README.md](../agent/README.md).
 | --- | --- | --- |
 | `CONSOLE_URL` | no | Public address of the console. The MCP server calls it, and the console builds the pairing link from it. Defaults to `http://localhost:3000`. |
 | `CONSOLE_SERVICE_TOKEN` | for console tools | Shared secret between the console backend and the MCP server, sent as a bearer token and compared in constant time. Without it every `/api/agent/v1` route answers 503. |
-| `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (events, contexts, holdings, hedge plans, pairing, change requests, signal payments and budget, and Gemini's listing of each intent's market). Defaults to `dashboard/.data`, which is git-ignored. Deleting it is safe: the console rebuilds the onchain part from the chain. |
+| `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (events, contexts, holdings, hedge plans, pairing, change requests, signal payments and budget, Gemini's listing of each intent's market, event wake-ups, and the executor's settlement records). Defaults to `dashboard/.data`, which is git-ignored. Deleting it is safe: the console rebuilds the onchain part from the chain, and the executor records each settlement again the next time it starts. |
 | `CONSOLE_EVENT_SOURCE` | no | `rpc` (default) polls the chain for Policy events. `stream` takes the QuickNode Stream webhook as the primary source and keeps a slow RPC poll to fill gaps. |
 | `CONSOLE_POLL_INTERVAL_MS` | no | How often the RPC poller asks for new blocks. Defaults to 250 ms on the local devchain and 1 s on Arc testnet. The hosted demo chain sets 1 s. |
 | `GEMINI_API_URL` | no | Gemini's public REST API, which the console reads (server side, cached for 10 s, no key) for the hedge view's live ladder and preview, and to check each intent's market against Gemini's listing (once per market, in the background; the answer is stored, so each market costs one lookup ever). For ladders it only asks about assets Gemini lists and the events of plans the console stores, and keeps at most 32 ladders. Listing checks have a budget of their own inside the client's 100 requests a minute: at most 24 requests in any 60 s and 12 a minute sustained, counted as the most each lookup could send (4 candidate event tickers, each tried twice) until it says what it sent. Intents waiting for approval are checked first, then the newest, and the queue never holds more than the intents the console shows. So a stream of invented markets from a stolen agent key is checked at one every 40 s and leaves the hedge view at least 81 requests a minute: a public console cannot be made to spend its Gemini rate limit. Defaults to `https://api.gemini.com`. The end-to-end tests point it at a local server that replays recorded responses. The dev scripts read it too: `dev:executor` checks approved intents against it and `dev:propose` picks its default market from it. |
@@ -49,6 +49,17 @@ See [agent/README.md](../agent/README.md).
 | `CONSOLE_BROWSER_RPC_URL` | no | Local devchain only: the RPC address the browser uses, when it cannot reach the chain at the deployment file's address. The hosted demo chain sets it to `https://<host>/rpc`, which Caddy forwards to anvil behind the owner's login. |
 
 The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
+
+## Simulated executor
+
+The executor (`npm run dev:executor`, and the `executor` service of the hosted demo chain) fills approved intents and settles filled positions at expiry; [order-lifecycle.md](order-lifecycle.md) explains both.
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `CONSOLE_URL` | no | The console the executor records settlements in, through `PUT /api/executor/v1/settlements/:intentId`. Defaults to `http://localhost:3000`; the compose files set `http://console:3000`, inside the stack. The route is not public: Caddy answers 404 for `/api/executor/*`. |
+| `EXECUTOR_SETTLE_MS` | no | How often the executor looks for a filled position that is due to be settled, at least `1000`. Defaults to `60000`. The look is local: Gemini and the console are asked only once a position's market has expired, then with waits of 1, 2, 5, 10 and then every 30 minutes while Gemini has not published the outcome. |
+| `SIM_EXECUTOR_DELAY_MS` | no | How long the executor waits after an approval before filling it. Defaults to `1500`. |
+| `SIM_EXECUTOR_POLL_MS` | no | How often the executor asks the chain for new approvals and fills. Defaults to `1000`. |
 
 ## Grok Bot event wake-ups
 
