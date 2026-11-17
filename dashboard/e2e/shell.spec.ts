@@ -79,6 +79,33 @@ test.describe("Advanced view", () => {
   });
 });
 
+test.describe("times", () => {
+  test.use({ timezoneId: "America/Vancouver", locale: "en-US" });
+
+  test("read in the owner's time zone by default, with the exact UTC time kept in the markup", async ({
+    page,
+  }) => {
+    const problems = watchConsole(page);
+    await page.goto("/activity");
+    const time = page.locator("main tbody time").first();
+    // Relative or local ("Just now", "5 min ago", "Today, 3:20 PM"): never the UTC form the server sent.
+    await expect(time).not.toContainText("UTC");
+    await expect(time).toHaveAttribute("title", /^\d{1,2} \w{3} \d{4}, \d{2}:\d{2}:\d{2} UTC$/);
+    await expect(time).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    await page.waitForLoadState("networkidle");
+    expect(problems).toEqual([]);
+  });
+
+  test("are exact UTC times in Advanced view", async ({ page, context, baseURL }) => {
+    const problems = watchConsole(page);
+    await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
+    await page.goto("/activity");
+    await expect(page.locator("main tbody time").first()).toHaveText(/^\d{2}:\d{2}:\d{2} UTC$/);
+    await page.waitForLoadState("networkidle");
+    expect(problems).toEqual([]);
+  });
+});
+
 test.describe("phone menu on a slow device", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
