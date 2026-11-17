@@ -11,23 +11,31 @@ import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { serve, type ServerType } from "@hono/node-server";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { buildLadder, type Ladder, type SpotPrice } from "@mandate/gemini";
 import {
+  buildLadder,
+  type Ladder,
+  type LadderListing,
+  type MarketEvent,
+  type SpotPrice,
+} from "@mandate/gemini";
+import {
+  consoleSettlementSink,
+  devAccount,
   devPolicyClient,
   devPrivateKey,
-  geminiVenue,
+  simulatedVenue,
   startDevchain,
-  startSimulatedExecutor,
+  startExecutor,
   type Devchain,
   type PolicyContractKind,
-  type SimulatedExecutor,
+  type Executor,
 } from "@mandate/devchain";
 import type { Intent, PolicyClient, PolicyRules } from "@mandate/shared";
 import { createMandateServer, type MandateServer } from "../src/app";
 import { parseConfig } from "../src/config";
 import { silentLogger } from "../src/logger";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
-import { FakeMarkets, ladderEvent } from "./fakes";
+import { FakeMarkets, LADDER_TICKER, ladderEvent } from "./fakes";
 
 export type Structured = Record<string, unknown>;
 
@@ -45,18 +53,84 @@ export const field = (value: unknown, ...path: (string | number)[]): unknown =>
     value,
   );
 
+/** The weekly ladder after the fixture's: Gemini lists it once the fixture's has expired. */
+export const NEXT_LADDER_TICKER = "BTC2611272200";
+const NEXT_EXPIRY = "2026-11-27T22:00:00.000Z";
+
+/** The fixture ladder a week later: same strikes and quotes, the next expiry. */
+function nextLadderEvent(): MarketEvent {
+  const event = ladderEvent();
+  return {
+    ...event,
+    id: "3",
+    ticker: NEXT_LADDER_TICKER,
+    title: "BTC price on November 27",
+    expiry: NEXT_EXPIRY,
+    contracts: event.contracts.map((contract) => ({
+      ...contract,
+      instrumentSymbol: contract.instrumentSymbol.replace(LADDER_TICKER, NEXT_LADDER_TICKER),
+      expiry: NEXT_EXPIRY,
+    })),
+  };
+}
+
 /**
  * The fixture ladder (`fakes.ts`) at a spot price the test controls. `driftCents` is added to the
  * spot after every ladder read, so two reads at the same moment see slightly different prices, as
- * they would on a live market.
+ * they would on a live market. `expire` moves the ladder past its expiry, as Gemini shows it then.
  */
 export class MovingMarkets extends FakeMarkets {
   spotCents: number;
   driftCents = 0;
+  /** The ladder plans go on: the fixture's, then the next one once it has expired. */
+  current: MarketEvent = ladderEvent();
 
   constructor(spotCents: number) {
     super();
     this.spotCents = spotCents;
+  }
+
+  /**
+   * The current ladder expires and BTC settles at `settlementCents`: Gemini publishes each strike's
+   * outcome on the old event (YES at or above the strike) and lists the next weekly ladder, the only
+   * one a plan can go on now.
+   */
+  expire(settlementCents: number): void {
+    const old = this.current;
+    const resolvedAt = new Date(Date.parse(old.expiry ?? NEXT_EXPIRY) + 8_232).toISOString();
+    const settled: MarketEvent = {
+      ...old,
+      status: "settled",
+      contracts: old.contracts.map((contract) => ({
+        ...contract,
+        status: "settled",
+        marketState: "closed",
+        resolutionSide: settlementCents >= (contract.strike?.valueCents ?? 0) ? "yes" : "no",
+        resolvedAt,
+        settlementValue: (settlementCents / 100).toFixed(2),
+      })),
+    };
+    this.current = nextLadderEvent();
+    this.events = [
+      ...this.events.map((event) => (event.ticker === old.ticker ? settled : event)),
+      this.current,
+    ];
+  }
+
+  override async listLadders(): Promise<LadderListing[]> {
+    const listed = await super.listLadders();
+    if (this.current.ticker === LADDER_TICKER) return listed;
+    // The expired ladder is no longer listed; the next weekly one is.
+    return listed.map((listing) =>
+      listing.eventTicker === LADDER_TICKER
+        ? {
+            ...listing,
+            eventTicker: this.current.ticker,
+            title: this.current.title,
+            expiry: this.current.expiry ?? NEXT_EXPIRY,
+          }
+        : listing,
+    );
   }
 
   #spot(): SpotPrice {
@@ -73,7 +147,7 @@ export class MovingMarkets extends FakeMarkets {
 
   override async getLadder(): Promise<Ladder> {
     await super.getLadder();
-    const ladder = buildLadder(ladderEvent(), this.#spot(), { fetchedAt: new Date().toISOString() });
+    const ladder = buildLadder(this.current, this.#spot(), { fetchedAt: new Date().toISOString() });
     if (ladder === null) throw new Error("fixture is not a ladder");
     this.spotCents += this.driftCents;
     return ladder;
@@ -98,6 +172,8 @@ export interface Stack {
   intents: () => Promise<Intent[]>;
   /** Resolves once the executor has recorded a result for every approved intent. */
   settled: () => Promise<void>;
+  /** The executor: it fills approved intents and settles filled positions at expiry. */
+  executor: Executor;
   stop: () => Promise<void>;
 }
 
@@ -138,20 +214,11 @@ export async function startStack(options: {
     ...(options.rules === undefined ? {} : { rules: options.rules }),
   });
   const servers: ServerType[] = [];
-  let executor: SimulatedExecutor | undefined;
+  let executor: Executor | undefined;
   try {
     const policy = chain.deployment.address;
     const reader = devPolicyClient(chain.rpcUrl, policy, "outsider");
     const markets = new MovingMarkets(options.spotCents);
-
-    executor = startSimulatedExecutor({
-      client: devPolicyClient(chain.rpcUrl, policy, "executor"),
-      venue: geminiVenue(new FakeMarkets()),
-      fromBlock: chain.deployment.blockNumber,
-      fillDelayMs: 0,
-      pollingIntervalMs: 100,
-      log: () => undefined,
-    });
 
     const consoleToken = randomBytes(24).toString("base64url");
     const fake = createFakeConsole({
@@ -159,9 +226,27 @@ export async function startStack(options: {
       holdings: options.holdings,
       isContractAgent: async (address) =>
         (await reader.getRoles()).agent.toLowerCase() === address.toLowerCase(),
+      executorAddress: devAccount("executor").address,
     });
     const consoleHttp = await listen(fake.fetch);
     servers.push(consoleHttp.server);
+
+    // The executor reads outcomes from the same markets the agent plans on, and records settlements in
+    // the console over HTTP, as on the hosted stack.
+    executor = startExecutor({
+      client: devPolicyClient(chain.rpcUrl, policy, "executor"),
+      venue: simulatedVenue(markets),
+      settlements: consoleSettlementSink({ consoleUrl: consoleHttp.url }),
+      fromBlock: chain.deployment.blockNumber,
+      fillDelayMs: 0,
+      pollingIntervalMs: 100,
+      settleIntervalMs: 200,
+      // Ask about open markets on every pass, and again 200 ms after an unpublished outcome: the test
+      // moves the ladder past expiry whenever it likes.
+      openRecheckMs: 0,
+      settleBackoffMs: [200],
+      log: () => undefined,
+    });
 
     const mcpToken = randomBytes(32).toString("base64url");
     const server = createMandateServer(
@@ -235,6 +320,7 @@ export async function startStack(options: {
       call,
       intents,
       settled,
+      executor: running,
       stop: async () => {
         running.stop();
         await server.endpoint.close();

@@ -18,6 +18,7 @@ import {
   putPairingRequestSchema,
   putSignalBudgetRequestSchema,
   putSignalPaymentRequestSchema,
+  settlementsResponseSchema,
   signalBudgetResponseSchema,
   signalPaymentResponseSchema,
   agentIdSchema,
@@ -340,3 +341,12 @@ async function pairingResponse(service: ConsoleService, mandate: Mandate, pairin
     isContractAgent: roles ? isAddressEqual(roles.agent, pairing.agentAddress) : false,
   });
 }
+
+// ------------------------------------------------------------------ settlements (#92)
+
+/** The settlements of the deployment the agent's mandate follows, newest first; only records that still verify. */
+export const getSettlements = agentRoute((_request, service, { mandate }) =>
+  Promise.resolve(
+    json(settlementsResponseSchema.parse({ settlements: service.verifiedSettlements(mandate) })),
+  ),
+);

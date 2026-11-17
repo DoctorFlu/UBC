@@ -15,20 +15,32 @@
  * which agent a token's hash belongs to. The env-file token registers itself for the first mandate's
  * agent (`env`) the first time it is presented with `legacy: true`, and once revoked stays revoked.
  * `addAgent` adds another workspace's agent with a console-issued token, and can hold its key to sign.
+ *
+ * It also takes the executor's settlements (`CONSOLE_EXECUTOR_ROUTES`, issue #92) the way the console
+ * does: no bearer token, a document that adds up, a signature that recovers to `executorAddress` when
+ * one is given, and the first record of an intent wins (200 for the same one, 409 `conflict` otherwise).
+ * The settlements belong to the server's contract, so they are the first mandate's (`env`) records.
+ * It does not check the fill onchain; the real console does.
  */
 import { randomBytes } from "node:crypto";
 import { Hono, type Context } from "hono";
+import { isAddressEqual, recoverMessageAddress, type Address, type Hex } from "viem";
 import type * as z from "zod";
 import { privateKeyToAccount } from "viem/accounts";
-import type { Address, Hex } from "viem";
 import {
   AGENT_ID_HEADER,
   CONSOLE_AGENT_API_BASE,
+  CONSOLE_EXECUTOR_API_BASE,
   ENV_AGENT_ID,
   agentTransactionRefusal,
   fromUnsignedTransaction,
   hashAgentToken,
   hashContext,
+  hashSettlement,
+  putSettlementRequestSchema,
+  settlementMessage,
+  settlementProblems,
+  type StoredSettlement,
   postPlanRequestSchema,
   postPolicyChangeRequestSchema,
   putContextRequestSchema,
@@ -62,6 +74,8 @@ export interface FakeConsoleState {
   signalPayments: Map<string, PutSignalPaymentRequest & { recordedAt: string }>;
   /** The latest signal budget snapshot. */
   signalBudget: SignalBudgetResponse | null;
+  /** Settlements by intent id, as the executor first recorded them (the first mandate's only). */
+  settlements: Map<number, StoredSettlement>;
   /** Every request seen, as `METHOD path`, for assertions (on the first agent's state: all agents'). */
   requests: string[];
 }
@@ -73,6 +87,8 @@ export interface FakeConsoleOptions {
   holdings?: ConsoleHolding[];
   /** Whether the Policy contract names this address as its agent. Defaults to false. */
   isContractAgent?: (address: string) => boolean | Promise<boolean>;
+  /** The contract's executor: a settlement signed by anyone else is refused (403). Any signer when unset. */
+  executorAddress?: Address;
   now?: () => Date;
 }
 
@@ -116,7 +132,12 @@ export interface FakeConsole {
   readonly stateOf: (agentId: string) => FakeConsoleState;
 }
 
-function fail(c: Context, status: 400 | 401 | 404 | 409 | 422, code: string, message: string): Response {
+function fail(
+  c: Context,
+  status: 400 | 401 | 403 | 404 | 409 | 422,
+  code: string,
+  message: string,
+): Response {
   return c.json({ error: { code, message } }, status);
 }
 
@@ -170,6 +191,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     pairing: null,
     signalPayments: new Map(),
     signalBudget: null,
+    settlements: new Map(),
     requests: [],
   });
   const state = newState(options.holdings);
@@ -206,7 +228,9 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
   app.use("*", async (c, next) => {
     state.requests.push(`${c.req.method} ${c.req.path}`);
     if (down) return c.json({ error: { code: "unavailable", message: "Down for a test." } }, 503);
-    if (c.req.header("authorization") !== `Bearer ${options.token}`) {
+    // The executor API has no token: a settlement is only stored when the executor signed it.
+    const isExecutorApi = c.req.path.startsWith(`${CONSOLE_EXECUTOR_API_BASE}/`);
+    if (!isExecutorApi && c.req.header("authorization") !== `Bearer ${options.token}`) {
       return c.json({ error: { code: "unauthorized", message: "Missing or wrong service token." } }, 401);
     }
     await next();
@@ -421,7 +445,53 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     return c.json({ signed });
   });
 
+  api.get("/settlements", (c) =>
+    c.json({
+      settlements: [...tenant(c).settlements.values()].sort(
+        (a, b) => b.storedAt.localeCompare(a.storedAt) || b.intentId - a.intentId,
+      ),
+    }),
+  );
+
+  const executor = new Hono();
+  executor.put("/settlements/:intentId", async (c) => {
+    const raw = c.req.param("intentId");
+    if (!/^(0|[1-9]\d{0,15})$/.test(raw)) {
+      return fail(c, 422, "invalid_parameter", "The intent id must be a whole number, starting at 0.");
+    }
+    const intentId = Number(raw);
+    const parsed = await body(c, putSettlementRequestSchema);
+    if (parsed instanceof Response) return parsed;
+    const { document, signature } = parsed;
+    if (document.intentId !== intentId) {
+      return fail(c, 422, "intent_mismatch", "The document's intentId must be the intent id in the path.");
+    }
+    const problems = settlementProblems(document);
+    if (problems.length > 0) return fail(c, 422, "invalid_settlement", problems.join("; "));
+    const hash = hashSettlement(document);
+    const signer = await recoverMessageAddress({ message: settlementMessage(hash), signature });
+    if (options.executorAddress !== undefined && !isAddressEqual(signer, options.executorAddress)) {
+      return fail(c, 403, "not_executor", "The settlement is not signed by the contract's executor.");
+    }
+    const existing = state.settlements.get(intentId);
+    if (existing !== undefined) {
+      if (existing.hash === hash) return c.json(existing);
+      return fail(c, 409, "conflict", `Intent ${raw} already has a settlement; the first record stands.`);
+    }
+    const stored: StoredSettlement = {
+      intentId,
+      hash,
+      document,
+      signature,
+      signer,
+      storedAt: now().toISOString(),
+    };
+    state.settlements.set(intentId, stored);
+    return c.json(stored, 201);
+  });
+
   app.route(CONSOLE_AGENT_API_BASE, api);
+  app.route(CONSOLE_EXECUTOR_API_BASE, executor);
 
   const handle = async (request: Request): Promise<Response> => app.fetch(request);
   return {

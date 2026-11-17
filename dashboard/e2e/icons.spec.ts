@@ -6,10 +6,10 @@ import { expect, test, type Page } from "@playwright/test";
 import { AGENT_ADDRESS } from "./routes";
 
 /**
- * The hosted console asks for the owner's login on every path but a short public list in
- * deploy/caddy/app-routes.caddy. A browser fetches tab and home-screen icons without that login, so every
+ * The hosted console asks for a signed-in session on every path but a short public list in
+ * deploy/caddy/app-routes.caddy. A browser fetches tab and home-screen icons without a session, so every
  * icon a page declares must be on the list: read here from the file itself, so a new icon path, or a path
- * dropped from the list, fails this test rather than the hosted login page.
+ * dropped from the list, fails this test rather than the hosted sign-in redirect.
  */
 const routesFile = fileURLToPath(new URL("../../deploy/caddy/app-routes.caddy", import.meta.url));
 const publicLine = /^@public path (.+)$/m.exec(readFileSync(routesFile, "utf8"))?.[1] ?? "";

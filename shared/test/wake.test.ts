@@ -6,19 +6,24 @@ import {
   MAX_EVENT_AGE_MS,
   MemoryWakeStore,
   RUN_QUIET_MS,
+  SETTLED_NEWS_MS,
   WAKE_DEBOUNCE_MS,
   WAKE_RETRY_DELAYS_MS,
   WakeNotifier,
   WakeTarget,
   chainWakes,
   initialPriceMemory,
+  ladderSettledWake,
+  mergeWakeDetail,
   priceWakes,
   wakeEventSchema,
   wakeId,
+  wakeSummary,
   type ChainWakeContext,
   type PolicyEvent,
   type PolicyRules,
   type PriceGoal,
+  type Settlement,
   type WakeCandidate,
   type WakeEvent,
 } from "../src";
@@ -302,6 +307,93 @@ function setup(
   notifier.start();
   return { time, rx, logs, store, notifier };
 }
+
+describe("ladderSettledWake", () => {
+  const doc = (intentId: number, patch: Partial<Settlement> = {}): Settlement => ({
+    version: 1,
+    chainId: 5042002,
+    policy: `0x${"ab".repeat(20)}`,
+    intentId,
+    market: MARKET,
+    eventTicker: "BTC2611202200",
+    strikeCents: 6_500_000,
+    expiresAt: "2026-11-20T22:00:00.000Z",
+    outcome: "NO",
+    costCents: 1_240,
+    limitPrice: 31,
+    contractsHundredths: 4_000,
+    resolution: "yes",
+    payoutCents: 0,
+    pnlCents: -1_240,
+    settlementValue: "65210",
+    resolvedAt: "2026-11-20T22:00:08.232Z",
+    venue: "simulated",
+    ...patch,
+  });
+  const input = (filledBuys: number[], settlements: Settlement[]) => ({
+    deploymentId: "5042002:0xabc",
+    eventTicker: "BTC2611202200",
+    filledBuys,
+    settlements,
+    now: T0,
+  });
+
+  it("waits until every filled buy on the ladder is settled, then offers one trigger for the ladder", () => {
+    const other = doc(9, { eventTicker: "ETH2611202200", market: "GEMI-ETH2611202200-HI2800" });
+    expect(ladderSettledWake(input([1, 2], [doc(1), other]))).toBeNull();
+    expect(ladderSettledWake(input([], [other]))).toBeNull();
+    const wake = ladderSettledWake(input([1, 2], [doc(1), doc(2), other]));
+    expect(wake).toEqual({
+      kind: "ladder_settled",
+      sourceId: "settlement:5042002:0xabc:BTC2611202200",
+      occurredAt: T0,
+      detail: {
+        ladders: [
+          {
+            asset: "BTC",
+            eventTicker: "BTC2611202200",
+            expiresAt: "2026-11-20T22:00:00.000Z",
+            settlementValue: "65210",
+            positions: 2,
+            costCents: 2_480,
+            payoutCents: 0,
+            pnlCents: -2_480,
+          },
+        ],
+      },
+    });
+    if (!wake) throw new Error("no wake-up");
+    expect(wakeSummary(wake, 1)).toBe(
+      "The BTC ladder BTC2611202200 settled at $65,210.00: 2 positions cost $24.80, paid $0, net -$24.80. " +
+        "Plan on the next ladder.",
+    );
+  });
+
+  it("treats a ladder that expired more than a day before as history, not news", () => {
+    const expiry = Date.parse("2026-11-20T22:00:00.000Z");
+    const at = (now: number) => ladderSettledWake({ ...input([1], [doc(1)]), now });
+    expect(at(expiry + SETTLED_NEWS_MS)).not.toBeNull();
+    expect(at(expiry + SETTLED_NEWS_MS + 1)).toBeNull();
+  });
+
+  it("merges two ladders that settle inside one window, each listed once", () => {
+    const btc = ladderSettledWake(input([1], [doc(1)]));
+    const eth = ladderSettledWake({
+      ...input([5], [doc(5, { eventTicker: "ETH2611202200", market: "GEMI-ETH2611202200-HI2800" })]),
+      eventTicker: "ETH2611202200",
+    });
+    if (!btc || !eth) throw new Error("no wake-up");
+    const merged = mergeWakeDetail(mergeWakeDetail(btc, eth), btc);
+    expect(merged.kind === "ladder_settled" && merged.detail.ladders.map((l) => l.eventTicker)).toEqual([
+      "ETH2611202200",
+      "BTC2611202200",
+    ]);
+    expect(wakeSummary(merged, 2)).toBe(
+      "2 ladders settled (ETH2611202200, BTC2611202200): cost $24.80, paid $0, net -$24.80 in all. " +
+        "Plan on the next ladders.",
+    );
+  });
+});
 
 describe("WakeNotifier", () => {
   it("posts a well-formed event with the bearer key, once per trigger", async () => {

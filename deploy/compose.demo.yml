@@ -99,6 +99,10 @@ services:
       POLICY_DEPLOYMENT_FILE: /data/chain/deployment.json
       # How often it asks anvil for new approvals; an owner's approval fills within about this long.
       SIM_EXECUTOR_POLL_MS: ${SIM_EXECUTOR_POLL_MS:-1000}
+      # Where it records what each position paid at expiry: the console's executor API, on the private network.
+      CONSOLE_URL: http://console:3000
+      # How often it checks positions on expired markets for Gemini's published outcome.
+      EXECUTOR_SETTLE_MS: ${EXECUTOR_SETTLE_MS:-60000}
       NODE_OPTIONS: --max-old-space-size=192
     volumes:
       - chain:/data/chain:ro

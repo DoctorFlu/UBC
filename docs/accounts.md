@@ -129,6 +129,7 @@ A new id is issued at every sign-in, sign-up, claim and recovery, and a ceremony
 | `/api/auth/*` | anyone | ceremonies, rate limited per client and in total |
 | `/mcp` | an agent token | the token's agent and mandate; an unknown or revoked token gets 401, and every token gets 503 while the console cannot be asked |
 | `/api/agent/v1/*` (private network) | the MCP server | `CONSOLE_SERVICE_TOKEN`, plus the agent id in `X-Mandate-Agent`; every record read or written belongs to that agent's mandate |
+| `/api/executor/v1/*` (private network) | the contract's executor | no session and no token: a settlement is stored only when its signature recovers to the `executor()` of the server's contract, so it belongs to that deployment and only the mandate that follows it (the first workspace's) sees it, in its snapshot, its event stream and its agent's `GET /api/agent/v1/settlements` |
 | `/agent/<address>` | anyone | onchain data of the mandate whose agent is that address, nothing offchain |
 | `/rpc` (demo chain) | a signed-in member of the workspace that holds the demo chain's mandate | Caddy asks the console (`forward_auth`) before it forwards to anvil |
 

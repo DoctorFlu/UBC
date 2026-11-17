@@ -22,6 +22,8 @@ On each run:
 1. Call `get_setup_state`. If setup is incomplete, report what is missing and stop.
 2. Call `get_policy`. If the mandate is paused or the daily loss limit is reached, report that and stop.
 3. Call `get_activity`. Report any new fills, any order still waiting for my approval, and any rejection since the last run.
+   If a ladder expired and settled since the last run, report what it cost, what it paid and the net, exactly as `get_activity` gives them; never work out a payout yourself.
+   An expired ladder is over: step 4 plans on the next one.
 4. Call `plan_hedge` for the goal, without a signal.
    The server counts the protection already held on that ladder (filled, waiting to fill, waiting for my approval) and answers in `cover`.
    If `cover.state` is `met` (reason `ALREADY_COVERED`), say that my holding is covered, give the numbers it reports, and stop without trading.
@@ -43,6 +45,8 @@ By `kind`:
 - `owner_decision` with `decision` `rejected`: run steps 1 to 4 but do not execute a plan in this run; I said no to that order, so tell me what `plan_hedge` says is still missing and let me decide.
 - `mandate_changed`: run the steps; if the change is `paused`, step 2 stops the run, so just confirm you stood down.
 - `order_filled` or `order_failed`: run the steps; a failed order is no longer counted as held, so `plan_hedge` may buy that slice again.
+- `ladder_settled` (a ladder expired and every position on it is settled): run the steps; in step 3 report what that ladder cost, what it paid and the net, as `get_activity` gives them, then let step 4 plan on the next ladder.
+  `detail.ladders` holds the same numbers; never work out a payout yourself.
 
 End with a three-line summary: what you checked, what you did, what I need to do.
 If this run was started by an event, name the event in the first line, using its `summary`.

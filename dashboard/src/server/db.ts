@@ -19,7 +19,8 @@ import { newId } from "./accounts/secrets";
  * - accounts: workspaces, members, passkeys, sessions, mandates, agents and agent tokens, with every
  *   secret stored as a hash and every agent key sealed (docs/accounts.md);
  * - what Gemini said about each intent's market the first time the console checked it;
- * - the event wake-ups of each mandate's Grok Bot routine (docs/event-wake.md).
+ * - the event wake-ups of each mandate's Grok Bot routine (docs/event-wake.md);
+ * - what each filled position paid at settlement, as the executor signed it (the contract cannot hold it).
  */
 export type Database = DatabaseSync;
 
@@ -27,7 +28,7 @@ export type Database = DatabaseSync;
  * Each entry upgrades the schema by one version, as SQL or as a function for steps that need values made
  * in code. Never edit a shipped entry; append a new one.
  */
-const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
+export const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
   `
   CREATE TABLE policy_events (
     deployment_id   TEXT    NOT NULL,
@@ -169,14 +170,29 @@ const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
     updated_at INTEGER NOT NULL
   ) STRICT;
   `,
-  // 6: accounts (#94). Workspaces, members, passkeys, sessions, mandates, agents and their tokens; every
+  // 6: what each filled position paid at settlement, signed by the executor (#92). First record wins.
+  // Keyed by deployment, not mandate: a settlement belongs to the contract whose executor signed it, and
+  // a mandate reads those of the deployment it follows.
+  `
+  CREATE TABLE settlements (
+    deployment_id TEXT    NOT NULL,
+    intent_id     INTEGER NOT NULL,
+    hash          TEXT    NOT NULL,
+    document      TEXT    NOT NULL,
+    signature     TEXT    NOT NULL,
+    signer        TEXT    NOT NULL,
+    stored_at     TEXT    NOT NULL,
+    PRIMARY KEY (deployment_id, intent_id)
+  ) STRICT;
+  `,
+  // 7: accounts (#94). Workspaces, members, passkeys, sessions, mandates, agents and their tokens; every
   // offchain record and every wake-up record now belongs to a mandate. The single-tenant data becomes the
   // first workspace's mandate. Every migration above is applied on the hosted database: never reorder them.
   migrateToAccounts,
 ];
 
 /**
- * Version 6. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
+ * Version 7. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
  * (which follows the contract the server is configured with) and that mandate's agent (whose key the MCP
  * server holds), and moves every existing offchain row into that mandate without losing one.
  */

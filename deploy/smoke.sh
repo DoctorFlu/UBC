@@ -186,6 +186,7 @@ echo "-- internal only"
 expect "the console's agent API is not public" none GET /api/agent/v1/holdings 404
 expect "the console's token lookup is not public" none POST /api/agent/v1/auth/resolve 404 \
   --header "Content-Type: application/json" --data-binary '{}'
+expect "the console's executor API is not public" none PUT /api/executor/v1/settlements/0 404
 
 if [ "$failures" -eq 0 ]; then
   echo "All checks passed."

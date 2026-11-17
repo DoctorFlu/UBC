@@ -6,14 +6,23 @@
  * executor must (see `src/executor.ts`): a market Gemini does not list, a category Gemini disagrees with,
  * an outcome other than YES or NO, or a limit price outside 1 to 99 is refused and recorded as not
  * filled. It reads Gemini's public market data (or `GEMINI_API_URL`) for that check; when Gemini cannot be
- * reached it waits and tries again rather than fill blindly. It refuses to run against anything but the
- * local devchain.
+ * reached it waits and tries again rather than fill blindly.
+ *
+ * Once a filled position's market has expired and Gemini has published its outcome, it records what the
+ * position paid in the console (`CONSOLE_URL`), signed with the executor key (issue #92; see
+ * docs/order-lifecycle.md). It refuses to run against anything but the local devchain.
  */
 import { resolvePolicyDeployment } from "@mandate/shared/node";
-import { devGeminiClient, devPolicyClient, geminiVenue, startSimulatedExecutor } from "../src";
+import {
+  consoleSettlementSink,
+  devGeminiClient,
+  devPolicyClient,
+  simulatedVenue,
+  startExecutor,
+} from "../src";
 import { executorSettings } from "../src/executor-settings";
 
-const { fillDelayMs, pollingIntervalMs } = executorSettings(process.env);
+const { fillDelayMs, pollingIntervalMs, settleIntervalMs, consoleUrl } = executorSettings(process.env);
 
 const deployment = resolvePolicyDeployment();
 if (deployment.source !== "devchain") {
@@ -29,15 +38,18 @@ if (roles.executor.toLowerCase() !== client.account?.address.toLowerCase()) {
 }
 
 console.log(
-  `[sim-executor] SIMULATED executor (dev only) watching ${deployment.address}, fill delay ${fillDelayMs} ms, ` +
+  `[simulated-executor] SIMULATED executor (dev only) watching ${deployment.address}, fill delay ${fillDelayMs} ms, ` +
     `polling every ${String(pollingIntervalMs ?? 1_000)} ms; ` +
-    "checks every approved intent against Gemini before filling",
+    "checks every approved intent against Gemini before filling; " +
+    `settles expired positions every ${String(settleIntervalMs / 1_000)} s into the console at ${consoleUrl}`,
 );
-const executor = startSimulatedExecutor({
+const executor = startExecutor({
   client,
-  venue: geminiVenue(devGeminiClient()),
+  venue: simulatedVenue(devGeminiClient()),
+  settlements: consoleSettlementSink({ consoleUrl }),
   fromBlock: deployment.fromBlock ?? 0n,
   fillDelayMs,
+  settleIntervalMs,
   ...(pollingIntervalMs === undefined ? {} : { pollingIntervalMs }),
 });
 

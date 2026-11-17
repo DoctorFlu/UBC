@@ -41,7 +41,7 @@ See [agent/README.md](../agent/README.md).
 | --- | --- | --- |
 | `CONSOLE_URL` | no | Public address of the console. The MCP server calls it, the console builds the pairing link from it, and it is the passkeys' origin and the `Origin` every write must carry. Defaults to `http://localhost:3000`. |
 | `CONSOLE_SERVICE_TOKEN` | for console tools | Shared secret between the console backend and the MCP server, sent as a bearer token and compared in constant time. Without it every `/api/agent/v1` route answers 503, so the MCP server cannot resolve tokens. |
-| `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (workspaces, members, passkeys, sessions, agent tokens and sealed agent keys, events, contexts, holdings, hedge plans, pairing, change requests, signal payments and budget, and Gemini's listing of each intent's market). Defaults to `dashboard/.data`, which is git-ignored. Deleting it loses the workspaces and the keys the console holds; the console rebuilds the onchain part from the chain. |
+| `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (workspaces, members, passkeys, sessions, agent tokens and sealed agent keys, events, contexts, holdings, hedge plans, pairing, change requests, signal payments and budget, Gemini's listing of each intent's market, event wake-ups, and the executor's settlement records). Defaults to `dashboard/.data`, which is git-ignored. Deleting it loses the workspaces and the keys the console holds; the console rebuilds the onchain part from the chain, and the executor records each settlement again the next time it starts. |
 | `CONSOLE_MODE` | no | `production` or `development`. Defaults to `production` when `NODE_ENV=production`. Production refuses to start without a master key and refuses open sign-up. |
 | `CONSOLE_MASTER_KEY_FILE` | in production, this or the next | File holding the master key that seals the agents' keys: 32 bytes as 64 hex digits, base64 or base64url. Preferred where the platform mounts secrets as files. |
 | `CONSOLE_MASTER_KEY` | in production, this or the previous | The master key itself, for hosts whose secrets live in an env file; `deploy/init-env.sh` creates it for the hosted stack. Set one of the two, not both. In development without either, the console creates `master.key` (mode 600) in its data folder and logs that it did, without the value. |
@@ -56,6 +56,17 @@ See [agent/README.md](../agent/README.md).
 | `CONSOLE_BROWSER_RPC_URL` | no | Local devchain only: the RPC address the browser uses, when it cannot reach the chain at the deployment file's address. The hosted demo chain sets it to `https://<host>/rpc`, which Caddy forwards to anvil for members of the first workspace only. |
 
 The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
+
+## Simulated executor
+
+The executor (`npm run dev:executor`, and the `executor` service of the hosted demo chain) fills approved intents and settles filled positions at expiry; [order-lifecycle.md](order-lifecycle.md) explains both.
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `CONSOLE_URL` | no | The console the executor records settlements in, through `PUT /api/executor/v1/settlements/:intentId`. Defaults to `http://localhost:3000`; the compose files set `http://console:3000`, inside the stack. The route is not public: Caddy answers 404 for `/api/executor/*`. |
+| `EXECUTOR_SETTLE_MS` | no | How often the executor looks for a filled position that is due to be settled, at least `1000`. Defaults to `60000`. The look is local: Gemini and the console are asked only once a position's market has expired, then with waits of 1, 2, 5, 10 and then every 30 minutes while Gemini has not published the outcome. |
+| `SIM_EXECUTOR_DELAY_MS` | no | How long the executor waits after an approval before filling it. Defaults to `1500`. |
+| `SIM_EXECUTOR_POLL_MS` | no | How often the executor asks the chain for new approvals and fills. Defaults to `1000`. |
 
 ## Grok Bot event wake-ups
 

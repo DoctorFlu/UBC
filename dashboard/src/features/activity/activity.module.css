@@ -11,6 +11,19 @@
   background: var(--color-surface);
 }
 
+/* What a position paid at expiry, with its net under it in a quieter line. */
+.settled {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-0-5);
+}
+
+.net {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 /* The simulated-fill marker after the fills hint, on the local devchain. */
 .statMarker {
   margin-inline-start: var(--space-2);

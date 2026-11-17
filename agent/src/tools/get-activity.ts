@@ -1,9 +1,16 @@
 import * as z from "zod";
-import { formatCents, type Intent, type IntentView } from "@mandate/shared";
+import { formatCents, settlementTotals, type Intent, type IntentView } from "@mandate/shared";
 import { ok, summarizeVerdict, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { intentRow, IntentRowSchema } from "../support/intents";
+import {
+  LadderSettlementSchema,
+  ladderSentence,
+  readSettlements,
+  settledLadders,
+  SettlementTotalsSchema,
+} from "../support/settlements";
 
 /** A note on intents older than the list that still matter, or "". */
 function olderIntents(waiting: number, rejected: number): string {
@@ -24,13 +31,22 @@ export const getActivity = defineTool({
     total: z.int().nullable().describe("All intents ever proposed on this contract"),
     intents: z.array(IntentRowSchema).nullable(),
     truncated: z.boolean().describe("Older intents exist beyond this list"),
+    settlements: SettlementTotalsSchema.extend({
+      ladders: z
+        .array(LadderSettlementSchema)
+        .describe("Settled ladders, the latest expiry first, at most 5"),
+    })
+      .nullable()
+      .describe(
+        "Every position settled so far, as the executor signed it and the console stored it (the contract cannot record a payout). null when the console cannot say.",
+      ),
   }),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   handler: async (input, ctx) => {
     if (ctx.policy === undefined) {
       const v = unavailableFor(notConfigured.policy());
       return {
-        structured: { ...v, total: null, intents: null, truncated: false },
+        structured: { ...v, total: null, intents: null, truncated: false, settlements: null },
         summary: summarizeVerdict(v),
       };
     }
@@ -45,7 +61,7 @@ export const getActivity = defineTool({
     } catch (error) {
       const v = unavailableFor(describeFailure(error, ctx));
       return {
-        structured: { ...v, total: null, intents: null, truncated: false },
+        structured: { ...v, total: null, intents: null, truncated: false, settlements: null },
         summary: summarizeVerdict(v),
       };
     }
@@ -54,9 +70,20 @@ export const getActivity = defineTool({
       describeFailure(error, ctx);
       return new Map<number, IntentView>();
     });
+    // What filled positions paid at expiry lives in the console, signed by the executor (issue #92).
+    const stored = await readSettlements(ctx);
+    const byIntent = new Map(stored?.map((settlement) => [settlement.intentId, settlement.document]));
     const rows = intents.map((intent) =>
-      intentRow(intent, views.get(intent.id), ctx.ledger.lookup(intent.id)),
+      intentRow(intent, views.get(intent.id), ctx.ledger.lookup(intent.id), byIntent.get(intent.id)),
     );
+    const ladders = stored === null ? null : settledLadders(stored);
+    const settlements =
+      stored === null || ladders === null
+        ? null
+        : {
+            ...settlementTotals(stored.map((settlement) => settlement.document)),
+            ladders: ladders.slice(0, 5),
+          };
 
     const count = (status: string) => rows.filter((r) => r.status === status).length;
     // The events cover every intent, so an approval still waiting further back is not missed.
@@ -75,7 +102,12 @@ export const getActivity = defineTool({
             actor: "owner",
             hint: `Intents ${waiting.map((id) => `#${id}`).join(", ")} wait for the owner's approval in the console.`,
           }
-        : { actor: "agent", hint: "Report these results to the owner in plain words." },
+        : ladders !== null && ladders.length > 0
+          ? {
+              actor: "agent",
+              hint: "Report these results to the owner in plain words, including what each expired ladder cost, paid and netted. An expired ladder is over: plan any new protection on the next ladder.",
+            }
+          : { actor: "agent", hint: "Report these results to the owner in plain words." },
     );
     const rejectedRows = rows.filter((r) => r.status === "rejected");
     const reasons = [...new Set(rejectedRows.map((r) => r.reason ?? "reason unknown"))];
@@ -85,12 +117,23 @@ export const getActivity = defineTool({
       flagged.length === 0
         ? ""
         : ` FLAGGED: ${flagged.join(", ")} could not have come from this server (see flags); the agent key was used around it, so tell the owner.`;
+    const settledText =
+      ladders === null
+        ? ctx.console === undefined
+          ? ""
+          : " Settlements: the console cannot say right now, so do not report any payout."
+        : ladders.length === 0
+          ? ""
+          : ` ${ladders
+              .slice(0, 3)
+              .map((ladder) => ladderSentence(ladder))
+              .join(" ")}`;
     const summary =
       total === 0
         ? "No intents have been proposed on this contract yet."
-        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waiting.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}${flaggedText}`;
+        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waiting.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}${settledText}${flaggedText}`;
     return {
-      structured: { ...v, total, intents: rows, truncated: total > rows.length },
+      structured: { ...v, total, intents: rows, truncated: total > rows.length, settlements },
       summary,
     };
   },

@@ -4,6 +4,8 @@
  *   npx tsx gemini/scripts/record-fixtures.ts             # record live fixtures
  *   npx tsx gemini/scripts/record-fixtures.ts --from-events <events.json> --ticker <T> --out <file>
  *                                                         # extract one event from a saved events page
+ *   npx tsx gemini/scripts/record-fixtures.ts --settled <T>
+ *                                                         # record a settled event, outcomes included
  *
  * Responses are trimmed: heavy display fields (rich-text descriptions, image and terms URLs)
  * are removed and only a handful of crypto events are kept, so fixtures stay a few kilobytes.
@@ -116,10 +118,19 @@ const { values } = parseArgs({
     "from-events": { type: "string" },
     ticker: { type: "string" },
     out: { type: "string" },
+    settled: { type: "string" },
   },
 });
 
-if (values["from-events"] !== undefined) {
+async function recordSettled(ticker: string): Promise<void> {
+  const event = asObject(await get(`/v1/prediction-markets/events/${encodeURIComponent(ticker)}`));
+  if (event["status"] !== "settled") throw new Error(`${ticker} is ${text(event["status"])}, not settled`);
+  write(join(FIXTURES, `event-${ticker}-settled.json`), event);
+}
+
+if (values.settled !== undefined) {
+  await recordSettled(values.settled);
+} else if (values["from-events"] !== undefined) {
   if (values.ticker === undefined || values.out === undefined)
     throw new Error("--ticker and --out are required");
   extract(values["from-events"], values.ticker, values.out);

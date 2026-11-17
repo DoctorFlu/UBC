@@ -236,6 +236,7 @@ export function ladderEvent(): MarketEvent {
       strike: { type: "above", value: String(k), valueCents: k * 100 },
       quote: quoteFor(k),
       resolutionSide: null,
+      resolvedAt: null,
       settlementValue: null,
     })),
   };
@@ -252,6 +253,7 @@ export function sportsEvent(): MarketEvent {
     strike: null,
     quote: { ...quoteFor(64_000), yesBuyCents: 55, noBuyCents: 47 },
     resolutionSide: null,
+    resolvedAt: null,
     settlementValue: null,
   });
   return {

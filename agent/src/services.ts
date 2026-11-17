@@ -38,6 +38,7 @@ import type {
   PutSignalBudgetRequest,
   PutSignalPaymentRequest,
   Roles,
+  SettlementsResponse,
   SignalBudgetResponse,
   SignalPaymentResponse,
   RuleInput,
@@ -161,6 +162,11 @@ export interface ConsoleClient {
     request: PutSignalBudgetRequest,
     signal?: AbortSignal,
   ): Promise<SignalBudgetResponse | null>;
+  /**
+   * What filled positions paid when their markets resolved, newest first, as the executor signed them
+   * (issue #92). Null when the console has no such route yet (404).
+   */
+  getSettlements(signal?: AbortSignal): Promise<SettlementsResponse | null>;
 }
 
 /**

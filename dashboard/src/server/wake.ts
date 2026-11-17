@@ -3,12 +3,14 @@ import "server-only";
 import type { Ladder } from "@mandate/gemini";
 import {
   type IntentView,
+  type LadderSettlementInput,
   type PolicyEvent,
   type PriceGoal,
   type WakeFetch,
   WakeNotifier,
   chainWakes,
   initialPriceMemory,
+  ladderSettledWake,
   priceWakes,
 } from "@mandate/shared";
 
@@ -46,6 +48,8 @@ export const MAX_PRICE_GOALS = 4;
  * - Price: no timer of its own. The console's poll loop calls `tick` and a check runs when the last one
  *   is older than `GROK_WAKE_PRICE_CHECK_MS`, so the first poll after a paused machine wakes checks at once.
  * - Runs in progress: every authenticated call from this mandate's agent marks one.
+ * - Settlements: the executor API hands each newly stored settlement of this mandate's deployment here;
+ *   a ladder wakes the Bot once, when its last filled position is settled.
  *
  * One instance serves one mandate (`mandateId`), whose records it alone reads and writes. Until each
  * mandate has a webhook of its own, the console runs one, for the mandate on the server's contract, with
@@ -118,6 +122,16 @@ export class ConsoleWake {
       runInProgress: this.notifier.runInProgress(now),
     });
     this.notifier.offer(wakes);
+  }
+
+  /**
+   * A settlement was stored for the first time (issue #92). Offers the ladder's one wake-up once every
+   * filled buy on it is settled; the rule (`ladderSettledWake`) says why.
+   */
+  onSettlement(input: Omit<LadderSettlementInput, "now">): void {
+    if (!this.enabled) return;
+    const wake = ladderSettledWake({ ...input, now: this.now });
+    if (wake) this.notifier.offer([wake]);
   }
 
   /** Starts a price check when the last one is old enough. Never waits for it. */

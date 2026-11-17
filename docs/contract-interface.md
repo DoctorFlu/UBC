@@ -82,6 +82,27 @@ Why: the agent wants to know a trade's fate before spending gas, and the console
 The TypeScript evaluator does this today and is fuzz-tested against the contract, so this is the least urgent request.
 An onchain answer removes any chance of drift if the rules change later.
 
+### 2.4 `recordSettlement` (issue #92)
+
+```solidity
+event IntentSettled(uint256 indexed intentId, uint256 payoutCents, int256 pnlCents);
+
+function recordSettlement(uint256 intentId, uint256 payoutCents, int256 pnlCents) external; // onlyExecutor
+```
+
+Callable once per intent, only by the executor, only for an `Executed` buy; reverts with `WrongStatus` otherwise and on a second call.
+It stores the payout, emits `IntentSettled`, and adds a negative `pnlCents` to the day's loss, so rule 5 (daily loss limit) counts expired protection.
+
+Why: what the contract can record today stops at the fill.
+`recordResult(intentId, filled, filledCents, pnlCents)` works only while the intent is `Approved` and moves it to `Executed`, so it is spent when the order fills, days before the market resolves.
+The executor therefore cannot write a payout onchain, and a settlement loss never reaches `dayLossCents`.
+
+What the offchain code does until this exists: the executor records each settlement in the console instead, as a canonical JSON document (`settlementSchema` in `shared/src/settlement.ts`) whose keccak256 hash it signs with the executor key.
+The console stores it only when the signer is the contract's `executor()` and the numbers match the fill onchain, keeps the first record per intent, and re-hashes it on every read, so an edited record shows as tampered and is never counted ([order-lifecycle.md](order-lifecycle.md)).
+That record is offchain: it is as trustworthy as the executor key and the console's copy, and the contract's daily loss rule does not see it.
+With `recordSettlement`, `PolicyClient` would probe for it and the executor would call it next to the console record; the console would then read the payout from `IntentSettled`.
+Unlike 2.1 to 2.3, it is not in `PolicyReference.sol` yet, and no offchain code depends on it.
+
 ## 3. Behavior worth a second look
 
 These are observations, not bug reports.

@@ -17,6 +17,7 @@ export * from "./events";
 export * from "./fees";
 export * from "./reasons";
 export * from "./reducer";
+export * from "./settlement";
 export * from "./signal-api";
 export * from "./tenancy";
 export * from "./types";

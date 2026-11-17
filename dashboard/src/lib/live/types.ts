@@ -14,6 +14,7 @@ import type {
   PolicyEvent,
   PolicyRules,
   Roles,
+  Settlement,
   WakeStatus,
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
@@ -92,6 +93,16 @@ export type SealedReason =
   | { status: "tampered"; source: SealedSource; hash: Hex; storedAt: string; claims: SealedClaims }
   | { status: "not_stored"; source: SealedSource; hash: Hex };
 
+/**
+ * What a filled position paid when its market resolved, as the executor recorded it in the console
+ * (issue #92; the contract cannot hold it). `verified`: the document still hashes to the hash it was
+ * stored under, and its signature was checked against the contract's `executor()` when it was stored.
+ * `tampered`: the stored document no longer matches, so none of its numbers are shown or counted.
+ */
+export type SettlementView =
+  | { status: "verified"; hash: Hex; signer: Address; signature: Hex; storedAt: string; document: Settlement }
+  | { status: "tampered"; hash: Hex; storedAt: string };
+
 export interface ChainView {
   /** Newest block read, with its timestamp in unix seconds: "today" follows the chain's clock. */
   head: { blockNumber: number; timestamp: number };
@@ -113,6 +124,8 @@ export interface ChainView {
   policySetBy: { blockNumber: number; timestamp: number; txHash: Hex } | null;
   /** Sealed reasons by intent id, for intents with a context hash onchain or linked offchain. */
   sealed: Record<number, SealedReason>;
+  /** Settlements by intent id, for filled positions whose market resolved (issue #92). */
+  settlements: Record<number, SettlementView>;
 }
 
 export interface PairingView {

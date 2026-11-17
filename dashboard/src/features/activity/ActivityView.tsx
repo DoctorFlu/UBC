@@ -1,6 +1,12 @@
 "use client";
 
-import { INTENT_STATUS_LABELS, type IntentStatus, type IntentView } from "@mandate/shared";
+import {
+  INTENT_STATUS_LABELS,
+  type IntentStatus,
+  type IntentView,
+  type Settlement,
+  settlementTotals,
+} from "@mandate/shared";
 import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
@@ -9,6 +15,7 @@ import { SimulatedFill } from "@/components/domain/SimulatedFill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
+import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
@@ -21,10 +28,44 @@ import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, countByStatus, newestFirst, todayUsage } from "@/lib/live/derive";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { fillsAreSimulated } from "@/lib/network";
+import { verifiedSettlements } from "@/lib/settlement/settlement";
 
 import styles from "./activity.module.css";
 
-const columns: readonly Column<IntentView>[] = [
+/** What a filled position paid when its market resolved; empty until it settles. */
+function SettledCell({ settlement }: { settlement: Settlement | undefined }) {
+  if (!settlement) return null;
+  return (
+    <span className={styles.settled} data-testid="intent-settled">
+      {settlement.payoutCents > 0 ? (
+        <>
+          Paid <Money cents={settlement.payoutCents} />
+        </>
+      ) : (
+        "Paid nothing"
+      )}
+      <span className={styles.net}>
+        Net <Money cents={settlement.pnlCents} sign="always" />
+      </span>
+    </span>
+  );
+}
+
+function activityColumns(settlements: ReadonlyMap<number, Settlement>): readonly Column<IntentView>[] {
+  return [
+    ...baseColumns.slice(0, -1),
+    {
+      key: "settled",
+      header: "At expiry",
+      cell: (intent) => <SettledCell settlement={settlements.get(intent.id)} />,
+      align: "end",
+      nowrap: true,
+    },
+    ...baseColumns.slice(-1),
+  ];
+}
+
+const baseColumns: readonly Column<IntentView>[] = [
   { key: "id", header: "Intent", cell: (intent) => <IntentLink id={intent.id} />, nowrap: true },
   {
     key: "time",
@@ -108,9 +149,11 @@ const filters: readonly Filter[] = [
 export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
-  const shown = useAdvancedColumns(columns);
   const chain = snapshot.chain;
+  const settlements = verifiedSettlements(chain);
+  const shown = useAdvancedColumns(activityColumns(settlements));
   if (!chain) return <ChainUnavailable snapshot={snapshot} title="Activity" />;
+  const settled = settlementTotals([...settlements.values()]);
 
   const intents = newestFirst(chain);
   const usage = todayUsage(chain);
@@ -175,6 +218,15 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
                 <SimulatedFill className={styles.statMarker} />
               ) : null}
             </>
+          }
+        />
+        <Stat
+          label="Paid at expiry"
+          value={formatUsdCents(settled.payoutCents)}
+          hint={
+            settled.positions === 0
+              ? "Nothing has settled yet"
+              : `${formatCount(settled.positions)} settled, cost ${formatUsdCents(settled.costCents)}, net ${formatUsdCents(settled.pnlCents, { sign: "always" })}`
           }
         />
       </StatGroup>

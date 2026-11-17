@@ -20,6 +20,9 @@
 #                                /apple-icon.png
 #   internal only (404 here)     /api/agent/*              the console's agent API: the MCP server calls it
 #                                                          on the private network, nobody else needs it
+#                                /api/executor/*           the console's executor API: the executor records
+#                                                          settlements on the private network (signed, but
+#                                                          nobody else needs to reach it)
 #   member (a session)           everything else           the console's pages, /api/console/* (snapshot,
 #                                                          live events, writes, agents and tokens), and on
 #                                                          the demo chain /rpc. The console checks the
@@ -62,6 +65,10 @@ handle /api/webhooks/quicknode {
 }
 
 handle /api/agent/* {
+	respond 404
+}
+
+handle /api/executor/* {
 	respond 404
 }
 

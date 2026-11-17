@@ -1,3 +1,9 @@
+/**
+ * Migrations apply by position (`PRAGMA user_version`), so a hosted console upgrades only if every
+ * migration it already ran keeps its place and new ones come after. This builds databases exactly as the
+ * shipped consoles left them, with rows in them, and opens them with the current code.
+ */
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,9 +12,28 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { AccountStore } from "./accounts/store";
-import { type Database, migrate, openDatabase } from "./db";
+import { type Database, MIGRATIONS, migrate, openDatabase } from "./db";
 import { OffchainStore } from "./store/offchain";
+import { SettlementStore } from "./store/settlements";
 import { SqliteWakeStore } from "./store/wakes";
+
+/**
+ * SHA-256 of the shipped migrations, joined by NUL: 1 to 5 as main had them at 190fe37 (the hosted
+ * console's schema today), and 1 to 6 as main had them at 2508c46 (settlements, #92). A change here means
+ * a shipped migration was edited or moved, which a deployed database never re-runs.
+ */
+const SHIPPED_SHA256 = {
+  5: "0a0e02f733cd4c812b7facda9c22497f09de6f4d0b165f0048a6a9f381d68f51",
+  6: "f595c104e5563ac1965cb0a8b2466a277699719b6762de0f1d971c845f1be328",
+} as const;
+
+function shippedHash(versions: number): string {
+  const steps = MIGRATIONS.slice(0, versions).map((step) => {
+    if (typeof step !== "string") throw new Error("a shipped migration is SQL");
+    return step;
+  });
+  return createHash("sha256").update(steps.join("\u0000")).digest("hex");
+}
 
 const AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const OWNER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
@@ -20,8 +45,9 @@ const MS = Date.parse(T);
  * The schema version the hosted console runs: every migration up to here is applied on its database, so
  * each keeps its position and the accounts migration comes after all of them. When another migration
  * lands on main first, raise this, insert a row into its tables below, and move accounts after it.
+ * The hosted console is at 5 until #92 is deployed, so a version 5 database is upgraded below as well.
  */
-const HOSTED_VERSION = 5;
+const HOSTED_VERSION = 6;
 
 /** Every table at `HOSTED_VERSION`: a migration moved or reordered on this branch changes this list. */
 const HOSTED_TABLES = [
@@ -35,6 +61,7 @@ const HOSTED_TABLES = [
   "pairings",
   "policy_change_requests",
   "policy_events",
+  "settlements",
   "signal_budget",
   "signal_payments",
   "wake_deliveries",
@@ -42,7 +69,7 @@ const HOSTED_TABLES = [
   "wake_sources",
 ];
 
-/** The tables the accounts migration gives a mandate. */
+/** The tables the accounts migration gives a mandate. Settlements stay keyed by deployment. */
 const SCOPED_TABLES = [
   "holdings",
   "decision_contexts",
@@ -71,13 +98,15 @@ function count(db: Database, table: string): number {
 }
 
 /**
- * A database at the hosted version, shaped like the hosted one: 26 events of which 8 propose an intent,
- * 3 plans, a holding, a confirmed pairing and a signal budget, plus a row in every other table.
+ * A database at a shipped version (the hosted one by default), shaped like the hosted one: 26 events of
+ * which 8 propose an intent, 3 plans, a holding, a confirmed pairing and a signal budget, plus a row in
+ * every other table, in write-ahead log mode as the hosted console keeps it.
  */
-function hostedDatabase(): string {
+function hostedDatabase(version = HOSTED_VERSION): string {
   const dataDir = mkdtempSync(join(tmpdir(), "mandate-migrate-"));
   const db = new DatabaseSync(join(dataDir, "console.sqlite"));
-  migrate(db, HOSTED_VERSION);
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;");
+  migrate(db, version);
   const run = (sql: string, ...values: (string | number | null)[]) => db.prepare(sql).run(...values);
 
   const types = [
@@ -173,11 +202,28 @@ function hostedDatabase(): string {
     JSON.stringify({ side: "above", spotCents: 9_100_000, coverState: null, crossings: 0, coverLosses: 0 }),
     MS,
   );
+  if (version >= 6) {
+    run(
+      "INSERT INTO settlements VALUES (?, ?, ?, ?, ?, ?, ?)",
+      DEPLOYMENT,
+      3,
+      hex("5e"),
+      JSON.stringify({ intentId: 3 }),
+      `0x${"ab".repeat(65)}`,
+      OWNER,
+      T,
+    );
+  }
   db.close();
   return dataDir;
 }
 
 describe("the migrations", () => {
+  it("keep the shipped migrations as they are, in their places", () => {
+    expect(shippedHash(5)).toBe(SHIPPED_SHA256[5]);
+    expect(shippedHash(6)).toBe(SHIPPED_SHA256[6]);
+  });
+
   it("keep main's order: the hosted version is exactly the schema the hosted console has", () => {
     const db = new DatabaseSync(":memory:");
     migrate(db, HOSTED_VERSION);
@@ -191,10 +237,17 @@ describe("migration to accounts (after the hosted version)", () => {
     const before = new DatabaseSync(join(dataDir, "console.sqlite"));
     const counts = Object.fromEntries(tables(before).map((table) => [table, count(before, table)]));
     before.close();
-    expect(counts).toMatchObject({ policy_events: 26, intent_details: 8, hedge_plans: 3, pairings: 1 });
+    expect(counts).toMatchObject({
+      policy_events: 26,
+      intent_details: 8,
+      hedge_plans: 3,
+      pairings: 1,
+      settlements: 1,
+    });
     for (const [table, n] of Object.entries(counts)) expect(n, table).toBeGreaterThan(0);
 
     const db = openDatabase(dataDir);
+    expect(MIGRATIONS.length).toBe(HOSTED_VERSION + 1);
     expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(
       HOSTED_VERSION + 1,
     );
@@ -233,6 +286,10 @@ describe("migration to accounts (after the hosted version)", () => {
     expect(offchain.latestPlans(mandate.id).map((plan) => plan.planId)).toEqual(["plan_3", "plan_2"]);
     expect(offchain.context(mandate.id, hex("bb"))?.document).toEqual({ n: 1 });
     expect(offchain.intentContextLink(mandate.id, DEPLOYMENT, 0)?.hash).toBe(hex("aa"));
+    // Settlements belong to the deployment the first mandate follows, and are read through it.
+    expect(new SettlementStore(db).list(DEPLOYMENT).map((s) => [s.intentId, s.hash])).toEqual([
+      [3, hex("5e")],
+    ]);
 
     // The wake-ups already sent stay sent and keep counting toward today's cap, and a trigger already
     // handled is not offered again.
@@ -250,6 +307,23 @@ describe("migration to accounts (after the hosted version)", () => {
     expect(strangers.countedSince(0)).toBe(0);
     expect(strangers.hasSource(`chain:${DEPLOYMENT}:${hex("2e")}:0`)).toBe(false);
     expect(strangers.priceMemory("plan_2")).toBeNull();
+  });
+
+  it("upgrades the hosted console's version 5 too: settlements then accounts, every row kept", () => {
+    const dataDir = hostedDatabase(5);
+    const before = new DatabaseSync(join(dataDir, "console.sqlite"));
+    const counts = Object.fromEntries(tables(before).map((table) => [table, count(before, table)]));
+    expect(tables(before)).not.toContain("settlements");
+    before.close();
+
+    const db = openDatabase(dataDir);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(
+      MIGRATIONS.length,
+    );
+    for (const [table, n] of Object.entries(counts)) expect(count(db, table), table).toBe(n);
+    expect(count(db, "settlements")).toBe(0);
+    expect(new AccountStore(db).firstWorkspace().claimedAt).toBeNull();
+    expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
   });
 
   it("runs once: opening the upgraded database again changes nothing", () => {

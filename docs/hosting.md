@@ -619,6 +619,9 @@ An idle pause owes no cooldown and ends the run, so a machine that rests between
 Event wake-ups of Grok Bot's routine ([event-wake.md](event-wake.md)) add no timer: chain triggers ride on the console's poll and price checks run on it at most every 5 minutes.
 While the machine is paused nothing is watched; the first poll after it wakes checks spot at once, and the hourly scheduled run stays the backstop.
 A wake-up the console sends makes Grok Bot call `/mcp`, which is use and keeps the machine awake for that run.
+
+The executor settles filled positions at expiry ([order-lifecycle.md](order-lifecycle.md#5-a-hosted-machine-that-pauses)) without keeping the machine awake: its 60-second timer calls neither Gemini nor the console until a position's ladder has expired, and then backs off while Gemini has not published the outcome.
+A ladder that expires while the machine is paused is settled on the next wake, which the hourly scheduled run brings within the hour.
 A cooldown comes when a run reaches its limit: after 8 hours of steady use, or when light use (a request now and then) keeps the machine from idling but is too little to extend the run.
 
 Before a demo, wake the machine and check it:

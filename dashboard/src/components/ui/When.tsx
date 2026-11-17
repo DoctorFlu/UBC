@@ -1,33 +1,12 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
-
 import { useAdvanced } from "@/lib/advanced/Advanced";
 import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { useNow } from "@/lib/useNow";
 import { exactUtc, relativeTime } from "@/lib/when";
 
-const TICK_MS = 30_000;
-let tickTimer: ReturnType<typeof setInterval> | undefined;
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  tickTimer ??= setInterval(() => {
-    for (const notify of listeners) notify();
-  }, TICK_MS);
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0 && tickTimer !== undefined) {
-      clearInterval(tickTimer);
-      tickTimer = undefined;
-    }
-  };
-}
-
-const currentTick = () => Math.floor(Date.now() / TICK_MS);
 // The server and the first browser render know no clock or time zone: both show the exact UTC time,
 // so hydration always matches, and the owner's own clock takes over right after.
-const serverTick = () => null;
 
 export interface WhenProps {
   /** Unix seconds, or an ISO string. */
@@ -60,15 +39,15 @@ export function When({
   inSentence = false,
 }: WhenProps) {
   const { advanced } = useAdvanced();
-  const tick = useSyncExternalStore(subscribe, currentTick, serverTick);
+  const now = useNow();
   const date = typeof at === "number" ? new Date(at * 1000) : new Date(at);
   const iso = date.toISOString();
-  if (!advanced && tick !== null) {
+  if (!advanced && now !== null) {
     return (
       <time dateTime={iso} title={exactUtc(date)} className={className}>
         {inSentence
-          ? toSentence(relativeTime(date, { now: new Date(tick * TICK_MS) }))
-          : relativeTime(date, { now: new Date(tick * TICK_MS) })}
+          ? toSentence(relativeTime(date, { now: new Date(now) }))
+          : relativeTime(date, { now: new Date(now) })}
       </time>
     );
   }
