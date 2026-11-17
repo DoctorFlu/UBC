@@ -70,7 +70,14 @@ describe("Caddy's routes", () => {
     for (const file of ["Caddyfile", "Caddyfile.gateway", "caddy/app-routes.caddy", "caddy/demo-rpc.caddy"]) {
       expect(deploy(file)).not.toMatch(/basic_?auth|CONSOLE_PASSWORD_HASH|CONSOLE_USER/);
     }
-    expect(routes).toMatch(/forward_auth console:3000 \{\s*uri \/api\/auth\/forward\s*\}/);
+    expect(routes).toMatch(/forward_auth console:3000 \{\s*uri \/api\/auth\/forward\n/);
+    // The check must not look like a Next.js client navigation, or Next.js answers it with a redirect.
+    const check = routes.slice(
+      routes.indexOf("uri /api/auth/forward\n"),
+      routes.indexOf("}", routes.indexOf("uri /api/auth/forward\n")),
+    );
+    for (const header of ["-RSC", "-Next-Router-*", "-Next-Url"])
+      expect(check).toContain(`header_up ${header}`);
     expect(deploy("caddy", "demo-rpc.caddy")).toMatch(
       /forward_auth console:3000 \{\s*uri \/api\/auth\/forward\/rpc\s*\}/,
     );

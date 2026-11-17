@@ -98,6 +98,12 @@ handle {
 		# through, a page opened without one is sent to /sign-in, and anything else gets a 401.
 		forward_auth console:3000 {
 			uri /api/auth/forward
+			# The check gets the request's headers. Next.js answers a request whose RSC and Next-Router-*
+			# headers do not match its _rsc query with a 307 to /api/auth/forward?_rsc=..., and Caddy
+			# would pass that redirect on instead of the check's 204, 303 or 401.
+			header_up -RSC
+			header_up -Next-Router-*
+			header_up -Next-Url
 		}
 
 		# Member routes that exist only in some setups (the demo chain's /rpc), see compose.demo.yml.
