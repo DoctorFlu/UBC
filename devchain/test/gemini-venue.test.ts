@@ -227,6 +227,22 @@ describe("an attempt whose answer never came", () => {
     expect(journal.records.get(7)?.state).toBe("open");
   });
 
+  it("treats a redirect as an unknown outcome, never a refusal: held, looked up, never sent again", async () => {
+    fake.failNextPlacement({ kind: "redirect", status: 302, location: "https://elsewhere.example/order" });
+    expect(await venue().placeOrder(order())).toMatchObject({
+      status: "held",
+      detail: expect.stringMatching(
+        /no answer from Gemini's sandbox when placing it \(.*redirect \(HTTP 302 to elsewhere\.example\); it was not followed/,
+      ) as unknown,
+    });
+    expect(journal.records.get(7)).toMatchObject({ state: "unknown" });
+    expect(journal.records.get(7)?.detail).toMatch(/\(redirected\); looking the order up/);
+
+    expect(await restarted().placeOrder(order())).toMatchObject({ status: "held" });
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+    expect(journal.records.get(7)?.state).toBe("unknown");
+  });
+
   it("matches by the order's exact terms when Gemini does not return client order ids", async () => {
     fake.echoClientOrderId = false;
     fake.failNextPlacement({ kind: "drop-after" });

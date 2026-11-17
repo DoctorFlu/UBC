@@ -69,6 +69,7 @@ export interface FakeRequest {
 export interface FakeAnswer {
   status: number;
   body: unknown;
+  headers?: Record<string, string>;
 }
 
 /** What the next order placement does instead of answering normally. */
@@ -78,7 +79,9 @@ export type PlacementFault =
   /** No answer arrives, and no order is made. */
   | { kind: "drop-before" }
   /** The order is made, but no answer arrives (a timeout after Gemini acted). */
-  | { kind: "drop-after" };
+  | { kind: "drop-after" }
+  /** The answer is a redirect to `location`; whether an order was made is unknown, so none is. */
+  | { kind: "redirect"; status: 301 | 302 | 303 | 307 | 308; location: string };
 
 const DROPPED = Symbol("dropped");
 
@@ -197,7 +200,7 @@ export class FakeGeminiPrivate {
     return Promise.resolve(
       new Response(JSON.stringify(answer.body), {
         status: answer.status,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...answer.headers },
       }),
     );
   };
@@ -293,6 +296,9 @@ export class FakeGeminiPrivate {
     const fault = this.faults.shift();
     if (fault?.kind === "refuse") return { status: fault.status, body: fault.body };
     if (fault?.kind === "drop-before") return DROPPED;
+    if (fault?.kind === "redirect") {
+      return { status: fault.status, body: null, headers: { location: fault.location } };
+    }
     if (!this.termsAccepted) {
       return {
         status: 403,

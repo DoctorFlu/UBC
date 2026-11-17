@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { geminiDoctor } from "../src/doctor";
 import { createGeminiPrivateClient, type GeminiCredentials } from "../src/private";
 import { FakeGeminiPrivate, unpacedLimiter } from "../testing/fake-private";
+import { redirectingPair } from "./helpers";
 
 const SANDBOX_KEY = "account-SANDBOXKEY0000000001";
 const SANDBOX_SECRET = "3vQ9sandboxSecretNeverPrinted";
@@ -138,5 +139,33 @@ describe("the Gemini doctor", () => {
     });
     expect(status).toBe(2);
     expect(verdict).toMatch(/^UNKNOWN: the sandbox did not answer usefully/);
+  });
+
+  it("says UNKNOWN, and sends nothing to the other host, when the sandbox answers with a redirect", async () => {
+    const servers = await redirectingPair(302);
+    try {
+      const lines: string[] = [];
+      const status = await geminiDoctor({
+        env: sandboxEnv,
+        say: (line) => lines.push(line),
+        // The real fetch: only the sandbox host is swapped for a loopback server.
+        sandboxClient: (credentials) =>
+          createGeminiPrivateClient({
+            environment: "sandbox",
+            credentials,
+            testBaseUrl: servers.redirecting.url,
+            limiter: unpacedLimiter(),
+          }),
+      });
+      expect(status).toBe(2);
+      expect(lines.at(-1)).toMatch(
+        /^UNKNOWN: the sandbox did not answer usefully \(POST \/v1\/roles answered with a redirect \(HTTP 302 to 127\.0\.0\.1:\d+\); it was not followed/,
+      );
+      expect(servers.redirecting.received).toHaveLength(1);
+      expect(servers.target.received).toEqual([]);
+      expect(lines.join("\n")).not.toContain(SANDBOX_SECRET);
+    } finally {
+      await servers.close();
+    }
   });
 });

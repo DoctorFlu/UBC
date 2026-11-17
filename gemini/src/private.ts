@@ -11,7 +11,9 @@
  *
  * Safety rules this client keeps whatever its caller does:
  * - A signed request goes only to Gemini's own host for the chosen environment, or to a loopback test
- *   server. A configurable URL is never trusted with a key.
+ *   server. A configurable URL is never trusted with a key, and a redirect is never followed: fetch keeps
+ *   custom headers across origins, so following one would hand the key, payload and signature to whatever
+ *   host the answer names. A redirect is reported as `redirected`, an unknown outcome.
  * - Production needs `allowProduction: true` on top of `environment: "production"`.
  * - Nothing is retried. A failed order may or may not exist (see `GeminiPrivateError.outcomeUnknown`); the
  *   caller looks it up instead of sending it again.
@@ -193,6 +195,12 @@ export function isLoopbackTestUrl(value: string): boolean {
   );
 }
 
+/** The host a redirect names, for the error message only; never requested. */
+function redirectHost(location: string | null, base: string): string | undefined {
+  if (location === null || !URL.canParse(location, base)) return undefined;
+  return new URL(location, base).host.slice(0, 100);
+}
+
 function invalid(message: string): GeminiPrivateError {
   return new GeminiPrivateError("invalid_argument", message);
 }
@@ -257,6 +265,8 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
           "X-GEMINI-PAYLOAD": payload,
           "X-GEMINI-SIGNATURE": signature,
         },
+        // Never "follow": the signed headers would go to the redirect's host. See `redirected` below.
+        redirect: "manual",
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (cause) {
@@ -268,6 +278,16 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
           ? `${method} ${path} got no answer within ${String(timeoutMs)} ms`
           : `${method} ${path} failed before an answer arrived (${cause instanceof Error ? cause.message : String(cause)})`,
         { path, cause },
+      );
+    }
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+      // Not followed. Gemini's API never redirects, so whatever answered may or may not have acted.
+      await response.body?.cancel().catch(() => undefined);
+      const target = redirectHost(response.headers.get("location"), baseUrl);
+      throw new GeminiPrivateError(
+        "redirected",
+        `${method} ${path} answered with a redirect (HTTP ${String(response.status)}${target ? ` to ${target}` : ""}); it was not followed, so nothing signed went there`,
+        { status: response.status, path },
       );
     }
     let text: string;
