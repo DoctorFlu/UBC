@@ -1,4 +1,10 @@
-import { type IntentView, intentAnomalies, isValidLimitPrice, quantityFromAmount } from "@mandate/shared";
+import {
+  type IntentView,
+  type MarketListing,
+  intentAnomalies,
+  isValidLimitPrice,
+  quantityFromAmount,
+} from "@mandate/shared";
 import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
@@ -6,7 +12,7 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { Advanced } from "@/lib/advanced/Advanced";
 
 import { formatCount, formatUsdCents } from "@/lib/format";
-import { categoryName, describeMarket } from "@/lib/markets";
+import { categoryName, describeMarket, namingCategory } from "@/lib/markets";
 
 import styles from "./domain.module.css";
 
@@ -15,7 +21,20 @@ import styles from "./domain.module.css";
  * Text that is not a Gemini symbol (only a stolen agent key can store one) is never shown raw here: it
  * reads "Not a Gemini market" with its length and a short quoted preview; the intent page has the rest.
  */
-export function MarketName({ symbol, category }: { symbol: string | null; category?: number | null }) {
+export function MarketName({
+  symbol,
+  category,
+  showCategory = true,
+  listing,
+}: {
+  symbol: string | null;
+  /** Gemini's listing, when checked: its category names an unparsed market before the intent's own. */
+  listing?: MarketListing | undefined;
+  /** The intent's category: it names a market whose symbol is not parsed ("Sports market"). */
+  category?: number | null;
+  /** Whether the category also follows the settle time, as in tables without a category column. */
+  showCategory?: boolean;
+}) {
   if (symbol === null) {
     return (
       <span className={styles.market}>
@@ -24,8 +43,9 @@ export function MarketName({ symbol, category }: { symbol: string | null; catego
       </span>
     );
   }
-  const market = describeMarket(symbol);
-  const kind = category == null ? null : categoryName(category);
+  const market = describeMarket(symbol, namingCategory({ category: category ?? null, listing }));
+  // An unparsed market's title already names its category.
+  const kind = category == null || !showCategory || !market.parsed ? null : categoryName(category);
   if (!market.isSymbol) {
     const size = `${formatCount(market.length)} ${market.length === 1 ? "character" : "characters"}`;
     return (
@@ -47,13 +67,11 @@ export function MarketName({ symbol, category }: { symbol: string | null; catego
     <span className={styles.market}>
       <span className={styles.marketTitle}>{market.title}</span>
       {sub ? <span className={styles.marketMeta}>{sub}</span> : null}
-      {market.title === symbol ? null : (
-        <Advanced>
-          <span className={styles.marketSymbol} translate="no">
-            {symbol}
-          </span>
-        </Advanced>
-      )}
+      <Advanced>
+        <span className={styles.marketSymbol} translate="no">
+          {symbol}
+        </span>
+      </Advanced>
     </span>
   );
 }

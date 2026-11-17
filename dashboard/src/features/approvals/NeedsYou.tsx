@@ -32,7 +32,12 @@ export function HeldIntent({ intent, chain }: { intent: IntentView; chain: Chain
       <div className={styles.heldBody}>
         <FlaggedBadge flags={intentFlags(intent)} />
         <div className={styles.heldHead}>
-          <MarketName symbol={intent.market} />
+          <MarketName
+            symbol={intent.market}
+            category={intent.category}
+            listing={intent.listing}
+            showCategory={false}
+          />
           <span className={styles.heldAmount}>{amountLabel(intent)}</span>
         </div>
         <div className={styles.heldMeta}>

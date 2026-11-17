@@ -96,7 +96,9 @@ const tableColumns: readonly Column<IntentView>[] = [
   {
     key: "market",
     header: "Market",
-    cell: (intent) => <MarketName symbol={intent.market} category={intent.category} />,
+    cell: (intent) => (
+      <MarketName symbol={intent.market} category={intent.category} listing={intent.listing} />
+    ),
     role: "primary",
   },
   { key: "order", header: "Order", cell: (intent) => <OrderSummary intent={intent} />, nowrap: true },

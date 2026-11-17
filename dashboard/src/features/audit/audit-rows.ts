@@ -18,7 +18,7 @@ import type { StatusKind } from "@/components/ui/StatusChip";
 import { formatUsdCents, formatUsdCentsDelta } from "@/lib/format";
 import { isoFromUnix } from "@/lib/live/derive";
 import type { ChainView } from "@/lib/live/types";
-import { describeMarket } from "@/lib/markets";
+import { describeMarket, namingCategory } from "@/lib/markets";
 
 /**
  * What kind of decision a row records:
@@ -82,15 +82,18 @@ function amount(cents: number | null): string {
  * "Buy NO on BTC $65,000 or above, $12.40". Onchain text that is not a Gemini symbol or a YES/NO outcome
  * is described, never quoted: it was written by whoever held the agent key and lands in exports too.
  */
-function order(event: {
-  isBuy: boolean;
-  outcome: string;
-  market: string;
-  amountCents: number | null;
-}): string {
+function order(
+  event: {
+    isBuy: boolean;
+    outcome: string;
+    market: string;
+    amountCents: number | null;
+  },
+  category: number | null,
+): string {
   const outcome =
     event.outcome === "YES" || event.outcome === "NO" ? event.outcome : "an outcome not YES or NO";
-  return `${event.isBuy ? "Buy" : "Sell"} ${outcome} on ${describeMarket(event.market).title}, ${amount(event.amountCents)}`;
+  return `${event.isBuy ? "Buy" : "Sell"} ${outcome} on ${describeMarket(event.market, category).title}, ${amount(event.amountCents)}`;
 }
 
 type Described = Pick<AuditRow, "group" | "label" | "summary" | "status" | "reason" | "intentId">;
@@ -100,7 +103,12 @@ type Described = Pick<AuditRow, "group" | "label" | "summary" | "status" | "reas
  * transaction: its approval or rejection then records the owner's decision, not a verdict at proposal.
  * `version` is the mandate's version after a `PolicyUpdated`.
  */
-function describe(event: PolicyEvent, held: boolean, version: number): Described {
+function describe(
+  event: PolicyEvent,
+  held: boolean,
+  version: number,
+  categoryOf: ReadonlyMap<number, number | null>,
+): Described {
   switch (event.type) {
     case "PolicyUpdated": {
       const { rules } = event;
@@ -127,7 +135,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
       return {
         group: "verdict",
         label: "Intent proposed",
-        summary: order(event),
+        summary: order(event, categoryOf.get(event.intentId) ?? null),
         status: null,
         reason: null,
         intentId: event.intentId,
@@ -136,7 +144,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
       return {
         group: held ? "owner" : "verdict",
         label: held ? "Approved by owner" : "Intent approved",
-        summary: order(event),
+        summary: order(event, categoryOf.get(event.intentId) ?? null),
         status: "approved",
         reason: null,
         intentId: event.intentId,
@@ -178,6 +186,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
 /** Every event as an audit row, oldest first (chain order). */
 export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRow[] {
   const flagsOf = new Map<number, string[]>();
+  const categoryOf = new Map(chain.intents.map((intent) => [intent.id, namingCategory(intent)] as const));
   for (const intent of chain.intents) {
     const flags = intentAnomalies(intent).map((anomaly) => anomaly.text);
     if (flags.length > 0) flagsOf.set(intent.id, flags);
@@ -204,7 +213,7 @@ export function auditRows(chain: Pick<ChainView, "events" | "intents">): AuditRo
     const held = heldTx !== undefined && heldTx.toLowerCase() !== event.transactionHash.toLowerCase();
     if (event.type === "IntentNeedsApproval") heldIn.set(event.intentId, event.transactionHash);
     const flags = intentId === null ? [] : (flagsOf.get(intentId) ?? []);
-    const described = describe(event, held, version);
+    const described = describe(event, held, version, categoryOf);
     return {
       id: eventKey(event),
       at: isoFromUnix(event.blockTimestamp),

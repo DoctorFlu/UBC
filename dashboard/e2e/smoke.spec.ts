@@ -255,6 +255,26 @@ test.describe("seeded demo", () => {
     await expect(page.getByTestId("sample-data")).toHaveCount(0);
   });
 
+  test("a market the console cannot read in words is named by its category, with the symbol in Advanced view", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // Gemini's sports symbols follow no one pattern and their team names live only in its listing.
+    const sports = () =>
+      page
+        .getByRole("row")
+        .filter({ has: page.getByRole("link", { name: "Intent #5", exact: true }) })
+        .filter({ visible: true });
+    await page.goto("/");
+    await expect(sports()).toContainText("Sports market");
+    await expect(sports()).not.toContainText("GEMI-");
+    await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
+    await page.reload();
+    await expect(sports()).toContainText("Sports market");
+    await expect(sports()).toContainText("GEMI-NBA2611200100-HILAL");
+  });
+
   test("an intent without a link says no reason was recorded", async ({ page }) => {
     await page.goto("/activity/1");
     await expect(page.getByTestId("sealed-reason")).toContainText("No reason recorded");

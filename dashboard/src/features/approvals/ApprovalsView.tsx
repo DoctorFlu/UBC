@@ -31,7 +31,14 @@ const baseColumns: readonly Column<HeldDecision>[] = [
   {
     key: "market",
     header: "Market",
-    cell: ({ intent }) => <MarketName symbol={intent.market} />,
+    cell: ({ intent }) => (
+      <MarketName
+        symbol={intent.market}
+        category={intent.category}
+        listing={intent.listing}
+        showCategory={false}
+      />
+    ),
     role: "primary",
   },
   { key: "amount", header: "Amount", cell: ({ intent }) => amountLabel(intent), align: "end", nowrap: true },

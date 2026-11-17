@@ -921,6 +921,8 @@ test("a market Gemini lists elsewhere, or not at all, is flagged beside Approve 
   await open(page, "/");
   const card = page.getByTestId(`waiting-intent-${mislabelled.intentId.toString()}`);
   await expect(card.getByTestId("flagged-badge")).toBeVisible();
+  // Named by Gemini's own category, not the one the key claimed, beside the flag that says so.
+  await expect(card).toContainText("Sports market");
   await expect(card.getByTestId("approval-warning")).toContainText(
     "Gemini lists this market as Sports, the intent says Crypto",
   );
