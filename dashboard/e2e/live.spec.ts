@@ -239,12 +239,17 @@ test("a fill the executor records appears on the intent", async ({ page }) => {
   await expect(page.locator("main")).not.toContainText("on Gemini");
 });
 
-test("a rule that blocks an intent says so on the overview", async ({ page }) => {
+test("a rule that blocks an intent says so on Home", async ({ page }) => {
   await open(page, "/");
-  await expect(page.getByText("Nothing blocked today").first()).toBeVisible();
+  const maxTrade = page
+    .getByTestId("rules-summary")
+    .getByRole("listitem")
+    .filter({ hasText: "Max trade size" });
+  await expect(maxTrade).toBeVisible();
+  await expect(maxTrade).not.toContainText("Blocked");
   const blocked = await chain.agent.proposeTrade(noBuy(BTC_65K, 3_000, 31));
   expect(blocked).toMatchObject({ intentId: 3, verdict: "rejected", reason: "over max trade size" });
-  await expect(page.getByText("Blocked 1 today")).toBeVisible();
+  await expect(maxTrade).toContainText("Blocked 1 today");
 });
 
 test("editing a limit changes the backtest of past intents before anything is signed", async ({ page }) => {
@@ -699,7 +704,7 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
   };
   const ids = {
     long: await proposeHostile(chain, { ...base, market: longMarket }),
-    // Above the approval threshold, so it waits for the owner with the hostile text on the overview.
+    // Above the approval threshold, so it waits for the owner with the hostile text on Home.
     injection: await proposeHostile(chain, { ...base, market: injection, amountCents: 2_100n }),
     maybe: await proposeHostile(chain, { ...base, outcome: "MAYBE" }),
     limitZero: await proposeHostile(chain, { ...base, limitPrice: 0n }),

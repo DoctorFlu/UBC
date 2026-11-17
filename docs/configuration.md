@@ -50,6 +50,22 @@ See [agent/README.md](../agent/README.md).
 
 The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
 
+## Landing page
+
+The landing page (`site/`) is a static export: `npm run build -w @mandate/site` writes `site/out`, which any static file server can serve.
+It has no server, no secrets, no cookies and no analytics.
+Its three settings are public and read at build time only, so changing one means building again.
+`next.config.ts` checks them and the build fails on a malformed value.
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `NEXT_PUBLIC_APP_URL` | no | The console's public address. "Launch app" links to it, and the scorecard link is built from it. Defaults to `http://localhost:3000`. |
+| `NEXT_PUBLIC_SCORECARD_AGENT` | no | The agent address whose public scorecard (`<app>/agent/<address>`) the page links to. Defaults to `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`, the devchain agent (anvil account 1), which the local stack and the hosted demo chain use. |
+| `NEXT_PUBLIC_REPO_URL` | no | The repository's address, linked from the footer as "Source on GitHub". Empty (the default) hides the link, so linking the source is a deliberate choice. |
+
+`npm run dev:stack` starts the page on port 3001 (`--site-port` changes it, `--no-site` skips it) with the first two set to the stack's console and agent.
+`npm run e2e -w @mandate/site` builds `site/out` with example settings for its tests, so build again before deploying from the same folder.
+
 ## Hosting
 
 The hosted setup in [hosting.md](hosting.md) reads one file, `deploy/.env`, which [`deploy/mandate.env.template`](../deploy/mandate.env.template) describes line by line.

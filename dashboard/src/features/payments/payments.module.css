@@ -34,7 +34,13 @@
 .intents {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
+  gap: 0 var(--space-3);
+}
+
+.intents > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
 }
 
 .note {

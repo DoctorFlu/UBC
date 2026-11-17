@@ -1,0 +1,51 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.view > :first-child {
+  padding-block-end: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  font-size: var(--text-md);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+}
+
+.caughtUp {
+  padding-block: var(--space-6);
+}
+
+/* Two summary cards: the rules (narrow) beside the latest verdicts (wide). */
+.board {
+  display: grid;
+  grid-template-columns: minmax(18rem, 1fr) minmax(0, 2fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+
+/* Advanced view: the full schedule needs the width, so the cards stack. */
+.board[data-advanced] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (width < 80rem) {
+  .board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

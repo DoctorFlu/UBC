@@ -1,0 +1,35 @@
+{
+  "name": "@mandate/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The public landing page: a static export that hands off to the console.",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "serve": "tsx scripts/serve.ts",
+    "typegen": "next typegen",
+    "typecheck": "npm run typegen && tsc --noEmit",
+    "e2e": "playwright test --project=phone-light --project=phone-dark --project=desktop-light --project=desktop-dark",
+    "screenshots": "playwright test --project=screenshots"
+  },
+  "dependencies": {
+    "@mandate/brand": "*",
+    "@mandate/shared": "*",
+    "@ui-sdk/core": "^0.1.0-beta.6",
+    "@ui-sdk/react": "^0.1.0-beta.6",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@mandate/devchain": "*",
+    "@playwright/test": "^1.65.1",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jsdom": "^31.0.1"
+  }
+}

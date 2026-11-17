@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "workspaces": [
+    "brand",
     "shared",
     "gemini",
     "planner",
@@ -16,7 +17,8 @@
     "devchain",
     "streams",
     "redteam",
-    "dashboard"
+    "dashboard",
+    "site"
   ],
   "scripts": {
     "lint": "npm run typegen --workspaces --if-present && eslint .",
@@ -43,8 +45,10 @@
     "dev:executor": "tsx devchain/scripts/executor.ts",
     "dev:propose": "tsx devchain/scripts/propose.ts",
     "redteam": "tsx redteam/src/cli.ts",
-    "e2e": "npm run e2e -w @mandate/dashboard",
-    "screenshots": "npm run screenshots -w @mandate/dashboard"
+    "e2e": "npm run e2e -w @mandate/dashboard && npm run e2e -w @mandate/site",
+    "screenshots": "npm run screenshots -w @mandate/dashboard",
+    "e2e:site": "npm run e2e -w @mandate/site",
+    "dev:site": "npm run dev -w @mandate/site"
   },
   "overrides": {
     "minimatch": "^11.0.8"

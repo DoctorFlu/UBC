@@ -38,7 +38,7 @@ export function ExportButtons({
         icon={<Download aria-hidden />}
         onClick={() => download(`${baseName}.csv`, "text/csv;charset=utf-8", csv())}
         disabled={count === 0}
-        aria-label={`Export ${what} as CSV`}
+        aria-label={`Export CSV, ${what}`}
       >
         Export CSV
       </Button>
@@ -47,7 +47,7 @@ export function ExportButtons({
         icon={<Braces aria-hidden />}
         onClick={() => download(`${baseName}.json`, "application/json", json())}
         disabled={count === 0}
-        aria-label={`Export ${what} as JSON`}
+        aria-label={`Export JSON, ${what}`}
       >
         Export JSON
       </Button>

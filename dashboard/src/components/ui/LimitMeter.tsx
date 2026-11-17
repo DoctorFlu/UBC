@@ -1,4 +1,7 @@
-import type { CSSProperties, ReactNode } from "react";
+"use client";
+
+import { Meter as MeterRoot, MeterIndicator, MeterTrack } from "@ui-sdk/react/meter";
+import type { ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
 import { formatPercentBps, formatUsdCents } from "@/lib/format";
@@ -65,7 +68,6 @@ function Meter({
 }) {
   const bps = limit <= 0n ? 0 : Number((used * 10_000n) / limit);
   const tone = meterTone(bps);
-  const load = `${Math.min(100, bps / 100).toString()}%`;
   const reading = `${format(used)} of ${format(limit)}`;
   const headroom = limit > used ? limit - used : 0n;
   return (
@@ -74,21 +76,19 @@ function Meter({
       <span className={styles.reading}>
         <strong>{format(used)}</strong> of {format(limit)}
       </span>
-      <div
+      <MeterRoot
         className={styles.rail}
-        role="meter"
-        aria-label={typeof label === "string" ? label : undefined}
-        aria-valuemin={0}
-        aria-valuemax={Number(limit)}
-        aria-valuenow={Number(used < limit ? used : limit)}
-        aria-valuetext={`${reading} ${usedWord}`}
-        style={{ "--load": load } as CSSProperties}
+        min={0}
+        max={Math.max(1, Number(limit))}
+        value={Number(used < limit ? used : limit)}
+        getValueLabel={() => `${reading} ${usedWord}`}
+        {...(typeof label === "string" ? { "aria-label": label } : {})}
       >
-        <div className={styles.track}>
-          <div className={styles.fill} />
-        </div>
+        <MeterTrack className={styles.track}>
+          <MeterIndicator className={styles.fill} />
+        </MeterTrack>
         <div className={styles.ticks} aria-hidden />
-      </div>
+      </MeterRoot>
       {compact ? null : (
         <div className={styles.foot}>
           <span className={styles.state}>

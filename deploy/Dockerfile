@@ -33,6 +33,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
 # The workspace manifests first, so the install layer is reused until a manifest or the lockfile changes.
 FROM base AS manifests
 COPY package.json package-lock.json ./
+COPY brand/package.json brand/
 COPY shared/package.json shared/
 COPY gemini/package.json gemini/
 COPY planner/package.json planner/
@@ -42,6 +43,7 @@ COPY devchain/package.json devchain/
 COPY streams/package.json streams/
 COPY redteam/package.json redteam/
 COPY dashboard/package.json dashboard/
+COPY site/package.json site/
 
 # Everything, development tools included: the console build, forge and tsx need them.
 # `npm ci`, never `npm install`: it installs exactly the lockfile, native bindings for this platform included.

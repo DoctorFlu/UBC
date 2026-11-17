@@ -6,7 +6,8 @@
   "description": "Contract interface, types, units and chain config shared by every package.",
   "exports": {
     ".": "./src/index.ts",
-    "./node": "./src/node.ts"
+    "./node": "./src/node.ts",
+    "./rules": "./src/rules.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

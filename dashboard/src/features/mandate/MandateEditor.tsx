@@ -151,23 +151,20 @@ export function MandateEditor({ rules, version, chain }: MandateEditorProps) {
           <div className={styles.amounts}>
             {AMOUNT_KEYS.map((key) => (
               <Field key={key} label={AMOUNT_LABELS[key]} hint={amountHints[key]} error={errors[key]}>
-                {(control) => (
-                  <Input
-                    {...control}
-                    prefix="$"
-                    suffix="USDC"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={draft.amounts[key]}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        amounts: { ...current.amounts, [key]: event.target.value },
-                      }))
-                    }
-                  />
-                )}
+                <Input
+                  prefix="$"
+                  suffix="USDC"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={draft.amounts[key]}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({
+                      ...current,
+                      amounts: { ...current.amounts, [key]: value },
+                    }))
+                  }
+                />
               </Field>
             ))}
           </div>

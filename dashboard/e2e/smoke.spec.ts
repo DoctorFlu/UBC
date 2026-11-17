@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { type Page, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { createPublicClient, http, isAddressEqual } from "viem";
 
 import { auditRows } from "../src/features/audit/audit-rows";
@@ -8,13 +8,8 @@ import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "
 
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
-import { DEMO_RECEIPT, snapshot } from "./support/console";
-
-/**
- * Chrome's "preloaded but not used within a few seconds" hint is a timing report, not a defect:
- * it fires when a loaded machine makes `next dev` slow to serve a page. Everything else counts.
- */
-const timingHint = /was preloaded using link preload but not used within a few seconds/;
+import { DEMO_RECEIPT, reportSignalBudget, snapshot } from "./support/console";
+import { watchConsole } from "./support/problems";
 
 /** The cells of one CSV line, with RFC 4180 quoting (the audit export has no line breaks in cells). */
 function csvCells(line: string): string[] {
@@ -37,19 +32,6 @@ function csvCells(line: string): string[] {
   }
   cells.push(cell);
   return cells;
-}
-
-/** Collects console errors, warnings (hydration mismatches are warnings) and uncaught errors. */
-function watchConsole(page: Page) {
-  const problems: string[] = [];
-  page.on("console", (message) => {
-    if (timingHint.test(message.text())) return;
-    if (message.type() === "error" || message.type() === "warning") {
-      problems.push(`${message.type()}: ${message.text()}`);
-    }
-  });
-  page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
-  return problems;
 }
 
 for (const scheme of schemes) {
@@ -81,6 +63,8 @@ for (const scheme of schemes) {
             expect(clipped).toEqual([]);
           }
           if (route.console) {
+            // The page reports that it hydrated; until it does, the phone menu waits (lib/page-hydration.ts).
+            await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
             // The badge renders once for wide screens and once for phones; one of them shows.
             await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toHaveCount(1);
           } else {
@@ -243,7 +227,13 @@ test.describe("seeded demo", () => {
     );
   });
 
-  test("the payments panel shows the agent's reported purchase, budget and balance", async ({ page }) => {
+  test("the payments panel shows the agent's reported purchase, budget and balance", async ({
+    page,
+    baseURL,
+  }) => {
+    // Report today's budget again, as the MCP server does after a purchase: the warm-up's report stops
+    // counting at midnight UTC, which a suite started just before it would otherwise run into.
+    await reportSignalBudget(baseURL ?? "", AGENT_ADDRESS);
     await page.goto("/payments");
     const payment = page.locator(`#payment-${DEMO_RECEIPT}`);
     await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
@@ -437,13 +427,14 @@ test.describe("seeded demo", () => {
     // The owner's own decisions: in the seed, intent 2 approved and intent 3 rejected after a hold.
     await page.getByRole("tab", { name: /Owner decisions/ }).click();
     await expect(table().locator("tbody tr")).toHaveCount(2);
-    await page.getByRole("combobox", { name: "Order of events" }).selectOption("oldest");
+    await page.getByRole("combobox", { name: "Order of events" }).click();
+    await page.getByRole("option", { name: "Oldest first" }).click();
     const shown = table().locator("tbody tr");
     await expect(shown.nth(0)).toContainText("Approved by owner Intent #2");
     await expect(shown.nth(1)).toContainText("Rejected by owner Intent #3");
 
     const download = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export 2 rows as CSV" }).click();
+    await page.getByRole("button", { name: "Export CSV, 2 rows" }).click();
     const file = await (await download).path();
     const lines = (await readFile(file, "utf8")).trimEnd().split("\r\n");
     expect(lines).toHaveLength(3);

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import type { FullConfig } from "@playwright/test";
+import { type FullConfig, chromium } from "@playwright/test";
 
 import { DEMO_POLICY, devPolicyClient } from "@mandate/devchain";
 import { CONSOLE_AGENT_ROUTES } from "@mandate/shared";
@@ -34,9 +34,11 @@ const DEMO_INTENTS = 7;
  *    signal on the recorded Gemini ladder the fake Gemini serves. Then it carries out the plan's first
  *    two orders on the chain (intents 7 and 8, sealed with the plan and the receipt), and the executor
  *    fills the first: the plan's evidence chain is complete and verified.
- * 3. `next dev` compiles each route on its first request. Tests that hit a cold route in parallel can
- *    wait long enough for Chrome to log "preloaded but not used" warnings, which the smoke test rightly
- *    treats as failures. Compiling every route once, in order, before the tests removes that.
+ * 3. `next dev` compiles each route on its first request, and each browser chunk on the first page
+ *    that loads it. Tests that hit a cold route in parallel can wait long enough for Chrome to log
+ *    "preloaded but not used" warnings, which the smoke test rightly treats as failures, or for a busy
+ *    machine to run out the test's time. Opening every route once in a real browser, in order, before
+ *    the tests compiles both.
  */
 export default async function warmUp(config: FullConfig) {
   const baseURL = config.projects[0]?.use.baseURL;
@@ -103,8 +105,19 @@ export default async function warmUp(config: FullConfig) {
       snapshot.chain.intents[DEMO_INTENTS]?.status === "executed",
     60_000,
   );
-  for (const route of routes) {
-    const response = await fetch(new URL(await routePath(route, baseURL), baseURL));
-    await response.arrayBuffer();
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ baseURL });
+    for (const route of routes) {
+      await page.goto(await routePath(route, baseURL), { waitUntil: "load", timeout: 180_000 });
+      // Hydrated means every chunk of the page has loaded; the requests the page then makes (the hedge
+      // page's quotes) compile their API routes before networkidle.
+      if (route.console) {
+        await page.locator("html[data-page-hydrated]").waitFor({ state: "attached", timeout: 180_000 });
+      }
+      await page.waitForLoadState("networkidle", { timeout: 180_000 });
+    }
+  } finally {
+    await browser.close();
   }
 }
