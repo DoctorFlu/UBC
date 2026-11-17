@@ -37,13 +37,10 @@ export function MandateSwitcher({ mandates, current, onNavigate }: MandateSwitch
   const pathname = usePathname();
   return (
     <Menu>
-      <MenuTrigger
-        className={styles.trigger}
-        aria-label={current ? `Mandate: ${current.name}. Switch mandate` : "Choose a mandate"}
-        data-testid="mandate-switcher"
-      >
+      {/* Named by what it shows ("Mandate Hedge my BTC"), as axe asks; the menu role says it switches. */}
+      <MenuTrigger className={styles.trigger} data-testid="mandate-switcher">
         <span className={styles.triggerText}>
-          <span className={styles.triggerLabel}>Mandate</span>
+          <span className={styles.triggerLabel}>Mandate</span>{" "}
           <span className={styles.triggerName}>{current ? current.name : "All mandates"}</span>
         </span>
         <ChevronsUpDown aria-hidden className={styles.chevron} strokeWidth={1.75} />
