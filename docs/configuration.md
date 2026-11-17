@@ -23,14 +23,15 @@ The browser never receives `ARC_RPC_URL`, because it may carry a provider key; i
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `AGENT_PRIVATE_KEY` | for trading tools | Key of the agent's Arc account. It can only propose trades. |
-| `MCP_AUTH_TOKEN` | yes | Token Grok Bot presents to the MCP server, at least 32 characters. Create or rotate it with `npm run mcp:token`. |
+| `MCP_AUTH_TOKEN` | yes | The first workspace's agent token, at least 32 characters, which Grok Bot presents to the MCP server. The console registers its hash the first time it is used and decides about it from then on, like any token made in the Agents section; once revoked there it stays revoked (see [accounts.md](accounts.md#the-env-file-token)). Create it with `npm run mcp:token`. |
+| `MCP_TRUST_PROXY` | no | `true` when a reverse proxy appends the client to `X-Forwarded-For` (Caddy in the hosted stack), so the limit on failed tokens keys on the client. Defaults to `false`: every client shares one bucket. |
 | `MCP_PORT` | no | Port of the MCP server. Defaults to `8787`. |
 | `MCP_HOST` | no | Interface the MCP server listens on. Defaults to `127.0.0.1`. |
 | `MCP_ALLOWED_ORIGINS` | no | Comma-separated hostnames allowed in a browser `Origin` header, in addition to localhost. |
 | `MCP_LOG_LEVEL` | no | `debug`, `info`, `warn` or `error`. Defaults to `info`. |
 | `MCP_ADVERTISE_OUTPUT_SCHEMAS` | no | `true` to include each tool's output schema in `tools/list`. Defaults to `false`, which makes the list about four times smaller; results are validated on the server either way. |
 
-The MCP server starts with only `MCP_AUTH_TOKEN`.
+The MCP server starts with only `MCP_AUTH_TOKEN`, but it answers calls only with `CONSOLE_SERVICE_TOKEN` too: it asks the console which agent every token belongs to, and refuses every call (503) while it cannot.
 A variable marked "for ... tools" becomes required once a registered tool declares it; until then `get_setup_state` reports it as a remaining step.
 See [agent/README.md](../agent/README.md).
 
@@ -38,15 +39,21 @@ See [agent/README.md](../agent/README.md).
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `CONSOLE_URL` | no | Public address of the console. The MCP server calls it, and the console builds the pairing link from it. Defaults to `http://localhost:3000`. |
-| `CONSOLE_SERVICE_TOKEN` | for console tools | Shared secret between the console backend and the MCP server, sent as a bearer token and compared in constant time. Without it every `/api/agent/v1` route answers 503. |
-| `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (events, contexts, holdings, hedge plans, pairing, change requests, signal payments and budget, and Gemini's listing of each intent's market). Defaults to `dashboard/.data`, which is git-ignored. Deleting it is safe: the console rebuilds the onchain part from the chain. |
+| `CONSOLE_URL` | no | Public address of the console. The MCP server calls it, the console builds the pairing link from it, and it is the passkeys' origin and the `Origin` every write must carry. Defaults to `http://localhost:3000`. |
+| `CONSOLE_SERVICE_TOKEN` | for console tools | Shared secret between the console backend and the MCP server, sent as a bearer token and compared in constant time. Without it every `/api/agent/v1` route answers 503, so the MCP server cannot resolve tokens. |
+| `CONSOLE_DATA_DIR` | no | Folder for the console's SQLite store (workspaces, members, passkeys, sessions, agent tokens and sealed agent keys, events, contexts, holdings, hedge plans, pairing, change requests, signal payments and budget, and Gemini's listing of each intent's market). Defaults to `dashboard/.data`, which is git-ignored. Deleting it loses the workspaces and the keys the console holds; the console rebuilds the onchain part from the chain. |
+| `CONSOLE_MODE` | no | `production` or `development`. Defaults to `production` when `NODE_ENV=production`. Production refuses to start without a master key and refuses open sign-up. |
+| `CONSOLE_MASTER_KEY_FILE` | in production, this or the next | File holding the master key that seals the agents' keys: 32 bytes as 64 hex digits, base64 or base64url. Preferred where the platform mounts secrets as files. |
+| `CONSOLE_MASTER_KEY` | in production, this or the previous | The master key itself, for hosts whose secrets live in an env file; `deploy/init-env.sh` creates it for the hosted stack. Set one of the two, not both. In development without either, the console creates `master.key` (mode 600) in its data folder and logs that it did, without the value. |
+| `CONSOLE_SIGNUP` | no | `invite` (needs a code from the admin command's `invite`) or `open`. Defaults to `invite` in production, where `open` is refused, and `open` in development. |
+| `CONSOLE_WEBAUTHN_RP_ID` | no | The passkeys' relying party id: the host name of `CONSOLE_URL` (the default) or a parent domain of it. Passkeys made for one value do not work with another. |
+| `CONSOLE_TRUST_PROXY` | no | `true` when a reverse proxy appends the client to `X-Forwarded-For` (Caddy in the hosted stack), so the sign-in, code and token limits key on the client. Defaults to `false`. |
 | `CONSOLE_EVENT_SOURCE` | no | `rpc` (default) polls the chain for Policy events. `stream` takes the QuickNode Stream webhook as the primary source and keeps a slow RPC poll to fill gaps. |
 | `CONSOLE_POLL_INTERVAL_MS` | no | How often the RPC poller asks for new blocks. Defaults to 250 ms on the local devchain and 1 s on Arc testnet. The hosted demo chain sets 1 s. |
 | `GEMINI_API_URL` | no | Gemini's public REST API, which the console reads (server side, cached for 10 s, no key) for the hedge view's live ladder and preview, and to check each intent's market against Gemini's listing (once per market, in the background; the answer is stored, so each market costs one lookup ever). For ladders it only asks about assets Gemini lists and the events of plans the console stores, and keeps at most 32 ladders. Listing checks have a budget of their own inside the client's 100 requests a minute: at most 24 requests in any 60 s and 12 a minute sustained, counted as the most each lookup could send (4 candidate event tickers, each tried twice) until it says what it sent. Intents waiting for approval are checked first, then the newest, and the queue never holds more than the intents the console shows. So a stream of invented markets from a stolen agent key is checked at one every 40 s and leaves the hedge view at least 81 requests a minute: a public console cannot be made to spend its Gemini rate limit. Defaults to `https://api.gemini.com`. The end-to-end tests point it at a local server that replays recorded responses. The dev scripts read it too: `dev:executor` checks approved intents against it and `dev:propose` picks its default market from it. |
 | `MCP_PUBLIC_URL` | no | Public address of the MCP server, shown on the console's Setup page so the owner can add it to Grok Bot. |
-| `NEXT_PUBLIC_DEV_SIGNER` | no | `1` adds a test-only owner signer (anvil account 0, a public key) for end-to-end tests and local demos. It is read at build time. Never set it in a deployed build that runs on Arc testnet; the hosted demo chain sets it and keeps the whole console behind the owner's login. |
-| `CONSOLE_BROWSER_RPC_URL` | no | Local devchain only: the RPC address the browser uses, when it cannot reach the chain at the deployment file's address. The hosted demo chain sets it to `https://<host>/rpc`, which Caddy forwards to anvil behind the owner's login. |
+| `NEXT_PUBLIC_DEV_SIGNER` | no | `1` adds a test-only owner signer (anvil account 0, a public key) for end-to-end tests and local demos. It is read at build time. Never set it in a deployed build that runs on Arc testnet; the hosted demo chain sets it and keeps the whole console behind sign-in. |
+| `CONSOLE_BROWSER_RPC_URL` | no | Local devchain only: the RPC address the browser uses, when it cannot reach the chain at the deployment file's address. The hosted demo chain sets it to `https://<host>/rpc`, which Caddy forwards to anvil for members of the first workspace only. |
 
 The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
 
@@ -83,8 +90,9 @@ The icons (`favicon.ico`, `icon.svg`, `apple-icon.png`) come from `brand/icons`,
 ## Hosting
 
 The hosted setup in [hosting.md](hosting.md) reads one file, `deploy/.env`, which [`deploy/mandate.env.template`](../deploy/mandate.env.template) describes line by line.
-Besides the variables on this page it uses `COMPOSE_FILE` (demo chain or Arc testnet, and optionally gateway mode and the landing page), `MANDATE_HOST` (the public hostname), `MANDATE_PUBLIC_URL`, `MANDATE_HTTP_PORT`, `MANDATE_HTTPS_PORT`, `MANDATE_APP_PORT`, `MANDATE_SITE_PORT`, `MANDATE_BIND_ADDRESS`, `MANDATE_SITE_ADDRESS` and `MANDATE_SITE_DIR` (the ports and addresses), `CONSOLE_USER` and `CONSOLE_PASSWORD_HASH` (the owner's login at the proxy), and for the demo chain `DEVCHAIN_CONTRACT` (which contract it deploys), `ANVIL_STATE_INTERVAL` (seconds between saves of the chain) and `SIM_EXECUTOR_POLL_MS` (how often the simulated executor polls).
-The compose files set the addresses between the services, the data folders and the listening interfaces themselves.
+Besides the variables on this page it uses `COMPOSE_FILE` (demo chain or Arc testnet, and optionally gateway mode and the landing page), `MANDATE_HOST` (the public hostname), `MANDATE_PUBLIC_URL`, `MANDATE_HTTP_PORT`, `MANDATE_HTTPS_PORT`, `MANDATE_APP_PORT`, `MANDATE_SITE_PORT`, `MANDATE_BIND_ADDRESS`, `MANDATE_SITE_ADDRESS` and `MANDATE_SITE_DIR` (the ports and addresses), and for the demo chain `DEVCHAIN_CONTRACT` (which contract it deploys), `ANVIL_STATE_INTERVAL` (seconds between saves of the chain) and `SIM_EXECUTOR_POLL_MS` (how often the simulated executor polls).
+The compose files set the addresses between the services, the data folders and the listening interfaces themselves, run the console with `CONSOLE_MODE=production`, and set `CONSOLE_TRUST_PROXY` and `MCP_TRUST_PROXY` to `true`, because Caddy sits in front of both.
+Env files from before workspaces may still hold `CONSOLE_USER` and `CONSOLE_PASSWORD_HASH`; nothing reads them any more.
 
 ## QuickNode Streams
 

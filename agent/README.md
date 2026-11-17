@@ -81,14 +81,15 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 
 ## Authentication and safety
 
-- **Bearer token.** Every `/mcp` request must carry `Authorization: Bearer <MCP_AUTH_TOKEN>`.
-  The token is compared in constant time.
-  A missing or wrong token gets `401` with `WWW-Authenticate: Bearer` and no detail.
+- **Bearer token.** Every `/mcp` request must carry `Authorization: Bearer <agent token>`: `MCP_AUTH_TOKEN` (the first workspace's agent) or a token made in the console's Agents section ([docs/accounts.md](../docs/accounts.md)).
+  The server sends the console the token's SHA-256, never the token, and the console answers which agent it belongs to; each call then runs in that agent's context and reaches only its own mandate.
+  Nothing is cached, so a token revoked in the console stops on its next call, and while the console cannot answer every call gets `503` (fail closed: there is no local fallback, not even for `MCP_AUTH_TOKEN`).
+  A missing, unknown or revoked token gets `401` with `WWW-Authenticate: Bearer` and no detail.
   There is no OAuth.
 - **Startup checks.** The server refuses to start if `MCP_AUTH_TOKEN` is unset or shorter than 32 characters, or if a registered tool requires a variable that is not set.
   Error messages name the variable, never its value.
-- **Rotation.** `npm run mcp:token` replaces only the `MCP_AUTH_TOKEN` line in `.env` and keeps every other line.
-  Restart the server, then update the connector header; the old token stops working at the restart.
+- **Rotation.** Make a new token in the console's Agents section, update the connector header, then revoke the old token there; it stops at once.
+  `MCP_AUTH_TOKEN` is registered for the first workspace's agent the first time it is used, and only then: once that agent has an env-file token, revoked or not, a different `MCP_AUTH_TOKEN` (from `npm run mcp:token`) is never accepted, so a revoked env-file token cannot come back by editing a file.
 - **Origin check.** Browsers always send `Origin`, so a request from a web page on another site gets `403`, which defends against DNS rebinding as the MCP spec requires.
   Localhost origins are allowed, and `MCP_ALLOWED_ORIGINS` adds more hostnames.
   Non-browser clients such as Grok's servers send no `Origin` and are unaffected.

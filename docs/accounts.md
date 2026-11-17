@@ -67,13 +67,25 @@ A KMS, an HSM or a custody provider replaces the console key store by implementi
 | Agent token (`mdt_` and 43 characters, 256 bits) | the owner, in Setup, Agents | once | SHA-256 | until revoked |
 | Env-file token (`MCP_AUTH_TOKEN`) | the operator, on the server | never by the console | SHA-256, registered by the MCP server | until revoked in the console |
 | Session id (256 bits) | the console, at sign-in | never (cookie only) | SHA-256 | 30 days, or 7 days unused |
-| Claim code (120 bits) | the operator, with `console:admin claim-code` | once, in the operator's terminal | SHA-256 | 24 hours, single use |
-| Invite code (120 bits) | the operator, with `console:admin invite` | once, in the operator's terminal | SHA-256 | 7 days, single use |
+| Passkey prompt (ceremony) id (256 bits) | the console, when a prompt starts | never (cookie only) | SHA-256 | 5 minutes, single use |
+| Claim code (120 bits) | the operator, with the admin command's `claim-code` | once, in the operator's terminal | SHA-256 | 24 hours, single use |
+| Invite code (120 bits) | the operator, with the admin command's `invite` | once, in the operator's terminal | SHA-256 | 7 days, single use |
 | Recovery code (120 bits) | the console, after a passkey is registered | once | SHA-256 | until used; a new one is shown then |
 
 Every secret is high-entropy, so a plain SHA-256 is enough and lookups are by hash.
 A lookup by hash leaks nothing about the secret through timing: an attacker cannot choose inputs whose hashes approach a stored one.
 Where a secret is compared rather than looked up (the env-file token, the service token), the comparison hashes both sides and uses `timingSafeEqual`.
+A token's name is shown in the Agents list, so a name that contains `mdt_` (a token pasted into the wrong field) is refused.
+
+The admin command runs on the server, next to the console's database: `npm run console:admin -- claim-code` (or `invite`, or `status`) in a checkout, and `docker compose exec console node dashboard/admin.mjs claim-code` in the hosted console, whose image carries it bundled into one file.
+It prints the code to standard output and everything else to standard error, so the code can be piped without the instructions.
+
+### The env-file token
+
+`MCP_AUTH_TOKEN` keeps the hosted agent working through the upgrade.
+The MCP server presents it to the console with `legacy: true`, and the first time it does, the console stores its hash as the first mandate's agent's token, named after the env file; from then on the console decides about it like any other token, and the Agents section lists it with when it was last used.
+That registration happens once: when the first mandate's agent has an env-file token, revoked or not, a different `MCP_AUTH_TOKEN` is never accepted, so a revoked token cannot come back by editing a file.
+The legacy flag never makes a console-issued token act as the env-file one, nor the other way round.
 
 ## Sign-in
 
@@ -82,22 +94,27 @@ The server side uses `@simplewebauthn/server` and the browser side `@simplewebau
 User verification is required, and passkeys are discoverable, so signing in asks for nothing but the passkey.
 
 - **Claim** (`/claim`): the first workspace holds the data that existed before accounts.
-  The operator runs `console:admin claim-code` on the server; it prints a one-time code once and stores only its hash.
+  The operator runs the admin command's `claim-code` on the server; it prints a one-time code once and stores only its hash.
   Whoever enters the code and registers a passkey becomes that workspace's member.
   Until then nobody can see the workspace's data.
 - **Sign-up** (`/sign-up`): creates a new workspace with one mandate (no contract yet) and its agent.
-  In production it needs an invite code from `console:admin invite`; in local development it is open unless `CONSOLE_SIGNUP=invite`.
+  In production it needs an invite code from the admin command's `invite`; in local development it is open unless `CONSOLE_SIGNUP=invite`.
 - **Sign-in** (`/sign-in`): one button, which asks the browser for a passkey of this site.
 - **Recovery** (`/recover`): the recovery code shown after sign-up or claim signs the member in once and asks for a new passkey; using it shows a new code.
   A member can also add a second passkey in Setup, so losing one device does not lock them out.
 - **Sign-out** ends the session on the server and clears the cookie.
 
+Each flow starts with its own route (`POST /api/auth/claim`, `/api/auth/sign-up`, `/api/auth/recover`, `/api/auth/sign-in`, and `POST /api/console/passkeys` for a second passkey), which checks the code or the session and answers the passkey options.
+Every new passkey then comes back to `POST /api/auth/register`, and a sign-in's answer to `POST /api/auth/sign-in/verify`; the purpose of the prompt is kept on the server, so the browser cannot change it in between.
 The relying party id and origin come from settings: the origin is `CONSOLE_URL` and the relying party id its host name, unless `CONSOLE_WEBAUTHN_RP_ID` names a parent domain.
 That works on `http://localhost`, in the end-to-end suites and on `https://8080-<id>.instabox.tech`.
+Passkeys belong to the relying party id, so changing the public name means registering passkeys again (through recovery).
 
 ### Sessions
 
 A session is a row on the server, referenced by a random id in the cookie `__Host-mandate_session`: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
+On plain-HTTP `localhost`, where browsers refuse `Secure` cookies and the `__Host-` prefix, the cookie is `mandate_session` without `Secure`.
+A passkey prompt's id travels the same way in `__Host-mandate_ceremony` (`mandate_ceremony` on `localhost`), `SameSite=Strict`, for 5 minutes.
 Only the id's hash is stored, so a copy of the database cannot be used to sign in.
 A new id is issued at every sign-in, sign-up, claim and recovery, and a ceremony's challenge lives in its own short-lived cookie and server row, so a session id can never be fixed in advance.
 `Lax` lets the pairing link from Grok Bot's chat open the console signed in; every write is a `POST`, `PUT` or `DELETE`, which `Lax` never sends cross-site, and every write must also carry an `Origin` header equal to `CONSOLE_URL`.
@@ -110,17 +127,36 @@ A new id is issued at every sign-in, sign-up, claim and recovery, and a ceremony
 | `/api/console/events` | a signed-in member | the same; the stream carries only that mandate's snapshot |
 | Owner writes (holdings, pairing, change requests) | a signed-in member | the session's mandate, and the wallet signature of that mandate's contract `user()` |
 | `/api/auth/*` | anyone | ceremonies, rate limited per client and in total |
-| `/mcp` | an agent token | the token's agent and mandate; an unknown or revoked token gets 401 |
+| `/mcp` | an agent token | the token's agent and mandate; an unknown or revoked token gets 401, and every token gets 503 while the console cannot be asked |
 | `/api/agent/v1/*` (private network) | the MCP server | `CONSOLE_SERVICE_TOKEN`, plus the agent id in `X-Mandate-Agent`; every record read or written belongs to that agent's mandate |
 | `/agent/<address>` | anyone | onchain data of the mandate whose agent is that address, nothing offchain |
 | `/rpc` (demo chain) | a signed-in member of the workspace that holds the demo chain's mandate | Caddy asks the console (`forward_auth`) before it forwards to anvil |
 
-The MCP server resolves a token by asking the console (`POST /api/agent/v1/auth/resolve` with the token's hash) and caches a positive answer for 30 seconds, so a revoked token stops working within 30 seconds.
-When the console cannot be asked, the MCP server refuses the call (503) rather than guess.
+The MCP server resolves the token of every request by asking the console (`POST /api/agent/v1/auth/resolve` with the token's SHA-256, never the token).
+It caches nothing, so a revoked token stops on its next call; the lookup is one indexed read on the private network.
+When the console cannot be asked, the MCP server refuses the call (503 with `Retry-After`) rather than guess, and it keeps no local copy of `MCP_AUTH_TOKEN` to fall back on.
 Each agent gets its own policy client, plan store and proposal ledger in the MCP server, so a plan id or a retried proposal of one agent means nothing to another.
+`whoami` names the agent and mandate a token reaches.
 Signal purchases spend the operator's wallet, so in phase 1 only the agent of the mandate that follows the server's contract may buy signals; phase 2 gives each mandate its own budget.
 
-The env-file token keeps working for the first mandate's agent until it is revoked: the MCP server registers it with the console (its hash, once), and from then on the console decides, like for any token.
+The env-file token keeps working for the first mandate's agent until it is revoked (see [The env-file token](#the-env-file-token)).
+
+### Rate limits
+
+Every limit is a token bucket per client and one shared by everyone, so neither one client nor many can flood it; a refused request gets 429 with `Retry-After`.
+
+| What | Per client | In total |
+| --- | --- | --- |
+| Passkey prompts: sign-in, sign-up, claim, recovery, a new passkey, and their answers | 20 at once, then 1 per 6 seconds | 300 at once, then 5 a second |
+| Typed codes: invite, claim and recovery | 10 at once, then 1 per 30 seconds | 60 at once, then 1 a second |
+| Token lookups that find no live token (the console's check) | 30 at once, then 1 per 2 seconds | 60 at once, then 1 a second |
+| New agent tokens, per member | 10 at once, then 1 a minute | 100 at once, then 1 a second |
+| Failed bearer tokens at `/mcp` (the MCP server's check, before it asks the console) | 30 at once, then 1 per 2 seconds | |
+| Tool calls, per token | 60 at once, then 1 a second | |
+
+The client is the right-most public address in `X-Forwarded-For` when the service is told it sits behind a proxy (`CONSOLE_TRUST_PROXY`, `MCP_TRUST_PROXY`); proxies append the peer they saw, so the addresses to its left are the client's own claim and cannot pick its bucket.
+Without a trusted proxy every request shares one bucket and only the totals apply.
+The buckets live in each process's memory, which is enough for one console and one MCP server.
 
 ## Settings
 
@@ -132,14 +168,16 @@ The env-file token keeps working for the first mandate's agent until it is revok
 | `CONSOLE_SIGNUP` | `invite` in production, `open` in development | `invite` needs a code from `console:admin invite`; `open` lets anyone create a workspace. |
 | `CONSOLE_WEBAUTHN_RP_ID` | the host name of `CONSOLE_URL` | The passkeys' relying party id. |
 | `CONSOLE_TRUST_PROXY` | `false` | `true` behind Caddy: rate limits key on the client address in `X-Forwarded-For`. |
+| `MCP_TRUST_PROXY` | `false` | The MCP server's: `true` behind Caddy, so its failed-token limit keys on the client. |
 
 In development, without a master key, the console creates one in its data directory (`master.key`, mode 600) and logs that it did, without the value.
+The hosted stack passes `CONSOLE_MASTER_KEY` from its env file, which `deploy/init-env.sh` fills, so the key sits with the other secrets the operator already keeps and backs up apart from the data volume; how to upgrade a hosted machine is in [hosting.md](hosting.md#upgrade-to-workspaces-once).
 
 ## Threat model
 
 - **A stolen agent token** reaches only its own mandate through the MCP server: it can propose inside the contract's rules, read that mandate's holdings, plans and activity, and file a change request.
   It cannot read or write another workspace, sign in to the console, create or revoke tokens, approve, change rules, or make its key sign anything but a proposal to its own contract.
-  The owner revokes it in Setup, and it stops working within 30 seconds.
+  The owner revokes it in Setup, and it stops working on its next call.
 - **A stolen session cookie** acts as that member until it expires or they sign out; it is `HttpOnly`, so page scripts cannot read it.
 - **Another workspace's member** cannot name a foreign mandate: every route takes the mandate from the session, and a `?mandate=` that is not the session's is 404, the same answer as one that does not exist.
 - **Guessing codes and tokens** is hopeless at 120 to 256 bits, and sign-in, sign-up, claim, recovery and token checks are rate limited besides.

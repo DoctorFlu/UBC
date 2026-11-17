@@ -9,7 +9,7 @@ import { apiError } from "./responses";
 
 /**
  * Sessions on the wire: the cookie, the Origin check every write passes, and the wrapper every console
- * route goes through (docs/accounts.md, "Sessions" and "Cross-site requests").
+ * route goes through (docs/accounts.md, "Sessions").
  */
 
 /**

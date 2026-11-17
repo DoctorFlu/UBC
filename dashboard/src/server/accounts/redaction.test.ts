@@ -29,7 +29,7 @@ import { sessionCookieName } from "../http/session";
 import { DEV_MASTER_KEY_FILE, openAgentKey } from "./keys";
 
 /**
- * No secret leaves the console except where it is meant to be shown once (docs/accounts.md, "Secrets"):
+ * No secret leaves the console except where it is meant to be shown once (docs/accounts.md, "Tokens and codes" and "Threat model"):
  * session ids, agent tokens, claim and recovery codes, the master key and the agents' private keys never
  * reach a log line, an error message, a snapshot, the event stream or any other answer.
  *
