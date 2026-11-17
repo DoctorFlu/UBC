@@ -1,6 +1,7 @@
 /**
- * `npm run mcp:e2e [-- --contract production|reference|both]`: the whole agent flow end to end,
- * the way Grok Bot runs it, in one command.
+ * `npm run mcp:e2e [-- --contract production|reference|both] [--tool-deadline-ms <ms>]`: the whole
+ * agent flow end to end, the way Grok Bot runs it, in one command. `--tool-deadline-ms` sets the
+ * server's MCP_TOOL_DEADLINE_MS, for seeing what a call that runs out of time reports.
  *
  * For each contract it starts a local chain (anvil, a fresh Policy contract with the demo rules),
  * an in-memory console on a free port, and the real MCP server as a child process on another
@@ -210,7 +211,15 @@ async function call(base: string, token: string, name: string, args: Structured 
   }
 }
 
-async function runOne(contract: PolicyContractKind): Promise<void> {
+/** Whether a call ran out of time: answered `TIMED_OUT`, or a bare `TIMEOUT` error. */
+function timedOut(result: CallResult): boolean {
+  const reasons = field(result.structuredContent, "reasons");
+  const codes = Array.isArray(reasons) ? reasons.map((entry) => field(entry, "code")) : [];
+  const text = (result.content ?? []).map((block) => block.text ?? "").join(" ");
+  return codes.includes("TIMED_OUT") || (result.isError === true && text.startsWith("TIMEOUT"));
+}
+
+async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | undefined): Promise<void> {
   const extended = contract === "reference";
   process.stdout.write(
     `\n=== ${contract} contract ${extended ? "(with previewTrade and contextHash)" : "(Policy.sol as is)"}\n`,
@@ -251,11 +260,18 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
     AGENT_PRIVATE_KEY: agentKey,
     CONSOLE_URL: `http://127.0.0.1:${consolePort}`,
     CONSOLE_SERVICE_TOKEN: consoleToken,
+    ...(toolDeadlineMs === undefined ? {} : { MCP_TOOL_DEADLINE_MS: toolDeadlineMs }),
   });
   process.stdout.write(
     `  chain ${chain.rpcUrl}, Policy ${chain.deployment.address}; console :${consolePort}; MCP ${server.base}/mcp\n`,
   );
-  const run = (name: string, args: Structured = {}) => call(server.base, mcpToken, name, args);
+  const run = async (name: string, args: Structured = {}) => {
+    const result = await call(server.base, mcpToken, name, args);
+    if (timedOut(result)) {
+      process.stdout.write(`    what the server logged:\n${describeCallLogs(server.logs, name)}\n`);
+    }
+    return result;
+  };
 
   try {
     process.stdout.write("\n-- setup\n");
@@ -500,8 +516,8 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
 }
 
 /**
- * The server's own account of a call that got no answer: which step was slow when its deadline
- * passed, whether it saw the client go away, and how the call ended.
+ * The server's own account of a call that ran out of time or got no answer: which step was slow
+ * when its deadline passed, whether it saw the client go away, and how the call ended.
  */
 function describeCallLogs(logs: readonly string[], tool: string): string {
   const events = ["tool.deadline_exceeded", "tool.client_gone", "tool.abandoned", "tool.call"];
@@ -525,7 +541,9 @@ function describeCallLogs(logs: readonly string[], tool: string): string {
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({ options: { contract: { type: "string", default: "both" } } });
+  const { values } = parseArgs({
+    options: { contract: { type: "string", default: "both" }, "tool-deadline-ms": { type: "string" } },
+  });
   const wanted = values.contract === "both" ? (["production", "reference"] as const) : [values.contract];
   const contracts = wanted.filter((kind): kind is PolicyContractKind => isPolicyContractKind(kind));
   if (contracts.length !== wanted.length) {
@@ -534,7 +552,7 @@ async function main(): Promise<void> {
   }
   process.stdout.write("Compiling the Policy contracts...\n");
   buildContracts();
-  for (const contract of contracts) await runOne(contract);
+  for (const contract of contracts) await runOne(contract, values["tool-deadline-ms"]);
   process.stdout.write(failures === 0 ? "\nE2E OK\n" : `\nE2E FAILED: ${failures} check(s)\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
