@@ -4,15 +4,17 @@
  * shipped consoles left them, with rows in them, and opens them with the current code.
  */
 import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
 import { AccountStore } from "./accounts/store";
-import { type Database, MIGRATIONS, migrate, openDatabase } from "./db";
+import { newId } from "./accounts/secrets";
+import { type Database, MIGRATIONS, migrate, migrationId, openDatabase } from "./db";
 import { OffchainStore } from "./store/offchain";
 import { SettlementStore } from "./store/settlements";
 import { SqliteWakeStore } from "./store/wakes";
@@ -228,6 +230,24 @@ describe("the migrations", () => {
     const db = new DatabaseSync(":memory:");
     migrate(db, HOSTED_VERSION);
     expect(tables(db)).toEqual(HOSTED_TABLES);
+  });
+
+  it("need no module of the app, so an upgrade can be rehearsed with db.ts alone (docs/hosting.md)", () => {
+    const source = readFileSync(fileURLToPath(new URL("./db.ts", import.meta.url)), "utf8");
+    const imports = [...source.matchAll(/^import\s(?:[^"']*\sfrom\s)?["']([^"']+)["']/gm)].map(
+      (match) => match[1],
+    );
+    expect(imports.filter((name) => name !== "server-only" && !name?.startsWith("node:"))).toEqual([]);
+  });
+
+  it("make ids in the same format as the accounts", () => {
+    const format = (id: string) => id.replace(/^[a-z]+_/, "").replace(/[0-9a-hjkmnp-tv-z]/g, "x");
+    for (const prefix of ["wsp", "mnd"] as const) {
+      const id = migrationId(prefix);
+      expect(id.startsWith(`${prefix}_`)).toBe(true);
+      expect(format(id)).toBe(format(newId(prefix)));
+      expect(format(id)).toBe("x".repeat(26));
+    }
   });
 });
 

@@ -1,11 +1,10 @@
 import "server-only";
 
+import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type * as Sqlite from "node:sqlite";
 import type { DatabaseSync } from "node:sqlite";
-
-import { newId } from "./accounts/secrets";
 
 /**
  * The console's durable store: one SQLite file under `CONSOLE_DATA_DIR`, opened with Node's built-in
@@ -301,8 +300,8 @@ function migrateToAccounts(db: Database): void {
   `);
 
   const now = new Date().toISOString();
-  const workspaceId = newId("wsp");
-  const mandateId = newId("mnd");
+  const workspaceId = migrationId("wsp");
+  const mandateId = migrationId("mnd");
   db.prepare("INSERT INTO workspaces (id, name, created_at, claimed_at) VALUES (?, ?, ?, NULL)").run(
     workspaceId,
     "First workspace",
@@ -415,6 +414,29 @@ function migrateToAccounts(db: Database): void {
  * one-time "experimental feature" warning is dropped: the API is stable in practice and the warning would
  * otherwise show on every server start.
  */
+/**
+ * A record id in the format of `newId` (accounts/secrets.ts): the prefix and 26 Crockford base32
+ * characters of 128 random bits. Written out here so this file imports nothing of the app's: a shipped
+ * migration must never change with another module, and docs/hosting.md rehearses an upgrade with
+ * `db.ts` alone. A test checks that both make the same kind of id.
+ */
+export function migrationId(prefix: "wsp" | "mnd"): string {
+  const alphabet = "0123456789abcdefghjkmnpqrstvwxyz";
+  let bits = 0;
+  let value = 0;
+  let out = "";
+  for (const byte of randomBytes(16)) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += alphabet.charAt((value >>> (bits - 5)) & 31);
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += alphabet.charAt((value << (5 - bits)) & 31);
+  return `${prefix}_${out}`;
+}
+
 function loadSqlite(): typeof Sqlite {
   const emitWarning = process.emitWarning.bind(process);
   process.emitWarning = (warning: string | Error, ...rest: unknown[]) => {
