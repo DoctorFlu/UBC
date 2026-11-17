@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { When } from "@/components/ui/When";
+import { useAdvancedColumns } from "@/lib/advanced/Advanced";
 
 import { Button } from "@/components/ui/Button";
 
@@ -173,6 +174,7 @@ function LadderTable({
   planLabel: string;
 }) {
   const [all, setAll] = useState(false);
+  const ladderColumns = useAdvancedColumns(columns(asset, planLabel));
   const [from, to] = nearbyRange(rows, quotes.spotCents);
   const trimmed = to - from + 1 < rows.length;
   const shown = all || !trimmed ? rows : rows.slice(from, to + 1);
@@ -181,7 +183,7 @@ function LadderTable({
       <Table
         caption={`Live quotes for ${quotes.title}, highest strike first`}
         captionHidden
-        columns={columns(asset, planLabel)}
+        columns={ladderColumns}
         rows={shown}
         rowKey={(row) => row.instrumentSymbol}
         rowTone={(row) => (row.boughtHundredths > 0 ? "attention" : undefined)}
@@ -207,7 +209,7 @@ export function ladderCaption(quotes: LadderQuotes | null): ReactNode {
   if (!quotes) return null;
   return (
     <>
-      {quotes.title}. Spot {usd(quotes.spotCents)}, quoted <When at={quotes.fetchedAt} />.
+      {quotes.title}. Spot {usd(quotes.spotCents)}, quoted <When inSentence at={quotes.fetchedAt} />.
     </>
   );
 }
