@@ -45,7 +45,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "smoke", testMatch: /(smoke|shell)\.spec\.ts/ },
+    { name: "smoke", testMatch: /(smoke|shell|icons)\.spec\.ts/ },
     { name: "screenshots", testMatch: /screenshots\.spec\.ts/ },
     { name: "live", testMatch: /live\.spec\.ts/, timeout: 240_000 },
   ],
