@@ -201,13 +201,54 @@ export interface FakeGemini {
   url: string;
   /** Answer every request with 503, as if Gemini were down. */
   setFailing: (failing: boolean) => void;
+  /**
+   * Moves an event past its expiry, as Gemini shows it once the index settled at `settlementValue`
+   * dollars: expired a minute ago, every strike resolved YES at or above the value and NO below it, with
+   * the value and the time of each outcome. `published: false` expires it without an outcome yet, as in
+   * the minutes between expiry and Gemini publishing it.
+   */
+  settle: (ticker: string, settlementValue: string, options?: { published?: boolean }) => void;
   requests: string[];
   stop: () => Promise<void>;
+}
+
+interface Settled {
+  value: string;
+  published: boolean;
+  expiredAt: string;
+  resolvedAt: string;
+}
+
+/** An event body as it reads after `settle`: Gemini's own shape (see event-BTC2611132200-settled.json). */
+function settledBody(body: unknown, settled: Settled): unknown {
+  if (body === null || typeof body !== "object") return body;
+  const event = body as Record<string, unknown>;
+  const value = Number(settled.value);
+  const contracts = Array.isArray(event.contracts) ? (event.contracts as Record<string, unknown>[]) : [];
+  return {
+    ...event,
+    status: settled.published ? "settled" : "active",
+    expiryDate: settled.expiredAt,
+    ...(settled.published ? { resolvedAt: settled.resolvedAt, settlement: { value: settled.value } } : {}),
+    contracts: contracts.map((contract) => {
+      const strike = Number((contract.strike as { value?: string } | undefined)?.value ?? Number.NaN);
+      const expired = { ...contract, expiryDate: settled.expiredAt, marketState: "closed", prices: {} };
+      if (!settled.published || Number.isNaN(strike)) return expired;
+      return {
+        ...expired,
+        status: "settled",
+        resolutionSide: value >= strike ? "yes" : "no",
+        resolvedAt: settled.resolvedAt,
+        settlementValue: settled.value,
+      };
+    }),
+  };
 }
 
 export async function startFakeGemini(port: number): Promise<FakeGemini> {
   let failing = false;
   const requests: string[] = [];
+  const settledEvents = new Map<string, Settled>();
   const server: Server = createServer((request, response) => {
     const path = request.url ?? "/";
     requests.push(path);
@@ -219,7 +260,12 @@ export async function startFakeGemini(port: number): Promise<FakeGemini> {
       send(503, { result: "error", reason: "Maintenance" });
       return;
     }
-    const body = request.method === "GET" ? recordedResponse(path) : null;
+    const recorded = request.method === "GET" ? recordedResponse(path) : null;
+    const route = path.split("?")[0] ?? "";
+    const settled = route.startsWith(EVENT_ROUTE)
+      ? settledEvents.get(decodeURIComponent(route.slice(EVENT_ROUTE.length)))
+      : undefined;
+    const body = settled && recorded !== null ? settledBody(recorded, settled) : recorded;
     if (body === null) send(404, { result: "error", reason: "NotFound" });
     else send(200, body);
   });
@@ -231,6 +277,15 @@ export async function startFakeGemini(port: number): Promise<FakeGemini> {
     url: `http://127.0.0.1:${port.toString()}`,
     setFailing: (next) => {
       failing = next;
+    },
+    settle: (ticker, value, options = {}) => {
+      const now = Date.now();
+      settledEvents.set(ticker, {
+        value,
+        published: options.published ?? true,
+        expiredAt: new Date(now - 60_000).toISOString(),
+        resolvedAt: new Date(now - 51_768).toISOString(),
+      });
     },
     requests,
     stop: () => new Promise<void>((resolve) => server.close(() => resolve())),

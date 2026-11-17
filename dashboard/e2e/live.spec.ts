@@ -2,6 +2,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 
 import { type Page, expect, test } from "@playwright/test";
 
+import { consoleSettlementSink, simulatedVenue, startExecutor } from "@mandate/devchain";
+import { createGeminiClient } from "@mandate/gemini";
 import { CONSOLE_AGENT_ROUTES, isMarketSymbol } from "@mandate/shared";
 
 import { formatContractsHundredths, formatUsdCents } from "../src/lib/format";
@@ -26,7 +28,13 @@ import {
   snapshot,
   waitForSnapshot,
 } from "./support/console";
-import { type FakeGemini, SPORTS_MARKET, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
+import {
+  type FakeGemini,
+  RECORDED_EVENT,
+  SPORTS_MARKET,
+  recordedPlanRequest,
+  startFakeGemini,
+} from "./support/fake-gemini";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first rules, watch
@@ -72,6 +80,8 @@ const LIVE_API_ROUTES = [
   "/api/agent/v1/policy-change-requests/warm-up",
   "/api/agent/v1/signal-budget",
   "/api/agent/v1/signal-payments/warm-up",
+  "/api/agent/v1/settlements",
+  "/api/executor/v1/settlements/0",
 ];
 
 async function startConsole(): Promise<void> {
@@ -999,6 +1009,148 @@ test("a market Gemini lists elsewhere, or not at all, is flagged beside Approve 
       ),
     ),
   );
+});
+
+test("an expired ladder settles once: Hedge, Activity and the intent show what it paid", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const state = await snapshot(baseURL);
+  const plan = state.offchain.plans.find((candidate) => candidate.asset === "BTC")?.plan;
+  if (!plan) throw new Error("the hedge test left no plan");
+  expect(plan.eventTicker).toBe(RECORDED_EVENT);
+  const onLadder = (market: string | null) => market?.startsWith(`GEMI-${RECORDED_EVENT}-`) === true;
+
+  // The real executor, reading Gemini (the fake) and recording settlements in this console.
+  const logs: string[] = [];
+  const begin = () =>
+    startExecutor({
+      client: chain.executor,
+      venue: simulatedVenue(createGeminiClient({ baseUrl: gemini.url })),
+      settlements: consoleSettlementSink({ consoleUrl: baseURL }),
+      fromBlock: 0n,
+      fillDelayMs: 0,
+      pollingIntervalMs: 200,
+      settleIntervalMs: 1_000,
+      openRecheckMs: 1_000,
+      log: (line) => logs.push(line),
+    });
+  let executor = begin();
+  try {
+    // It first fills what the earlier tests left approved, as the devchain's executor would have.
+    await waitForSnapshot(
+      baseURL,
+      (current) => !(current.chain?.intents ?? []).some((intent) => intent.status === "approved"),
+    );
+
+    // The ladder expires, and Gemini has not published the outcome yet: nothing settles, nothing is guessed.
+    gemini.settle(RECORDED_EVENT, "64250.4175", { published: false });
+    await page.clock.setFixedTime(new Date(Date.parse(plan.expiry) + 120_000));
+    await open(page, "/hedge");
+    const expired = page.getByTestId("ladder-expired");
+    await expect(expired).toHaveAttribute("data-state", "settling");
+    await expect(expired).toContainText("Waiting for Gemini to publish the outcome");
+    await expect(page.getByTestId("cover-now")).toHaveCount(0);
+    await expect.poll(() => logs.some((line) => line.includes("waiting for Gemini to publish"))).toBe(true);
+    expect(Object.keys((await snapshot(baseURL)).chain?.settlements ?? {})).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("hedge-expired-waiting-1440-light.png"),
+      fullPage: true,
+    });
+
+    // Gemini publishes it: BTC settled at $64,250.42, so NO below $65,000 pays and NO below $64,000 does not.
+    gemini.settle(RECORDED_EVENT, "64250.4175");
+    const settled = await waitForSnapshot(baseURL, (current) => {
+      const filled = (current.chain?.intents ?? []).filter(
+        (intent) => intent.status === "executed" && intent.isBuy === true && onLadder(intent.market),
+      );
+      return (
+        filled.length > 0 && filled.every((intent) => current.chain?.settlements[intent.id] !== undefined)
+      );
+    });
+    const chainView = settled.chain;
+    if (!chainView) throw new Error("no chain");
+    const documents = Object.values(chainView.settlements).map((view) => {
+      if (view.status !== "verified") throw new Error("a settlement does not verify");
+      return view.document;
+    });
+    for (const document of documents) {
+      const intent = chainView.intents.find((candidate) => candidate.id === document.intentId);
+      expect(document).toMatchObject({
+        eventTicker: RECORDED_EVENT,
+        costCents: intent?.filledCents,
+        resolution: (document.strikeCents ?? 0) <= 6_425_041 ? "yes" : "no",
+        settlementValue: "64250.4175",
+        venue: "simulated",
+      });
+      expect(document.pnlCents).toBe(document.payoutCents - document.costCents);
+    }
+    const cost = documents.reduce((sum, document) => sum + document.costCents, 0);
+    const paid = documents.reduce((sum, document) => sum + document.payoutCents, 0);
+    expect(paid).toBeGreaterThan(0);
+
+    // Exactly once: more passes, and a restarted executor that remembers nothing, store nothing new.
+    await executor.settleNow();
+    executor.stop();
+    executor = begin();
+    await executor.settleNow();
+    await executor.settleNow();
+    expect((await snapshot(baseURL)).chain?.settlements).toEqual(chainView.settlements);
+
+    // Hedge: the expired ladder in plain words, the per-strike detail only in the Advanced view.
+    await expect(expired).toHaveAttribute("data-state", "settled");
+    await expect(expired).toContainText("BTC settled at $64,250.42");
+    await expect(page.getByTestId("settlement-totals")).toContainText(
+      `It cost ${formatUsdCents(cost)} and paid ${formatUsdCents(paid)}`,
+    );
+    await expect(expired.getByRole("table")).toHaveCount(0);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.screenshot({
+          path: testInfo.outputPath(`hedge-settled-${width.toString()}-${scheme}.png`),
+          fullPage: true,
+        });
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.getByRole("switch", { name: "Advanced view" }).click();
+    const strikes = expired.getByRole("table", { name: `Settled positions on ${RECORDED_EVENT}` });
+    await expect(strikes.getByRole("row")).toHaveCount(documents.length + 1);
+    await page.screenshot({
+      path: testInfo.outputPath("hedge-settled-advanced-1440-light.png"),
+      fullPage: true,
+    });
+    await page.getByRole("switch", { name: "Advanced view" }).click();
+
+    // Activity: what was paid at expiry, in all and per intent.
+    await open(page, "/activity");
+    await expect(page.getByText("Paid at expiry", { exact: true })).toBeVisible();
+    const first = documents[0];
+    if (!first) throw new Error("no settlement");
+    await expect(row(page, first.intentId).getByTestId("intent-settled")).toContainText(
+      first.payoutCents > 0 ? `Paid ${formatUsdCents(first.payoutCents)}` : "Paid nothing",
+    );
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.screenshot({
+        path: testInfo.outputPath(`activity-settled-${width.toString()}-light.png`),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // The intent: its signed settlement.
+    await open(page, `/activity/${first.intentId.toString()}`);
+    const card = page.getByTestId("intent-settlement");
+    await expect(card).toHaveAttribute("data-sealed", "verified");
+    await expect(card).toContainText("It settled at $64,250.42");
+    await page.screenshot({ path: testInfo.outputPath("intent-settled-1440-light.png"), fullPage: true });
+  } finally {
+    executor.stop();
+  }
 });
 
 test("the kill switch pauses the agent and the contract refuses its next proposal", async ({ page }) => {
