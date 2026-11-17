@@ -165,6 +165,9 @@ Verified end to end on 17 November 2026, a local stack on the sandbox (devchain,
   The USD balance fell from 100000.00 to 99999.02: 97c and a 1c fee, the taker fee rounded up, exactly the worst case the order was sized for.
 - Buy NO on HI65100, $0.02 at 1c: 1 contract rested (`fundsOnHold` 0.01), and the executor cancelled it at its time limit with nothing filled, so its budget was released onchain.
 - Afterwards `npm run gemini:sandbox-orders` listed no open order.
+- At expiry the fill settled on Gemini's settled positions: Gemini published the outcome at 17:00:07 UTC (NO, BTC at $63,696.06), and the executor recorded the settlement, signed, at 17:00:30 UTC: cost $0.97, paid $1.00, net $0.03.
+  The balance rose to 100000.02, so the payout carried no fee.
+  The net the console shows leaves out the 1c fee paid at the fill, which no answer reports.
 
 From Gemini's documentation only, not yet checked with a key:
 
