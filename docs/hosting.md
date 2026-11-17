@@ -628,7 +628,9 @@ The steps were first used for the update from version 5 to 6 (the `settlements` 
 If the new version misbehaves after the swap, roll back to the old images and the old `repo`.
 The old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
 So the backup is restored only if the upgrade damaged the data, and restoring it loses what was written since the backup (the onchain part comes back from the chain, offchain records do not).
-In a new shell, set `b` to the kept backup's path first.
+The rollback is three blocks, and the second one is run only to restore the backup.
+
+First, put the old `repo` and the old images back:
 
 ```sh
 cd /data/mandate
@@ -636,15 +638,27 @@ mv repo repo.failed
 mv repo.old repo
 docker tag mandate-console:rollback mandate-console:demo         # :arc on Arc testnet
 docker tag mandate-services:rollback mandate-services:latest
-cd repo/deploy
-docker compose --env-file /data/mandate/mandate.env stop console executor   # only to restore the backup:
+```
+
+Second, and only if the data was damaged, restore the backup.
+Skip this block to keep the upgraded file.
+In a new shell, set `b` to the kept backup's path first.
+
+```sh
+cd /data/mandate/repo/deploy
+docker compose --env-file /data/mandate/mandate.env stop console executor
 docker run --rm --network none -v mandate_console-data:/v -v "$b:/backup.sqlite:ro" --entrypoint sh mandate-services:latest -c \
   'mkdir -p /v/failed && mv -f /v/console.sqlite* /v/failed/ && cp /backup.sqlite /v/console.sqlite && chmod 644 /v/console.sqlite'
+```
+
+Third, start the old version:
+
+```sh
+cd /data/mandate/repo/deploy
 docker compose --env-file /data/mandate/mandate.env up -d --no-build --remove-orphans
 docker compose --env-file /data/mandate/mandate.env up -d --force-recreate --no-deps caddy
 ```
 
-The `stop` and `docker run` lines are the restore; skip both to keep the upgraded file.
 The WAL and shared-memory files go with the file they belong to: a stale WAL next to the restored file would be replayed over it, so the copy runs only after they have moved.
 The container runs as the console's user (`node`, uid 1000), so the restored file has the console's owner.
 `repo.old` is gone after the next update, so a rollback is possible only until then.
