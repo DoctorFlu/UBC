@@ -8,7 +8,7 @@ import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "
 
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
-import { DEMO_RECEIPT, snapshot } from "./support/console";
+import { DEMO_RECEIPT, reportSignalBudget, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
 
 /** The cells of one CSV line, with RFC 4180 quoting (the audit export has no line breaks in cells). */
@@ -227,7 +227,13 @@ test.describe("seeded demo", () => {
     );
   });
 
-  test("the payments panel shows the agent's reported purchase, budget and balance", async ({ page }) => {
+  test("the payments panel shows the agent's reported purchase, budget and balance", async ({
+    page,
+    baseURL,
+  }) => {
+    // Report today's budget again, as the MCP server does after a purchase: the warm-up's report stops
+    // counting at midnight UTC, which a suite started just before it would otherwise run into.
+    await reportSignalBudget(baseURL ?? "", AGENT_ADDRESS);
     await page.goto("/payments");
     const payment = page.locator(`#payment-${DEMO_RECEIPT}`);
     await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
