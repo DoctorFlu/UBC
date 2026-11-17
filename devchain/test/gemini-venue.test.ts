@@ -43,7 +43,7 @@ let journal: ReturnType<typeof memoryOrderJournal>;
 let events: MarketEvent[];
 let trading: ReturnType<typeof createGeminiPrivateClient>;
 
-function venue(options: { orderTtlMs?: number } = {}): Venue {
+function venue(options: { orderTtlMs?: number; matchByTerms?: boolean } = {}): Venue {
   const now = () => clock.now;
   return geminiVenue({
     publicClient: {
@@ -73,10 +73,10 @@ function signedClient() {
 }
 
 /** The venue of a new executor process: a few seconds later, with a new signed client (nonce from 0). */
-function restarted(): Venue {
+function restarted(options: { matchByTerms?: boolean } = {}): Venue {
   clock.now += 5_000;
   trading = signedClient();
-  return venue();
+  return venue(options);
 }
 
 const order = (patch: Partial<VenueOrder> = {}): VenueOrder => ({
@@ -290,6 +290,23 @@ describe("an attempt whose answer never came", () => {
     await venue().placeOrder(order());
     placedOf(await restarted().placeOrder(order()));
     expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+  });
+
+  it("never matches by terms when the account serves several mandates: holds, sends nothing (#95)", async () => {
+    fake.echoClientOrderId = false;
+    fake.failNextPlacement({ kind: "drop-before" });
+    await venue({ matchByTerms: false }).placeOrder(order());
+    // Another mandate's order on the same account, with the same terms, placed after the attempt.
+    clock.now += 1_000;
+    await trading.placeOrder({ symbol: MARKET, side: "buy", outcome: "no", quantity: "40", price: "0.31" });
+    expect(await restarted({ matchByTerms: false }).placeOrder(order())).toMatchObject({
+      status: "held",
+      detail: expect.stringMatching(/places orders for several mandates/) as unknown,
+    });
+    // The dropped attempt and the other mandate's order; nothing sent again, nothing adopted.
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(2);
+    expect(fake.orders.size).toBe(1);
+    expect(journal.records.get(7)?.venueOrderId ?? null).toBeNull();
   });
 
   it("holds the intent, and still sends nothing, when no order or several orders match", async () => {

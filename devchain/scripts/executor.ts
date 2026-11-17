@@ -137,6 +137,8 @@ if (settings.venue === "gemini") {
       journal: consoleOrderJournal({ consoleUrl, sign, deployment: { chainId, policy } }),
       deployment: { chainId, policy },
       orderTtlMs,
+      // One Gemini account serves every mandate's contract, so another's order could share the terms.
+      matchByTerms: false,
     }),
     announcement: {
       kind: "executor-venue",

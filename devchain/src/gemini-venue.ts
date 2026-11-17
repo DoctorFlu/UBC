@@ -68,6 +68,12 @@ export interface GeminiVenueOptions {
   deployment: { chainId: number; policy: `0x${string}` };
   /** How long an order rests unfilled before the rest is cancelled. Default 10 minutes. */
   orderTtlMs?: number;
+  /**
+   * Whether an unanswered attempt may be matched to an order by its exact terms when Gemini returns no
+   * client order ids. Default true. False when the account serves several contracts (#95): another
+   * mandate's order for the same terms would be taken for this one, so the intent is held instead.
+   */
+  matchByTerms?: boolean;
   now?: () => number;
 }
 
@@ -228,6 +234,14 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
     if (orders.some((order) => order.clientOrderId)) {
       // Gemini keeps client order ids, and none is ours: the attempt never reached it.
       return { found: null, detail: "no order on Gemini carries this intent's client order id" };
+    }
+    if (options.matchByTerms === false) {
+      return {
+        found: null,
+        detail:
+          "Gemini returned no client order ids, and this account places orders for several mandates, so an " +
+          "order cannot be told apart by its terms; check Gemini",
+      };
     }
     const sentAt = Date.parse(record.placedAt);
     const quantity = quantityText(record.quantityHundredths);
