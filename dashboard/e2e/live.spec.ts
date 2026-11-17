@@ -654,7 +654,7 @@ test("a signal payment the agent records appears live, linked to the intent that
 
 test("a plan's evidence chain says plainly when it breaks, and hostile strings never widen a page", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const stored = (await snapshot(baseURL)).offchain.plans[0];
   if (!stored) throw new Error("the hedge test posted a plan");
@@ -721,8 +721,28 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   await agentApi(baseURL, CONSOLE_AGENT_ROUTES.plans, "POST", request);
   await page.goto(`/hedge/plans/${encodeURIComponent(request.plan.planId)}`);
   await expect(page.getByTestId("chain-status")).toHaveAttribute("data-status", "not_executed");
-  await expect(page.getByTestId("evidence-request")).toContainText("W".repeat(100));
+  const evidenceRequest = page.getByTestId("evidence-request").getByTestId("request-text");
+  await expect(evidenceRequest).toContainText("W".repeat(100));
   expect(await overflowsViewport(page)).toBe(false);
+  await expectClamped(evidenceRequest);
+  await shoot(page, testInfo, "evidence-request-clamped", page.getByTestId("evidence-request"));
+
+  // The hedge card shows the same request the same way: three lines, the rest one press away.
+  await open(page, "/hedge");
+  const card = page.getByTestId("agent-plan");
+  await expect(card).toHaveAttribute("data-plan-id", request.plan.planId);
+  const planRequest = card.getByTestId("request-text");
+  await expectClamped(planRequest);
+  expect(await overflowsViewport(page)).toBe(false);
+  await shoot(page, testInfo, "hedge-request-clamped", card);
+  await planRequest.getByRole("button", { name: "Show more" }).click();
+  await expect(planRequest.getByRole("button", { name: "Show less" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  expect(await overflowsViewport(page)).toBe(false);
+  await shoot(page, testInfo, "hedge-request-expanded", card);
+  await page.setViewportSize({ width: 390, height: 844 });
 
   // The public scorecard stays phone-wide with the hostile intent on it.
   await page.goto(`/agent/${AGENT_ADDRESS}`);
@@ -737,6 +757,15 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   const html = await (await fetch(new URL(`/agent/${AGENT_ADDRESS}`, baseURL))).text();
   expect(html).not.toContain("W".repeat(1_000));
 });
+
+/** A request cut to three lines, with "Show more" collapsed, wrapping inside its box. */
+async function expectClamped(request: Locator): Promise<void> {
+  const more = request.getByRole("button", { name: "Show more" });
+  await expect(more).toBeVisible();
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  const lineHeight = await request.locator("p").evaluate((p) => parseFloat(getComputedStyle(p).lineHeight));
+  expect((await request.boundingBox())?.height ?? 0).toBeLessThanOrEqual(lineHeight * 3 + 1);
+}
 
 /**
  * Whether the page scrolls sideways (onchain text must wrap or truncate, never widen the page). False, or
