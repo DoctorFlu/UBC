@@ -20,7 +20,7 @@ import type { DatabaseSync } from "node:sqlite";
 export type Database = DatabaseSync;
 
 /** Each entry upgrades the schema by one version. Never edit a shipped entry; append a new one. */
-const MIGRATIONS: readonly string[] = [
+export const MIGRATIONS: readonly string[] = [
   `
   CREATE TABLE policy_events (
     deployment_id   TEXT    NOT NULL,
