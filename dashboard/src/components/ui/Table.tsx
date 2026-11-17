@@ -15,6 +15,8 @@ export interface Column<Row> {
    * "actions" holds row buttons and drops its label when stacked.
    */
   role?: "primary" | "actions";
+  /** Shown only in Advanced view: hashes, block numbers, raw identifiers. See `useAdvancedColumns`. */
+  advanced?: boolean;
 }
 
 export interface TableProps<Row> {

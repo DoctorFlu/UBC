@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { createPublicClient, http, isAddressEqual } from "viem";
 
+import { describeReason } from "@mandate/shared";
+
 import { auditRows } from "../src/features/audit/audit-rows";
 import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "../src/lib/format";
 
@@ -10,6 +12,8 @@ import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } f
 import { suitePaths } from "./support/chain";
 import { DEMO_RECEIPT, reportSignalBudget, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
+
+const ADVANCED_COOKIE = "mandate-advanced";
 
 /** The cells of one CSV line, with RFC 4180 quoting (the audit export has no line breaks in cells). */
 function csvCells(line: string): string[] {
@@ -274,6 +278,13 @@ test.describe("seeded demo", () => {
     await expect(page.getByTestId("chain-status")).toContainText(
       "Verified: all 2 intents' sealed reasons hash to the chain and name this plan and its paid signal.",
     );
+    // Transactions, receipts and settlement references are Advanced detail; the page says where they are.
+    await expect(page.getByTestId("chain-status")).toContainText("Advanced view shows the transaction");
+    await expect(page.getByRole("button", { name: "Copy transaction" })).toHaveCount(0);
+    await expect(page.getByTestId("evidence-signal")).not.toContainText(
+      "9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f",
+    );
+    await page.getByRole("switch", { name: "Advanced view" }).click();
     // The local chain has no explorer: hashes are there to copy, and the page says so.
     await expect(page.getByTestId("chain-status")).toContainText("the local chain, which has no explorer");
     await expect(page.getByRole("link", { name: /in the explorer/ })).toHaveCount(0);
@@ -325,6 +336,7 @@ test.describe("seeded demo", () => {
 
   test("the public scorecard counts exactly what the audit trail shows, and nothing private", async ({
     page,
+    context,
     baseURL,
   }) => {
     const current = await snapshot(baseURL ?? "");
@@ -358,6 +370,8 @@ test.describe("seeded demo", () => {
           item.getAttribute("data-count"),
         ]),
       );
+    // The audit page shows the contract's reason codes in Advanced view.
+    await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
     await page.goto("/audit");
     const auditBlocked = await page
       .getByTestId("blocked-by-rule")
@@ -421,7 +435,10 @@ test.describe("seeded demo", () => {
     );
     expect(unchanged.map((row) => row.event)).toEqual(["Paused"]);
     await expect(table().locator("tbody tr")).toHaveCount(events.length - unchanged.length);
-    await expect(table().locator("tbody tr").first()).toContainText(events.at(-1)?.type ?? "");
+    const newest = auditRows({ events, intents: current.chain?.intents ?? [] })
+      .filter((row) => !row.unchanged)
+      .at(-1);
+    await expect(table().locator("tbody tr").first()).toContainText(newest?.label ?? "");
     await expect(page.getByText(/Resumed/)).toHaveCount(0);
 
     // The owner's own decisions: in the seed, intent 2 approved and intent 3 rejected after a hold.
@@ -465,8 +482,16 @@ test.describe("seeded demo", () => {
 
   test("the audit counts blocked intents by the contract's reason", async ({ page }) => {
     await page.goto("/audit");
-    const blocked = page.locator("main");
-    await expect(blocked.getByText("over max trade size", { exact: true }).first()).toBeVisible();
-    await expect(blocked.getByText("category not allowed", { exact: true }).first()).toBeVisible();
+    const blocked = page.getByTestId("blocked-by-rule");
+    const reasons = ["over max trade size", "category not allowed"];
+    // In words by default, and with the contract's own reason code in Advanced view.
+    for (const reason of reasons) {
+      await expect(blocked.getByText(describeReason(reason).label, { exact: true })).toBeVisible();
+      await expect(blocked.getByText(reason, { exact: true })).toHaveCount(0);
+    }
+    await page.getByRole("switch", { name: "Advanced view" }).click();
+    for (const reason of reasons) {
+      await expect(blocked.getByText(reason, { exact: true })).toBeVisible();
+    }
   });
 });

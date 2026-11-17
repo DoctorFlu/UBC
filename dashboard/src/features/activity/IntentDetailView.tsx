@@ -17,6 +17,7 @@ import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { amountLabel, FlaggedBadge, intentFlags, MarketName, OrderSummary } from "@/components/domain/Intent";
 import { SimulatedFill } from "@/components/domain/SimulatedFill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
+import { Advanced } from "@/lib/advanced/Advanced";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
@@ -34,7 +35,7 @@ import {
   shortenHex,
 } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
-import { intentEvents, isoFromUnix } from "@/lib/live/derive";
+import { intentEvents } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
 import { categoryName, describeMarket } from "@/lib/markets";
 import { evidenceHref } from "@/lib/evidence/chain";
@@ -104,9 +105,7 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
         out.push({
           ...meta(event),
           title: waited ? "Approved by you" : "Approved by the contract",
-          detail: waited
-            ? "The contract re-checked the budget and approved it."
-            : "Inside every rule of the mandate.",
+          detail: waited ? "The contract re-checked the budget and approved it." : "Inside every rule.",
           tone: "good",
         });
         break;
@@ -262,7 +261,9 @@ function SealedReasonCard({
               There is a hash ({SOURCE_TEXT[sealed.source]}), but the agent never stored the document behind
               it, so its reason can&apos;t be shown or checked.
             </p>
-            <HexValue label="Hash" value={sealed.hash} kind="hash" />
+            <Advanced>
+              <HexValue label="Hash" value={sealed.hash} kind="hash" />
+            </Advanced>
           </div>
         </div>
       </Card>
@@ -279,7 +280,9 @@ function SealedReasonCard({
               The stored document does not match {SOURCE_TEXT[sealed.source]}. It was changed after the fact,
               so the console does not show it.
             </p>
-            <HexValue label="Hash" value={sealed.hash} kind="hash" />
+            <Advanced>
+              <HexValue label="Hash" value={sealed.hash} kind="hash" />
+            </Advanced>
             {sealed.claims.planId ? (
               <ArrowLink href={evidenceHref(sealed.claims.planId)}>
                 Evidence chain of the plan it claims
@@ -310,10 +313,12 @@ function SealedReasonCard({
             <dd>
               <PaidSignals receipts={doc.signalReceiptIds} payments={payments} />
             </dd>
-            <dt>Hash</dt>
-            <dd>
-              <HexValue value={sealed.hash} kind="hash" />
-            </dd>
+            <Advanced>
+              <dt>Hash</dt>
+              <dd>
+                <HexValue value={sealed.hash} kind="hash" />
+              </dd>
+            </Advanced>
           </dl>
           <PricesSeen ladder={doc.ladderSummary} market={market} />
         </div>
@@ -361,7 +366,7 @@ function FlaggedCard({ intent, flags }: { intent: IntentView; flags: readonly st
           The MCP server checks every proposal before it reaches the contract, so this one was sent with the
           agent&apos;s key directly. The contract still applied the amount rules, but it does not check the
           market, outcome, price or category, and the executor refuses to trade an intent like this. If you
-          did not send it, pause the mandate and set a new agent key.
+          did not send it, pause trading and set a new agent key.
         </p>
         <ul className={styles.flaggedList}>
           {flags.map((flag) => (
@@ -491,12 +496,12 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                 </>
               ) : null}
               {intent.agent ? (
-                <>
+                <Advanced>
                   <dt>Agent</dt>
                   <dd>
                     <HexValue value={intent.agent} kind="address" />
                   </dd>
-                </>
+                </Advanced>
               ) : null}
             </dl>
             {intent.status === "needs_approval" ? (
@@ -515,7 +520,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
 
         <Card
           title="Onchain steps"
-          description="Every Policy event for this intent, oldest first."
+          description="What the contract recorded for this intent, oldest first."
           headingLevel={2}
         >
           <ol className={styles.timeline} data-testid="intent-timeline">
@@ -529,10 +534,12 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                   </p>
                   {step.detail ? <p className={styles.stepDetail}>{step.detail}</p> : null}
                   <p className={styles.stepMeta}>
-                    <span>
-                      <When at={step.timestamp} />, block {formatCount(step.blockNumber)}
-                    </span>
-                    <HexValue value={step.txHash} kind="tx" />
+                    <Advanced fallback={<When at={step.timestamp} />}>
+                      <span>
+                        <When at={step.timestamp} />, block {formatCount(step.blockNumber)}
+                      </span>
+                      <HexValue value={step.txHash} kind="tx" />
+                    </Advanced>
                   </p>
                 </div>
               </li>

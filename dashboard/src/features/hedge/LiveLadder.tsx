@@ -38,6 +38,7 @@ function columns(asset: string, planLabel: string): readonly Column<LadderRow>[]
         </span>
       ),
       role: "primary",
+      advanced: true,
     },
     {
       key: "no",

@@ -8,11 +8,13 @@ import { CopyButton } from "@/components/ui/CopyButton";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
-import { formatCount, formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { formatCount } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { useOwnerAccess } from "@/lib/owner/access";
 import { setupSteps } from "@/lib/setup";
+import { Advanced } from "@/lib/advanced/Advanced";
+import { When } from "@/components/ui/When";
 
 import styles from "./setup.module.css";
 
@@ -82,17 +84,23 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
                   <div>
                     <dt>Status</dt>
                     <dd>
-                      {pairing.status === "confirmed" && pairing.confirmedAt
-                        ? `Confirmed ${formatDateUtc(pairing.confirmedAt)} at ${formatTimeUtc(pairing.confirmedAt)}`
-                        : `Waiting for you since ${formatTimeUtc(pairing.announcedAt)}`}
+                      {pairing.status === "confirmed" && pairing.confirmedAt ? (
+                        <>
+                          Confirmed <When at={pairing.confirmedAt} date />
+                        </>
+                      ) : (
+                        <>
+                          Waiting for you since <When at={pairing.announcedAt} />
+                        </>
+                      )}
                     </dd>
                   </div>
                   <div>
-                    <dt>Contract agent</dt>
+                    <dt>Can propose</dt>
                     <dd>
                       {pairing.isContractAgent
-                        ? "Yes, agent() is this address"
-                        : "No, agent() is another address"}
+                        ? "Yes, the contract accepts proposals from this address"
+                        : "No, the contract expects another agent address"}
                     </dd>
                   </div>
                 </dl>
@@ -136,40 +144,44 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
                 <dt>Chain</dt>
                 <dd>{snapshot.network.name}</dd>
               </div>
-              <div>
-                <dt>Chain id</dt>
-                <dd className="num">{snapshot.network.chainId}</dd>
-              </div>
-              <div>
-                <dt>RPC</dt>
-                <dd className="mono">{snapshot.network.rpcUrl}</dd>
-              </div>
-              <div>
-                <dt>Policy contract</dt>
-                <dd>{contract ? <HexValue value={contract.address} kind="address" /> : "Not configured"}</dd>
-              </div>
-              {contract?.roles ? (
-                <>
-                  <div>
-                    <dt>Owner</dt>
-                    <dd>
-                      <HexValue value={contract.roles.user} kind="address" />
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Agent</dt>
-                    <dd>
-                      <HexValue value={contract.roles.agent} kind="address" />
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Executor</dt>
-                    <dd>
-                      <HexValue value={contract.roles.executor} kind="address" />
-                    </dd>
-                  </div>
-                </>
-              ) : null}
+              <Advanced>
+                <div>
+                  <dt>Chain id</dt>
+                  <dd className="num">{snapshot.network.chainId}</dd>
+                </div>
+                <div>
+                  <dt>RPC</dt>
+                  <dd className="mono">{snapshot.network.rpcUrl}</dd>
+                </div>
+                <div>
+                  <dt>Policy contract</dt>
+                  <dd>
+                    {contract ? <HexValue value={contract.address} kind="address" /> : "Not configured"}
+                  </dd>
+                </div>
+                {contract?.roles ? (
+                  <>
+                    <div>
+                      <dt>Owner</dt>
+                      <dd>
+                        <HexValue value={contract.roles.user} kind="address" />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Agent</dt>
+                      <dd>
+                        <HexValue value={contract.roles.agent} kind="address" />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Executor</dt>
+                      <dd>
+                        <HexValue value={contract.roles.executor} kind="address" />
+                      </dd>
+                    </div>
+                  </>
+                ) : null}
+              </Advanced>
             </dl>
           </Card>
         </div>

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { IntentLink } from "@/components/domain/Intent";
+import { Advanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/ui/Money";
@@ -62,6 +63,7 @@ const orderColumns: readonly Column<OrderOnChain>[] = [
       </span>
     ),
     role: "primary",
+    advanced: true,
   },
   {
     key: "contracts",
@@ -207,6 +209,7 @@ function AgentPlanCard({
   const execution = planExecution(plan, snapshot.chain);
   const settles = describeMarket(plan.rungs[0]?.instrumentSymbol ?? "").settles;
   const signal = plan.signal;
+  const columns = useAdvancedColumns(orderColumns);
   return (
     <>
       <Card
@@ -236,16 +239,18 @@ function AgentPlanCard({
                     ? "Used, and it changed which rungs were bought."
                     : "Used; the orders are the same as without it."
                   : `Bought but ignored, because ${SIGNAL_IGNORED[signal.ignoredBecause ?? ""] ?? "it did not fit this ladder"}.`}{" "}
-                <span className={styles.receipt}>
-                  Receipt{" "}
-                  {snapshot.offchain.signalPayments.some(
-                    (payment) => payment.receiptId === signal.receiptId.toLowerCase(),
-                  ) ? (
-                    <Link href={paymentHref(signal.receiptId)}>{shortenHex(signal.receiptId, 10, 6)}</Link>
-                  ) : (
-                    <code>{shortenHex(signal.receiptId, 10, 6)}</code>
-                  )}
-                </span>
+                <Advanced>
+                  <span className={styles.receipt}>
+                    Receipt{" "}
+                    {snapshot.offchain.signalPayments.some(
+                      (payment) => payment.receiptId === signal.receiptId.toLowerCase(),
+                    ) ? (
+                      <Link href={paymentHref(signal.receiptId)}>{shortenHex(signal.receiptId, 10, 6)}</Link>
+                    ) : (
+                      <code>{shortenHex(signal.receiptId, 10, 6)}</code>
+                    )}
+                  </span>
+                </Advanced>
               </>
             ) : (
               "None: the plan uses Gemini's quotes only."
@@ -262,7 +267,7 @@ function AgentPlanCard({
         <Table
           caption={`Orders of plan ${view.planId}`}
           captionHidden
-          columns={orderColumns}
+          columns={columns}
           rows={execution.orders}
           rowKey={(entry) => `${entry.index.toString()}:${entry.order.instrumentSymbol}`}
           empty={
@@ -306,7 +311,7 @@ function NoPlanCard({
           <p className={styles.previewLabel}>
             <strong>Preview, not {agentName === "The agent" ? "the agent" : agentName}&rsquo;s plan.</strong>{" "}
             The console ran the same planner on your {preview.assumptions.holdingQuantity} {asset}, the
-            mandate&rsquo;s limits and Gemini&rsquo;s live quotes, assuming protection down to{" "}
+            rules&rsquo; limits and Gemini&rsquo;s live quotes, assuming protection down to{" "}
             {preview.assumptions.dropPercent}% below spot for at most{" "}
             {formatUsdCents(preview.assumptions.maxCostCents)} (the budget left). Nothing is stored or
             proposed.
