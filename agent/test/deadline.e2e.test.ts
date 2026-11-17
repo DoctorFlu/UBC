@@ -286,6 +286,23 @@ describe("a proposal whose receipt the RPC endpoint holds back", () => {
       const again = await s.call("execute_plan", { planId, reason: "The owner agreed." });
       expect(reasonCodes(again)).toEqual(["TX_UNCONFIRMED"]);
       expect(await s.intents()).toHaveLength(1);
+
+      // What the answer tells the agent to do next: plan again. The order that landed late counts as
+      // held, so the new plan buys only what is still missing and never that order again.
+      const [late] = await s.intents();
+      if (late?.amountCents == null || late.limitPrice == null)
+        throw new Error("the late order is on the chain");
+      const replan = await s.call("plan_hedge", GOAL);
+      expect(field(replan.structured, "plan", "cover", "state")).toBe("partly_met");
+      // Nothing else is held, and each hundredth of a contract pays one cent below the floor.
+      expect(field(replan.structured, "plan", "cover", "heldPayoutCents")).toBe(
+        Math.floor((late.amountCents * 100) / late.limitPrice),
+      );
+      const next = String(field(replan.structured, "plan", "planId"));
+      expect(next).not.toBe(planId);
+      const done = await s.call("execute_plan", { planId: next, reason: "The owner agreed." });
+      expect(done.isError).toBe(false);
+      expect(field(done.structured, "execution", "submitted")).toBeGreaterThan(0);
     },
   );
 

@@ -96,7 +96,6 @@ const payments: PaymentsClient = {
 
 it.each(tools.map((tool) => tool.name))(
   "%s answers within its deadline when every upstream hangs",
-  { timeout: 15_000 },
   async (name) => {
     const args = ARGS[name];
     if (args === undefined) throw new Error(`no test arguments for ${name}: add them to ARGS`);

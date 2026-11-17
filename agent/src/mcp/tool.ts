@@ -215,7 +215,7 @@ export async function invokeTool(
         });
       }
       const what = stop === undefined ? "The tool did not finish in time." : describeStop(stop, budgetMs);
-      result = toolErrorResult("TIMEOUT", `${what} Try this call again in a minute.`, scope.requestId);
+      result = toolErrorResult("TIMEOUT", `${what} Try this call once more in a minute.`, scope.requestId);
     } else {
       errorCode = "INTERNAL";
       logger.error("tool.internal_error", { cause: describeCause(error) });
