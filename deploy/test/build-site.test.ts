@@ -35,11 +35,12 @@ describe.skipIf(!hasBash)("deploy/build-site.sh", () => {
   it("links to https://<MANDATE_HOST> and writes to site/out by default", () => {
     writeFileSync(
       envFile,
-      "MANDATE_HOST=8080-abc.instabox.tech\nMANDATE_PUBLIC_URL=\nCONSOLE_PASSWORD_HASH=\n",
+      "MANDATE_HOST=8080-abc.instabox.tech\nMANDATE_PUBLIC_URL=\nNEXT_PUBLIC_SITE_URL=https://8081-abc.instabox.tech\nCONSOLE_PASSWORD_HASH=\n",
     );
     const { status, output } = dryRun();
     expect(status).toBe(0);
     expect(output).toContain("NEXT_PUBLIC_APP_URL=https://8080-abc.instabox.tech\n");
+    expect(output).toContain("NEXT_PUBLIC_SITE_URL=https://8081-abc.instabox.tech\n");
     expect(output).toContain("NEXT_PUBLIC_SCORECARD_AGENT=(the site's default)\n");
     expect(output).toContain("NEXT_PUBLIC_REPO_URL=(none)\n");
     expect(output).toContain(`folder: ${deployDir}/../site/out\n`);
@@ -51,6 +52,7 @@ describe.skipIf(!hasBash)("deploy/build-site.sh", () => {
       [
         "MANDATE_HOST=app.example.com",
         "MANDATE_PUBLIC_URL=https://app.example.com:8443",
+        "MANDATE_SITE_ADDRESS=example.com",
         "NEXT_PUBLIC_SCORECARD_AGENT='0x70997970C51812dc3A010C7d01b50e0d17dc79C8'",
         'NEXT_PUBLIC_REPO_URL="https://github.com/example/repo"',
         "MANDATE_SITE_DIR=/srv/mandate-site",
@@ -59,22 +61,43 @@ describe.skipIf(!hasBash)("deploy/build-site.sh", () => {
     );
     let { output } = dryRun();
     expect(output).toContain("NEXT_PUBLIC_APP_URL=https://app.example.com:8443\n");
+    expect(output).toContain("NEXT_PUBLIC_SITE_URL=https://example.com\n");
     expect(output).toContain("NEXT_PUBLIC_SCORECARD_AGENT=0x70997970C51812dc3A010C7d01b50e0d17dc79C8\n");
     expect(output).toContain("NEXT_PUBLIC_REPO_URL=https://github.com/example/repo\n");
     expect(output).toContain("folder: /srv/mandate-site\n");
 
-    ({ output } = dryRun({ NEXT_PUBLIC_APP_URL: "https://other.example.com", MANDATE_SITE_DIR: "site-out" }));
+    ({ output } = dryRun({
+      NEXT_PUBLIC_APP_URL: "https://other.example.com",
+      NEXT_PUBLIC_SITE_URL: "https://www.other.example.com",
+      MANDATE_SITE_DIR: "site-out",
+    }));
     expect(output).toContain("NEXT_PUBLIC_APP_URL=https://other.example.com\n");
+    expect(output).toContain("NEXT_PUBLIC_SITE_URL=https://www.other.example.com\n");
     expect(output).toContain(`folder: ${deployDir}/site-out\n`);
   });
 
   it("refuses to build without an app address, and works without an env file", () => {
-    const missing = dryRun();
+    const missing = dryRun({ NEXT_PUBLIC_SITE_URL: "https://site.example.com" });
     expect(missing.status).toBe(1);
     expect(missing.output).toContain("Set MANDATE_HOST");
 
-    const fromEnvironment = dryRun({ MANDATE_HOST: "localhost:13080" });
+    const fromEnvironment = dryRun({
+      MANDATE_HOST: "localhost:13080",
+      MANDATE_SITE_ADDRESS: "localhost:13081",
+    });
     expect(fromEnvironment.status).toBe(0);
     expect(fromEnvironment.output).toContain("NEXT_PUBLIC_APP_URL=https://localhost:13080\n");
+    expect(fromEnvironment.output).toContain("NEXT_PUBLIC_SITE_URL=https://localhost:13081\n");
+  });
+
+  it("refuses to build without the site's own address behind a proxy, where only the proxy knows it", () => {
+    for (const address of ["", "http://:8081", ":8081"]) {
+      writeFileSync(envFile, `MANDATE_HOST=8080-abc.instabox.tech\nMANDATE_SITE_ADDRESS=${address}\n`);
+      const { status, output } = dryRun();
+      expect(status).toBe(1);
+      expect(output).toContain("Set NEXT_PUBLIC_SITE_URL");
+    }
+    writeFileSync(envFile, "MANDATE_HOST=app.example.com\nMANDATE_SITE_ADDRESS=https://example.com\n");
+    expect(dryRun().output).toContain("NEXT_PUBLIC_SITE_URL=https://example.com\n");
   });
 });

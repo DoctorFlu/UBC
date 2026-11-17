@@ -294,7 +294,7 @@ docker compose up -d
 ```
 
 [`build-site.sh`](../deploy/build-site.sh) builds it with Docker (the Dockerfile's `site` stage, from the same install as the console), so the host needs no Node.js; once the console has been built it takes about 10 seconds and 1.3 GB of memory.
-It bakes in three public settings from the env file: `NEXT_PUBLIC_APP_URL` (default `MANDATE_PUBLIC_URL`, else `https://<MANDATE_HOST>`), `NEXT_PUBLIC_SCORECARD_AGENT` (default the demo chain's agent) and `NEXT_PUBLIC_REPO_URL` (default empty, no source link).
+It bakes in four public settings from the env file: `NEXT_PUBLIC_APP_URL` (default `MANDATE_PUBLIC_URL`, else `https://<MANDATE_HOST>`), `NEXT_PUBLIC_SITE_URL` (the site's own URL, which link previews need: default `https://<MANDATE_SITE_ADDRESS>` when that is a name, and required in gateway mode), `NEXT_PUBLIC_SCORECARD_AGENT` (default the demo chain's agent) and `NEXT_PUBLIC_REPO_URL` (default empty, no source link).
 It replaces the folder's contents only when the build succeeds, and in place, so a running Caddy serves the new pages at once.
 Caddy serves `site/out` (or `MANDATE_SITE_DIR`) on a second listener, `MANDATE_SITE_ADDRESS`.
 Files under `/_next/static/` carry a content hash, so they are cached for a year; everything else is revalidated on every visit.
@@ -395,7 +395,7 @@ Publish the app's port, and only that one (never anvil's 8545 or the signal API'
 instabox port publish mandate 8080 --name "Mandate app"
 ```
 
-For the landing page, add `compose.site.yml` to `COMPOSE_FILE` and set `NEXT_PUBLIC_REPO_URL` (and `NEXT_PUBLIC_SCORECARD_AGENT`, for another agent) in the env file, then build it, apply, and publish its port:
+For the landing page, add `compose.site.yml` to `COMPOSE_FILE` and set `NEXT_PUBLIC_SITE_URL` (`https://8081-<machine id>.instabox.tech`) and `NEXT_PUBLIC_REPO_URL` (and `NEXT_PUBLIC_SCORECARD_AGENT`, for another agent) in the env file, then build it, apply, and publish its port:
 
 ```sh
 MANDATE_ENV_FILE=/data/mandate/mandate.env ./build-site.sh
