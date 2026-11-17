@@ -34,6 +34,8 @@ export const resolveToken = serviceRoute(async (request, service) => {
     if (wait > 0) return limited(wait);
     return apiError(404, "unknown_token", "No live agent token has that hash.");
   }
+  // The MCP server resolves the token of every MCP call: a Bot run of that mandate is in progress.
+  service.noteAgentActivity(found.mandate);
   const answer: ResolveTokenResponse = {
     workspaceId: found.mandate.workspaceId,
     mandateId: found.mandate.id,

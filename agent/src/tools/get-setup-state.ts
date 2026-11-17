@@ -5,6 +5,7 @@ import type { ToolContext } from "../context";
 import { ok, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { describeFailure } from "../support/failures";
+import { SERVER_AGENT, type AgentIdentity } from "../tenancy/agents";
 
 /** Below this the agent cannot pay for a few proposals: 0.01 USDC in Arc's 18-decimal gas units. */
 export const MIN_AGENT_GAS_WEI = 10n ** 16n;
@@ -17,8 +18,33 @@ const SetupStepSchema = z.object({
 });
 type SetupStep = z.infer<typeof SetupStepSchema>;
 
-/** Steps that depend only on the server's configuration. */
-export function setupSteps(config: Config): SetupStep[] {
+/**
+ * Steps that depend only on the configuration of the agent the call acts for. An agent whose key the
+ * console holds has nothing to set on the server: its key and contract come from its workspace.
+ */
+export function setupSteps(config: Config, agent: AgentIdentity = SERVER_AGENT): SetupStep[] {
+  if (agent.signer === "console") {
+    return [
+      {
+        key: "agent_key",
+        done: config.agentAddress !== undefined,
+        actor: "owner",
+        hint: "The console holds this agent's key. Nothing to set on the server.",
+      },
+      {
+        key: "policy_contract",
+        done: config.policyAddress !== undefined,
+        actor: "owner",
+        hint: "This mandate has no Policy contract yet. Until it has one, the agent can plan and explain, but not propose trades.",
+      },
+      {
+        key: "console_link",
+        done: true,
+        actor: "owner",
+        hint: "This agent reaches its workspace in the console with its token.",
+      },
+    ];
+  }
   return [
     {
       key: "agent_key",
@@ -53,7 +79,7 @@ async function attempt<T>(ctx: ToolContext, read: () => Promise<T>): Promise<T |
 
 /** Every step, including the ones that need live state: the chain, the agent role, gas, pairing and holdings. */
 export async function liveSetupSteps(ctx: ToolContext): Promise<SetupStep[]> {
-  const steps = setupSteps(ctx.config);
+  const steps = setupSteps(ctx.config, ctx.agent);
   const policy = ctx.policy;
   const consoleClient = ctx.console;
   const address = ctx.config.agentAddress;

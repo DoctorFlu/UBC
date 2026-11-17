@@ -14,7 +14,8 @@ export function capabilitiesOf(config: Config): Capabilities {
   const readPolicy = isConfigured(config, "POLICY_ADDRESS");
   return {
     readPolicy,
-    proposeTrades: readPolicy && isConfigured(config, "AGENT_PRIVATE_KEY"),
+    // The agent's address exists when it has a key: the server's own, or one the console holds for it.
+    proposeTrades: readPolicy && config.agentAddress !== undefined,
     console: isConfigured(config, "CONSOLE_SERVICE_TOKEN"),
   };
 }
