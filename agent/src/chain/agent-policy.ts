@@ -34,7 +34,7 @@ import {
   type TradeIntentInput,
 } from "@mandate/shared";
 import { raceAbort } from "@mandate/shared";
-import type { Address, Config } from "../config";
+import { type Address, type Config, isLoopbackUrl } from "../config";
 import type { AgentPolicy, ProposeOptions } from "../services";
 import { EventIndex } from "./event-index";
 import { scopedFetch, shieldCurrentScope, unscoped, withSignal } from "./rpc-scope";
@@ -46,10 +46,7 @@ import { scopedFetch, shieldCurrentScope, unscoped, withSignal } from "./rpc-sco
 export const RECEIPT_TIMEOUT_MS = 10_000;
 
 /** A loopback RPC is the local devchain (anvil): no explorer, and receipts arrive in milliseconds. */
-function isLoopback(rpcUrl: string): boolean {
-  const host = new URL(rpcUrl).hostname;
-  return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-}
+const isLoopback = isLoopbackUrl;
 
 export class ChainAgentPolicy implements AgentPolicy {
   readonly policyAddress: Address;

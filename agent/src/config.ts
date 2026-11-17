@@ -2,6 +2,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import * as z from "zod";
 import { marketDataSource, type MarketDataSource } from "@mandate/gemini";
 import { ARC_TESTNET } from "@mandate/shared";
+import { wellKnownKeyRefusal } from "@mandate/shared/node";
 import { Secret } from "./secret";
 import {
   PAYMENTS_ENV_KEYS,
@@ -9,6 +10,19 @@ import {
   paymentsEnvShape,
   type PaymentsConfig,
 } from "./x402/payments-config";
+
+/**
+ * Set by `applyDeploymentFile` on the environment it returns when the contract comes from a devchain
+ * deployment file (the hosted demo chain reaches anvil by its container name, not a loopback address). A
+ * symbol, so no environment variable can claim it.
+ */
+export const DEVCHAIN_DEPLOYMENT: unique symbol = Symbol("devchain deployment");
+
+/** A loopback RPC is the local devchain, as `createAgentPolicy` decides. */
+export function isLoopbackUrl(url: string): boolean {
+  const host = new URL(url).hostname;
+  return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+}
 
 /** Every environment variable the MCP server reads. */
 export const ENV_KEYS = [
@@ -195,7 +209,7 @@ export class ConfigError extends Error {
  * work. Error messages name the variable and the rule it broke, never the value.
  */
 export function parseConfig(
-  env: Readonly<Record<string, string | undefined>>,
+  env: Readonly<Record<string, string | undefined>> & { readonly [DEVCHAIN_DEPLOYMENT]?: boolean },
   limits = DEFAULT_LIMITS,
 ): Config {
   const input: Record<string, string> = {};
@@ -217,6 +231,13 @@ export function parseConfig(
     } catch {
       throw new ConfigError(["AGENT_PRIVATE_KEY: is not a valid secp256k1 private key"]);
     }
+    // Anvil's published keys may sign on the devchain only: a loopback RPC or a devchain deployment
+    // file. Anywhere else (Arc testnet by default) anyone could sign as this agent.
+    const refusal = wellKnownKeyRefusal("AGENT_PRIVATE_KEY", vars.AGENT_PRIVATE_KEY, {
+      local: env[DEVCHAIN_DEPLOYMENT] === true || isLoopbackUrl(vars.ARC_RPC_URL),
+      network: `the RPC at ${new URL(vars.ARC_RPC_URL).host}, which is not a loopback devchain`,
+    });
+    if (refusal !== null) throw new ConfigError([refusal]);
   }
   const payments = paymentsConfigFrom(vars);
   if (!payments.ok) throw new ConfigError(payments.problems);

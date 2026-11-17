@@ -52,6 +52,22 @@ describe("applyDeploymentFile", () => {
     expect(config.policyDeployBlock).toBe(7n);
   });
 
+  it("lets anvil's agent key sign on the demo chain the file names, and nowhere else", () => {
+    const anvilAgent = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+    const path = deploymentFile(JSON.stringify(RECORD));
+    // The hosted demo reaches anvil by its container name: not a loopback address, still the devchain.
+    const env = applyDeploymentFile({ POLICY_DEPLOYMENT_FILE: path, AGENT_PRIVATE_KEY: anvilAgent });
+    expect(testConfig(env as Record<string, string>).agentAddress).toBe(RECORD.agent);
+    // The same address typed in by hand is not the devchain's file.
+    expect(() =>
+      testConfig({
+        AGENT_PRIVATE_KEY: anvilAgent,
+        POLICY_ADDRESS: TEST_POLICY,
+        ARC_RPC_URL: "http://anvil:8545",
+      }),
+    ).toThrow(ConfigError);
+  });
+
   it("names the variable and the path when the file is missing", () => {
     expect(() => applyDeploymentFile({ POLICY_DEPLOYMENT_FILE: "/no/such/deployment.json" })).toThrow(
       ConfigError,

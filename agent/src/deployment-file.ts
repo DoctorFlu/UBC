@@ -1,5 +1,5 @@
 import { resolvePolicyDeployment } from "@mandate/shared/node";
-import { ConfigError } from "./config";
+import { ConfigError, DEVCHAIN_DEPLOYMENT } from "./config";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -27,6 +27,8 @@ export function applyDeploymentFile(env: Env): Env {
   }
   return {
     ...env,
+    // The file is the devchain's: anvil's published keys may sign on it (see `parseConfig`).
+    [DEVCHAIN_DEPLOYMENT]: true,
     POLICY_ADDRESS: deployment.address,
     POLICY_DEPLOY_BLOCK: String(deployment.fromBlock ?? 0n),
     ARC_RPC_URL: deployment.rpcUrl,

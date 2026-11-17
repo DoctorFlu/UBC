@@ -9,9 +9,12 @@ import type { Services } from "../src/services";
 import { envAgent, staticResolver, type TokenResolver } from "../src/tenancy/resolver";
 
 export const TEST_TOKEN = randomBytes(32).toString("base64url");
-/** A throwaway key (the well-known first Hardhat account), never used for anything real. */
-export const TEST_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-export const TEST_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+/**
+ * A throwaway key, never funded or used for anything real. Not one of anvil's published keys: the server
+ * refuses those for Arc testnet, the default RPC.
+ */
+export const TEST_PRIVATE_KEY = `0x${"4d".repeat(32)}` as const;
+export const TEST_ADDRESS = "0xba32858eA15Ad4A729d3aCA3c2ed5E3363Bc16f6";
 export const TEST_POLICY = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 /** Another throwaway key (the second Hardhat account) for the signal buyer, never funded. */
 export const TEST_BUYER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
