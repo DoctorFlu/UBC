@@ -296,6 +296,13 @@
   color: var(--color-danger);
 }
 
+/* Phones: the icon alone, a 2rem square, so the strip still fits beside the lamp, Dev and the isolator. */
+.venueBadgeShort {
+  justify-content: center;
+  width: 2rem;
+  padding: 0;
+}
+
 .venueBadge svg {
   flex: none;
   width: 0.875rem;
@@ -504,5 +511,10 @@
    */
   .topbar:has([data-dev-signer]) .brandTop {
     display: none;
+  }
+
+  /* With the venue's badge as well (issue #93), the strip's parts sit closer so the menu keeps its room. */
+  .topbar:has([data-dev-signer]):has([data-venue]) .topbarEnd {
+    gap: var(--space-1);
   }
 }

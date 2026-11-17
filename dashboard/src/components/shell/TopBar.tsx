@@ -85,7 +85,12 @@ export function TopBar({ navCounts, foot }: TopBarProps) {
         <span className={styles.mobileOnly}>
           <LiveIndicator {...live} compact />
         </span>
-        <VenueBadge />
+        <span className={styles.desktopOnly}>
+          <VenueBadge />
+        </span>
+        <span className={styles.mobileOnly}>
+          <VenueBadge short />
+        </span>
         <span className={styles.desktopOnly}>
           <DevSignerBadge />
         </span>

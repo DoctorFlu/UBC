@@ -11,15 +11,12 @@ import type { ConsoleNetwork, ExecutorVenueView, NetworkKind } from "@/lib/live/
 export const NETWORK_TAGS: Record<NetworkKind, string> = { local: "Local", "arc-testnet": "Arc testnet" };
 
 /**
- * Whether fills are simulated. On the local devchain the executor is the devchain's simulator unless it
- * announced it trades on Gemini (issue #93), so a recorded fill never touched an exchange; elsewhere the
- * contract only knows the executor recorded it.
+ * Whether a fill is simulated. On the local devchain a fill is the devchain's simulator's unless the
+ * executor journaled a Gemini order for that intent (issue #93: `hasVenueOrder`); elsewhere the contract
+ * only knows the executor recorded it.
  */
-export function fillsAreSimulated(
-  network: Pick<ConsoleNetwork, "kind">,
-  venue: Pick<ExecutorVenueView, "venue"> | null = null,
-): boolean {
-  return network.kind === "local" && venue?.venue !== "gemini";
+export function fillsAreSimulated(network: Pick<ConsoleNetwork, "kind">, hasVenueOrder = false): boolean {
+  return network.kind === "local" && !hasVenueOrder;
 }
 
 /**

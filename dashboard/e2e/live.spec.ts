@@ -2,8 +2,18 @@ import { type ChildProcess, spawn } from "node:child_process";
 
 import { type Locator, type Page, type TestInfo, expect, test } from "@playwright/test";
 
-import { consoleSettlementSink, simulatedVenue, startExecutor } from "@mandate/devchain";
+import {
+  announceVenue,
+  consoleOrderJournal,
+  consoleSettlementSink,
+  devAccount,
+  geminiVenue,
+  simulatedVenue,
+  startExecutor,
+} from "@mandate/devchain";
 import { createGeminiClient } from "@mandate/gemini";
+import { createGeminiPrivateClient } from "@mandate/gemini/private";
+import { FakeGeminiPrivate, unpacedLimiter } from "@mandate/gemini/testing";
 import { CONSOLE_AGENT_ROUTES, isMarketSymbol } from "@mandate/shared";
 
 import { formatContractsHundredths, formatUsdCents } from "../src/lib/format";
@@ -1160,6 +1170,124 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     await expect(counted).toHaveAttribute("data-count", documents.length.toString());
     await expect(counted).toContainText(`paid ${formatUsdCents(paid)}`);
     await shoot(page, testInfo, "scorecard-settled", counted);
+  } finally {
+    executor.stop();
+  }
+});
+
+test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and state in Advanced view", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  // The real executor with the Gemini venue: public data from the fake Gemini, the private API from a fake
+  // that checks every signature, and the order journal in this console, signed with the executor key.
+  const fake = new FakeGeminiPrivate({ apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" });
+  const sign = (hash: `0x${string}`) => devAccount("executor").signMessage({ message: { raw: hash } });
+  const chainId = chain.executor.publicClient.chain.id;
+  const policy = chain.address.toLowerCase() as `0x${string}`;
+  expect(
+    await announceVenue(
+      { consoleUrl: baseURL, sign },
+      {
+        kind: "executor-venue",
+        version: 1,
+        chainId,
+        policy,
+        venue: "gemini",
+        environment: "sandbox",
+        announcedAt: new Date().toISOString(),
+      },
+    ),
+  ).toBeNull();
+  const logs: string[] = [];
+  const executor = startExecutor({
+    client: chain.executor,
+    venue: geminiVenue({
+      publicClient: createGeminiClient({ baseUrl: gemini.url }),
+      trading: createGeminiPrivateClient({
+        environment: "sandbox",
+        credentials: { apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" },
+        fetch: fake.fetch,
+        limiter: unpacedLimiter(),
+      }),
+      journal: consoleOrderJournal({ consoleUrl: baseURL, sign }),
+      deployment: { chainId, policy },
+    }),
+    settlements: consoleSettlementSink({ consoleUrl: baseURL }),
+    fromBlock: 0n,
+    fillDelayMs: 0,
+    fillPollMs: 200,
+    pollingIntervalMs: 200,
+    log: (line) => logs.push(line),
+  });
+  try {
+    // The badge, next to Local and Dev signer, at both widths and in both themes.
+    await open(page, "/");
+    const badge = page.getByTestId("venue-badge").filter({ visible: true });
+    await expect(badge).toHaveText("Gemini Sandbox");
+    await expect(badge).toHaveAttribute("data-venue", "sandbox");
+    await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toBeVisible();
+    await shoot(page, testInfo, "topbar-sandbox", page.locator("header").first());
+    // On a phone the strip still fits: menu, name, lamp, Sandbox, Dev and the isolator, no sideways scroll.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(badge).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    // Nothing in the strip overlaps: the menu, the lamp, the venue badge, in that order.
+    const menu = await page.getByRole("button", { name: "Open menu" }).boundingBox();
+    const lamp = await page.getByTestId("live-indicator").filter({ visible: true }).boundingBox();
+    const venue = await badge.boundingBox();
+    if (!menu || !lamp || !venue) throw new Error("the strip is missing a part");
+    expect(menu.x).toBeGreaterThanOrEqual(0);
+    expect(menu.x + menu.width).toBeLessThanOrEqual(lamp.x);
+    expect(lamp.x + lamp.width).toBeLessThanOrEqual(venue.x);
+    await page.screenshot({ path: testInfo.outputPath("home-sandbox-390-light.png") });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const market = "GEMI-ETH2611202200-HI2800";
+    const { intentId, verdict } = await chain.agent.proposeTrade(noBuy(market, 300, 31));
+    expect(verdict).toBe("approved");
+    // The executor first catches up on every earlier intent from block 0, which takes a while under load.
+    await expect
+      .poll(() => fake.orders.size, {
+        timeout: 30_000,
+        message: "the executor placed no order on the fake Gemini",
+      })
+      .toBe(1);
+    const [order] = [...fake.orders.values()];
+    if (!order) throw new Error("no order on the fake");
+    expect(order).toMatchObject({
+      symbol: market,
+      side: "buy",
+      outcome: "no",
+      quantity: 967,
+      priceCents: 31,
+    });
+
+    // Open on Gemini: the plain view says nothing new; Advanced view names the order and its state.
+    await open(page, `/activity/${intentId.toString()}`);
+    await expect(page.getByTestId("intent-venue-order")).toHaveCount(0);
+    await page.getByRole("switch", { name: "Advanced view" }).click();
+    await expect(page.getByTestId("intent-venue-order")).toHaveText(
+      `Gemini sandbox #${String(order.orderId)}`,
+    );
+    await expect(page.getByTestId("intent-venue-state")).toHaveText("Open");
+    await expect(page.getByTestId("intent-venue-note")).toHaveText("Resting on Gemini's sandbox at 31c");
+
+    // Filled on Gemini: recorded onchain once, shown without the simulated marker.
+    fake.fill(order.orderId);
+    await expect(page.getByTestId("intent-venue-state")).toHaveText("Filled", { timeout: 20_000 });
+    await expect(page.locator("main").getByText("Executed").first()).toBeVisible();
+    await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
+    expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+    const view = (await snapshot(baseURL)).chain?.venueOrders[intentId];
+    expect(view).toMatchObject({ state: "filled", venueOrderId: String(order.orderId), filledCents: 300 });
+    await shoot(
+      page,
+      testInfo,
+      "intent-venue-order",
+      page.locator("dl", { has: page.getByTestId("intent-venue-order") }),
+    );
+    await page.getByRole("switch", { name: "Advanced view" }).click();
   } finally {
     executor.stop();
   }

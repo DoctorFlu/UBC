@@ -66,9 +66,10 @@ The executor also announces its venue at start (`PUT /api/executor/v1/venue`), w
 ## The console
 
 - A "Sandbox" badge (or "Live", in the danger colour) next to the "Local" and "Dev signer" badges, from the executor's signed announcement.
+  On a phone it is the icon alone (a box for the sandbox, a bolt for real money), so the strip still fits.
   Nothing is shown for the simulated executor.
 - The intent page, in Advanced view: the Gemini order id, its state, how much filled, the executor's note, and our client order id.
-- While the executor trades on Gemini, fills are no longer marked as simulated.
+- A fill with a Gemini order in the journal is no longer marked as simulated; earlier simulated fills keep the marker.
 
 ## The doctor
 

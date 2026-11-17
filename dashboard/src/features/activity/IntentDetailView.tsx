@@ -432,6 +432,11 @@ const VENUE_ORDER_STATES: Record<VenueOrderView["state"], string> = {
   rejected: "Refused by Gemini",
 };
 
+/** The executor writes its notes as sentence fragments; shown on their own, they start with a capital. */
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /**
  * The order the executor placed on Gemini for this intent (issue #93), from its signed journal in the
  * console. Advanced only: the Order card already says what filled.
@@ -459,8 +464,13 @@ function VenueOrderFacts({ order }: { order: VenueOrderView }) {
             {formatContractsHundredths(order.quantityHundredths)} contracts filled
           </span>
         ) : null}
-        {order.detail ? <span className={styles.venueDetail}>{order.detail}</span> : null}
       </dd>
+      {order.detail ? (
+        <>
+          <dt>Venue note</dt>
+          <dd data-testid="intent-venue-note">{sentenceCase(order.detail)}</dd>
+        </>
+      ) : null}
       <dt>Client order id</dt>
       <dd className="num">{order.clientOrderId}</dd>
     </Advanced>
@@ -572,7 +582,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
   }
   const market = intent.market ? describeMarket(intent.market, namingCategory(intent)) : null;
   const venueOrder: VenueOrderView | undefined = chain.venueOrders[intent.id];
-  const simulated = venueOrder === undefined && fillsAreSimulated(snapshot.network, chain.venue);
+  const simulated = fillsAreSimulated(snapshot.network, venueOrder !== undefined);
   const timeline = steps(chain, intent.id, simulated);
   const flags = intentFlags(intent);
   const settlement: SettlementView | undefined = chain.settlements[intent.id];
