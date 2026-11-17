@@ -254,15 +254,25 @@ async function adminClaimCode(dataDir: string): Promise<string> {
   const admin = spawn("npm", ["run", "--silent", "admin", "-w", "@mandate/dashboard", "--", "claim-code"], {
     cwd: ROOT,
     env: { ...process.env, CONSOLE_DATA_DIR: dataDir },
-    stdio: ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  // The code alone is on stdout; the explanation on stderr is for an operator's terminal, so it is shown
+  // only when the command fails.
   let code = "";
+  let notes = "";
   admin.stdout.setEncoding("utf8");
   admin.stdout.on("data", (chunk: string) => {
     code += chunk;
   });
+  admin.stderr.setEncoding("utf8");
+  admin.stderr.on("data", (chunk: string) => {
+    notes += chunk;
+  });
   const exit = await new Promise<number | null>((resolve) => admin.once("exit", resolve));
-  if (exit !== 0) throw new Error(`the admin command could not make a claim code (code ${String(exit)})`);
+  if (exit !== 0) {
+    console.error(notes);
+    throw new Error(`the admin command could not make a claim code (code ${String(exit)})`);
+  }
   return code.trim();
 }
 
