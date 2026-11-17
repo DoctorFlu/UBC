@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Creates the host's env file from mandate.env.template (readable by its owner only) and fills
-# MCP_AUTH_TOKEN and CONSOLE_SERVICE_TOKEN with fresh random values, without printing them. Safe to run
+# MCP_AUTH_TOKEN, CONSOLE_SERVICE_TOKEN and CONSOLE_MASTER_KEY with fresh random values, without printing
+# them. On an env file from before workspaces it adds CONSOLE_MASTER_KEY and changes nothing else. Safe to run
 # again: a value that is already set is kept, and every other line is left exactly as it is. The other
 # values are yours to fill (see docs/hosting.md).
 #
@@ -40,5 +41,8 @@ fill_token() {
 
 fill_token MCP_AUTH_TOKEN
 fill_token CONSOLE_SERVICE_TOKEN
+# 32 random bytes, which the console reads as base64url. It seals the agents' keys: back it up, never change it.
+fill_token CONSOLE_MASTER_KEY
 
-echo "Next: fill MANDATE_HOST and X402_SELLER_ADDRESS in $env_file, then run deploy/set-console-password.sh."
+echo "Next: fill MANDATE_HOST and X402_SELLER_ADDRESS in $env_file, start the stack, then claim the first"
+echo "workspace with a one-time code (docs/hosting.md)."

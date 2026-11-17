@@ -8,4 +8,13 @@ export { defineTool, type Tool, type ToolSpec } from "./mcp/tool";
 export { untrusted, UntrustedTextSchema, type UntrustedText } from "./mcp/untrusted";
 export { Secret } from "./secret";
 export type { MarketsClient, ResolvedMarket, Services } from "./services";
+export { type AgentIdentity, AgentContexts } from "./tenancy/agents";
+export {
+  type Resolution,
+  type ResolvedAgent,
+  type TokenResolver,
+  createTokenResolver,
+  envAgent,
+  staticResolver,
+} from "./tenancy/resolver";
 export * from "./x402/buyer";

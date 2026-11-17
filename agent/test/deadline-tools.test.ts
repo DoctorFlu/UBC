@@ -10,7 +10,7 @@ import { createMandateServer } from "../src/app";
 import type { PaymentsClient } from "../src/services";
 import { tools } from "../src/tools";
 import { harness, ladderSymbol } from "./fakes";
-import { captureLogs, connectClient, fixedClock, TEST_BUYER_ADDRESS } from "./helpers";
+import { captureLogs, connectClient, fixedClock, TEST_BUYER_ADDRESS, testResolver } from "./helpers";
 
 const DEADLINE_MS = 300;
 
@@ -107,6 +107,8 @@ it.each(tools.map((tool) => tool.name))(
       logger,
       {
         clock: fixedClock,
+        // The bearer lookup has its own bound, outside the call's deadline (tenancy.test.ts).
+        resolver: testResolver(),
         services: {
           policy: policy === undefined ? undefined : hanging(policy, ["explorerTxUrl"]),
           markets: markets === undefined ? undefined : hanging(markets),

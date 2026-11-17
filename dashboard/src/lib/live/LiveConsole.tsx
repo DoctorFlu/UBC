@@ -31,6 +31,24 @@ const RETRY_FIRST_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
 
 /**
+ * Whether the console says this browser has no session (any more): it expired, the member signed out in
+ * another tab, or the console was upgraded under an open page. A network failure is not a no.
+ */
+async function signedOut(): Promise<boolean> {
+  try {
+    return (await fetch(SNAPSHOT_PATH, { cache: "no-store" })).status === 401;
+  } catch {
+    return false;
+  }
+}
+
+/** To the sign-in page, which brings the member back here once they are in. */
+function toSignIn(): void {
+  const here = `${window.location.pathname}${window.location.search}`;
+  window.location.assign(here === "/" ? "/sign-in" : `/sign-in?next=${encodeURIComponent(here)}`);
+}
+
+/**
  * Keeps the console's snapshot current: the server renders with `initial`, then the browser follows
  * /api/console/events, opening a new stream when the browser gives up on one; the first message after any (re)connect is a
  * full snapshot, accepted even when its `seq` is lower, which happens after the server restarts.
@@ -61,6 +79,7 @@ export function LiveConsoleProvider({
     let retry: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let fresh = true;
+    let stopped = false;
     const connect = () => {
       const current = new EventSource(EVENTS_PATH);
       source = current;
@@ -72,10 +91,18 @@ export function LiveConsoleProvider({
       current.addEventListener("error", () => {
         setConnection("reconnecting");
         // EventSource retries a dropped connection by itself, but gives up for good on an HTTP error, such
-        // as a proxy's 502 while the console wakes up: open a new stream after a growing pause.
+        // as a proxy's 502 while the console wakes up: open a new stream after a growing pause. A 401 means
+        // the session is gone, and no retry brings it back: go and sign in instead.
         if (current.readyState === EventSource.CLOSED) {
-          retry = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** attempt));
-          attempt += 1;
+          void signedOut().then((out) => {
+            if (stopped) return;
+            if (out) {
+              toSignIn();
+              return;
+            }
+            retry = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** attempt));
+            attempt += 1;
+          });
         }
       });
       current.addEventListener("snapshot", (event) => {
@@ -93,6 +120,7 @@ export function LiveConsoleProvider({
     };
     connect();
     return () => {
+      stopped = true;
       clearTimeout(retry);
       source?.close();
     };
@@ -102,6 +130,10 @@ export function LiveConsoleProvider({
     if (!follow) return;
     try {
       const response = await fetch(SNAPSHOT_PATH, { cache: "no-store" });
+      if (response.status === 401) {
+        toSignIn();
+        return;
+      }
       if (!response.ok) return;
       const next = (await response.json()) as ConsoleSnapshot;
       // Newer only: the stream may already have delivered this change, or a later one.

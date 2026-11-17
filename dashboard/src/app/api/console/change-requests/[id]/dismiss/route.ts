@@ -8,6 +8,5 @@ export async function POST(
   request: Request,
   context: RouteContext<"/api/console/change-requests/[id]/dismiss">,
 ) {
-  const { id } = await context.params;
-  return dismissChangeRequest(request, getConsoleService(), id);
+  return dismissChangeRequest(request, getConsoleService(), await context.params);
 }

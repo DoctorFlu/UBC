@@ -23,14 +23,20 @@ export type LogSink = (line: string) => void;
 const LEVELS: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 const SENSITIVE_KEY = /authorization|cookie|password|secret|token|private.?key|api.?key|mnemonic|seed/i;
 const PRIVATE_KEY_LIKE = /0x[0-9a-fA-F]{64}/g;
+/** An agent token (`mdt_`, docs/accounts.md) or a bare 32-byte hex string, such as a token's hash. */
+const TOKEN_LIKE = /\bmdt_[A-Za-z0-9_-]{8,}|\b[0-9a-fA-F]{64}\b/g;
 const URL_PATH = /\b(https?:\/\/[^\s/?#]+)[/?#]\S*/g;
 
 /**
  * Removes things that should never reach a log from free text such as an upstream error message:
- * 32-byte hex strings (private keys) and URL paths and queries (hosted RPC URLs carry API keys).
+ * 32-byte hex strings (private keys and token hashes), agent tokens, and URL paths and queries (hosted
+ * RPC URLs carry API keys).
  */
 export function scrubText(text: string): string {
-  return text.replace(PRIVATE_KEY_LIKE, "[redacted]").replace(URL_PATH, "$1/[redacted]");
+  return text
+    .replace(PRIVATE_KEY_LIKE, "[redacted]")
+    .replace(TOKEN_LIKE, "[redacted]")
+    .replace(URL_PATH, "$1/[redacted]");
 }
 
 function redact(value: unknown, depth = 0): unknown {

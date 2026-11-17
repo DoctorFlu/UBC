@@ -76,6 +76,10 @@ function scopedMarkets(markets: MarketsClient, deadline: CallDeadline): MarketsC
 function scopedConsole(client: ConsoleClient, deadline: CallDeadline): ConsoleClient {
   return {
     baseUrl: client.baseUrl,
+    // The client already names the agent the call's token resolved to (docs/accounts.md); the call's
+    // deadline binds whichever agent it acts for.
+    agentId: client.agentId,
+    forAgent: (agentId) => scopedConsole(client.forAgent(agentId), deadline),
     getHoldings: (own) =>
       deadline.step("console.holdings", (signal) => client.getHoldings(both(signal, own))),
     putContext: (hash, document, own) =>

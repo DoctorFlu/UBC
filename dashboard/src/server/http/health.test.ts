@@ -1,12 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fixtureSnapshot } from "@/fixtures";
-
 import { health } from "./health";
 
-const service = {
-  snapshot: () => ({ ...fixtureSnapshot, feed: { ...fixtureSnapshot.feed, health: "offline" as const } }),
-};
+const service = { feedHealth: "offline" as const };
 
 afterEach(() => {
   vi.restoreAllMocks();

@@ -135,10 +135,17 @@ export const buySignal = defineTool({
   handler: async (input, ctx) => {
     const payments = ctx.payments;
     if (payments === undefined) {
-      const v = unavailable([reason("NOT_CONFIGURED", "No wallet is configured to pay for signals.")], {
-        actor: "owner",
-        hint: "Set X402_BUYER_PRIVATE_KEY in the server's .env file and fund its Circle Gateway balance on Arc testnet.",
-      });
+      // Signals spend the operator's wallet, which only the first mandate's agent may use (docs/accounts.md).
+      const v =
+        ctx.agent.signer === "console"
+          ? unavailable([reason("NOT_CONFIGURED", "This agent has no wallet to pay for signals.")], {
+              actor: "owner",
+              hint: "Plan without a signal: paid signals are not available to this workspace yet.",
+            })
+          : unavailable([reason("NOT_CONFIGURED", "No wallet is configured to pay for signals.")], {
+              actor: "owner",
+              hint: "Set X402_BUYER_PRIVATE_KEY in the server's .env file and fund its Circle Gateway balance on Arc testnet.",
+            });
       return result(v, {
         receiptId: null,
         signalId: null,

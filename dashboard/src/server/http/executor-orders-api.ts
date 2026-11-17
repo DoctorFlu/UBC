@@ -50,6 +50,14 @@ function intentIdParam(value: string | undefined): number | null {
 }
 
 /**
+ * The deployment the executor works for: the contract the server follows, which only the first
+ * workspace's mandate sees (docs/accounts.md). The journal is keyed by it, like settlements.
+ */
+function executorDeployment(service: ConsoleService): string | null {
+  return service.deploymentIdFor(service.accounts.store.envMandate());
+}
+
+/**
  * Checks that a signed document names the deployment this console follows and is signed by its
  * executor. Returns the deployment id and signer, or the answer to send.
  */
@@ -60,7 +68,7 @@ async function verifySigned(
   signature: Hex,
 ): Promise<{ ok: true; deploymentId: string; signer: `0x${string}` } | { ok: false; response: Response }> {
   const deployment = service.deployment;
-  const deploymentId = service.deploymentId;
+  const deploymentId = executorDeployment(service);
   const roles = await service.currentRoles();
   if (!deployment || !deploymentId || !roles) {
     return {
@@ -145,7 +153,7 @@ export const getVenueOrder = guarded("get venue order", (request, service, param
       apiError(422, "invalid_parameter", "The intent id must be a whole number, starting at 0."),
     );
   }
-  const deploymentId = service.deploymentId;
+  const deploymentId = executorDeployment(service);
   if (!deploymentId) {
     return Promise.resolve(
       apiError(
@@ -179,7 +187,9 @@ export const putVenueOrder = guarded("put venue order", async (request, service,
   const verified = await verifySigned(service, document, hash, signature);
   if (!verified.ok) return verified.response;
 
-  const intent = service.snapshot().chain?.intents.find((candidate) => candidate.id === intentId);
+  const intent = service
+    .snapshot(service.accounts.store.envMandate())
+    .chain?.intents.find((candidate) => candidate.id === intentId);
   if (!intent) {
     return apiError(
       409,

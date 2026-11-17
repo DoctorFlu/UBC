@@ -15,6 +15,12 @@ export const whoami = defineTool({
     agentAddress: AddressSchema.nullable().describe(
       "The agent's public Arc address, or null if no agent key is set",
     ),
+    agent: z
+      .object({
+        id: z.string().describe("The agent this token acts for, as the console's Agents section names it"),
+        mandateId: z.string().nullable().describe("The mandate it acts on"),
+      })
+      .describe("Which agent and mandate the bearer token reaches"),
     chain: z.object({ rpcHost: z.string().describe("Host of the Arc RPC endpoint the server uses") }),
     policyAddress: AddressSchema.nullable(),
     capabilities: z.object({
@@ -24,7 +30,7 @@ export const whoami = defineTool({
     }),
   }),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  handler: (_input, { config }) => {
+  handler: (_input, { config, agent }) => {
     const capabilities = capabilitiesOf(config);
     const enabled = Object.entries(capabilities)
       .filter(([, on]) => on)
@@ -33,13 +39,14 @@ export const whoami = defineTool({
     return {
       structured: {
         agentAddress: address,
+        agent: { id: agent.agentId, mandateId: agent.mandateId },
         chain: { rpcHost: rpcHost(config) },
         policyAddress: config.policyAddress ?? null,
         capabilities,
       },
-      summary: `${address === null ? "No agent key is configured." : `Agent address ${address}.`} Capabilities: ${
-        enabled.length === 0 ? "none yet; call get_setup_state" : enabled.join(", ")
-      }.`,
+      summary: `Agent ${agent.agentId}${agent.mandateId === null ? "" : ` of mandate ${agent.mandateId}`}. ${
+        address === null ? "No agent key is configured." : `Agent address ${address}.`
+      } Capabilities: ${enabled.length === 0 ? "none yet; call get_setup_state" : enabled.join(", ")}.`,
     };
   },
 });

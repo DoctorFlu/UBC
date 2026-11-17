@@ -4,9 +4,11 @@ import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import type { AccountView } from "@/lib/accounts/types";
 import { needsOwner } from "@/lib/live/attention";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 
+import { AccountBlock } from "./AccountBlock";
 import { AdvancedToggle } from "./AdvancedToggle";
 import { Brand } from "./Brand";
 import { GetStarted } from "./GetStarted";
@@ -17,7 +19,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { TopBar } from "./TopBar";
 
 /** The console frame around every owner view. Views render only their own content inside it. */
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ account, children }: { account: AccountView; children: ReactNode }) {
   const snapshot = useSnapshot();
   const navCounts = { "/approvals": needsOwner(snapshot).total };
   const agent = snapshot.contract?.roles?.agent ?? null;
@@ -30,11 +32,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className={styles.sidebarInner}>
           <Brand />
           <NavLinks counts={navCounts} />
-          <SidebarFoot agent={agent} />
+          <SidebarFoot agent={agent} account={account} />
         </div>
       </aside>
       <div className={styles.main}>
-        <TopBar navCounts={navCounts} foot={<SidebarFoot agent={agent} />} />
+        <TopBar navCounts={navCounts} foot={<SidebarFoot agent={agent} account={account} />} />
         <PausedBanner />
         <FeedNotice />
         <main id="main" tabIndex={-1} className={styles.content}>
@@ -45,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function SidebarFoot({ agent }: { agent: string | null }) {
+function SidebarFoot({ agent, account }: { agent: string | null; account: AccountView }) {
   return (
     <div className={styles.sidebarEnd}>
       <GetStarted />
@@ -59,6 +61,7 @@ function SidebarFoot({ agent }: { agent: string | null }) {
         <AdvancedToggle />
         <ThemeToggle />
       </div>
+      <AccountBlock account={account} />
     </div>
   );
 }

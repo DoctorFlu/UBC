@@ -21,7 +21,7 @@
     "site"
   ],
   "scripts": {
-    "lint": "npm run typegen --workspaces --if-present && eslint .",
+    "lint": "npm run typegen --workspaces --if-present && eslint --concurrency 2 .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p deploy",
@@ -51,7 +51,8 @@
     "e2e": "npm run e2e -w @mandate/dashboard && npm run e2e -w @mandate/site",
     "screenshots": "npm run screenshots -w @mandate/dashboard",
     "e2e:site": "npm run e2e -w @mandate/site",
-    "dev:site": "npm run dev -w @mandate/site"
+    "dev:site": "npm run dev -w @mandate/site",
+    "console:admin": "npm run admin -w @mandate/dashboard --"
   },
   "overrides": {
     "minimatch": "^11.0.8"

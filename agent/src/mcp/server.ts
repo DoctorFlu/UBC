@@ -17,6 +17,8 @@ import { invokeTool, type Tool } from "./tool";
 export interface RequestScope {
   readonly requestId: string;
   readonly signal?: AbortSignal;
+  /** The context of the agent the request's token resolved to; tools run with it. */
+  readonly app?: AppContext;
 }
 
 const requestScope = new AsyncLocalStorage<RequestScope>();
@@ -59,7 +61,10 @@ export function buildMcpServer(app: AppContext, tools: readonly Tool[]): McpServ
         ...(app.config.advertiseOutputSchemas ? { outputSchema: tool.outputSchema } : {}),
         annotations: { title: tool.title, ...tool.annotations },
       },
-      (args) => invokeTool(tool, args, app, requestScope.getStore() ?? { requestId: randomUUID() }),
+      (args) => {
+        const scope = requestScope.getStore() ?? { requestId: randomUUID() };
+        return invokeTool(tool, args, scope.app ?? app, scope);
+      },
     );
   }
   return server;

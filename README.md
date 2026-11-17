@@ -183,6 +183,8 @@ npm run dev:stack      # chain, signal API, console, MCP server, simulated execu
 Open http://localhost:3000 for the console, or http://localhost:3001 for the landing page.
 The stack runs a local chain with Arc's chain id, deploys the Policy contract with the demo rules above, and wires every service to it.
 The owner signs with a built-in test wallet, so no browser wallet is needed.
+The console asks you to sign in: the stack prints a one-time claim code, so open http://localhost:3000/claim, enter it and your name, and make a passkey (your device asks for a fingerprint, face or PIN).
+Save the recovery code it shows; [docs/accounts.md](docs/accounts.md) says how workspaces and passkeys work.
 
 Then:
 
@@ -191,7 +193,7 @@ Then:
    Without this step everything else works and the agent plans without a signal.
 3. In a second terminal run `npm run dev:tunnel`.
    It prints a public HTTPS address for the MCP server.
-4. In Grok Bot, open **Connect apps**, add a custom connector with that address ending in `/mcp`, and an `Authorization` header of `Bearer ` followed by the token from `.env`.
+4. In Grok Bot, open **Connect apps**, add a custom connector with that address ending in `/mcp`, and an `Authorization` header of `Bearer ` followed by the token from `.env`, or by a token you create in the console under **Setup**, **Agents**.
    The steps are in [agent/README.md](agent/README.md#connect-grok-bot).
 5. Ask Grok Bot: "Protect my BTC below $60,000 for at most $50."
    The first time, it gives you a pairing link; open it and confirm in the console.

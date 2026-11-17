@@ -67,6 +67,7 @@ describe("whoami", () => {
     );
     expect(structured).toEqual({
       agentAddress: TEST_ADDRESS,
+      agent: { id: "env", mandateId: null },
       chain: { rpcHost: "rpc.testnet.arc.network" },
       policyAddress: TEST_POLICY,
       capabilities: { readPolicy: true, proposeTrades: true, console: false },

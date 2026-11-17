@@ -29,10 +29,23 @@ import {
 } from "@mandate/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import type { ConsoleSnapshot } from "@/lib/live/types";
+
+import {
+  claimFirstWorkspace,
+  consoleHeaders,
+  envMandate,
+  envSnapshot,
+  signUpWorkspace,
+  workspaceAgent,
+} from "../../../test/support/accounts";
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
-import { type ConsoleConfig, readWakeConfig } from "../config";
+import type { Member } from "../accounts/store";
+import { readWakeConfig, testConsoleConfig } from "../config";
+import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
+import { eventStream } from "./event-stream";
 import { getVenueOrder, putExecutorVenue, putVenueOrder } from "./executor-orders-api";
 
 const silent = { info: () => undefined, warn: () => undefined };
@@ -120,7 +133,7 @@ async function expectError(response: Response, status: number, code: string): Pr
 async function untilApproved(id: number): Promise<void> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    if (service.snapshot().chain?.intents.find((intent) => intent.id === id)?.status === "approved") return;
+    if (envSnapshot(service).chain?.intents.find((intent) => intent.id === id)?.status === "approved") return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`intent ${String(id)} never became approved`);
@@ -138,16 +151,11 @@ beforeAll(async () => {
   } as const;
   placedId = (await chain.agent.proposeTrade(buy)).intentId;
   journalId = (await chain.agent.proposeTrade(buy)).intentId;
-  const config: ConsoleConfig = {
-    dataDir: mkdtempSync(join(tmpdir(), "mandate-console-")),
-    eventSource: "rpc",
+  const config = testConsoleConfig(mkdtempSync(join(tmpdir(), "mandate-console-")), {
     pollIntervalMs: 50,
     serviceToken: "console-service-token-for-tests-0123456789",
-    streamSecurityToken: null,
-    publicUrl: "http://console.test",
-    mcpPublicUrl: null,
     wake: readWakeConfig({}),
-  };
+  });
   service = new ConsoleService(config, openDatabase(config.dataDir), { env: chain.env, logger: silent });
   service.start();
   await untilApproved(placedId);
@@ -232,7 +240,7 @@ describe("the executor's order journal in the console", () => {
     // A closed order's note can still change: a settlement problem found later.
     const noted = { ...filled, revision: 4, detail: "settlement disagreement: checked by hand" };
     expect((await putRaw(journalId, noted)).status).toBe(201);
-    expect(service.snapshot().chain?.venueOrders[journalId]).toMatchObject({
+    expect(envSnapshot(service).chain?.venueOrders[journalId]).toMatchObject({
       state: "filled",
       venueOrderId: "101",
       detail: "settlement disagreement: checked by hand",
@@ -260,7 +268,8 @@ describe("the executor's order journal in the console", () => {
       market: BTC_ABOVE_65K,
       outcome: "NO" as const,
       isBuy: true,
-      amountCents: 1_240,
+      // 40 contracts at 31c ($12.40), with room for Gemini's worst-case fee (60c).
+      amountCents: 1_300,
       limitPrice: 31,
     };
     const placement = await gemini.placeOrder(order);
@@ -271,7 +280,7 @@ describe("the executor's order journal in the console", () => {
 
     fake.fill(placement.placed.venueOrderId);
     expect(await gemini.readFill(placement.placed)).toMatchObject({ state: "closed", filledCents: 1_240 });
-    expect(service.snapshot().chain?.venueOrders[placedId]).toMatchObject({
+    expect(envSnapshot(service).chain?.venueOrders[placedId]).toMatchObject({
       venue: "gemini",
       environment: "sandbox",
       state: "filled",
@@ -302,11 +311,11 @@ describe("the executor's order journal in the console", () => {
       environment: "sandbox",
       announcedAt: "2026-11-17T08:00:00.000Z",
     };
-    expect(service.snapshot().chain?.venue).toBeNull();
+    expect(envSnapshot(service).chain?.venue).toBeNull();
     await expectError(await announce(base, agentSign), 403, "not_executor");
     await expectError(await announce({ ...base, environment: null }), 422, "invalid_body");
     expect((await announce(base)).status).toBe(201);
-    expect(service.snapshot().chain?.venue).toEqual({
+    expect(envSnapshot(service).chain?.venue).toEqual({
       venue: "gemini",
       environment: "sandbox",
       announcedAt: base.announcedAt,
@@ -338,7 +347,7 @@ describe("the executor's order journal in the console", () => {
     };
     const productionConsole: ConsoleMarketData = () =>
       ({ environment: "production", settings: "EXECUTOR_VENUE=simulated (the default)" }) as const;
-    const shown = service.snapshot().chain?.venue;
+    const shown = envSnapshot(service).chain?.venue;
     const refused = await announce(gemini, productionConsole);
     expect(refused.status).toBe(409);
     expect(await refused.json()).toEqual({
@@ -354,8 +363,67 @@ describe("the executor's order journal in the console", () => {
     const simulated: ExecutorVenue = { ...gemini, venue: "simulated", environment: null };
     await expectError(await announce(simulated, sandboxConsole), 409, "environment_mismatch");
     // Nothing refused is shown.
-    expect(service.snapshot().chain?.venue).toEqual(shown);
+    expect(envSnapshot(service).chain?.venue).toEqual(shown);
     expect((await announce(simulated, productionConsole)).status).toBe(201);
-    expect(service.snapshot().chain?.venue?.venue).toBe("simulated");
+    expect(envSnapshot(service).chain?.venue?.venue).toBe("simulated");
+    // Back on the sandbox for the tests that follow.
+    const later = { ...gemini, announcedAt: "2026-11-17T09:01:00.000Z" };
+    expect((await announce(later, sandboxConsole)).status).toBe(201);
+  });
+
+  it("keeps the journal and the venue with the server's contract: another workspace sees neither", async () => {
+    // Keyed by deployment like settlements (docs/accounts.md): only the mandate that follows the
+    // server's contract sees the venue badge and the order fields.
+    expect(Object.keys(envSnapshot(service).chain?.venueOrders ?? {})).not.toHaveLength(0);
+    expect(envSnapshot(service).chain?.venue).not.toBeNull();
+    const mallory = signUpWorkspace(service, "Mallory");
+    const other = workspaceAgent(service, mallory);
+    const theirs = service.snapshot(other.mandate);
+    expect(theirs.chain).toBeNull();
+    expect(JSON.stringify(theirs)).not.toMatch(/venueOrder|"venue"|clientOrderId|sandbox/);
+    expect(service.deploymentIdFor(other.mandate)).toBeNull();
+    expect(service.deploymentIdFor(envMandate(service))).not.toBeNull();
+
+    // Through the console's routes, signed in: the first workspace's owner sees them; Mallory's own
+    // views carry none of it, and naming the first mandate is a 404, the answer for one that does not exist.
+    setConsoleServiceForTests(service);
+    try {
+      const alice = claimFirstWorkspace(service, "Alice");
+      const { GET } = await import("@/app/api/console/snapshot/route");
+      const as = (member: Member, query = "") =>
+        new Request(`http://console.test/api/console/snapshot${query}`, {
+          headers: consoleHeaders(service, member),
+        });
+      const hers = (await (await GET(as(alice))).json()) as ConsoleSnapshot;
+      expect(hers.chain?.venue).toMatchObject({ venue: "gemini", environment: "sandbox" });
+      expect(hers.chain?.venueOrders[placedId]).toMatchObject({ state: "filled" });
+      const his = await GET(as(mallory));
+      expect(his.status).toBe(200);
+      expect(await his.text()).not.toMatch(/venueOrder|"venue"|clientOrderId|sandbox/);
+      for (const mandate of [envMandate(service).id, "mnd_does_not_exist"]) {
+        const query = `?mandate=${encodeURIComponent(mandate)}`;
+        expect((await GET(as(mallory, query))).status, mandate).toBe(404);
+        const events = await eventStream(
+          new Request(`http://console.test/api/console/events${query}`, {
+            headers: consoleHeaders(service, mallory),
+          }),
+          service,
+        );
+        expect(events.status, mandate).toBe(404);
+      }
+    } finally {
+      setConsoleServiceForTests(undefined);
+    }
+  });
+
+  it("holds no venue credential: the journal, the venue and the snapshot carry no API key or secret", () => {
+    const deploymentId = service.deploymentIdFor(envMandate(service)) ?? "";
+    const stored = JSON.stringify([
+      service.venueOrders.orders(deploymentId),
+      service.venueOrders.venue(deploymentId),
+      envSnapshot(service),
+    ]);
+    expect(stored).toContain(BTC_ABOVE_65K);
+    for (const secret of ["account-FAKEKEY", "fake-secret"]) expect(stored).not.toContain(secret);
   });
 });

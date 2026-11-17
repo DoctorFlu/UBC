@@ -47,9 +47,13 @@ export const MAX_PRICE_GOALS = 4;
  *   the newly stored events here, so a trigger fires once whichever source delivered it.
  * - Price: no timer of its own. The console's poll loop calls `tick` and a check runs when the last one
  *   is older than `GROK_WAKE_PRICE_CHECK_MS`, so the first poll after a paused machine wakes checks at once.
- * - Runs in progress: every authenticated call from the agent's MCP server marks one.
- * - Settlements: the executor API hands each newly stored settlement here; a ladder wakes the Bot once,
- *   when its last filled position is settled.
+ * - Runs in progress: every authenticated call from this mandate's agent marks one.
+ * - Settlements: the executor API hands each newly stored settlement of this mandate's deployment here;
+ *   a ladder wakes the Bot once, when its last filled position is settled.
+ *
+ * One instance serves one mandate (`mandateId`), whose records it alone reads and writes. Until each
+ * mandate has a webhook of its own, the console runs one, for the mandate on the server's contract, with
+ * the webhook in the settings (docs/accounts.md).
  */
 export class ConsoleWake {
   readonly notifier: WakeNotifier;
@@ -61,6 +65,7 @@ export class ConsoleWake {
   constructor(
     private readonly config: ConsoleConfig,
     db: Database,
+    readonly mandateId: string,
     private readonly options: {
       ladder?: LadderSource;
       logger: { info: (message: string) => void; warn: (message: string) => void };
@@ -69,7 +74,7 @@ export class ConsoleWake {
       now?: () => number;
     },
   ) {
-    this.store = new SqliteWakeStore(db);
+    this.store = new SqliteWakeStore(db, mandateId);
     this.notifier = new WakeNotifier({
       target: config.wake.target,
       dailyCap: config.wake.dailyCap,
@@ -201,6 +206,25 @@ export class ConsoleWake {
       this.options.onChange();
     }
   }
+}
+
+/** Why a mandate other than the one on the server's contract has no wake-ups yet. */
+export const NO_WAKE_TARGET_REASON =
+  "Event wake-ups are set up for the first workspace only, which runs on the server's own contract.";
+
+/** The wake-up status of a mandate the console sends no wake-ups for: off, with nothing recorded. */
+export function wakeOffStatus(config: ConsoleConfig, offReason: string): ConsoleWakeStatus {
+  return {
+    enabled: false,
+    dailyCap: config.wake.dailyCap,
+    usedToday: 0,
+    leftToday: config.wake.dailyCap,
+    recent: [],
+    offReason,
+    priceCheckEveryMs: config.wake.priceCheckMs,
+    lastPriceCheckAt: null,
+    priceProblem: null,
+  };
 }
 
 /** The goals a price check measures: the latest plan per asset with a floor, on a ladder not yet expired. */

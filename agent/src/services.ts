@@ -145,6 +145,10 @@ export interface HedgePlanner {
 export interface ConsoleClient {
   /** Base URL of the console backend. */
   readonly baseUrl: string;
+  /** The agent every call acts for (`x-mandate-agent`): the console scopes each record to its mandate. */
+  readonly agentId: string;
+  /** The same console, acting for another agent (docs/accounts.md). */
+  forAgent(agentId: string): ConsoleClient;
   getHoldings(signal?: AbortSignal): Promise<HoldingsResponse>;
   putContext(hash: `0x${string}`, document: DecisionContext, signal?: AbortSignal): Promise<ContextResponse>;
   /** The stored document, or null when the console has none under this hash. */

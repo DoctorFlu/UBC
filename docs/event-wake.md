@@ -116,6 +116,12 @@ So a new console, a deleted data folder or a long stop never replays old events 
 | Secrets | The webhook URL and key are kept in a `WakeTarget`, which prints and serializes as `[redacted]`. Log lines, the record, errors (only "HTTP 503", "network error" or "timed out", never a raw message) and the console's snapshot never carry either. |
 | No new polling | There is no timer of its own. Chain triggers ride on the ingestion that exists; price checks ride on the console's existing poll loop; settled ladders ride on the executor's request that stores a settlement; the only timer is the one that sends a waiting wake-up, set only while one waits. |
 
+## Workspaces
+
+Wake-ups belong to a mandate (issue #94, [accounts.md](accounts.md#event-wake-ups)): every record above is kept per mandate, and the daily cap counts one mandate's wake-ups.
+For now the one webhook in the settings serves the first workspace's mandate, the one on the server's contract; a run in progress is marked only by that mandate's agent.
+Other workspaces see wake-ups as off.
+
 ## Price checks and a machine that pauses
 
 The hosted stack runs on a machine that pauses after about 30 idle minutes and wakes on the next inbound request ([hosting.md](hosting.md#pauses-and-the-free-plans-limits)).

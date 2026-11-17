@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { planHedge } from "@mandate/planner";
 import {
+  AGENT_ID_HEADER,
   CONSOLE_AGENT_ROUTES,
   Category,
   type DecisionContext,
@@ -23,8 +24,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { GET as holdingsRoute } from "@/app/api/agent/v1/holdings/route";
 
+import { envMandate, envSnapshot } from "../../../test/support/accounts";
 import { BTC_ABOVE_66K, type TestChain, startTestChain } from "../../../test/support/devchain";
-import { type ConsoleConfig, readWakeConfig } from "../config";
+import { testConsoleConfig } from "../config";
 import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
@@ -50,24 +52,25 @@ const silent = { info: () => undefined, warn: () => undefined };
 
 function makeService(options: { token?: string | null; env?: EnvVars } = {}): ConsoleService {
   const dataDir = mkdtempSync(join(tmpdir(), "mandate-console-"));
-  const config: ConsoleConfig = {
-    dataDir,
-    eventSource: "rpc",
-    pollIntervalMs: 50,
+  const config = testConsoleConfig(dataDir, {
     serviceToken: options.token === undefined ? TOKEN : options.token,
-    streamSecurityToken: null,
-    publicUrl: "http://console.test",
-    mcpPublicUrl: null,
-    wake: readWakeConfig({}),
-  };
+  });
   // No deployment file: the console runs without a chain, as it does before `dev:chain`.
   const env = options.env ?? { POLICY_DEPLOYMENT_FILE: join(dataDir, "missing.json") };
   return new ConsoleService(config, openDatabase(dataDir), { env, logger: silent });
 }
 
-function call(method: string, path: string, body?: unknown, token: string | null = TOKEN): Request {
+/** A call from the MCP server, for the server's own agent unless `agent` names another (or null: none). */
+function call(
+  method: string,
+  path: string,
+  body?: unknown,
+  token: string | null = TOKEN,
+  agent: string | null = "env",
+): Request {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (token !== null) headers.authorization = `Bearer ${token}`;
+  if (agent !== null) headers[AGENT_ID_HEADER] = agent;
   return new Request(`http://console.test${path}`, {
     method,
     headers,
@@ -176,6 +179,27 @@ describe("agent API: authentication", () => {
     }
   });
 
+  it("answers 400 without an agent header and 404 for an unknown agent, after the token check", async () => {
+    await expectError(
+      await getHoldings(call("GET", CONSOLE_AGENT_ROUTES.holdings, undefined, TOKEN, null), service),
+      400,
+      "agent_required",
+    );
+    for (const agent of ["agt_00000000000000000000000000", "nobody", "ENV", "env "]) {
+      const response = await getHoldings(
+        call("GET", CONSOLE_AGENT_ROUTES.holdings, undefined, TOKEN, agent),
+        service,
+      );
+      if (agent === "env ") expect(response.status).toBe(200);
+      else await expectError(response, 404, "unknown_agent");
+    }
+    await expectError(
+      await getHoldings(call("GET", CONSOLE_AGENT_ROUTES.holdings, undefined, null, "nobody"), service),
+      401,
+      "unauthorized",
+    );
+  });
+
   it("answers 503 for every route when the console has no service token", async () => {
     const unconfigured = makeService({ token: null });
     await expectError(
@@ -206,7 +230,9 @@ describe("agent API: holdings", () => {
     );
     expect(empty).toEqual({ holdings: [], updatedAt: null });
 
-    service.offchain.saveHoldings([{ asset: "BTC", quantity: "0.05", note: "Cold wallet" }]);
+    service.offchain.saveHoldings(envMandate(service).id, [
+      { asset: "BTC", quantity: "0.05", note: "Cold wallet" },
+    ]);
     const saved = holdingsResponseSchema.parse(
       await (await getHoldings(call("GET", CONSOLE_AGENT_ROUTES.holdings), service)).json(),
     );
@@ -306,7 +332,7 @@ describe("agent API: hedge plans", () => {
     );
     expect(repeated.status).toBe(200);
     expect(planResponseSchema.parse(await repeated.json())).toEqual(first);
-    expect(service.offchain.plan(plan.planId)?.requestText).toBe(body.requestText);
+    expect(service.offchain.plan(envMandate(service).id, plan.planId)?.requestText).toBe(body.requestText);
   });
 
   it("shows the latest plan of each asset in the snapshot, read back as the planner typed it", async () => {
@@ -325,7 +351,7 @@ describe("agent API: hedge plans", () => {
       );
       expect(response.status).toBe(201);
     }
-    const plans = fresh.snapshot().offchain.plans;
+    const plans = envSnapshot(fresh).offchain.plans;
     expect(plans.map((entry) => [entry.asset, entry.planId])).toEqual([
       ["BTC", "plan_btc_2"],
       ["ETH", "plan_eth_1"],
@@ -383,7 +409,7 @@ describe("agent API: policy change requests", () => {
       { id: request.id },
     );
     expect(policyChangeRequestSchema.parse(await read.json())).toEqual(request);
-    expect(service.snapshot().offchain.changeRequests[0]?.id).toBe(request.id);
+    expect(envSnapshot(service).offchain.changeRequests[0]?.id).toBe(request.id);
   });
 
   it("refuses a request without a reason, without a change, or one that tries to unpause", async () => {
@@ -447,7 +473,7 @@ describe("agent API: signal payments", () => {
     const repeated = await put(service, RECEIPT, { ...payment, amount: "999999", signal: null });
     expect(repeated.status).toBe(200);
     expect(signalPaymentResponseSchema.parse(await repeated.json())).toEqual(first);
-    const shown = service.snapshot().offchain.signalPayments;
+    const shown = envSnapshot(service).offchain.signalPayments;
     expect(shown).toEqual([{ ...payment, receiptId: RECEIPT, recordedAt: first.recordedAt }]);
   });
 
@@ -463,7 +489,7 @@ describe("agent API: signal payments", () => {
       signal: null,
     };
     expect((await put(service, other, later)).status).toBe(201);
-    expect(service.snapshot().offchain.signalPayments.map((entry) => entry.receiptId)).toEqual([
+    expect(envSnapshot(service).offchain.signalPayments.map((entry) => entry.receiptId)).toEqual([
       other,
       RECEIPT,
     ]);
@@ -476,7 +502,7 @@ describe("agent API: signal payments", () => {
     await expectError(await put(service, RECEIPT, { ...payment, signature: "0x00" }), 422, "invalid_body");
     await expectError(await put(service, RECEIPT, "not json"), 422, "invalid_body");
     await expectError(await put(service, RECEIPT, payment, `${TOKEN}x`), 401, "unauthorized");
-    expect(service.snapshot().offchain.signalPayments).toEqual([]);
+    expect(envSnapshot(service).offchain.signalPayments).toEqual([]);
   });
 });
 
@@ -508,7 +534,7 @@ describe("agent API: signal budget", () => {
     const ignored = await put(service, older);
     expect(ignored.status).toBe(200);
     expect(signalBudgetResponseSchema.parse(await ignored.json())).toMatchObject(newer);
-    expect(service.snapshot().offchain.signalBudget).toMatchObject(newer);
+    expect(envSnapshot(service).offchain.signalBudget).toMatchObject(newer);
   });
 
   it("refuses a float amount, extra keys and a bad token", async () => {
@@ -516,7 +542,7 @@ describe("agent API: signal budget", () => {
     await expectError(await put(service, { ...snapshot, dailyBudget: "0.02" }), 422, "invalid_body");
     await expectError(await put(service, { ...snapshot, privateKey: "x" }), 422, "invalid_body");
     await expectError(await put(service, snapshot, null), 401, "unauthorized");
-    expect(service.snapshot().offchain.signalBudget).toBeNull();
+    expect(envSnapshot(service).offchain.signalBudget).toBeNull();
   });
 });
 
@@ -553,7 +579,7 @@ describe("agent API: pairing", () => {
       isContractAgent: true,
     });
 
-    service.offchain.confirmPairing(AGENT, chain.user.account?.address ?? AGENT);
+    service.offchain.confirmPairing(envMandate(service).id, AGENT, chain.user.account?.address ?? AGENT);
     const again = pairingResponseSchema.parse(
       await (await putPairing(call("PUT", CONSOLE_AGENT_ROUTES.pairing, announcement), service)).json(),
     );
@@ -625,9 +651,9 @@ describe("agent API: intent to context links", () => {
     });
   const sealedOf = async (intentId: number) => {
     await expect
-      .poll(() => service.snapshot().chain?.intents.some((intent) => intent.id === intentId))
+      .poll(() => envSnapshot(service).chain?.intents.some((intent) => intent.id === intentId))
       .toBe(true);
-    return service.snapshot().chain?.sealed[intentId];
+    return envSnapshot(service).chain?.sealed[intentId];
   };
 
   it("links an intent once, idempotently, and shows the reason as recorded offchain and verified", async () => {

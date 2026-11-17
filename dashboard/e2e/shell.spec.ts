@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 
 import { routePath, routes, schemes } from "./routes";
 import { watchConsole } from "./support/problems";
+import { ownerCookie } from "./support/session";
 
 const ADVANCED_COOKIE = "mandate-advanced";
 
@@ -33,12 +34,16 @@ test.describe("Advanced view", () => {
     expect(problems).toEqual([]);
   });
 
-  test("is rendered by the server from the cookie, so nothing flashes", async ({ request }) => {
-    const on = await (await request.get("/", { headers: { cookie: `${ADVANCED_COOKIE}=on` } })).text();
+  test("is rendered by the server from the cookie, so nothing flashes", async ({ request, baseURL }) => {
+    // An explicit cookie header replaces the stored ones, so it carries the owner's session too.
+    const session = ownerCookie(baseURL ?? "") ?? "";
+    const on = await (
+      await request.get("/", { headers: { cookie: `${ADVANCED_COOKIE}=on; ${session}` } })
+    ).text();
     expect(on).toContain("Committed");
     expect(on).not.toContain('data-testid="rules-summary"');
 
-    const off = await (await request.get("/")).text();
+    const off = await (await request.get("/", { headers: { cookie: session } })).text();
     expect(off).toContain('data-testid="rules-summary"');
     expect(off).not.toContain("Committed");
   });

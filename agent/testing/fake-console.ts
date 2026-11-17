@@ -10,18 +10,32 @@
  * where the latest `asOf` wins, and 404 for anything unknown. `setSignalRoutes(false)` makes the two
  * signal routes answer 404, like a console that does not implement them yet.
  *
+ * It is multi-tenant like the real one (docs/accounts.md): each agent has its own records, every call
+ * names its agent in `x-mandate-agent` (400 without, 404 for an unknown one), and `auth/resolve` answers
+ * which agent a token's hash belongs to. The env-file token registers itself for the first mandate's
+ * agent (`env`) the first time it is presented with `legacy: true`, and once revoked stays revoked.
+ * `addAgent` adds another workspace's agent with a console-issued token, and can hold its key to sign.
+ *
  * It also takes the executor's settlements (`CONSOLE_EXECUTOR_ROUTES`, issue #92) the way the console
  * does: no bearer token, a document that adds up, a signature that recovers to `executorAddress` when
  * one is given, and the first record of an intent wins (200 for the same one, 409 `conflict` otherwise).
+ * The settlements belong to the server's contract, so they are the first mandate's (`env`) records.
  * It does not check the fill onchain; the real console does.
  */
 import type { GeminiEnvironment } from "@mandate/gemini";
+import { randomBytes } from "node:crypto";
 import { Hono, type Context } from "hono";
-import { isAddressEqual, recoverMessageAddress, type Address } from "viem";
+import { isAddressEqual, recoverMessageAddress, type Address, type Hex } from "viem";
 import type * as z from "zod";
+import { privateKeyToAccount } from "viem/accounts";
 import {
+  AGENT_ID_HEADER,
   CONSOLE_AGENT_API_BASE,
   CONSOLE_EXECUTOR_API_BASE,
+  ENV_AGENT_ID,
+  agentTransactionRefusal,
+  fromUnsignedTransaction,
+  hashAgentToken,
   hashContext,
   hashSettlement,
   putSettlementRequestSchema,
@@ -35,6 +49,8 @@ import {
   putPairingRequestSchema,
   putSignalBudgetRequestSchema,
   putSignalPaymentRequestSchema,
+  resolveTokenRequestSchema,
+  signTransactionRequestSchema,
   type ConsoleHolding,
   type ContextResponse,
   type IntentContextResponse,
@@ -42,6 +58,7 @@ import {
   type PolicyChangeRequest,
   type PostPlanRequest,
   type PutSignalPaymentRequest,
+  type ResolveTokenResponse,
   type SignalBudgetResponse,
 } from "@mandate/shared";
 
@@ -58,9 +75,9 @@ export interface FakeConsoleState {
   signalPayments: Map<string, PutSignalPaymentRequest & { recordedAt: string }>;
   /** The latest signal budget snapshot. */
   signalBudget: SignalBudgetResponse | null;
-  /** Settlements by intent id, as the executor first recorded them. */
+  /** Settlements by intent id, as the executor first recorded them (the first mandate's only). */
   settlements: Map<number, StoredSettlement>;
-  /** Every request seen, as `METHOD path`, for assertions. */
+  /** Every request seen, as `METHOD path`, for assertions (on the first agent's state: all agents'). */
   requests: string[];
 }
 
@@ -78,7 +95,20 @@ export interface FakeConsoleOptions {
   marketEnvironment?: GeminiEnvironment;
 }
 
+/** Another workspace's agent, as `addAgent` creates it. */
+export interface FakeAgent {
+  readonly agentId: string;
+  readonly workspaceId: string;
+  readonly mandateId: string;
+  /** Its console-issued token (`mdt_...`), shown once like the real console does. */
+  readonly token: string;
+  readonly tokenId: string;
+  readonly address: Address | null;
+  readonly state: FakeConsoleState;
+}
+
 export interface FakeConsole {
+  /** The first mandate's agent's records (`env`). */
   readonly state: FakeConsoleState;
   /** Web-standard handler for the whole API. */
   readonly fetch: (request: Request) => Promise<Response>;
@@ -92,9 +122,27 @@ export interface FakeConsole {
   readonly setSignalRoutes: (served: boolean) => void;
   /** Change the Gemini environment its health answer names. */
   readonly setMarketEnvironment: (environment: GeminiEnvironment) => void;
+  /** A new workspace with one mandate (no contract unless `contract` is given) and its agent. */
+  readonly addAgent: (options?: {
+    /** The agent's key, which this console holds and signs with. */
+    privateKey?: Hex;
+    /** The mandate's contract: the agent may sign `proposeTrade` to it, on its chain. */
+    contract?: { policyAddress: Address; chainId: number };
+  }) => FakeAgent;
+  /** Another console-issued token for an agent. */
+  readonly issueToken: (agentId: string) => { token: string; tokenId: string };
+  /** Revokes a token at once, like the owner does in Setup. */
+  readonly revokeToken: (token: string) => void;
+  /** The records of an agent. */
+  readonly stateOf: (agentId: string) => FakeConsoleState;
 }
 
-function fail(c: Context, status: 401 | 403 | 404 | 409 | 422, code: string, message: string): Response {
+function fail(
+  c: Context,
+  status: 400 | 401 | 403 | 404 | 409 | 422,
+  code: string,
+  message: string,
+): Response {
   return c.json({ error: { code, message } }, status);
 }
 
@@ -113,12 +161,34 @@ async function body<S extends z.ZodType>(c: Context, schema: S): Promise<z.outpu
   return parsed.data;
 }
 
+const base32 = (bytes: number) =>
+  [...randomBytes(bytes)].map((byte) => "0123456789abcdefghjkmnpqrstvwxyz".charAt(byte % 32)).join("");
+
+interface AgentRecord {
+  agentId: string;
+  workspaceId: string;
+  mandateId: string;
+  address: Address | null;
+  signer: "env" | "console";
+  deployment: "env" | null;
+  privateKey: Hex | null;
+  contract: { policyAddress: Address; chainId: number } | null;
+  state: FakeConsoleState;
+}
+
+interface TokenRecord {
+  tokenId: string;
+  agentId: string;
+  source: "env" | "console";
+  revoked: boolean;
+}
+
 export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
   const now = options.now ?? (() => new Date());
   const publicUrl = (options.publicUrl ?? "http://localhost:3000").replace(/\/+$/, "");
-  const state: FakeConsoleState = {
-    holdings: options.holdings ?? [],
-    holdingsUpdatedAt: options.holdings === undefined ? null : now().toISOString(),
+  const newState = (holdings?: ConsoleHolding[]): FakeConsoleState => ({
+    holdings: holdings ?? [],
+    holdingsUpdatedAt: holdings === undefined ? null : now().toISOString(),
     contexts: new Map(),
     intentContexts: new Map(),
     plans: new Map(),
@@ -128,11 +198,37 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     signalBudget: null,
     settlements: new Map(),
     requests: [],
-  };
+  });
+  const state = newState(options.holdings);
+  const agents = new Map<string, AgentRecord>([
+    [
+      ENV_AGENT_ID,
+      {
+        agentId: ENV_AGENT_ID,
+        workspaceId: "wsp_first",
+        mandateId: "mnd_first",
+        address: null,
+        signer: "env",
+        deployment: "env",
+        privateKey: null,
+        contract: null,
+        state,
+      },
+    ],
+  ]);
+  /** Token hash to its record. */
+  const tokens = new Map<string, TokenRecord>();
   let down = false;
   let signalRoutes = true;
   let nextRequestId = 1;
   let marketEnvironment: GeminiEnvironment = options.marketEnvironment ?? "production";
+
+  const issueToken = (agentId: string) => {
+    const token = `mdt_${randomBytes(32).toString("base64url")}`;
+    const tokenId = `tok_${base32(26)}`;
+    tokens.set(hashAgentToken(token), { tokenId, agentId, source: "console", revoked: false });
+    return { token, tokenId };
+  };
 
   const app = new Hono();
   app.use("*", async (c, next) => {
@@ -147,32 +243,88 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     return undefined;
   });
 
+  // Which agent a token's hash belongs to: the one route that names no agent.
+  app.post(`${CONSOLE_AGENT_API_BASE}/auth/resolve`, async (c) => {
+    const parsed = await body(c, resolveTokenRequestSchema);
+    if (parsed instanceof Response) return parsed;
+    let record = tokens.get(parsed.tokenHash);
+    if (record === undefined && parsed.legacy) {
+      const registered = [...tokens.values()].some((t) => t.agentId === ENV_AGENT_ID && t.source === "env");
+      if (!registered) {
+        record = { tokenId: `tok_${base32(26)}`, agentId: ENV_AGENT_ID, source: "env", revoked: false };
+        tokens.set(parsed.tokenHash, record);
+      }
+    }
+    if (record === undefined || record.revoked || (record.source === "env") !== parsed.legacy) {
+      return fail(c, 404, "unknown_token", "No live agent token has that hash.");
+    }
+    const agent = agents.get(record.agentId);
+    if (agent === undefined) return fail(c, 404, "unknown_token", "No live agent token has that hash.");
+    const answer: ResolveTokenResponse = {
+      workspaceId: agent.workspaceId,
+      mandateId: agent.mandateId,
+      agentId: agent.agentId,
+      tokenId: record.tokenId,
+      agent: { address: agent.address, signer: agent.signer },
+      mandate: { deployment: agent.deployment },
+    };
+    return c.json(answer);
+  });
+
+  // The agent each request names, set by the middleware below.
+  const agentOf = new WeakMap<Request, AgentRecord>();
   const api = new Hono();
-  api.get("/holdings", (c) => c.json({ holdings: state.holdings, updatedAt: state.holdingsUpdatedAt }));
+  api.use("*", async (c, next) => {
+    const id = c.req.header(AGENT_ID_HEADER);
+    if (id === undefined || id.trim() === "") {
+      const message = `Name the agent the request is for in the ${AGENT_ID_HEADER} header.`;
+      return c.json({ error: { code: "agent_required", message } }, 400);
+    }
+    const agent = agents.get(id.trim());
+    if (agent === undefined) {
+      return c.json({ error: { code: "unknown_agent", message: "No agent has that id." } }, 404);
+    }
+    agentOf.set(c.req.raw, agent);
+    await next();
+    return undefined;
+  });
+  const agentFor = (c: Context): AgentRecord => {
+    const agent = agentOf.get(c.req.raw);
+    if (agent === undefined) throw new Error("no agent for this request");
+    return agent;
+  };
+  const tenant = (c: Context) => agentFor(c).state;
+
+  api.get("/holdings", (c) => {
+    const t = tenant(c);
+    return c.json({ holdings: t.holdings, updatedAt: t.holdingsUpdatedAt });
+  });
 
   api.put("/contexts/:hash", async (c) => {
+    const t = tenant(c);
     const hash = c.req.param("hash").toLowerCase();
     const parsed = await body(c, putContextRequestSchema);
     if (parsed instanceof Response) return parsed;
     if (hashContext(parsed.document).toLowerCase() !== hash) {
       return fail(c, 422, "hash_mismatch", "The document does not hash to the hash in the path.");
     }
-    const existing = state.contexts.get(hash);
+    const existing = t.contexts.get(hash);
     if (existing !== undefined) return c.json(existing);
     const stored: ContextResponse = {
       hash: hash as `0x${string}`,
       document: parsed.document,
       storedAt: now().toISOString(),
     };
-    state.contexts.set(hash, stored);
+    t.contexts.set(hash, stored);
     return c.json(stored, 201);
   });
   api.get("/contexts/:hash", (c) => {
-    const stored = state.contexts.get(c.req.param("hash").toLowerCase());
+    const stored = tenant(c).contexts.get(c.req.param("hash").toLowerCase());
     return stored === undefined ? fail(c, 404, "not_found", "No context under this hash.") : c.json(stored);
   });
 
   api.put("/intents/:intentId/context", async (c) => {
+    const t = tenant(c);
     const raw = c.req.param("intentId");
     if (!/^(0|[1-9]\d{0,15})$/.test(raw)) {
       return fail(c, 422, "invalid_parameter", "The intent id must be a whole number, starting at 0.");
@@ -180,31 +332,33 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     const intentId = Number(raw);
     const parsed = await body(c, putIntentContextRequestSchema);
     if (parsed instanceof Response) return parsed;
-    const existing = state.intentContexts.get(intentId);
+    const existing = t.intentContexts.get(intentId);
     if (existing !== undefined) {
       if (existing.hash.toLowerCase() === parsed.hash.toLowerCase()) return c.json(existing);
       return fail(c, 409, "conflict", `Intent ${raw} is already linked to another context.`);
     }
     const link: IntentContextResponse = { intentId, ...parsed, linkedAt: now().toISOString() };
-    state.intentContexts.set(intentId, link);
+    t.intentContexts.set(intentId, link);
     return c.json(link, 201);
   });
   api.get("/intents/:intentId/context", (c) => {
-    const link = state.intentContexts.get(Number(c.req.param("intentId")));
+    const link = tenant(c).intentContexts.get(Number(c.req.param("intentId")));
     return link === undefined ? fail(c, 404, "not_found", "No linked context.") : c.json(link);
   });
 
   api.post("/plans", async (c) => {
+    const t = tenant(c);
     const parsed = await body(c, postPlanRequestSchema);
     if (parsed instanceof Response) return parsed;
-    const existing = state.plans.get(parsed.planId);
+    const existing = t.plans.get(parsed.planId);
     if (existing !== undefined) return c.json({ planId: existing.planId, storedAt: existing.storedAt });
     const storedAt = now().toISOString();
-    state.plans.set(parsed.planId, { ...parsed, storedAt });
+    t.plans.set(parsed.planId, { ...parsed, storedAt });
     return c.json({ planId: parsed.planId, storedAt }, 201);
   });
 
   api.post("/policy-change-requests", async (c) => {
+    const t = tenant(c);
     const parsed = await body(c, postPolicyChangeRequestSchema);
     if (parsed instanceof Response) return parsed;
     const request: PolicyChangeRequest = {
@@ -217,65 +371,89 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
       resolvedAt: null,
       appliedTxHash: null,
     };
-    state.changeRequests.set(request.id, request);
+    t.changeRequests.set(request.id, request);
     return c.json(request, 201);
   });
   api.get("/policy-change-requests/:id", (c) => {
-    const request = state.changeRequests.get(c.req.param("id"));
+    const request = tenant(c).changeRequests.get(c.req.param("id"));
     return request === undefined ? fail(c, 404, "not_found", "No such request.") : c.json(request);
   });
 
   api.put("/pairing", async (c) => {
+    const t = tenant(c);
     const parsed = await body(c, putPairingRequestSchema);
     if (parsed instanceof Response) return parsed;
     const isContractAgent = (await options.isContractAgent?.(parsed.agentAddress)) ?? false;
     const keep =
-      state.pairing !== null &&
-      state.pairing.agentAddress.toLowerCase() === parsed.agentAddress.toLowerCase();
-    state.pairing = {
+      t.pairing !== null && t.pairing.agentAddress.toLowerCase() === parsed.agentAddress.toLowerCase();
+    t.pairing = {
       agentAddress: parsed.agentAddress,
       agentName: parsed.agentName,
-      status: keep && state.pairing !== null ? state.pairing.status : "pending",
+      status: keep && t.pairing !== null ? t.pairing.status : "pending",
       claimUrl: `${publicUrl}/agents/claim/${parsed.agentAddress.toLowerCase()}`,
       isContractAgent,
     };
-    return c.json(state.pairing);
+    return c.json(t.pairing);
   });
   api.get("/pairing", async (c) => {
-    if (state.pairing === null) return fail(c, 404, "not_found", "The agent has not asked to pair.");
-    state.pairing.isContractAgent =
-      (await options.isContractAgent?.(state.pairing.agentAddress)) ?? state.pairing.isContractAgent;
-    return c.json(state.pairing);
+    const t = tenant(c);
+    if (t.pairing === null) return fail(c, 404, "not_found", "The agent has not asked to pair.");
+    t.pairing.isContractAgent =
+      (await options.isContractAgent?.(t.pairing.agentAddress)) ?? t.pairing.isContractAgent;
+    return c.json(t.pairing);
   });
 
   api.put("/signal-payments/:receiptId", async (c) => {
     if (!signalRoutes) return c.notFound();
+    const t = tenant(c);
     const receiptId = c.req.param("receiptId").toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(receiptId)) {
       return fail(c, 422, "invalid_parameter", "The receipt id must be a 0x-prefixed 32-byte hex string.");
     }
     const parsed = await body(c, putSignalPaymentRequestSchema);
     if (parsed instanceof Response) return parsed;
-    const existing = state.signalPayments.get(receiptId);
+    const existing = t.signalPayments.get(receiptId);
     if (existing !== undefined) return c.json({ receiptId, recordedAt: existing.recordedAt });
     const recordedAt = now().toISOString();
-    state.signalPayments.set(receiptId, { ...parsed, recordedAt });
+    t.signalPayments.set(receiptId, { ...parsed, recordedAt });
     return c.json({ receiptId, recordedAt }, 201);
   });
 
   api.put("/signal-budget", async (c) => {
     if (!signalRoutes) return c.notFound();
+    const t = tenant(c);
     const parsed = await body(c, putSignalBudgetRequestSchema);
     if (parsed instanceof Response) return parsed;
-    if (state.signalBudget === null || Date.parse(parsed.asOf) >= Date.parse(state.signalBudget.asOf)) {
-      state.signalBudget = { ...parsed, storedAt: now().toISOString() };
+    if (t.signalBudget === null || Date.parse(parsed.asOf) >= Date.parse(t.signalBudget.asOf)) {
+      t.signalBudget = { ...parsed, storedAt: now().toISOString() };
     }
-    return c.json(state.signalBudget);
+    return c.json(t.signalBudget);
+  });
+
+  // Signs as an agent whose key this console holds: only `proposeTrade` to its own contract.
+  api.post("/signer/transactions", async (c) => {
+    const agent = agentFor(c);
+    const parsed = await body(c, signTransactionRequestSchema);
+    if (parsed instanceof Response) return parsed;
+    if (agent.privateKey === null || agent.contract === null) {
+      return fail(
+        c,
+        409,
+        "no_key",
+        "The console holds no key for this agent, or its mandate has no contract.",
+      );
+    }
+    const refusal = agentTransactionRefusal(parsed.transaction, agent.contract);
+    if (refusal !== null) return fail(c, 422, "refused", `Not signed: ${refusal}.`);
+    const signed = await privateKeyToAccount(agent.privateKey).signTransaction(
+      fromUnsignedTransaction(parsed.transaction),
+    );
+    return c.json({ signed });
   });
 
   api.get("/settlements", (c) =>
     c.json({
-      settlements: [...state.settlements.values()].sort(
+      settlements: [...tenant(c).settlements.values()].sort(
         (a, b) => b.storedAt.localeCompare(a.storedAt) || b.intentId - a.intentId,
       ),
     }),
@@ -338,6 +516,43 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     },
     setSignalRoutes: (served) => {
       signalRoutes = served;
+    },
+    addAgent: (agentOptions = {}) => {
+      const agentId = `agt_${base32(26)}`;
+      const address =
+        agentOptions.privateKey === undefined ? null : privateKeyToAccount(agentOptions.privateKey).address;
+      const record: AgentRecord = {
+        agentId,
+        workspaceId: `wsp_${base32(26)}`,
+        mandateId: `mnd_${base32(26)}`,
+        address,
+        signer: "console",
+        deployment: agentOptions.contract === undefined ? null : "env",
+        privateKey: agentOptions.privateKey ?? null,
+        contract: agentOptions.contract ?? null,
+        state: newState(),
+      };
+      agents.set(agentId, record);
+      const issued = issueToken(agentId);
+      return {
+        agentId,
+        workspaceId: record.workspaceId,
+        mandateId: record.mandateId,
+        token: issued.token,
+        tokenId: issued.tokenId,
+        address,
+        state: record.state,
+      };
+    },
+    issueToken,
+    revokeToken: (token) => {
+      const record = tokens.get(hashAgentToken(token));
+      if (record !== undefined) record.revoked = true;
+    },
+    stateOf: (agentId) => {
+      const agent = agents.get(agentId);
+      if (agent === undefined) throw new Error(`no agent ${agentId}`);
+      return agent.state;
     },
   };
 }

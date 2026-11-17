@@ -21,6 +21,8 @@ import {
   chainExplorerTxUrl,
   devchain,
   PolicyClient,
+  signerAccount,
+  type AgentSigner,
   type Capabilities,
   type Intent,
   type IntentView,
@@ -167,8 +169,11 @@ export class ChainAgentPolicy implements AgentPolicy {
   }
 }
 
-/** The policy service for this configuration, or undefined when no Policy contract is configured. */
-export function createAgentPolicy(config: Config): AgentPolicy | undefined {
+/**
+ * The policy service for this configuration, or undefined when no Policy contract is configured. It signs
+ * with `signer` when one is given (an agent key the console holds), else with `AGENT_PRIVATE_KEY`.
+ */
+export function createAgentPolicy(config: Config, signer?: AgentSigner): AgentPolicy | undefined {
   if (config.policyAddress === undefined) return undefined;
   const rpcUrl = config.arcRpcUrl.reveal();
   const local = isLoopback(rpcUrl);
@@ -176,10 +181,13 @@ export function createAgentPolicy(config: Config): AgentPolicy | undefined {
   const transport = http(rpcUrl, { timeout: 10_000, retryCount: 1, fetchFn: scopedFetch });
   const publicClient = createPublicClient({ chain, transport, pollingInterval: local ? 100 : 1_000 });
   const key = config.agentPrivateKey;
-  const walletClient =
-    key === undefined
-      ? undefined
-      : createWalletClient({ chain, transport, account: privateKeyToAccount(key.reveal()) });
+  const account =
+    signer !== undefined
+      ? signerAccount(signer)
+      : key === undefined
+        ? undefined
+        : privateKeyToAccount(key.reveal());
+  const walletClient = account === undefined ? undefined : createWalletClient({ chain, transport, account });
   return new ChainAgentPolicy({
     policyAddress: config.policyAddress,
     publicClient,

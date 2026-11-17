@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Client } from "@modelcontextprotocol/client";
 import { createMandateServer, type MandateServer } from "../src/app";
-import { captureLogs, connectClient, fixedClock } from "./helpers";
+import { captureLogs, connectClient, fixedClock, testResolver } from "./helpers";
 import { harness, ladderSymbol } from "./fakes";
 
 const clients: Client[] = [];
@@ -20,6 +20,7 @@ function server(): { server: MandateServer; lines: string[]; h: ReturnType<typeo
   const { policy, markets, planner, console: consoleClient } = h.app;
   const built = createMandateServer(h.ctx.config, logger, {
     clock: fixedClock,
+    resolver: testResolver(),
     services: { policy, markets, planner, console: consoleClient },
   });
   return { server: built, lines, h };

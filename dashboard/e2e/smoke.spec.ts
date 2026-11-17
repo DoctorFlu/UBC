@@ -13,7 +13,7 @@ import { describeMarket } from "../src/lib/markets";
 
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
-import { DEMO_RECEIPT, reportSignalBudget, snapshot } from "./support/console";
+import { DEMO_RECEIPT, ownerHeaders, reportSignalBudget, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
 
 const ADVANCED_COOKIE = "mandate-advanced";
@@ -190,6 +190,7 @@ test.describe("seeded demo", () => {
     const market = (await (
       await fetch(
         `${baseURL ?? ""}/api/console/hedge/market?asset=${stored.asset}&event=${stored.plan.eventTicker}`,
+        { headers: ownerHeaders(baseURL ?? "") },
       )
     ).json()) as HedgeMarketResponse;
     if (!market.quotes) throw new Error("the fake Gemini served no ladder");
@@ -205,7 +206,13 @@ test.describe("seeded demo", () => {
     expect(cover.assessment.heldPayoutCents).toBeGreaterThan(0);
     expect(cover.assessment.state).not.toBe("nothing_to_cover");
 
+    // Cover is measured once the page's own quotes arrive, which it asks for after it hydrates: wait for
+    // that answer, not a fixed time, so a busy machine cannot run the check out before the page asks.
+    const quotesArrive = () =>
+      page.waitForResponse((response) => new URL(response.url()).pathname === "/api/console/hedge/market");
+    let quotes = quotesArrive();
     await page.goto("/hedge");
+    await quotes;
     const card = page.getByTestId("cover-now");
     await expect(card).toHaveAttribute("data-state", cover.assessment.state);
     const settles = stored.plan.rungs[0]?.instrumentSymbol ?? "";
@@ -216,7 +223,9 @@ test.describe("seeded demo", () => {
     // The numbers per strike are Advanced detail.
     await expect(card.getByRole("table")).toHaveCount(0);
     await context.addCookies([{ name: "mandate-advanced", value: "on", url: baseURL ?? "" }]);
+    quotes = quotesArrive();
     await page.reload();
+    await quotes;
     await expect(card.getByRole("table", { name: /Cover per strike/ }).locator("tbody tr")).toHaveCount(
       cover.assessment.rungs.length,
     );
@@ -379,23 +388,26 @@ test.describe("seeded demo", () => {
     await expect(intents.nth(1)).toContainText("No result recorded yet.");
     await expect(intents.nth(0).getByRole("button", { name: "Copy transaction" })).toHaveCount(3);
 
-    // Each link opens its record: the intent, the payment row, and the plan on the hedge page.
+    // Each link opens its record: the intent, the payment row, and the plan on the hedge page. Each step
+    // waits for its navigation, not a fixed time, so a busy machine cannot run a check out mid-load.
     await intents
       .nth(0)
       .getByRole("link", { name: `Intent #${filled.id.toString()}`, exact: true })
       .click();
+    await page.waitForURL(new RegExp(`/activity/${filled.id.toString()}$`));
     await expect(
       page.getByRole("heading", { level: 1, name: `Intent #${filled.id.toString()}` }),
     ).toBeVisible();
     // ...and the intent page leads back to the chain of the plan its reason names.
     await page.getByTestId("sealed-reason").getByRole("link", { name: stored.planId }).click();
+    await page.waitForURL(/\/hedge\/plans\//);
     await expect(page.getByRole("heading", { level: 1, name: "Evidence chain" })).toBeVisible();
     await signal.getByRole("link", { name: "Payment record" }).click();
-    await expect(page).toHaveURL(new RegExp(`/payments#payment-${DEMO_RECEIPT}$`));
+    await page.waitForURL(new RegExp(`/payments#payment-${DEMO_RECEIPT}$`));
     await expect(page.locator(`#payment-${DEMO_RECEIPT}`)).toBeVisible();
     await page.goBack();
     await page.getByTestId("evidence-plan").getByRole("link", { name: "Hedge page" }).click();
-    await expect(page).toHaveURL(/\/hedge\?asset=BTC$/);
+    await page.waitForURL(/\/hedge\?asset=BTC$/);
     await expect(page.getByTestId("agent-plan")).toHaveAttribute("data-plan-id", stored.planId);
   });
 

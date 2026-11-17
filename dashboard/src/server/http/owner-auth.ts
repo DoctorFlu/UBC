@@ -10,17 +10,19 @@ import {
   ownerRequestMessage,
 } from "@/lib/owner-request";
 
-import type { ConsoleService } from "../console-service";
+import type { ConsoleService, MandateScope } from "../console-service";
 import { type Parsed, apiError, readBody } from "./responses";
 
 /**
  * Reads an owner-signed request: `{ payload, auth: { issuedAt, nonce, signature } }`. The payload must
- * match `payloadSchema`, the signature must recover to the Policy contract's `user()` over the message
- * `ownerRequestMessage` builds, the time must be recent and the nonce unused.
+ * match `payloadSchema`, the signature must recover to the `user()` of the mandate's Policy contract over
+ * the message `ownerRequestMessage` builds, the time must be recent and the nonce unused. The session
+ * decides which mandate; the signature proves the owner of that mandate's contract approved.
  */
 export async function readOwnerRequest<T>(
   request: Request,
   service: ConsoleService,
+  mandate: MandateScope,
   action: OwnerAction,
   payloadSchema: z.ZodType<T>,
   now: () => number = Date.now,
@@ -33,9 +35,11 @@ export async function readOwnerRequest<T>(
   if (Math.abs(now() - issued) > OWNER_REQUEST_MAX_AGE_MS) {
     return fail(401, "stale_signature", "The signature is too old. Sign the request again.");
   }
-  const address = service.policyAddress;
-  const roles = await service.currentRoles();
-  if (!address || !roles) {
+  if (mandate.deployment === null) {
+    return fail(409, "no_contract", "This mandate has no Policy contract yet, so it has no owner to sign.");
+  }
+  const chain = await service.chainFor(mandate);
+  if (!chain) {
     return fail(
       503,
       "chain_unavailable",
@@ -45,12 +49,12 @@ export async function readOwnerRequest<T>(
   const message = ownerRequestMessage({
     action,
     payload,
-    policyAddress: address,
-    chainId: service.snapshot().network.chainId,
+    policyAddress: chain.policy.address,
+    chainId: chain.chainId,
     issuedAt: auth.issuedAt,
     nonce: auth.nonce,
   });
-  const valid = await service.verifyOwnerSignature(roles.user, message, auth.signature as Hex);
+  const valid = await service.verifyOwnerSignature(chain.roles.user, message, auth.signature as Hex);
   if (!valid) {
     return fail(403, "not_owner", "Only the wallet that owns the Policy contract can do this.");
   }

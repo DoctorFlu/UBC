@@ -27,7 +27,7 @@ export interface HealthResponse {
  * the reason, naming the settings, goes to the console's log, not to the public answer.
  */
 export function health(
-  service: Pick<ConsoleService, "snapshot">,
+  service: Pick<ConsoleService, "feedHealth">,
   marketData: () => Pick<MarketDataSource, "environment">,
 ): Response {
   let marketEnvironment: GeminiEnvironment;
@@ -41,6 +41,6 @@ export function health(
       "The console's Gemini settings contradict each other; its log names them.",
     );
   }
-  const body: HealthResponse = { status: "ok", feed: service.snapshot().feed.health, marketEnvironment };
+  const body: HealthResponse = { status: "ok", feed: service.feedHealth, marketEnvironment };
   return json(body);
 }

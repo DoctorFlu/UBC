@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { localhostAllowedOrigins, originValidationResponse } from "@modelcontextprotocol/server";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -7,15 +7,20 @@ import type { AppContext } from "../context";
 import { scrubText } from "../logger";
 import { runInRequestScope, type McpEndpoint } from "../mcp/server";
 import { SERVER_NAME, SERVER_VERSION } from "../version";
-import { isAuthorized } from "./auth";
-import { TokenBucketLimiter } from "./rate-limit";
+import type { AgentContexts } from "../tenancy/agents";
+import type { TokenResolver } from "../tenancy/resolver";
+import { bearerToken } from "./auth";
+import { clientKey, TokenBucketLimiter } from "./rate-limit";
 
 export interface HttpEnv {
-  Variables: { requestId: string };
+  Variables: { requestId: string; agent: AppContext; tokenId: string };
 }
 
-/** Failed authentication attempts share one bucket, so a flood of bad tokens is cheap to answer. */
-const FAILED_AUTH_LIMIT = { capacity: 30, refillPerSecond: 0.5 };
+/**
+ * Failed bearer tokens, per client (one bucket for all without a trusted proxy). It is checked before the
+ * console is asked, so a flood of bad tokens is cheap to answer and never reaches the console.
+ */
+export const FAILED_AUTH_LIMIT = { capacity: 30, refillPerSecond: 0.5 };
 
 function jsonRpcError(c: Context, status: ContentfulStatusCode, code: number, message: string, headers = {}) {
   return c.json({ jsonrpc: "2.0", error: { code, message }, id: null }, status, headers);
@@ -62,19 +67,22 @@ function clientInfoOf(body: unknown): string | undefined {
 /**
  * The HTTP surface:
  * - `GET /health`: no auth, status and version only.
- * - `POST /mcp`: Origin check, bearer auth, body limit, a rate limit on tool calls, then the MCP
- *   endpoint.
+ * - `POST /mcp`: Origin check, bearer auth (the console says which agent the token acts for), body
+ *   limit, a rate limit on tool calls per token, then the MCP endpoint in that agent's context.
  *   Other methods on `/mcp` get 405 because the server is stateless and never streams.
  * - Everything else: 404.
  */
-export function createHttpApp(app: AppContext, endpoint: McpEndpoint): Hono<HttpEnv> {
+export function createHttpApp(
+  app: AppContext,
+  endpoint: McpEndpoint,
+  tenancy: { resolver: TokenResolver; agents: AgentContexts },
+): Hono<HttpEnv> {
   const { config, logger } = app;
   const http = new Hono<HttpEnv>();
   const allowedOrigins = [...localhostAllowedOrigins(), ...config.allowedOrigins];
+  // Tool calls are limited per token, keyed by the token's id from the console, never by the token.
   const limiter = new TokenBucketLimiter(config.limits.rateLimit);
   const failedAuthLimiter = new TokenBucketLimiter(FAILED_AUTH_LIMIT);
-  // Rate limits are per bearer token. Key the bucket by a hash so the token never sits in a map key.
-  const tokenKey = createHash("sha256").update(config.authToken.reveal()).digest("hex").slice(0, 16);
 
   http.use("*", async (c, next) => {
     const requestId = randomUUID();
@@ -106,16 +114,55 @@ export function createHttpApp(app: AppContext, endpoint: McpEndpoint): Hono<Http
       await next();
     },
     async (c, next) => {
-      if (isAuthorized(c.req.header("authorization"), config.authToken)) {
-        await next();
-        return;
+      const requestId = c.get("requestId");
+      const client = clientKey(c.req.raw, config.trustProxy);
+      const tooMany = (retryAfter: number) =>
+        jsonRpcError(c, 429, -32000, "Too many requests", { "Retry-After": String(retryAfter) });
+      const refuse = () => {
+        const retryAfter = failedAuthLimiter.take(client);
+        if (retryAfter > 0) return tooMany(retryAfter);
+        logger.warn("http.unauthorized", { requestId });
+        return c.json({ error: "unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
+      };
+      // A client that has spent its failed attempts waits without the console being asked at all.
+      const blocked = failedAuthLimiter.peek(client);
+      if (blocked > 0) return tooMany(blocked);
+      const token = bearerToken(c.req.header("authorization"));
+      if (token === undefined) return refuse();
+
+      // Its own bound (`RESOLVE_TIMEOUT_MS`): the tool call's deadline starts only after it.
+      const lookupStarted = performance.now();
+      const resolution = await tenancy.resolver.resolve(token, c.req.raw.signal);
+      switch (resolution.kind) {
+        case "agent":
+          c.set("agent", tenancy.agents.contextFor(resolution.agent));
+          c.set("tokenId", resolution.agent.tokenId);
+          await next();
+          return undefined;
+        case "unknown":
+          return refuse();
+        case "limited":
+          return tooMany(resolution.retryAfter);
+        case "unavailable":
+          // Fail closed: without the console's answer no token is accepted, not even the env-file one.
+          logger.warn("http.auth_unavailable", {
+            requestId,
+            reason: resolution.reason,
+            ...(resolution.timedOut === true ? { timedOut: true } : {}),
+            durationMs: Math.round(performance.now() - lookupStarted),
+          });
+          return jsonRpcError(
+            c,
+            503,
+            -32000,
+            resolution.timedOut === true
+              ? "The MCP server could not check the token in time: the console did not answer. Try again shortly."
+              : "The MCP server cannot check tokens right now. Try again shortly.",
+            {
+              "Retry-After": "5",
+            },
+          );
       }
-      const retryAfter = failedAuthLimiter.take("unauthenticated");
-      if (retryAfter > 0) {
-        return jsonRpcError(c, 429, -32000, "Too many requests", { "Retry-After": String(retryAfter) });
-      }
-      logger.warn("http.unauthorized", { requestId: c.get("requestId") });
-      return c.json({ error: "unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
     },
     async (c, next) => {
       if (c.req.method !== "POST") {
@@ -138,7 +185,7 @@ export function createHttpApp(app: AppContext, endpoint: McpEndpoint): Hono<Http
       // Grok Bot spends three or four protocol requests (initialize, notifications, a GET probe)
       // on every call; charging those would cut its real budget to a quarter.
       for (let calls = toolCallCount(body); calls > 0; calls -= 1) {
-        const retryAfter = limiter.take(tokenKey);
+        const retryAfter = limiter.take(c.get("tokenId"));
         if (retryAfter > 0) {
           logger.warn("http.rate_limited", { requestId: c.get("requestId"), retryAfter });
           return jsonRpcError(c, 429, -32000, "Too many requests", { "Retry-After": String(retryAfter) });
@@ -146,7 +193,7 @@ export function createHttpApp(app: AppContext, endpoint: McpEndpoint): Hono<Http
       }
       const request = c.req.raw;
       const response = await runInRequestScope(
-        { requestId: c.get("requestId"), signal: request.signal },
+        { requestId: c.get("requestId"), signal: request.signal, app: c.get("agent") },
         () => endpoint.handle(request, body),
       );
       // Which protocol step this was and how large the answer is. Without it, a client that lists

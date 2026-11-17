@@ -38,6 +38,14 @@ export function shieldCurrentScope(bound?: AbortSignal): void {
   if (current !== undefined) current.signal = bound;
 }
 
+/**
+ * The signal of the policy call in progress, for requests made inside it that are not RPC requests
+ * (the console signing an agent's proposal); undefined outside a call, or once shielded without a bound.
+ */
+export function currentScopeSignal(): AbortSignal | undefined {
+  return scope.getStore()?.signal;
+}
+
 /** `fetch` for viem's http transport that honours the current scope's signal. */
 export function scopedFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   const signal = scope.getStore()?.signal;

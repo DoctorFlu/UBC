@@ -1,8 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import { suitePaths } from "./e2e/support/chain";
-import { E2E_SERVICE_TOKEN } from "./e2e/support/console";
+import { E2E_MASTER_KEY, E2E_SERVICE_TOKEN } from "./e2e/support/console";
 import { SUITE_GEMINI_PORT } from "./e2e/support/fake-gemini";
+import { ownerStatePath } from "./e2e/support/session";
 
 /**
  * Headless Chromium only. Install it once with `npx playwright install chromium`.
@@ -32,6 +33,8 @@ const prod = process.env.E2E_SERVER === "prod";
 const live = process.env.E2E_SUITE === "live";
 const suite = prod ? "screenshots" : "smoke";
 const paths = suitePaths(suite);
+/** The owner's session, which the warm-up saves when it claims the first workspace (e2e/support/session.ts). */
+const owner = ownerStatePath(baseURL);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -47,9 +50,9 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "smoke", testMatch: /(smoke|shell|icons)\.spec\.ts/ },
-    { name: "screenshots", testMatch: /screenshots\.spec\.ts/ },
-    { name: "prod", testMatch: /prod\.spec\.ts/ },
+    { name: "smoke", testMatch: /(smoke|shell|icons|accounts)\.spec\.ts/, use: { storageState: owner } },
+    { name: "screenshots", testMatch: /screenshots\.spec\.ts/, use: { storageState: owner } },
+    { name: "prod", testMatch: /prod\.spec\.ts/, use: { storageState: owner } },
     // One worker: each spec starts its own `next dev` on this folder's `.next`, so they run one after the other.
     { name: "live", testMatch: /(live|wake)\.spec\.ts/, timeout: 240_000, workers: 1 },
   ],
@@ -91,6 +94,8 @@ export default defineConfig({
             POLICY_DEPLOYMENT_FILE: paths.deploymentFile,
             CONSOLE_DATA_DIR: paths.dataDir,
             CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
+            // The production build runs as production: it needs a master key, and sign-up needs an invite.
+            CONSOLE_MASTER_KEY: E2E_MASTER_KEY,
             CONSOLE_URL: baseURL,
             MCP_PUBLIC_URL: "https://mcp.example.test/mcp",
             // Never the real Gemini: the suite's quotes come from recorded responses.

@@ -21,7 +21,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../test/support/devchain";
-import type { ConsoleConfig } from "./config";
+import { envMandate } from "../../test/support/accounts";
+import { type ConsoleConfig, testConsoleConfig } from "./config";
 import { ConsoleService } from "./console-service";
 import { openDatabase } from "./db";
 import { putSettlement } from "./http/executor-api";
@@ -35,16 +36,11 @@ const EXPIRED_AT = new Date(Math.floor(Date.now() / 60_000) * 60_000 - 60_000).t
 const RESOLVED_AT = new Date(Date.parse(EXPIRED_AT) + 8_232).toISOString();
 
 function config(dataDir: string): ConsoleConfig {
-  return {
-    dataDir,
-    eventSource: "rpc",
+  return testConsoleConfig(dataDir, {
     pollIntervalMs: 50,
-    serviceToken: null,
-    streamSecurityToken: null,
     publicUrl: "http://localhost:3000",
-    mcpPublicUrl: null,
     wake: { target: new WakeTarget(SECRET_URL, KEY), offReason: null, dailyCap: 6, priceCheckMs: 60_000 },
-  };
+  });
 }
 
 describe("the settlement wake-up", () => {
@@ -104,7 +100,7 @@ describe("the settlement wake-up", () => {
   async function untilExecuted(): Promise<void> {
     const deadline = Date.now() + 20_000;
     while (Date.now() < deadline) {
-      const intents = service.snapshot().chain?.intents ?? [];
+      const intents = service.snapshot(envMandate(service)).chain?.intents ?? [];
       if (ids.every((id) => intents.find((intent) => intent.id === id)?.status === "executed")) return;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -184,6 +180,8 @@ describe("the settlement wake-up", () => {
     service.settlementStored(LADDER);
     await service.wake.settled();
     expect(bodies).toHaveLength(1);
-    expect(service.snapshot().wake.recent.map((wake) => wake.kind)).toEqual(["ladder_settled"]);
+    expect(service.snapshot(envMandate(service)).wake.recent.map((wake) => wake.kind)).toEqual([
+      "ladder_settled",
+    ]);
   });
 });

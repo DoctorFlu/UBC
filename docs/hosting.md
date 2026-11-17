@@ -11,11 +11,11 @@ Everything is in [`deploy/`](../deploy).
 
 | Container | What it is | Public |
 | --- | --- | --- |
-| `caddy` | TLS and routing for one hostname, and the owner's login. | ports 80 and 443, or one high port in gateway mode |
-| `console` | The owner's console (Next.js, standalone build). | through Caddy |
+| `caddy` | TLS and routing for one hostname; it asks the console whether a request has a session. | ports 80 and 443, or one high port in gateway mode |
+| `console` | The console (Next.js, standalone build): workspaces, passkey sign-in, and each workspace's mandate. | through Caddy |
 | `mcp` | The MCP server Grok Bot connects to. | `/mcp` through Caddy |
 | `signals` | The x402 signal API. Only the MCP server calls it. | no |
-| `anvil` | Demo chain only: a local chain with Arc's chain id 5042002. | `/rpc`, behind the owner's login |
+| `anvil` | Demo chain only: a local chain with Arc's chain id 5042002. | `/rpc`, for members of the first workspace only |
 | `chain-init` | Demo chain only: deploys the Policy contract once, then exits. | no |
 | `executor` | Demo chain only: the simulated executor, which records fills without placing orders. | no |
 
@@ -36,24 +36,27 @@ Two optional files go after the chain's:
 
 ### Routes and who may use them
 
-Caddy denies by default: every path that is not listed as public needs the owner's login.
+Caddy denies by default: every path that is not listed as public needs a signed-in member of a workspace.
 The rules are in one file, [`deploy/caddy/app-routes.caddy`](../deploy/caddy/app-routes.caddy), which both the HTTPS `Caddyfile` and the gateway's `Caddyfile.gateway` import.
+How workspaces, passkeys, sessions and agent tokens work is in [accounts.md](accounts.md).
 
 | Path | Who | Check |
 | --- | --- | --- |
-| `/mcp` | Grok Bot | The MCP server's own bearer token (`MCP_AUTH_TOKEN`). |
+| `/mcp` | Grok Bot | A bearer agent token. The MCP server asks the console which agent it belongs to, on every call, and acts for that agent's mandate only. |
 | `/mcp/health` | anyone | None; it says only that the server is up. |
 | `/api/webhooks/quicknode` | QuickNode | The console verifies QuickNode's HMAC signature and refuses stale or unsigned deliveries. |
+| `/sign-in`, `/sign-up`, `/claim`, `/recover` and `/api/auth/*` | anyone | The way to a session: passkeys, invite, claim and recovery codes, each rate limited by the console. |
 | `/agent/<address>` and its scripts under `/_next/static/` | anyone | None; this is the public scorecard, and it links to nothing private. |
 | `/api/health` | anyone | None; it reports only `ok` and the feed's health. |
 | `/api/agent/*` | nobody | Answers 404 publicly. The MCP server reaches it inside the Docker network with `CONSOLE_SERVICE_TOKEN`. |
-| `/rpc` (demo chain only) | the owner | The owner's login. It forwards to anvil, so the browser's test signer can send transactions. |
-| everything else (pages, `/api/console/*`) | the owner | The owner's login (HTTP basic auth over HTTPS). |
+| `/rpc` (demo chain only) | members of the first workspace | A session in the workspace that holds the demo chain's mandate. It forwards to anvil, so the browser's test signer can send transactions. |
+| everything else (pages, `/api/console/*`) | members | A session. Caddy asks the console (`forward_auth` to `/api/auth/forward`), and the console checks it again and shows each member their own workspace only. |
 
-Until the owner sets a password, `CONSOLE_PASSWORD_HASH` is empty and compose uses the base64 of the sentence `locked: run deploy/set-console-password.sh`, which is not a bcrypt hash, so no password can match it: every owner route answers 401 to everyone while the rest of the stack runs.
-The owner's login is needed because the console's pages and read APIs show holdings, hedge plans and decision contexts, and on the demo chain the owner's key is public, so wallet signatures alone prove nothing there.
-Caddy strips the login header before the request reaches the console.
-A browser request from another site (`Sec-Fetch-Site: cross-site` or `same-site`) to an owner route is refused unless it is a plain page navigation, so another site cannot use a logged-in browser to make changes.
+A page opened without a session is sent to `/sign-in`, and an API request gets 401; nothing asks the browser for a password.
+Members are needed because the console's pages and read APIs show holdings, hedge plans and decision contexts, and on the demo chain the owner's key is public, so wallet signatures alone prove nothing there.
+A browser request from another site (`Sec-Fetch-Site: cross-site` or `same-site`) is refused unless it is a plain page navigation, and the console also checks the `Origin` of every write, so another site cannot use a signed-in browser to make changes.
+The stock Caddy image has no rate limiter, so the limits on sign-in, sign-up, claim and recovery codes, and failed agent tokens are in the console and the MCP server.
+They key on the client's address, which Caddy appends to `X-Forwarded-For` (`CONSOLE_TRUST_PROXY` and `MCP_TRUST_PROXY`, both set by compose).
 
 The signal API is not routed at all.
 Only the MCP server buys signals, it reaches the API inside the Docker network, and x402 settlement goes through Circle Gateway with no callback to this host.
@@ -66,7 +69,7 @@ Compose prefixes each name with the project name, `mandate`.
 
 | Volume | Files | Used by |
 | --- | --- | --- |
-| `mandate_console-data` | `console.sqlite` (with its `-wal` and `-shm`): event cache, holdings, decision contexts, hedge plans, pairing, change requests, signal payments. | `console` |
+| `mandate_console-data` | `console.sqlite` (with its `-wal` and `-shm`): workspaces, members, passkeys, sessions, agent tokens (as hashes) and the agents' keys (sealed with `CONSOLE_MASTER_KEY`), and each mandate's event cache, holdings, decision contexts, hedge plans, pairing, change requests and signal payments. | `console` |
 | `mandate_agent-data` | The MCP server's signal spend ledger and purchased signals. | `mcp` |
 | `mandate_chain` (demo chain only) | `anvil-state.json`, the chain itself, saved every 60 seconds (`ANVIL_STATE_INTERVAL`) and on shutdown, and `deployment.json`, the contract the other services use. | `anvil`, `chain-init`; read only for `console`, `mcp`, `executor` |
 | `mandate_caddy-data` | The HTTPS certificate and its key, and Caddy's account with Let's Encrypt. | `caddy` |
@@ -136,12 +139,10 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 git clone https://github.com/DoctorFlu/UBC.git mandate
 cd mandate/deploy
 ./init-env.sh
-./set-console-password.sh
 ```
 
-`init-env.sh` copies [`mandate.env.template`](../deploy/mandate.env.template) to `deploy/.env` with mode 600, and fills `MCP_AUTH_TOKEN` and `CONSOLE_SERVICE_TOKEN` with fresh random values without printing them.
-`set-console-password.sh` asks twice for the owner's console password (at least 16 characters) and stores only its bcrypt hash, as `CONSOLE_PASSWORD_HASH`.
-Keep the password in a password manager; the host never stores it.
+`init-env.sh` copies [`mandate.env.template`](../deploy/mandate.env.template) to `deploy/.env` with mode 600, and fills `MCP_AUTH_TOKEN`, `CONSOLE_SERVICE_TOKEN` and `CONSOLE_MASTER_KEY` with fresh random values without printing them.
+`CONSOLE_MASTER_KEY` encrypts the agents' keys the console holds: keep a copy of `deploy/.env` somewhere safe, apart from the volume backups, because without the key those agent keys cannot be opened.
 
 Open `deploy/.env` in an editor and set at least:
 
@@ -159,7 +160,7 @@ pbpaste | ./set-secret.sh GROK_WEBHOOK_URL    # from the clipboard (xclip -o or 
 ./set-secret.sh GROK_WEBHOOK_KEY              # or typed or pasted at its prompt, which shows nothing
 ```
 
-It accepts only `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, `GEMINI_API_KEY` and `GEMINI_API_SECRET`; the console password has its own script, and the tokens are generated.
+It accepts only `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, `GEMINI_API_KEY` and `GEMINI_API_SECRET`; the tokens and the master key are generated.
 It drops one trailing newline and refuses an empty value, a line break or other control character, a character outside printable ASCII (a non-breaking space from a web page), a space at either end and a single quote; the URL must start with `https://`.
 It writes the line as `NAME='value'`, because docker compose would otherwise expand a `$` in the value and cut it at ` #`.
 The file is rebuilt next to itself with mode 600 and moved over the old one, so it is never half written, and a failure leaves no temporary file; run it as the file's owner, so the owner stays.
@@ -192,17 +193,29 @@ It reads its secrets from the environment and prints none of them:
 
 ```sh
 export MCP_AUTH_TOKEN="$(sed -n 's/^MCP_AUTH_TOKEN=//p' .env)"
-read -rs CONSOLE_PASSWORD && export CONSOLE_PASSWORD
 ./smoke.sh https://<host>
 ```
 
-Without `CONSOLE_PASSWORD` it checks instead that every owner route refuses everyone, and skips the checks that need the login.
-Without `MCP_AUTH_TOKEN` it skips the MCP checks that need the token, so it can run from a machine that should not hold it; set `SMOKE_AGENT_ADDRESS` to the agent's address then, for the scorecard check.
+Without `MCP_AUTH_TOKEN` it skips the MCP checks that need a token, so it can run from a machine that should not hold one; set `SMOKE_AGENT_ADDRESS` to the agent's address then, for the scorecard check.
+With `CONSOLE_SESSION`, the value of the console's session cookie copied from a signed-in browser (`read -rs CONSOLE_SESSION && export CONSOLE_SESSION`), it also checks the signed-in routes.
 
-It checks both health endpoints, that `/mcp` refuses a request without the token and answers `initialize`, `tools/list` and a read-only `whoami` call with it, that owner pages and APIs refuse a request without the login or with a wrong one, that the live event stream and a cross-site write behave, that the scorecard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs the login.
+It checks both health endpoints, that `/mcp` refuses a request without a token or with an unknown one and answers `initialize`, `tools/list` and a read-only `whoami` call with the token, that member APIs answer 401 without a session or with a wrong one and pages send the browser to `/sign-in`, that nothing asks for a password, that cross-site writes and sign-ins are refused, that the account pages, the scorecard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs a session.
+With a session it also checks the console, the snapshot, the Agents data and the live event stream.
 It ends with `All checks passed.`
 
-Open `https://<host>` in a browser and log in as `owner` (or your `CONSOLE_USER`) with the password.
+### Claim the first workspace
+
+The first workspace holds the server's own mandate: the contract from the env file, its agent and `MCP_AUTH_TOKEN`.
+Nobody can see it until it is claimed, with a one-time code that only the server prints:
+
+```sh
+docker compose exec console node dashboard/admin.mjs claim-code
+```
+
+The code works once, for 24 hours, and only its hash is stored.
+Open `https://<host>/claim` on the device that will hold your passkey, enter your name and the code, and create the passkey.
+The console then shows a recovery code once: keep it in a password manager, because it is the way back in if every passkey is lost.
+`docker compose exec console node dashboard/admin.mjs status` shows whether the workspace is claimed, and `invite` prints a one-time code that lets one more person create a workspace of their own on `/sign-up`.
 
 ## 6. Connect Grok Bot
 
@@ -211,12 +224,15 @@ In Grok Bot, open **Connect apps** and add a custom connector:
 - URL: `https://<host>/mcp`
 - Header: `Authorization` with the value `Bearer ` followed by the token.
 
-To see the token, run `sed -n 's/^MCP_AUTH_TOKEN=//p' deploy/.env` in your own terminal and copy it into Grok Bot.
+The token is either `MCP_AUTH_TOKEN`, the first workspace's agent token from the env file, or one made in the console under **Setup**, **Agents**, which shows a new token once.
+Every workspace connects its own Grok Bot with its own token, and each token reaches only its own workspace's mandate.
+To see the env file's token, run `sed -n 's/^MCP_AUTH_TOKEN=//p' deploy/.env` in your own terminal and copy it into Grok Bot.
 Never paste it into a chat, an issue or a pull request.
-The rest of the connector setup, and how to rotate the token, are in [agent/README.md](../agent/README.md#connect-grok-bot).
+Revoking a token in the Agents section stops it on its next call, `MCP_AUTH_TOKEN` included.
+The rest of the connector setup is in [agent/README.md](../agent/README.md#connect-grok-bot).
 
 The first time Grok Bot connects, it asks to pair and gives you a link to `https://<host>/setup/pair/<agent>`.
-Open it, log in, and confirm.
+Open it, sign in, and confirm.
 On the demo chain, enter a holding under **Hedge** before asking for a hedge.
 
 ## 7. QuickNode webhook (Arc testnet only)
@@ -270,6 +286,18 @@ docker compose start
 Archive each volume whole: the console's SQLite file runs in WAL mode, so `console.sqlite` alone, without its `-wal` file, can be almost empty.
 To back it up without stopping anything, as before an update that changes its schema, see [Updates that change the console's database](#updates-that-change-the-consoles-database).
 Copy the archives off the VM, together with `deploy/.env`, which holds the tokens and keys and must stay private.
+The console's archive is useless without the `CONSOLE_MASTER_KEY` that was in `deploy/.env` when it was made: it seals the agents' keys.
+
+To copy the console's database without stopping anything, use SQLite's online backup, never a plain file copy.
+The database runs in WAL mode, so recent writes may still be only in `console.sqlite-wal`, and a copy of `console.sqlite` alone can miss them:
+
+```sh
+docker compose exec console node -e 'const {DatabaseSync,backup}=require("node:sqlite");const db=new DatabaseSync(process.argv[1],{readOnly:true});backup(db,process.argv[2]).then((pages)=>{db.close();new DatabaseSync(process.argv[2]).exec("PRAGMA journal_mode=DELETE");console.log("backed up",pages,"pages")})' /data/console/console.sqlite "/data/console/backup-$(date +%F-%H%M).sqlite"
+docker compose cp "console:/data/console/backup-<date>.sqlite" ~/mandate-backups/
+```
+
+The copy is one self-contained file.
+To restore it, stop the stack, copy it into the volume as `console.sqlite`, and remove any `console.sqlite-wal` and `console.sqlite-shm` beside it.
 
 To restore, with the stack stopped (`docker compose down`), unpack each archive into its volume, then start:
 
@@ -279,7 +307,7 @@ docker run --rm -v mandate_console-data:/v -v ~/mandate-backups:/b alpine:3.20 t
 docker compose up -d
 ```
 
-Losing `mandate_console-data` loses the offchain records (holdings, contexts, plans, pairing); the console rebuilds the onchain part from the chain.
+Losing `mandate_console-data` loses the workspaces, members and passkeys, the agents' keys the console holds, and the offchain records (holdings, contexts, plans, pairing); the console rebuilds the onchain part from the chain, and the first workspace can be claimed again.
 Losing `mandate_chain` resets the demo chain; `chain-init` then deploys a new contract and the other services follow it.
 
 ## Logs
@@ -339,7 +367,8 @@ These were checked on a real machine.
 - It connects to the port on the machine's loopback interface, so Docker publishes the app on `127.0.0.1` only.
 - It rewrites `Host` to `127.0.0.1:<port>`, puts the public name in `X-Forwarded-Host`, and sets `X-Forwarded-Proto: https` and `X-Forwarded-For`.
   Caddy sets `Host` back to `MANDATE_HOST` from the env file, never from the request, and trusts the forwarded headers only from private addresses.
-- It passes `Authorization` (the owner's login and the MCP token) and the browser's `Origin` and `Sec-Fetch-*` headers unchanged, so the login and the cross-site check work as on a VM.
+- It passes `Authorization` (the agent tokens), `Cookie` (the console's session) and the browser's `Origin` and `Sec-Fetch-*` headers unchanged, so sign-in, the token check and the cross-site check work as on a VM.
+  It puts the client in `X-Forwarded-For`, and Caddy appends the proxy's private address, so the rate limits key on the client.
 - It streams responses, so the console's live events work, and it adds `X-Robots-Tag: noindex` and a few security headers of its own.
 - The console builds its links from `MANDATE_HOST` (`https://<MANDATE_HOST>`), and its redirects are relative, so pairing links and the browser's `/rpc` point at the public URL.
 
@@ -357,7 +386,7 @@ instabox get mandate        # "id" is m_<machine id>; the public names use the p
 | Path | What |
 | --- | --- |
 | `/data/mandate/repo` | The code, replaced on every update, and the built landing page in `repo/site/out`. |
-| `/data/mandate/mandate.env` | The env file, mode 600: the tokens and the owner's password hash. |
+| `/data/mandate/mandate.env` | The env file, mode 600: the tokens and the console's master key. |
 | `/data/mandate/docker` | Docker's data root: the named volumes (the console's database, the demo chain) and the containers' state. |
 | `/data/mandate/containerd` | containerd's root: Docker's images and build cache, because Docker 29 keeps images in containerd. |
 
@@ -394,14 +423,14 @@ tar -xzf mandate-src.tgz -C repo
 MANDATE_ENV_FILE=/data/mandate/mandate.env repo/deploy/init-env.sh
 ```
 
-`init-env.sh` creates the tokens on the machine; they never leave it.
+`init-env.sh` creates the tokens and the master key on the machine; they never leave it.
 In `/data/mandate/mandate.env`, set:
 
 - `COMPOSE_FILE=compose.yml:compose.demo.yml:compose.gateway.yml`;
 - `MANDATE_HOST=8080-<machine id>.instabox.tech`;
 - `X402_SELLER_ADDRESS`, the address that receives signal payments.
 
-Leave `CONSOLE_PASSWORD_HASH` empty: until the owner sets the password, every owner route refuses everyone.
+Until the first workspace is claimed, nobody can see it.
 Then build and start, which takes about 10 minutes the first time:
 
 ```sh
@@ -428,13 +457,16 @@ instabox port publish mandate 8081 --name "Mandate site"
 
 The site's origin serves only the static files: `/mcp`, `/rpc`, `/api/*` and the console's pages answer 404 there.
 
-### The owner's password
+### Claim the first workspace
 
-The owner sets it from their own terminal; the command asks twice, shows nothing, and restarts Caddy with the new hash:
+The owner prints a claim code from their own terminal; it is shown once and only its hash is stored:
 
 ```sh
-instabox ssh mandate -- -t 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-console-password.sh && cd /data/mandate/repo/deploy && docker compose --env-file /data/mandate/mandate.env up -d caddy'
+instabox ssh mandate -- 'cd /data/mandate/repo/deploy && docker compose --env-file /data/mandate/mandate.env exec console node dashboard/admin.mjs claim-code'
 ```
+
+Then open `https://8080-<machine id>.instabox.tech/claim` on the device that will hold the passkey, as in [Claim the first workspace](#claim-the-first-workspace).
+The passkey belongs to that public name, so a machine with a new id needs new passkeys.
 
 ### Secrets from other products
 
@@ -519,7 +551,7 @@ Pick a moment when nothing is scheduled to call the app, such as a Grok Bot rout
 The landing page keeps serving the previous build until Caddy is recreated, then the new one.
 
 The env file and the volumes are outside `repo`, so they are kept, and `repo.old` holds the previous version until the next update.
-The update never writes the env file, so a password the owner sets in the meantime stays.
+The update never writes the env file, so a value the owner sets in the meantime stays.
 Caddy is recreated because its configuration files are mounted one by one from `repo`: after `mv repo repo.old` a running Caddy still reads the old files (checked on the machine), so new routes would apply only at its next restart.
 Every other command in this runbook works the same way with `--env-file /data/mandate/mandate.env` added after `docker compose`.
 
@@ -627,8 +659,9 @@ The steps were first used for the update from version 5 to 6 (the `settlements` 
    Only the times in that row change (`as_of`, `stored_at` and the snapshot's `asOf`), not the amounts.
 
 If the new version misbehaves after the swap, roll back to the old images and the old `repo`.
-The old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
+After an update that only adds tables, the old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
 So the backup is restored only if the upgrade damaged the data, and restoring it loses what was written since the backup (the onchain part comes back from the chain, offchain records do not).
+An update that changes existing tables, such as [the upgrade to workspaces](#upgrade-to-workspaces-once), must restore the backup on a rollback: the old console cannot read the changed tables.
 The rollback is three blocks, and the second one is run only to restore the backup.
 
 First, put the old `repo` and the old images back:
@@ -663,6 +696,54 @@ docker compose --env-file /data/mandate/mandate.env up -d --force-recreate --no-
 The WAL and shared-memory files go with the file they belong to: a stale WAL next to the restored file would be replayed over it, so the copy runs only after they have moved.
 The container runs as the console's user (`node`, uid 1000), so the restored file has the console's owner.
 `repo.old` is gone after the next update, so a rollback is possible only until then.
+
+### Upgrade to workspaces (once)
+
+The first version with workspaces and passkeys (issue #94) changes the console's database and how everyone signs in.
+It is an update that changes the console's database, run exactly as in [Updates that change the console's database](#updates-that-change-the-consoles-database), with these differences:
+
+- **Before the build**, add the master key; `init-env.sh` adds `CONSOLE_MASTER_KEY` and leaves every other line of the env file exactly as it was:
+
+  ```sh
+  cd /data/mandate
+  MANDATE_ENV_FILE=/data/mandate/mandate.env repo/deploy/init-env.sh
+  ```
+
+  Keep a copy of `/data/mandate/mandate.env` off the machine from now on: the master key in it is the only way to open the agents' keys the console will hold.
+  The old login's settings (`CONSOLE_USER`, `CONSOLE_PASSWORD_HASH`) are no longer read and can stay where they are.
+- **The rehearsal** goes from the current version to 8, then `8 -> 8`.
+  The machine is at 7 once the Gemini venue update (#108, the venue order journal) has run, so `7 -> 8`; a machine that skipped it goes `6 -> 8`, and one that also skipped the settlements update `5 -> 8`, and their `diff` also shows those updates' new tables, empty.
+  The `diff` shows more than new empty tables, because the upgrade gives every record to the first workspace:
+  - the version line;
+  - new tables `workspaces`, `mandates` and `agents` with 1 row each, and `members`, `passkeys`, `sessions`, `recovery_codes`, `ceremonies`, `access_codes` and `agent_tokens` with 0;
+  - `holdings`, `decision_contexts`, `hedge_plans`, `policy_change_requests`, `pairings`, `intent_context_links`, `signal_payments`, `signal_budget`, `wake_deliveries`, `wake_sources` and `wake_price_memory` with the same number of rows as before and, when they have rows, a new hash, because each row gains the first mandate's id.
+
+  `policy_events`, `ingest_cursors`, `intent_details`, `market_listings`, `settlements`, `venue_orders` and `executor_venues` keep their rows and their hash: they stay keyed by deployment ([accounts.md](accounts.md#the-model)).
+  Any other change, a different row count above all, means stop.
+  The comparison after the swap shows the same tables changed, but not the rehearsal's hashes: the first workspace's ids are random, so the live upgrade gives the records another mandate id than the rehearsal did; compare the row counts.
+  It may also show rows in `access_codes`, `agent_tokens` and `sessions`, from a claim code, Grok Bot's first call with the env file's token, and a sign-in, and a new hash in `executor_venues` and `ingest_cursors`, from the executor's announcement when it starts and the console's reading of the chain.
+  `dashboard/src/server/db.test.ts` upgrades a database of the hosted schema with rows in every table, checks every count, and reads the records back through the console's stores.
+- **During the swap**, `/mcp` cannot be reached for about ten seconds: Caddy answers 502 while the MCP server restarts, then refuses connections while Caddy itself restarts (its routes changed).
+  The MCP server starts only once the console is healthy, and asks the console about every token, never guessing; if the console stops answering later, `/mcp` answers 503 with `Retry-After: 5`.
+  In the rehearsal on Docker (17 Nov 2026), Grok Bot's calls failed for 10.2 s and then worked with the env file's token on the first try.
+- **After the swap**, run the smoke test with the token as in [Smoke test](#smoke-test): Grok Bot's token from the env file is now the first workspace's agent token, and works as before.
+  Then claim the first workspace as in [Claim the first workspace](#claim-the-first-workspace-1); until then the console shows nobody its data.
+  Under **Setup**, **Agents**, the first workspace's agent lists the env file's token, with when Grok Bot last used it.
+- **Between the swap and the claim** the owner cannot sign in, and everything that does not need the owner keeps working:
+  - Grok Bot's hourly run: `/mcp` resolves the env file's token to the first workspace's agent on its first call (and registers it), and every tool works as before.
+    Only during the swap itself, about ten seconds, can `/mcp` not be reached, so swap away from the run's hour mark.
+  - The contract approves a proposal inside the mandate's rules by itself, as always, and the executor places and settles it; it keeps storing settlements and its venue order journal, the event wake-ups keep going to Grok Bot's webhook, the console keeps following the chain, and `/agent/<address>` stays public.
+  - The owner gets nothing: every console page sends them to `/sign-in`, which has no passkey yet to offer, and every `/api/console/*` request is refused with 401.
+    So no holdings change, and no pairing or change request is confirmed.
+    An intent the contract holds for the owner's approval waits, since approving is a transaction from the owner's wallet that the console's pages send; until the claim only another wallet tool could send it.
+  - A console tab left open from before the swap keeps its old page: its live stream drops when the console restarts and comes back refused, so the page shows the last data it had with the lamp on reconnecting, and a write from it fails.
+    Reloading it goes to `/sign-in`.
+    Pages of the new version go to `/sign-in` by themselves when their stream is refused.
+  - The claim ends the window: the owner then sees everything that happened in it.
+- **A rollback restores the backup**: run all three blocks of the rollback, the second one included.
+  The previous console cannot read the upgraded tables, whose rows now carry a mandate.
+  On a version 8 file it starts, but its health check, its pages and the agent API's holdings answer 500 (`no such column: id`), as the version 7 image did on Docker on 17 Nov 2026; the MCP server and Caddy wait for a healthy console, so they are not started either.
+  Passkeys made after the swap stay on their devices unused.
 
 ### Pauses and the free plan's limits
 

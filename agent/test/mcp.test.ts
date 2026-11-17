@@ -81,6 +81,7 @@ describe.each(["legacy", "auto"] as const)("MCP round trip (%s era negotiation)"
     const result = await client.callTool({ name: "whoami", arguments: {} });
     expect(result.structuredContent).toEqual({
       agentAddress: TEST_ADDRESS,
+      agent: { id: "env", mandateId: "mnd_first" },
       chain: { rpcHost: "rpc.testnet.arc.io" },
       policyAddress: TEST_POLICY,
       capabilities: { readPolicy: true, proposeTrades: true, console: false },
