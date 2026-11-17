@@ -223,11 +223,16 @@ The console keeps a slow RPC poll in stream mode, so a missed delivery is filled
 cd mandate
 git pull
 cd deploy
+./build-site.sh                                  # only with compose.site.yml
 docker compose up -d --build --remove-orphans
+docker compose up -d --force-recreate --no-deps caddy
 docker image prune -f
+docker builder prune -f --filter until=24h
 ```
 
 Compose rebuilds the images, replaces only the containers whose image or settings changed, and keeps every volume.
+Caddy's configuration files are mounted one by one, and a mounted file that is replaced (as `git pull` does) stays the old file inside a running container, so the second `up` recreates Caddy to load the new routes; it takes a second.
+The last two lines keep the disk from filling: a full build caches about 4 GB, and each build whose dependencies changed adds about as much again.
 After changing `deploy/.env`, `docker compose up -d` applies it.
 After switching `COMPOSE_FILE` between the modes, `--remove-orphans` removes the containers the new mode does not use.
 
@@ -281,14 +286,17 @@ Avoid `down -v` unless you mean to start from nothing: a new certificate counts 
 ## Landing page
 
 The landing page in `site/` is a static export, served by Caddy from its own origin so it shares no cookies or storage with the console.
-Build it with the app's public URL baked in, then add `compose.site.yml` to `COMPOSE_FILE` and apply:
+Add `compose.site.yml` to `COMPOSE_FILE`, build the site, and apply:
 
 ```sh
-NEXT_PUBLIC_APP_URL=https://<app host> npm run build -w @mandate/site   # writes site/out
+./build-site.sh
 docker compose up -d
 ```
 
-Caddy then serves `site/out` (or `MANDATE_SITE_DIR`) on a second listener, `MANDATE_SITE_ADDRESS`.
+[`build-site.sh`](../deploy/build-site.sh) builds it with Docker (the Dockerfile's `site` stage, from the same install as the console), so the host needs no Node.js; once the console has been built it takes about 10 seconds and 1.3 GB of memory.
+It bakes in three public settings from the env file: `NEXT_PUBLIC_APP_URL` (default `MANDATE_PUBLIC_URL`, else `https://<MANDATE_HOST>`), `NEXT_PUBLIC_SCORECARD_AGENT` (default the demo chain's agent) and `NEXT_PUBLIC_REPO_URL` (default empty, no source link).
+It replaces the folder's contents only when the build succeeds, and in place, so a running Caddy serves the new pages at once.
+Caddy serves `site/out` (or `MANDATE_SITE_DIR`) on a second listener, `MANDATE_SITE_ADDRESS`.
 Files under `/_next/static/` carry a content hash, so they are cached for a year; everything else is revalidated on every visit.
 Without `compose.site.yml` the stack runs without the site, whether or not `site/` exists.
 With it, the folder must exist, or Docker refuses to start Caddy.
@@ -328,18 +336,23 @@ instabox get mandate        # "id" is m_<machine id>; the public names use the p
 
 | Path | What |
 | --- | --- |
-| `/data/mandate/repo` | The code, replaced on every update. |
+| `/data/mandate/repo` | The code, replaced on every update, and the built landing page in `repo/site/out`. |
 | `/data/mandate/mandate.env` | The env file, mode 600: the tokens and the owner's password hash. |
-| `/data/mandate/docker` | Docker's data root: images, build cache and the named volumes (the console's database, the demo chain). |
+| `/data/mandate/docker` | Docker's data root: the named volumes (the console's database, the demo chain) and the containers' state. |
+| `/data/mandate/containerd` | containerd's root: Docker's images and build cache, because Docker 29 keeps images in containerd. |
 
-Move Docker's data root there once, before the first build:
+Move both there once, before the first build; the root disk is only 16 GiB and holds the system:
 
 ```sh
-sudo mkdir -p /data/mandate/docker
+sudo mkdir -p /data/mandate/docker /data/mandate/containerd
 sudo chown "$USER:$USER" /data/mandate
 echo '{ "data-root": "/data/mandate/docker" }' | sudo tee /etc/docker/daemon.json
-sudo systemctl restart docker
+sudo sed -i '1i root = "/data/mandate/containerd"' /etc/containerd/config.toml
+sudo systemctl restart containerd docker
 ```
+
+Measured with the demo chain and the landing page, `/data` holds 8.3 GB: InstaBox's own 4 GiB swap file, about 0.8 GB of images, 3.9 GB of build cache, and some 70 MB of code, volumes and settings.
+That leaves 12 GB, enough for a rebuild with new dependencies (about 4 GB more) before the update's prune step.
 
 ### Deploy
 
@@ -379,8 +392,21 @@ docker compose --env-file /data/mandate/mandate.env up -d --build
 Publish the app's port, and only that one (never anvil's 8545 or the signal API's):
 
 ```sh
-instabox port publish mandate 8080
+instabox port publish mandate 8080 --name "Mandate app"
 ```
+
+For the landing page, add `compose.site.yml` to `COMPOSE_FILE` and set `NEXT_PUBLIC_REPO_URL` (and `NEXT_PUBLIC_SCORECARD_AGENT`, for another agent) in the env file, then build it, apply, and publish its port:
+
+```sh
+MANDATE_ENV_FILE=/data/mandate/mandate.env ./build-site.sh
+docker compose --env-file /data/mandate/mandate.env up -d
+```
+
+```sh
+instabox port publish mandate 8081 --name "Mandate site"
+```
+
+The site's origin serves only the static files: `/mcp`, `/rpc`, `/api/*` and the console's pages answer 404 there.
 
 ### The owner's password
 
@@ -416,11 +442,16 @@ mv repo repo.old
 mkdir repo
 tar -xzf mandate-src.tgz -C repo
 cd repo/deploy
+MANDATE_ENV_FILE=/data/mandate/mandate.env ./build-site.sh    # only with compose.site.yml
 docker compose --env-file /data/mandate/mandate.env up -d --build --remove-orphans
+docker compose --env-file /data/mandate/mandate.env up -d --force-recreate --no-deps caddy
 docker image prune -f
+docker builder prune -f --filter until=24h
 ```
 
 The env file and the volumes are outside `repo`, so they are kept, and `repo.old` holds the previous version until the next update.
+The update never writes the env file, so a password the owner sets in the meantime stays.
+Caddy is recreated because its configuration files are mounted one by one from `repo`: after `mv repo repo.old` a running Caddy still reads the old files (checked on the machine), so new routes would apply only at its next restart.
 Every other command in this runbook works the same way with `--env-file /data/mandate/mandate.env` added after `docker compose`.
 
 ### Pauses and the free plan's limits
@@ -457,10 +488,11 @@ If `cooldownUntil` is set, the machine cannot run before then.
 ### Connect Grok Bot
 
 In Grok Bot's connector, set the URL to `https://8080-<machine id>.instabox.tech/mcp`.
-To see the token, run this in your own terminal and copy it into Grok Bot:
+The connector's `Authorization` header is `Bearer ` and the token.
+On a Mac, this copies exactly that value to the clipboard without showing it; paste it into Grok Bot:
 
 ```sh
-instabox ssh mandate -- sed -n 's/^MCP_AUTH_TOKEN=//p' /data/mandate/mandate.env
+instabox ssh mandate -- "sed -n 's/^MCP_AUTH_TOKEN=/Bearer /p' /data/mandate/mandate.env" | tr -d '\n' | pbcopy
 ```
 
 Wake the machine before a session (`instabox wake mandate`): a connector call that has to wake it waits for the resume, and during a cooldown it fails.
