@@ -177,7 +177,7 @@ describe("the settlement wake-up", () => {
     await untilExecuted();
     expect((await record(ids[0] ?? -1)).status).toBe(200);
     // Even if the console were asked again directly, the ladder's trigger was already recorded.
-    service.settlementStored(LADDER);
+    service.settlementStored(service.accounts.store.envMandate(), LADDER);
     await service.wake.settled();
     expect(bodies).toHaveLength(1);
     expect(service.snapshot(envMandate(service)).wake.recent.map((wake) => wake.kind)).toEqual([

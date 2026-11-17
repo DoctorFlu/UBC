@@ -54,7 +54,7 @@ export async function readOwnerRequest<T>(
     issuedAt: auth.issuedAt,
     nonce: auth.nonce,
   });
-  const valid = await service.verifyOwnerSignature(chain.roles.user, message, auth.signature as Hex);
+  const valid = await service.verifyOwnerSignature(mandate, chain.roles.user, message, auth.signature as Hex);
   if (!valid) {
     return fail(403, "not_owner", "Only the wallet that owns the Policy contract can do this.");
   }

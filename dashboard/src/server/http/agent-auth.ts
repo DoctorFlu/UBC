@@ -42,7 +42,17 @@ export const resolveToken = serviceRoute(async (request, service) => {
     agentId: found.agent.id,
     tokenId: found.token.id,
     agent: { address: found.agent.address, signer: found.agent.signer },
-    mandate: { deployment: found.mandate.deployment },
+    mandate: {
+      name: found.mandate.name,
+      deployment: found.mandate.deployment,
+      contract: found.mandate.contract
+        ? {
+            chainId: found.mandate.contract.chainId,
+            address: found.mandate.contract.address,
+            deployBlock: found.mandate.contract.deployBlock,
+          }
+        : null,
+    },
   };
   return json(resolveTokenResponseSchema.parse(answer));
 });

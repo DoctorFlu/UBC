@@ -209,9 +209,17 @@ describe("the MCP endpoint with several workspaces", () => {
     const { server, fake } = setup();
     const other = fake.addAgent();
     const mine = await call(server, TEST_TOKEN, "whoami");
-    expect(mine.structuredContent?.agent).toEqual({ id: "env", mandateId: "mnd_first" });
+    expect(mine.structuredContent?.agent).toEqual({
+      id: "env",
+      mandateId: "mnd_first",
+      mandateName: "Mandate",
+    });
     const theirs = await call(server, other.token, "whoami");
-    expect(theirs.structuredContent?.agent).toEqual({ id: other.agentId, mandateId: other.mandateId });
+    expect(theirs.structuredContent?.agent).toEqual({
+      id: other.agentId,
+      mandateId: other.mandateId,
+      mandateName: "Mandate",
+    });
     expect(theirs.structuredContent?.policyAddress).toBeNull();
     expect(theirs.structuredContent?.capabilities).toMatchObject({ proposeTrades: false, readPolicy: false });
 

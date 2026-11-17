@@ -220,6 +220,7 @@ export const fixtureSnapshot: ConsoleSnapshot = {
     kind: "reference",
     roles: { user: OWNER_ADDRESS, agent: AGENT_ADDRESS, executor: EXECUTOR_ADDRESS },
     recordsContextHash: true,
+    ownerSigner: "wallet",
   },
   chain: chainFrom(fixtureEvents(), sealed),
   offchain: {

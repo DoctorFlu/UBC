@@ -12,8 +12,9 @@ import {
   type ExecutorVenue,
   type VenueOrderRecord,
 } from "@mandate/shared";
-import { type Hex, isAddressEqual, recoverMessageAddress } from "viem";
+import { type Hex, isAddress, isAddressEqual, recoverMessageAddress } from "viem";
 
+import type { Mandate } from "../accounts/store";
 import type { ConsoleService } from "../console-service";
 import type { VenueOrderRow } from "../store/venue-orders";
 import { apiError, json, readBody } from "./responses";
@@ -49,55 +50,58 @@ function intentIdParam(value: string | undefined): number | null {
 }
 
 /**
- * The deployment the executor works for: the contract the server follows, which only the first
- * workspace's mandate sees (docs/accounts.md). The journal is keyed by it, like settlements.
+ * The deployment a GET names with `?chainId=&policy=` (#95: one executor serves every mandate's contract),
+ * or the server's own contract when it names none, as an executor from before #95 asks. The journal is
+ * keyed by deployment, like settlements.
  */
-function executorDeployment(service: ConsoleService): string | null {
-  return service.deploymentIdFor(service.accounts.store.envMandate());
+async function requestedDeployment(request: Request, service: ConsoleService): Promise<string | null> {
+  const query = new URL(request.url).searchParams;
+  const chainId = query.get("chainId");
+  const policy = query.get("policy");
+  if (chainId === null && policy === null) {
+    return service.deploymentIdFor(service.accounts.store.envMandate());
+  }
+  if (chainId === null || policy === null || !/^[1-9]\d{0,15}$/.test(chainId) || !isAddress(policy)) {
+    return null;
+  }
+  return (await service.contractOf(Number(chainId), policy))?.chain.deploymentId ?? null;
 }
 
 /**
- * Checks that a signed document names the deployment this console follows and is signed by its
- * executor. Returns the deployment id and signer, or the answer to send.
+ * Checks that a signed document names a contract this console follows and is signed by that contract's
+ * executor. Returns the mandate it belongs to, the deployment id and the signer, or the answer to send.
  */
 async function verifySigned(
   service: ConsoleService,
   document: { chainId: number; policy: string },
   hash: Hex,
   signature: Hex,
-): Promise<{ ok: true; deploymentId: string; signer: `0x${string}` } | { ok: false; response: Response }> {
-  const deployment = service.deployment;
-  const deploymentId = executorDeployment(service);
-  const roles = await service.currentRoles();
-  if (!deployment || !deploymentId || !roles) {
-    return {
-      ok: false,
-      response: apiError(
-        503,
-        "chain_unavailable",
-        "The console is not following a Policy contract yet. Try again shortly.",
-      ),
-    };
-  }
-  if (
-    document.chainId !== deployment.chainId ||
-    !isAddressEqual(document.policy as `0x${string}`, deployment.address)
-  ) {
+): Promise<
+  | { ok: true; mandate: Mandate; deploymentId: string; signer: `0x${string}` }
+  | { ok: false; response: Response }
+> {
+  const found = isAddress(document.policy)
+    ? await service.contractOf(document.chainId, document.policy)
+    : null;
+  if (!found) {
     return {
       ok: false,
       response: apiError(
         422,
         "wrong_deployment",
-        "The record names another chain or Policy contract than the one this console follows.",
+        "The record names a chain or Policy contract this console does not follow (or cannot read right now).",
       ),
     };
   }
+  const { mandate, chain } = found;
   let signer: `0x${string}`;
   try {
     signer = await recoverMessageAddress({ message: settlementMessage(hash), signature });
   } catch {
     return { ok: false, response: apiError(422, "invalid_signature", "The signature cannot be read.") };
   }
+  const roles = chain.roles;
+  const deploymentId = chain.deploymentId;
   if (!isAddressEqual(signer, roles.executor)) {
     return {
       ok: false,
@@ -108,7 +112,7 @@ async function verifySigned(
       ),
     };
   }
-  return { ok: true, deploymentId, signer };
+  return { ok: true, mandate, deploymentId, signer };
 }
 
 function storedView(row: VenueOrderRow) {
@@ -145,27 +149,22 @@ function replacementProblem(previous: VenueOrderRecord, next: VenueOrderRecord):
   return null;
 }
 
-export const getVenueOrder = guarded("get venue order", (request, service, params) => {
+export const getVenueOrder = guarded("get venue order", async (request, service, params) => {
   const intentId = intentIdParam(params.intentId);
   if (intentId === null) {
-    return Promise.resolve(
-      apiError(422, "invalid_parameter", "The intent id must be a whole number, starting at 0."),
-    );
+    return apiError(422, "invalid_parameter", "The intent id must be a whole number, starting at 0.");
   }
-  const deploymentId = executorDeployment(service);
+  const deploymentId = await requestedDeployment(request, service);
   if (!deploymentId) {
-    return Promise.resolve(
-      apiError(
-        503,
-        "chain_unavailable",
-        "The console is not following a Policy contract yet. Try again shortly.",
-      ),
+    return apiError(
+      503,
+      "chain_unavailable",
+      "The console is not following that Policy contract (or cannot read it right now). Try again shortly.",
     );
   }
   const row = service.venueOrders.order(deploymentId, intentId);
-  if (!row)
-    return Promise.resolve(apiError(404, "not_found", `Intent ${String(intentId)} has no venue order.`));
-  return Promise.resolve(json(storedView(row)));
+  if (!row) return apiError(404, "not_found", `Intent ${String(intentId)} has no venue order.`);
+  return json(storedView(row));
 });
 
 export const putVenueOrder = guarded("put venue order", async (request, service, params) => {
@@ -187,7 +186,7 @@ export const putVenueOrder = guarded("put venue order", async (request, service,
   if (!verified.ok) return verified.response;
 
   const intent = service
-    .snapshot(service.accounts.store.envMandate())
+    .snapshot(verified.mandate)
     .chain?.intents.find((candidate) => candidate.id === intentId);
   if (!intent) {
     return apiError(
@@ -235,7 +234,7 @@ export const putVenueOrder = guarded("put venue order", async (request, service,
     signature: signature.toLowerCase() as Hex,
     signer: verified.signer,
   });
-  service.venueChanged();
+  service.venueChanged(verified.mandate);
   return json(storedView(row), 201);
 });
 
@@ -267,7 +266,7 @@ export const putExecutorVenue = guarded("put executor venue", async (request, se
     signature: signature.toLowerCase() as Hex,
     signer: verified.signer,
   });
-  service.venueChanged();
+  service.venueChanged(verified.mandate);
   return json(
     { venue: document.venue, environment: document.environment, announcedAt: document.announcedAt },
     201,
