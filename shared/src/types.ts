@@ -120,7 +120,11 @@ export const eventMetaSchema = z.object({
 });
 export type EventMeta = z.infer<typeof eventMetaSchema>;
 
-/** Decoded Policy events. `IntentProposed` is requested extension 1; the rest are in the production contract. */
+/** A role set or handed over (production contract v2). `previous` is the zero address when the constructor set it. */
+const roleChangedSchema = <T extends "UserChanged" | "AgentChanged" | "ExecutorChanged">(type: T) =>
+  eventMetaSchema.extend({ type: z.literal(type), previous: addressSchema, current: addressSchema });
+
+/** Decoded Policy events. `IntentProposed` and the role events are not in the reference contract; the production contract has every one. */
 export const policyEventSchema = z.discriminatedUnion("type", [
   eventMetaSchema.extend({
     type: z.literal("PolicyUpdated"),
@@ -130,6 +134,9 @@ export const policyEventSchema = z.discriminatedUnion("type", [
     type: z.literal("Paused"),
     paused: z.boolean(),
   }),
+  roleChangedSchema("UserChanged"),
+  roleChangedSchema("AgentChanged"),
+  roleChangedSchema("ExecutorChanged"),
   eventMetaSchema.extend({
     type: z.literal("IntentProposed"),
     intentId: intentIdSchema,

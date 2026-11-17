@@ -84,7 +84,7 @@ It leaves the demo usable:
 The run reports these plainly; each attack's row in [REPORT.md](REPORT.md) has the transactions.
 
 1. **Fixed here: readers broke on out-of-range numbers** (`chain.poison-readers`, now `held`).
-   The contract accepts numbers above 2^53 - 1 from the agent key: a sell with limit price 2^256 - 1 is approved, and a buy of 2^256 - 1 cents is rejected but stored.
+   The contract accepts numbers above 2^53 - 1 from the agent key: a buy of 2^256 - 1 cents is rejected but stored, and a sell with limit price 2^256 - 1 is stored too (approved before Policy v2, rejected with `invalid limit price` since, with the limit still in `IntentProposed`).
    `@mandate/shared` used to refuse them, so one such event stalled the console's log scanner, the simulated executor and the MCP server's history for good.
    Amounts, limit prices and results now decode to `null` with the exact digits in `outOfRange`, never rounded or clamped, and every reader keeps working.
    Rules, which only the owner key sets, are still refused; the console skips and reports such an event instead of stopping.
@@ -95,8 +95,10 @@ The run reports these plainly; each attack's row in [REPORT.md](REPORT.md) has t
 4. **The contract trusts the category argument** (`chain.mislabel-category`): a Sports market proposed as Crypto with the agent key is approved.
    Through the MCP server the category is read from Gemini, never from the agent, so this needs a stolen key.
    The executor now looks the market up on Gemini and refuses the intent when the categories differ (`chain.executor-refuses`).
-5. **The contract stores any market, outcome and limit price** (`chain.market-strings`, `chain.limit-price-edges`): empty, oversized and instruction-carrying markets, outcome `MAYBE`, and prices 0 or above 99 are all approved.
-   The executor refuses each one before trading and records it as not filled (`chain.executor-refuses`); the console flags them and shows only a short preview of the text.
+5. **Fixed in the contract (Policy v2, issue #23): any market, outcome and limit price was approved** (`chain.market-strings`, `chain.limit-price-edges`, now `held` on the production contract).
+   Before v2, empty, oversized and instruction-carrying markets, outcome `MAYBE`, and prices 0 or above 99 were all approved; they still are on the devchain reference contract, where both stay `bounded`.
+   Policy v2 records them and rejects them with `invalid market`, `invalid outcome` or `invalid limit price`; the text is still in `IntentProposed`, so the console flags it and shows only a short preview.
+   The executor refuses any that a contract approves before trading and records it as not filled (`chain.executor-refuses`).
 6. **Fixed here: planted text reached the model** (`mcp.chain-text-relay`).
    `get_intent` put onchain market text in its summary and `get_activity` returned it raw, so a stolen key could plant instructions for Grok Bot in the audit log.
    The server now withholds any market that is not a Gemini symbol and any outcome other than YES or NO (`agent/src/support/intents.ts`).
@@ -104,7 +106,7 @@ The run reports these plainly; each attack's row in [REPORT.md](REPORT.md) has t
 ## Attacks considered and dropped
 
 - **Front-running the owner's approval**: the agent cannot approve, and the late-approval budget re-check is covered by `chain.drain-budget`.
-- **Approving a held intent while paused or after the rules tightened** (`approveIntent` re-checks only the budget, `docs/contract-interface.md` 3.2): this is an owner action, not something the agent can trigger; it is noted there already.
+- **Approving a held intent while paused or after the rules tightened** (`docs/contract-interface.md` 3.2): an owner action, not something the agent can trigger; since Policy v2, `approveIntent` re-checks every rule and refuses it.
 - **Gas griefing and intent spam**: the agent key can fill the log with rejected intents at its own gas cost; it changes no verdict, and the oversized-market attack already shows the cost model.
 - **Cross-chain replay**: transactions carry the chain id (EIP-155), and the replay attack already shows the nonce check.
 - **Rate-limit bypass with other tokens**: there is one bearer token per server, and failed authentication has its own stricter bucket.

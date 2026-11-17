@@ -5,11 +5,12 @@
 import { randomBytes } from "node:crypto";
 import { devAccount } from "@mandate/devchain";
 import { amountsFor, attacks, preconditions } from "./attacks";
+import { checksProposalFormat } from "./chain";
 import { endState, runAttacks } from "./run";
 import { TargetRefused, type TargetHandle } from "./targets";
 import type { AttackContext, AttackRecord, RunReport } from "./types";
 
-export { attacks, amountsFor, preconditions } from "./attacks";
+export { attacks, amountsFor, preconditions, type ContractTraits } from "./attacks";
 export { connectStack, startSelf, TargetRefused, type TargetHandle } from "./targets";
 export { line, markdown, passed, summarize, summaryLine, endStateLines } from "./report";
 export type * from "./types";
@@ -48,7 +49,8 @@ export async function runRedTeam(
     committedCents: snapshot.committedCents,
     roles: await target.reader.getRoles(),
   };
-  const outcome = await runAttacks(ctx, attacks(amounts), onRecord);
+  const traits = { checksFormat: await checksProposalFormat(target.reader) };
+  const outcome = await runAttacks(ctx, attacks(amounts, traits), onRecord);
   const end = await endState(ctx, before);
   const records = [...outcome.records];
   if (end.committedAfterCents > end.budgetCents) {

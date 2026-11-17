@@ -239,8 +239,18 @@ function chainIntent(
 
 // ------------------------------------------------------------------ the attacks
 
-export function attacks(amounts: Amounts): Attack[] {
+/**
+ * What the contract under attack does that changes an attack's expected outcome. The production
+ * contract's v2 (issue #23) rejects a malformed market, outcome or limit price before any rule; the
+ * reference contract and the first production version store them.
+ */
+export interface ContractTraits {
+  checksFormat: boolean;
+}
+
+export function attacks(amounts: Amounts, traits: ContractTraits): Attack[] {
   const { overMax, splitParts, overThreshold, probe, piece } = amounts;
+  const { checksFormat } = traits;
   const splitText = splitParts.map(usd).join(" + ");
   return [
     // ---------------------------------------------------------------- MCP surface
@@ -1155,13 +1165,23 @@ export function attacks(amounts: Amounts): Attack[] {
       name: "Limit prices 0, 100 and 1,000,000",
       surface: "chain",
       tried: `proposeTrade for ${usd(probe)} each with limit prices 0, 100 and 1,000,000.`,
-      expected:
-        "All three are approved: the contract does not check the limit price. The amount rules still bound each order.",
-      expectedVerdict: "bounded",
-      limit:
-        "the amount rules (max trade size, approval threshold, budget), and the executor refuses any limit price outside 1 to 99 (`chain.executor-refuses`)",
-      finding:
-        "LIMITATION: the contract does not validate limitPrice (0 and anything from 100 up are meaningless for a $1 contract). The MCP server's input schema enforces 1 to 99 before proposing, and the executor checks it again before trading, so with a stolen key such an intent is approved but never traded.",
+      ...(checksFormat
+        ? {
+            expected:
+              "All three are recorded and rejected with `invalid limit price`: the contract takes 1 to 99 cents per one-dollar contract.",
+            expectedVerdict: "held" as const,
+            finding:
+              "FIXED in the contract (v2, issue #23): it used to approve any limit price, leaving the executor's check as the only stop. It now rejects anything outside 1 to 99 at proposal, and the executor still checks before trading.",
+          }
+        : {
+            expected:
+              "All three are approved: the contract does not check the limit price. The amount rules still bound each order.",
+            expectedVerdict: "bounded" as const,
+            limit:
+              "the amount rules (max trade size, approval threshold, budget), and the executor refuses any limit price outside 1 to 99 (`chain.executor-refuses`)",
+            finding:
+              "LIMITATION: the contract does not validate limitPrice (0 and anything from 100 up are meaningless for a $1 contract). The MCP server's input schema enforces 1 to 99 before proposing, and the executor checks it again before trading, so with a stolen key such an intent is approved but never traded.",
+          }),
       async run(ctx) {
         const attempts: [string, ChainAttempt][] = [];
         for (const [label, price] of [
@@ -1172,6 +1192,7 @@ export function attacks(amounts: Amounts): Attack[] {
           attempts.push([label, await ctx.chain.propose(chainIntent(ctx, { limitPrice: price }))]);
         }
         const approved = attempts.every(([, a]) => a.verdict?.kind === "approved");
+        const refused = attempts.every(([, a]) => rejectedWith(a, "invalid limit price"));
         for (const [label, a] of attempts) {
           if (a.verdict?.kind === "approved") {
             ctx.state.approved.push({ intentId: a.verdict.intentId, amountCents: probe });
@@ -1183,8 +1204,8 @@ export function attacks(amounts: Amounts): Attack[] {
           }
         }
         return {
-          verdict: approved ? "bounded" : "held",
-          matched: approved,
+          verdict: attempts.some(([, a]) => a.verdict?.kind === "approved") ? "bounded" : "held",
+          matched: checksFormat ? refused : approved,
           actual: attempts.map(([label, a]) => `limit ${label}: ${showAttempt(a)}`).join("; "),
           txHashes: hashes(...attempts.map(([, a]) => a)),
           intentIds: intentIdsOf(...attempts.map(([, a]) => a)),
@@ -1196,25 +1217,47 @@ export function attacks(amounts: Amounts): Attack[] {
       name: "Empty, enormous and instruction-carrying market strings",
       surface: "chain",
       tried: `proposeTrade for ${usd(probe)} each with an empty market, an oversized market (16 KiB on our own chain, 1 KiB on the live stack to spare the demo console's layout), outcome "MAYBE", and a market that is a prompt injection aimed at whoever reads the activity (an inert canary on the live stack).`,
-      expected:
-        "All four are approved and stored: the contract does not validate market or outcome. The amount rules still bound each order; the attacker pays the gas.",
-      expectedVerdict: "bounded",
-      limit:
-        "the amount rules per order, gas paid by the attacker and the block gas limit for the string size, and the executor refuses any market that is not a Gemini symbol and any outcome but YES or NO (`chain.executor-refuses`)",
-      finding:
-        "LIMITATION: the contract stores any market and outcome string. With a stolen key, an attacker can plant arbitrary text (including instructions aimed at an LLM or the owner) in the audit log. No reader acts on it: the executor refuses the intent before trading, the console flags it and shows only a short preview (the full text folded away on the intent page), and the MCP server withholds it (see `mcp.chain-text-relay`).",
+      ...(checksFormat
+        ? {
+            expected:
+              "All four are recorded and rejected: the empty and oversized markets and the injection (longer than 128 bytes) with `invalid market`, MAYBE with `invalid outcome`. The text still lands in the log, in IntentProposed; the attacker pays the gas.",
+            expectedVerdict: "held" as const,
+            finding:
+              "FIXED in the contract (v2, issue #23) as far as trading goes: it used to approve any market and outcome; it now rejects a market that is empty or longer than 128 bytes and any outcome but YES or NO. It still records the proposal, so a stolen key can still plant text in the audit log: the console flags it and shows only a short preview, and the MCP server withholds it (see `mcp.chain-text-relay`). A market of 1 to 128 bytes that is not a Gemini symbol is still approved, and the executor refuses it (`chain.executor-refuses`).",
+          }
+        : {
+            expected:
+              "All four are approved and stored: the contract does not validate market or outcome. The amount rules still bound each order; the attacker pays the gas.",
+            expectedVerdict: "bounded" as const,
+            limit:
+              "the amount rules per order, gas paid by the attacker and the block gas limit for the string size, and the executor refuses any market that is not a Gemini symbol and any outcome but YES or NO (`chain.executor-refuses`)",
+            finding:
+              "LIMITATION: the contract stores any market and outcome string. With a stolen key, an attacker can plant arbitrary text (including instructions aimed at an LLM or the owner) in the audit log. No reader acts on it: the executor refuses the intent before trading, the console flags it and shows only a short preview (the full text folded away on the intent page), and the MCP server withholds it (see `mcp.chain-text-relay`).",
+          }),
       async run(ctx) {
         const size = ctx.target === "self" ? 16 * 1024 : 1024;
-        const cases: [string, Partial<Parameters<AttackContext["chain"]["propose"]>[0]>, RefusalCode][] = [
-          ["empty market", { market: "" }, "market_not_a_symbol"],
-          [`${size / 1024} KiB market`, { market: `GEMI-${"X".repeat(size - 5)}` }, "market_not_a_symbol"],
-          ["outcome MAYBE", { outcome: "MAYBE" }, "outcome_not_yes_no"],
-          ["injection market", { market: planted(ctx).text }, "market_not_a_symbol"],
+        const cases: [
+          string,
+          Partial<Parameters<AttackContext["chain"]["propose"]>[0]>,
+          RefusalCode,
+          "invalid market" | "invalid outcome",
+        ][] = [
+          ["empty market", { market: "" }, "market_not_a_symbol", "invalid market"],
+          [
+            `${size / 1024} KiB market`,
+            { market: `GEMI-${"X".repeat(size - 5)}` },
+            "market_not_a_symbol",
+            "invalid market",
+          ],
+          ["outcome MAYBE", { outcome: "MAYBE" }, "outcome_not_yes_no", "invalid outcome"],
+          ["injection market", { market: planted(ctx).text }, "market_not_a_symbol", "invalid market"],
         ];
         const attempts: [string, ChainAttempt][] = [];
-        for (const [label, overrides, refusal] of cases) {
+        let refusedAsMalformed = true;
+        for (const [label, overrides, refusal, reason] of cases) {
           const a = await ctx.chain.propose(chainIntent(ctx, overrides));
           attempts.push([label, a]);
+          if (!rejectedWith(a, reason)) refusedAsMalformed = false;
           if (a.verdict?.kind === "approved") {
             ctx.state.untradeable.push({ intentId: a.verdict.intentId, label, refusal });
           }
@@ -1229,8 +1272,8 @@ export function attacks(amounts: Amounts): Attack[] {
         }
         const approved = attempts.every(([, a]) => a.verdict?.kind === "approved");
         return {
-          verdict: approved ? "bounded" : "held",
-          matched: approved,
+          verdict: attempts.some(([, a]) => a.verdict?.kind === "approved") ? "bounded" : "held",
+          matched: checksFormat ? refusedAsMalformed : approved,
           actual: attempts.map(([label, a]) => `${label}: ${showAttempt(a)}`).join("; "),
           txHashes: hashes(...attempts.map(([, a]) => a)),
           intentIds: intentIdsOf(...attempts.map(([, a]) => a)),
@@ -1496,9 +1539,12 @@ export function attacks(amounts: Amounts): Attack[] {
       surface: "chain",
       selfOnly:
         "it cannot be undone: the two intents would stay in the demo's history for good (flagged, but there)",
-      tried: `With the agent key: a ${usd(probe)} sell with limit price 2^256 - 1 (approved, so the number lands in an IntentApproved event) and a buy of 2^256 - 1 cents (rejected, but stored). Then reads the history the way the console, the simulated executor and the MCP server do.`,
-      expected:
-        "Onchain the mandate holds: the sell stays inside the per-order rules and the buy is rejected with `over max trade size`. Every reader keeps working: each value too large for offchain code reads as null with its exact digits flagged beside it, never rounded or clamped, and the executor refuses the sell (`chain.executor-refuses`).",
+      tried: checksFormat
+        ? `With the agent key: a ${usd(probe)} sell with limit price 2^256 - 1 (the number lands in its IntentProposed event) and a buy of 2^256 - 1 cents (rejected, but stored). Then reads the history the way the console, the simulated executor and the MCP server do.`
+        : `With the agent key: a ${usd(probe)} sell with limit price 2^256 - 1 (approved, so the number lands in an IntentApproved event) and a buy of 2^256 - 1 cents (rejected, but stored). Then reads the history the way the console, the simulated executor and the MCP server do.`,
+      expected: checksFormat
+        ? "Onchain the mandate holds: the sell is rejected with `invalid limit price` and the buy with `over max trade size`. Every reader keeps working: each value too large for offchain code reads as null with its exact digits flagged beside it, never rounded or clamped, in the IntentProposed event and in getIntent."
+        : "Onchain the mandate holds: the sell stays inside the per-order rules and the buy is rejected with `over max trade size`. Every reader keeps working: each value too large for offchain code reads as null with its exact digits flagged beside it, never rounded or clamped, and the executor refuses the sell (`chain.executor-refuses`).",
       expectedVerdict: "held",
       finding:
         "FIXED (issue #64): `@mandate/shared` used to refuse any onchain number above 2^53 - 1, so one such event stalled the console's scanner, the simulated executor and the MCP server's history for good. Amounts, limit prices and results now decode to null with the exact value in `outOfRange`; rules, which only the owner key sets, are still refused, and the console skips and reports such an event instead of stopping.",
@@ -1507,7 +1553,9 @@ export function attacks(amounts: Amounts): Attack[] {
           chainIntent(ctx, { isBuy: false, limitPrice: UINT256_MAX, amountCents: BigInt(probe) }),
         );
         const huge = await ctx.chain.propose(chainIntent(ctx, { amountCents: UINT256_MAX }));
-        const onchainHeld = sell.verdict?.kind === "approved" && rejectedWith(huge, "over max trade size");
+        const onchainHeld =
+          (checksFormat ? rejectedWith(sell, "invalid limit price") : sell.verdict?.kind === "approved") &&
+          rejectedWith(huge, "over max trade size");
         const readers: [string, string | null][] = [];
         const attempt = async (label: string, read: () => Promise<unknown>) => {
           try {
@@ -1522,15 +1570,20 @@ export function attacks(amounts: Amounts): Attack[] {
         // Each value too large for offchain code must read as null with its exact digits flagged, not clamped.
         await attempt("event log decode (console scanner, executor, MCP event index)", async () => {
           const events = await ctx.reader.getEvents({ fromBlock: 0n });
-          // The approval of the sell carries the limit price (the production contract emits no proposal event).
+          // The sell's limit price is in its IntentProposed event, and on a contract that approves the sell
+          // (the reference contract) in its IntentApproved event too: every event carrying it must flag it.
           const sellId = sell.verdict?.intentId;
-          const flagged = events.some(
-            (e) =>
-              e.type === "IntentApproved" &&
-              e.intentId === sellId &&
-              e.limitPrice === null &&
-              e.outOfRange?.["limitPrice"] === max,
+          const carriers = events.filter(
+            (e) => (e.type === "IntentProposed" || e.type === "IntentApproved") && e.intentId === sellId,
           );
+          const flagged =
+            carriers.length > 0 &&
+            carriers.every(
+              (e) =>
+                (e.type === "IntentProposed" || e.type === "IntentApproved") &&
+                e.limitPrice === null &&
+                e.outOfRange?.["limitPrice"] === max,
+            );
           if (!flagged) throw Object.assign(new Error("not flagged"), { name: "NotFlagged" });
         });
         await attempt("getIntent", async () => {
@@ -1572,8 +1625,9 @@ export function attacks(amounts: Amounts): Attack[] {
       id: "chain.executor-refuses",
       name: "The executor refuses every approved intent the MCP server could not have sent",
       surface: "chain",
-      tried:
-        "Reads back each intent this run got approved with the agent key alone (a mislabelled category, limit prices 0, 100, 1,000,000 and 2^256 - 1, an empty, oversized or instruction-carrying market, outcome MAYBE) and puts it through the executor's pre-trade check, with the venue lookup the executor uses (the recorded markets on our own chain, Gemini on the live stack).",
+      tried: checksFormat
+        ? "Reads back each intent this run got approved with the agent key alone (a mislabelled category; the contract rejects the malformed limit prices, markets and outcomes itself) and puts it through the executor's pre-trade check, with the venue lookup the executor uses (the recorded markets on our own chain, Gemini on the live stack)."
+        : "Reads back each intent this run got approved with the agent key alone (a mislabelled category, limit prices 0, 100, 1,000,000 and 2^256 - 1, an empty, oversized or instruction-carrying market, outcome MAYBE) and puts it through the executor's pre-trade check, with the venue lookup the executor uses (the recorded markets on our own chain, Gemini on the live stack).",
       expected:
         "Every one is refused before any order is placed, for the reason that matches what was planted. The executor then records it as not filled, which releases its budget (covered by the devchain executor tests).",
       expectedVerdict: "held",

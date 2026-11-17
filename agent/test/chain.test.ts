@@ -1,7 +1,8 @@
 /**
  * The trading tools against real Policy contracts on anvil: the production `Policy.sol` as is, and
- * the reference contract with the requested extensions (`previewTrade`, the `contextHash`
- * overload, `IntentProposed`). Markets and the console are faked; the chain is not.
+ * the reference contract. Both have the requested extensions (`previewTrade`, the `contextHash`
+ * overload, `IntentProposed`), the production contract since v2 (issue #23), so the tools answer the
+ * same on both. Markets and the console are faked; the chain is not.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { devPrivateKey, startDevchain, type Devchain, type PolicyContractKind } from "@mandate/devchain";
@@ -23,7 +24,6 @@ const MARKET = ladderSymbol(63_000);
 const trade = { market: MARKET, outcome: "NO" as const, limitPrice: 30, reason: "Demo case." };
 
 describe.each<PolicyContractKind>(["production", "reference"])("tools on the %s contract", (contract) => {
-  const extended = contract === "reference";
   let chain: Devchain;
   let h: Harness;
   let ctx: ToolContext;
@@ -50,7 +50,7 @@ describe.each<PolicyContractKind>(["production", "reference"])("tools on the %s 
       status: "ok",
       policy: {
         rules: { budgetCents: 20_000, maxTradeCents: 2_500, allowedCategories: ["Crypto"] },
-        contract: { previewTrade: extended, contextHash: extended },
+        contract: { previewTrade: true, contextHash: true },
         agent: { isContractAgent: true },
       },
     });
@@ -63,12 +63,12 @@ describe.each<PolicyContractKind>(["production", "reference"])("tools on the %s 
     expect(chainSteps.every((s) => s["done"] === true)).toBe(true);
   });
 
-  it(`simulates with ${extended ? "the contract's previewTrade" : "the offchain evaluator"}`, async () => {
+  it("simulates with the contract's previewTrade", async () => {
     const { structured } = await simulateTrade.run({ ...trade, amountCents: 3_000 }, ctx);
     expect(structured).toMatchObject({
       simulation: {
         wouldBe: "rejected",
-        source: extended ? "contract" : "offchain",
+        source: "contract",
         rule: { rule: "maxTradeCents" },
       },
     });
@@ -92,7 +92,7 @@ describe.each<PolicyContractKind>(["production", "reference"])("tools on the %s 
     });
     for (const result of [approved, held, rejected]) {
       const context = (result.structured["proposal"] as Row)["context"] as Row;
-      expect(context).toMatchObject({ stored: true, contextHashRecorded: extended });
+      expect(context).toMatchObject({ stored: true, contextHashRecorded: true });
       const doc = h.console.state.contexts.get(context["hash"] as string)?.document;
       expect(verifyContext(doc, context["hash"] as string)).toBe(true);
     }
@@ -111,7 +111,7 @@ describe.each<PolicyContractKind>(["production", "reference"])("tools on the %s 
   it("verifies the decision context of an intent", async () => {
     const { structured } = await getIntent.run({ intentId: 0 }, ctx);
     expect(structured).toMatchObject({
-      intent: { id: 0, status: "approved", context: { document: "verified", onchain: extended } },
+      intent: { id: 0, status: "approved", context: { document: "verified", onchain: true } },
     });
   });
 
@@ -132,7 +132,7 @@ describe.each<PolicyContractKind>(["production", "reference"])("tools on the %s 
       execution: {
         totalOrders: plan.orders.length,
         submitted: plan.orders.length,
-        contextHashRecorded: extended,
+        contextHashRecorded: true,
       },
     });
     const intent = await ctx.policy?.intent(3);

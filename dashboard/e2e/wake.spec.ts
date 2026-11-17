@@ -287,10 +287,19 @@ test("spot falling below the floor of the agent's plan sends one event", async (
 test("past the daily cap, the owner's decision is recorded but not sent", async () => {
   const held = (await snapshot(baseURL)).chain?.intents.find((intent) => intent.status === "needs_approval");
   if (!held) throw new Error("no intent waits for the owner");
-  await chain.user.approveIntent(held.id);
+  // The owner paused the agent above. Policy v2 checks every rule again on approval, so the contract
+  // refuses this approval with "agent paused" and the intent ends rejected; the wake-up says both.
+  expect(await chain.user.approveIntent(held.id)).toMatchObject({
+    verdict: "rejected",
+    reason: "agent paused",
+  });
   await expect
     .poll(async () => (await snapshot(baseURL)).wake.recent[0], { timeout: 20_000 })
-    .toMatchObject({ kind: "owner_decision", status: "capped" });
+    .toMatchObject({
+      kind: "owner_decision",
+      status: "capped",
+      summary: `The owner approved #${held.id.toString()} but the contract refused it (agent paused).`,
+    });
   const current = await snapshot(baseURL);
   expect(current.wake).toMatchObject({ usedToday: DAILY_CAP, leftToday: 0 });
   expect(webhook.received).toHaveLength(DAILY_CAP);
@@ -327,6 +336,7 @@ test("the Setup page shows wake-ups in Advanced view only", async ({ page, conte
   await expect(rows).toHaveCount(5);
   await expect(rows.first()).toHaveAttribute("data-status", "capped");
   await expect(rows.first()).toContainText("The owner approved");
+  await expect(rows.first()).toContainText("but the contract refused it (agent paused)");
   await expect(rows.first().getByText("Not sent", { exact: true })).toBeVisible();
   await expect(rows.first()).toContainText("today's cap was reached");
   await expect(card.locator('[data-kind="price_below_floor"]')).toContainText("HTTP 200");

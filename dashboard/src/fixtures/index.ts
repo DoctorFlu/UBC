@@ -305,7 +305,7 @@ export const fixtureSnapshot: ConsoleSnapshot = {
       {
         id: "wk_5b1e0f3a9c2d4e6f7a8b9c0d",
         kind: "owner_decision",
-        summary: "The owner rejected #6 (rejected by user).",
+        summary: "The owner rejected #6.",
         count: 1,
         status: "sent",
         result: "HTTP 200",

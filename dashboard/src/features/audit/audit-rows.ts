@@ -28,7 +28,7 @@ import { describeMarket, namingCategory } from "@/lib/markets";
  * - `owner`: the owner approving or rejecting a held intent (`approveIntent`, `rejectIntent`).
  * - `result`: what the executor recorded (`ResultRecorded`).
  */
-export type AuditGroup = "mandate" | "pause" | "verdict" | "owner" | "result";
+export type AuditGroup = "mandate" | "pause" | "roles" | "verdict" | "owner" | "result";
 
 export interface AuditRow {
   id: string;
@@ -64,6 +64,7 @@ export interface AuditRow {
 export const GROUP_LABELS: Record<AuditGroup, string> = {
   mandate: "Rule changes",
   pause: "Pauses",
+  roles: "Role changes",
   verdict: "Proposal verdicts",
   owner: "Owner decisions",
   result: "Executor results",
@@ -95,6 +96,12 @@ function order(
     event.outcome === "YES" || event.outcome === "NO" ? event.outcome : "an outcome not YES or NO";
   return `${event.isBuy ? "Buy" : "Sell"} ${outcome} on ${describeMarket(event.market, category).title}, ${amount(event.amountCents)}`;
 }
+
+const ROLE_NAMES = {
+  UserChanged: { label: "Owner", name: "owner (the contract's user)" },
+  AgentChanged: { label: "Agent", name: "agent" },
+  ExecutorChanged: { label: "Executor", name: "executor" },
+} as const;
 
 type Described = Pick<AuditRow, "group" | "label" | "summary" | "status" | "reason" | "intentId">;
 
@@ -131,6 +138,22 @@ function describe(
         reason: null,
         intentId: null,
       };
+    case "UserChanged":
+    case "AgentChanged":
+    case "ExecutorChanged": {
+      const role = ROLE_NAMES[event.type];
+      const set = /^0x0{40}$/i.test(event.previous);
+      return {
+        group: "roles",
+        label: set ? `${role.label} set` : `${role.label} changed`,
+        summary: set
+          ? `The ${role.name} is ${event.current}`
+          : `The ${role.name} moved from ${event.previous} to ${event.current}`,
+        status: null,
+        reason: null,
+        intentId: null,
+      };
+    }
     case "IntentProposed":
       return {
         group: "verdict",

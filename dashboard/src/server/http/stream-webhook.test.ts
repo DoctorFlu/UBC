@@ -104,7 +104,8 @@ describe("QuickNode Stream webhook", () => {
     const body = await envelopeForBlock(chain, BigInt(proposal.blockNumber));
     const response = await receiveStreamDelivery(delivery(body), service);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "stored", received: 1, stored: 1 });
+    // Two logs since the production contract's v2: IntentProposed, then the verdict.
+    expect(await response.json()).toEqual({ status: "stored", received: 2, stored: 2 });
     await expect
       .poll(
         () => envSnapshot(service).chain?.intents.find((intent) => intent.id === proposal.intentId)?.status,
@@ -123,7 +124,7 @@ describe("QuickNode Stream webhook", () => {
     });
     const body = await envelopeForBlock(chain, BigInt(proposal.blockNumber));
     const first = await receiveStreamDelivery(delivery(body, { nonce: "replayed-nonce" }), service);
-    expect(await first.json()).toMatchObject({ status: "stored", stored: 1 });
+    expect(await first.json()).toMatchObject({ status: "stored", stored: 2 });
     const eventsAfterFirst = envSnapshot(service).chain?.events.length;
 
     const replay = await receiveStreamDelivery(delivery(body, { nonce: "replayed-nonce" }), service);
@@ -132,7 +133,7 @@ describe("QuickNode Stream webhook", () => {
 
     const redelivered = await receiveStreamDelivery(delivery(body), service);
     expect(redelivered.status).toBe(200);
-    expect(await redelivered.json()).toEqual({ status: "stored", received: 1, stored: 0 });
+    expect(await redelivered.json()).toEqual({ status: "stored", received: 2, stored: 0 });
     expect(envSnapshot(service).chain?.events.length).toBe(eventsAfterFirst);
   });
 

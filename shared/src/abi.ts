@@ -1,15 +1,17 @@
 /**
  * ABIs of the Policy contract.
  *
- * - `policyBaseAbi` matches the production contract (`contracts/src/Policy.sol`) exactly.
- * - `policyExtensionsAbi` holds the additions requested in `docs/contract-interface.md`. The devchain
- *   reference contract has them; the production contract may not yet. `PolicyClient` detects them at
- *   runtime and falls back when they are missing.
- * - `policyAbi` is both together, for decoding anything either contract emits.
+ * - `policyAbi` matches the production contract (`contracts/src/Policy.sol`, v2 since issue #23) exactly.
+ * - It is made of three parts. `policyBaseAbi` is what every Policy contract has, including the first
+ *   production version. `policyExtensionsAbi` holds the additions requested in `docs/contract-interface.md`,
+ *   which the production contract now has and the devchain reference contract has too; `PolicyClient`
+ *   still detects them at runtime. `policyV2Abi` is what only the production contract has: `setUser`,
+ *   the role events and `ZeroAddress`.
+ * - `policyReferenceAbi` is the devchain reference contract's ABI: the base plus the extensions.
  *
  * `internalType` is left out so the ABI does not depend on Solidity type names. The devchain tests check
- * that the production contract compiles to exactly `policyBaseAbi`, and the reference contract to exactly
- * `policyAbi`.
+ * that the production contract compiles to exactly `policyAbi`, and the reference contract to exactly
+ * `policyReferenceAbi`.
  */
 
 const policyRulesComponents = [
@@ -61,7 +63,7 @@ const view = (name: string, type: string) =>
     stateMutability: "view",
   }) as const;
 
-/** The production contract's ABI, without the constructor. */
+/** What every Policy contract has, without the constructor. */
 export const policyBaseAbi = [
   // ------------------------------------------------------------ user
   {
@@ -209,7 +211,7 @@ export const policyBaseAbi = [
   { type: "error", name: "FillExceedsIntent", inputs: [] },
 ] as const;
 
-/** Requested additions, each independent of the others. */
+/** Requested additions, each independent of the others. The production contract has all three since v2. */
 export const policyExtensionsAbi = [
   // Request 1: details of every proposal in the log, so rejected intents keep them.
   {
@@ -253,7 +255,37 @@ export const policyExtensionsAbi = [
   },
 ] as const;
 
-export const policyAbi = [...policyBaseAbi, ...policyExtensionsAbi] as const;
+const roleChanged = <name extends string>(name: name) =>
+  ({
+    type: "event",
+    name,
+    inputs: [
+      { name: "previous", type: "address", indexed: true },
+      { name: "current", type: "address", indexed: true },
+    ],
+    anonymous: false,
+  }) as const;
+
+/** What only the production contract (v2) has: a movable user role, role events, and zero-address checks. */
+export const policyV2Abi = [
+  {
+    type: "function",
+    name: "setUser",
+    inputs: [{ name: "user_", type: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  roleChanged("UserChanged"),
+  roleChanged("AgentChanged"),
+  roleChanged("ExecutorChanged"),
+  { type: "error", name: "ZeroAddress", inputs: [] },
+] as const;
+
+/** The devchain reference contract: the base plus the extensions. */
+export const policyReferenceAbi = [...policyBaseAbi, ...policyExtensionsAbi] as const;
+
+/** The production contract's ABI, for encoding and for decoding anything either contract emits. */
+export const policyAbi = [...policyBaseAbi, ...policyExtensionsAbi, ...policyV2Abi] as const;
 
 export type PolicyBaseAbi = typeof policyBaseAbi;
 export type PolicyAbi = typeof policyAbi;

@@ -26,7 +26,9 @@ export const VERDICT_LABELS: Readonly<Record<Verdict, string>> = {
 
 /**
  * The exact strings the contract puts in `IntentRejected`, in the order `_violation` checks them, followed
- * by the two reasons `approveIntent` and `rejectIntent` emit.
+ * by the reason `rejectIntent` emits. `approveIntent` re-runs `_violation` in the production contract
+ * (v2), so an approval can be refused with any rule's reason; the reference contract re-checks only the
+ * budget. The format reasons the production contract checks first are in `FORMAT_REASON_CODES`.
  */
 export const REASON_CODES = [
   "agent paused",
@@ -79,13 +81,40 @@ export const REASONS: Readonly<Record<ReasonCode, ReasonInfo>> = {
   },
 };
 
+/**
+ * The reasons the production contract (v2) gives before any rule runs, when the intent's format is wrong
+ * (`_malformed`, in this order). The MCP server never sends such an intent; only a key used outside it can.
+ */
+export const FORMAT_REASON_CODES = ["invalid market", "invalid outcome", "invalid limit price"] as const;
+export type FormatReasonCode = (typeof FORMAT_REASON_CODES)[number];
+
+export const FORMAT_REASONS: Readonly<Record<FormatReasonCode, ReasonInfo>> = {
+  "invalid market": {
+    label: "Invalid market",
+    explanation: "The market was empty or longer than 128 bytes, so it cannot be a venue's market symbol.",
+  },
+  "invalid outcome": {
+    label: "Invalid outcome",
+    explanation: "The outcome was not YES or NO.",
+  },
+  "invalid limit price": {
+    label: "Invalid limit price",
+    explanation: "The limit price was not between 1 and 99 cents per one-dollar contract.",
+  },
+};
+
 export function isReasonCode(value: string): value is ReasonCode {
   return (REASON_CODES as readonly string[]).includes(value);
+}
+
+export function isFormatReasonCode(value: string): value is FormatReasonCode {
+  return (FORMAT_REASON_CODES as readonly string[]).includes(value);
 }
 
 /** Label and explanation for any reason string, including reasons this version does not know. */
 export function describeReason(reason: string): ReasonInfo {
   if (isReasonCode(reason)) return REASONS[reason];
+  if (isFormatReasonCode(reason)) return FORMAT_REASONS[reason];
   return {
     label: reason || "Unknown",
     explanation: `The contract rejected this trade with reason "${reason}".`,

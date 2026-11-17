@@ -26,7 +26,7 @@ It then drives the server over HTTP with the official MCP SDK client, opening a 
 The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts and each intent's link to its context in the console, `get_intent`, `get_activity` and `request_policy_change`, and the daily digest's read-only calls with the fields they add (issue #97).
 It also checks that no key or token reaches the server's logs.
 Pass `-- --contract production` or `-- --contract reference` to run one contract; the default runs both.
-On the reference contract, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain.
+On both contracts, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain: the production contract has both since Policy v2.
 It needs Foundry (`forge` and `anvil`) and network access to Gemini's public API.
 
 The server reads `.env` from the repo root, or the file named by `ENV_FILE`.
@@ -172,7 +172,7 @@ Both are lost on restart; the console keeps the plans and decision contexts it r
 
 Every proposal carries a decision-context document (the request, the reasons, the market data and the plan it came from), stored in the console under its keccak256 hash.
 When the contract has the 7-argument `proposeTrade`, the hash is also recorded onchain and the result says `contextHashRecorded: true`.
-On the production contract the result says `contextHashRecorded: false` and the document lives only offchain.
+Policy v2 has it; on a contract without it, the result says `contextHashRecorded: false` and the document lives only offchain.
 If the console is down, documents wait in an in-process outbox and are sent with later proposals.
 
 Once the proposal transaction is confirmed and the intent id is known, the server links the intent to its document in the console (`PUT /api/agent/v1/intents/<intentId>/context` with the hash and the proposal transaction), for every single trade and every order of a plan.
