@@ -28,13 +28,17 @@
  * by at most one strike step of exposure (q x gap).
  */
 import type { LadderRung } from "@mandate/gemini";
+import { assessCover, measureCover } from "./cover";
 import { planIdFor } from "./id";
 import { orderBySignal, rateRung, readSignal, shortId, type SignalContext } from "./signal";
+import { designStaircase, resolveCeiling, resolveFloor, type DesignedRung as Designed } from "./staircase";
 import type {
+  CoverAssessment,
   HedgeInput,
   HedgePlan,
   PayoffPoint,
   PlannedOrder,
+  PlanCover,
   PlannedRung,
   PlanSignalUse,
   PlanWarning,
@@ -44,7 +48,6 @@ import type {
 } from "./types";
 import {
   ceilDiv,
-  floorDiv,
   formatContracts,
   formatHoldingUnits,
   formatPrice,
@@ -57,11 +60,12 @@ import {
   requireInteger,
 } from "./units";
 
-interface DesignedRung {
-  rung: LadderRung;
-  coversFromCents: number;
-  coversToCents: number;
-  designedHundredths: number;
+interface DesignedRung extends Designed {
+  /**
+   * Contracts to buy at this strike: the designed size, or with positions held, only what is missing
+   * from the goal (`CoverRung.missingHundredths`).
+   */
+  wantHundredths: number;
 }
 
 type Rating = Omit<SignalRungRating, "boughtHundredths">;
@@ -81,6 +85,8 @@ interface Context {
   signal: SignalContext | null;
   /** The signal's rating of each designed rung, highest strike first. */
   ratings: Rating[];
+  /** Cover already held, when the input gave positions. */
+  cover: CoverAssessment | null;
 }
 
 export function planHedge(input: HedgeInput): HedgePlan {
@@ -114,6 +120,7 @@ export function planHedge(input: HedgeInput): HedgePlan {
     uncovered: [],
     signal,
     ratings: [],
+    cover: null,
   };
   if (signal !== null) warnIfIgnored(ctx, signal);
 
@@ -123,14 +130,32 @@ export function planHedge(input: HedgeInput): HedgePlan {
       "category_not_allowed",
       "The policy does not allow trading this market category, so no hedge is planned.",
     );
+    // Cover is a fact about positions, whatever the rules allow now.
+    if (input.held !== undefined) {
+      ctx.cover = assessCover({
+        holding: input.holding,
+        ladder: input.ladder,
+        spotCents,
+        goal: input.goal,
+        held: input.held,
+      });
+    }
     return finalize(ctx);
   }
 
   const ascending = [...input.ladder.rungs].sort((a, b) => a.strikeCents - b.strikeCents);
   const descending = [...ascending].reverse();
-  const floorCents = resolveFloor(input, spotCents);
-  const ceilingCents = resolveCeiling(ctx, ascending, descending);
-  if (ceilingCents === null) return finalize(ctx);
+  const floorCents = resolveFloor(input.goal, spotCents);
+  const ceilingCents = resolveCeiling(
+    units,
+    spotCents,
+    input.goal.ceilingCents,
+    ascending,
+    (code, message) => {
+      warn(ctx, code, message);
+    },
+  );
+  if (ceilingCents === null) return finalizeWithCover(ctx, []);
   ctx.ceilingCents = ceilingCents;
   ctx.floorCents = floorCents;
   if (floorCents >= ceilingCents) {
@@ -139,12 +164,68 @@ export function planHedge(input: HedgeInput): HedgePlan {
       "floor_not_below_ceiling",
       `The floor ${formatPrice(floorCents)} is not below where protection starts (${formatPrice(ceilingCents)}), so there is nothing to protect.`,
     );
-    return finalize(ctx);
+    return finalizeWithCover(ctx, []);
   }
 
   const designed = design(ctx, descending, ceilingCents, floorCents);
+  if (input.held !== undefined) {
+    const cover = measureCover({
+      asset,
+      eventTicker: input.ladder.eventTicker,
+      spotCents,
+      units,
+      ceilingCents,
+      floorCents,
+      designed,
+      held: input.held,
+    });
+    ctx.cover = cover;
+    if (cover.state === "met") {
+      warn(ctx, "already_covered", alreadyCovered(cover));
+      return finalize(ctx);
+    }
+    const missing = new Map(cover.rungs.map((r) => [r.instrumentSymbol, r.missingHundredths]));
+    for (const d of designed) d.wantHundredths = missing.get(d.rung.instrumentSymbol) ?? 0;
+  }
   buy(ctx, designed, slippage);
   return finalize(ctx);
+}
+
+/** Finalizes a plan that never reached the staircase, measuring cover against an empty one. */
+function finalizeWithCover(ctx: Context, designed: DesignedRung[]): HedgePlan {
+  if (ctx.input.held !== undefined) {
+    ctx.cover = measureCover({
+      asset: ctx.asset,
+      eventTicker: ctx.input.ladder.eventTicker,
+      spotCents: ctx.spotCents,
+      units: ctx.units,
+      ceilingCents: ctx.ceilingCents,
+      floorCents: ctx.floorCents,
+      designed,
+      held: ctx.input.held,
+    });
+  }
+  return finalize(ctx);
+}
+
+/** The warning for a goal the positions already cover, in plain words with the numbers. */
+function alreadyCovered(cover: CoverAssessment): string {
+  const below = formatPrice(cover.measuredBelowCents ?? 0);
+  const parts = (
+    [
+      ["filled", cover.heldByState.filled],
+      ["waiting to fill", cover.heldByState.awaiting_fill],
+      ["waiting for the owner's approval", cover.heldByState.awaiting_owner],
+    ] as const
+  )
+    .filter(([, cents]) => cents > 0)
+    .map(([label, cents]) => `${formatUsd(cents)} ${label}`);
+  return `The ${cover.holdingQuantity} ${cover.asset} is already covered below ${below}: the contracts held pay ${formatUsd(cover.heldPayoutCents)} there (${parts.join(", ")}), ${formatBps(cover.coverBps ?? 0)} of the ${formatUsd(cover.targetPayoutCents)} the goal calls for, so nothing more is bought.`;
+}
+
+/** "99%", "100%", "212%" from basis points, rounded down. */
+function formatBps(bps: number): string {
+  return `${Math.floor(bps / 100).toString()}%`;
 }
 
 const IGNORED_BECAUSE: Record<NonNullable<PlanSignalUse["ignoredBecause"]>, string> = {
@@ -162,90 +243,16 @@ function warnIfIgnored(ctx: Context, signal: SignalContext): void {
   );
 }
 
-function resolveFloor(input: HedgeInput, spotCents: number): number {
-  const goal = input.goal;
-  if ("floorCents" in goal) {
-    requireInteger(goal.floorCents, "goal.floorCents", 1);
-    return goal.floorCents;
-  }
-  const bps = Math.round(goal.dropPercent * 100);
-  if (
-    !Number.isFinite(goal.dropPercent) ||
-    bps <= 0 ||
-    bps >= 10_000 ||
-    Math.abs(goal.dropPercent * 100 - bps) > 1e-6
-  ) {
-    throw new PlannerInputError("goal.dropPercent must be between 0 and 100 with at most two decimals");
-  }
-  // spot x (1 - drop), rounded half up to the cent.
-  return Number(floorDiv(BigInt(spotCents) * BigInt(10_000 - bps) + 5_000n, 10_000n));
-}
-
-function resolveCeiling(ctx: Context, ascending: LadderRung[], descending: LadderRung[]): number | null {
-  const { spotCents } = ctx;
-  const requested = ctx.input.goal.ceilingCents;
-  const firstAtOrAbove = ascending.find((r) => r.strikeCents >= spotCents)?.strikeCents;
-  const highestAllowed = firstAtOrAbove ?? spotCents;
-  let ceiling: number;
-  if (requested === undefined) {
-    if (!descending.some((r) => r.strikeCents < spotCents)) {
-      warn(
-        ctx,
-        "no_strike_below_spot",
-        `Every strike on this ladder is at or above spot (${formatPrice(spotCents)}), so it cannot protect against a fall.`,
-      );
-      return null;
-    }
-    // Protect the holding's actual loss: the top rung is the highest strike below spot, sized
-    // for the drop from spot to that strike.
-    ceiling = spotCents;
-  } else {
-    requireInteger(requested, "goal.ceilingCents", 1);
-    ceiling = requested;
-    if (ceiling > highestAllowed) {
-      warn(
-        ctx,
-        "ceiling_lowered",
-        `Protection cannot start at ${formatPrice(requested)}, more than one strike above spot; it starts at ${formatPrice(highestAllowed)} instead.`,
-      );
-      ceiling = highestAllowed;
-    }
-  }
-  if (ceiling > spotCents) {
-    const excess = holdingCents(ctx.units, ceiling - spotCents);
-    warn(
-      ctx,
-      "ceiling_above_spot",
-      `Protection starts at ${formatPrice(ceiling)}, above spot (${formatPrice(spotCents)}), so the payout can exceed the holding's actual loss by up to ${formatUsd(excess)}.`,
-    );
-  }
-  return ceiling;
-}
-
 function design(
   ctx: Context,
   descending: LadderRung[],
   ceilingCents: number,
   floorCents: number,
 ): DesignedRung[] {
-  const designed: DesignedRung[] = [];
-  let previous = ceilingCents;
-  for (const rung of descending) {
-    if (rung.strikeCents >= ceilingCents) continue;
-    const bottom = Math.max(rung.strikeCents, floorCents);
-    const gap = previous - bottom;
-    if (gap <= 0) break;
-    designed.push({
-      rung,
-      coversFromCents: previous,
-      coversToCents: bottom,
-      // q x gap dollars, in hundredths of a contract: units x gapCents / 1e8, rounded down.
-      designedHundredths: Number(floorDiv(ctx.units * BigInt(gap), HOLDING_SCALE)),
-    });
-    previous = rung.strikeCents;
-    if (rung.strikeCents <= floorCents) break;
-  }
-  if (previous > floorCents) {
+  const staircase = designStaircase(ctx.units, descending, ceilingCents, floorCents);
+  const designed = staircase.designed.map((d) => ({ ...d, wantHundredths: d.designedHundredths }));
+  const previous = staircase.tailFromCents ?? floorCents;
+  if (staircase.tailFromCents !== null) {
     const shortfall = holdingCents(ctx.units, previous - floorCents);
     ctx.uncovered.push({
       code: "no_tail_protection",
@@ -303,11 +310,13 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
 
   for (const d of designed) {
     const { rung } = d;
-    let want = d.designedHundredths;
-    if (want < 1) {
+    let want = d.wantHundredths;
+    if (d.designedHundredths < 1) {
       note("below_minimum", d, 0);
       continue;
     }
+    // Positions already held cover this rung.
+    if (want < 1) continue;
     if (rung.marketState !== "open") {
       note("market_not_open", d, want);
       continue;
@@ -547,8 +556,11 @@ function finalize(ctx: Context): HedgePlan {
     orders: orders.map((o) => [o.instrumentSymbol, o.quantityHundredths, o.limitPriceCents]),
     // Only plans given a signal carry this key, so every plan id without one is unchanged.
     ...(ctx.signal === null ? {} : { signal: [ctx.signal.paid.receiptId, ctx.signal.paid.signal.signalId] }),
+    // The same for positions held: a top-up made against other positions is another plan.
+    ...(ctx.input.held === undefined || ctx.input.held.length === 0 ? {} : { held: heldKey(ctx.input.held) }),
   });
   const signal = ctx.signal === null ? null : signalUse(ctx, ctx.signal, orders);
+  const cover = ctx.cover === null ? null : planCover(ctx.cover, rungs);
 
   return {
     planId: planIdFor(canonical),
@@ -578,6 +590,29 @@ function finalize(ctx: Context): HedgePlan {
     warnings: ctx.warnings,
     uncovered: ctx.uncovered,
     ...(signal === null ? {} : { signal }),
+    ...(cover === null ? {} : { cover }),
+  };
+}
+
+/** Contracts held per symbol, sorted, for the plan id. */
+function heldKey(held: NonNullable<HedgeInput["held"]>): [string, number][] {
+  const totals = new Map<string, number>();
+  for (const p of held) totals.set(p.instrumentSymbol, (totals.get(p.instrumentSymbol) ?? 0) + p.hundredths);
+  return [...totals.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** The cover the plan was made against, plus what it pays once the plan's orders are held too. */
+function planCover(cover: CoverAssessment, rungs: readonly PlannedRung[]): PlanCover {
+  const below = cover.measuredBelowCents;
+  const added = below === null ? 0 : hedgePayoutCents(rungs, below - 1);
+  const withPlanPayoutCents = cover.heldPayoutCents + added;
+  return {
+    ...cover,
+    withPlanPayoutCents,
+    withPlanCoverBps:
+      cover.targetPayoutCents === 0
+        ? null
+        : Math.floor((withPlanPayoutCents * 10_000) / cover.targetPayoutCents),
   };
 }
 
