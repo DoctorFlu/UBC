@@ -135,10 +135,10 @@ A day with a settlement: last week's ladder expired and settled on Gemini, and t
 The fee is estimated from Gemini's schedule, so the digest says so once; a simulated fill has no fee and no fee in the line.
 
 ```text
-Mandate: last week's BTC ladder settled, net +$10.70 after fees. BTC is covered again.
+Mandate: last week's BTC ladder settled, net +$9.99 after fees. BTC is covered again.
 Protected: BTC below $63,000 to Nov 27 (BTC2611272200): covered.
 Spent: $42.00 on 6 orders, 2 signals for 0.02 USDC. Budget left $158.00.
-Settled: BTC2611202200, 3 positions: cost $21.00, fees $0.30, paid $32.00, net +$10.70 (fees estimated).
+Settled: BTC2611202200, 3 positions: cost $21.00, fees $1.01, paid $32.00, net +$9.99 (fees estimated).
 Waiting for you: nothing.
 ```
 

@@ -65,7 +65,7 @@ Each filled in one piece, so neither tells per-order rounding from per-fill roun
 ### The estimated fee
 
 No Gemini answer reports the fee, so the executor estimates it from the schedule at the taker rate (`estimatedFeeCents` in `gemini/src/fees.ts`), on the filled contracts and their average price, rounded up to the cent.
-The taker rate is the larger, so the estimate never understates a fee that the schedule gives.
+The taker rate is the larger, so the estimate covers a fee at either rate, as long as Gemini rounds once per order (the gap above).
 The journal stores it with the order's record when the order fills (`feeCents`), and the signed settlement carries it too: `feeCents`, with `pnlCents` = payout - cost - fee, the net after fees.
 A record written before the estimate was stored gets the estimate at settlement, from the cost and the contracts.
 A simulated fill pays no fee, so its settlement has no `feeCents` and its net is payout - cost.
@@ -175,7 +175,7 @@ Verified end to end on 17 November 2026, a local stack on the sandbox (devchain,
 - Buy NO on HI64500, $0.98 at 97c, against a YES bid of 3c: the executor placed 1 contract, which filled at once at 0.97.
   The fill was recorded onchain as $0.97, and the intent page shows the Gemini order id, Filled, and the Sandbox badge.
   The history row is `filled`, `filledQuantity` 1, `avgExecutionPrice` 0.97, and still no fee field.
-  The USD balance fell from 100000.00 to 99999.02: 97c and a 1c fee, the taker fee rounded up, exactly the worst case the order was sized for.
+  The USD balance fell from 100000.00 to 99999.02: 97c and a 1c fee, consistent with the schedule (both rates round up to 1c here); the order was sized for the taker fee.
 - Buy NO on HI65100, $0.02 at 1c: 1 contract rested (`fundsOnHold` 0.01), and the executor cancelled it at its time limit with nothing filled, so its budget was released onchain.
 - Afterwards `npm run gemini:sandbox-orders` listed no open order.
 - At expiry the fill settled on Gemini's settled positions: Gemini published the outcome at 17:00:07 UTC (NO, BTC at $63,696.06), and the executor recorded the settlement, signed, at 17:00:30 UTC: cost $0.97, paid $1.00.
