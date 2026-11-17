@@ -27,7 +27,7 @@ The hosted machine's switch is in [hosting.md](hosting.md#arc-testnet).
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `AGENT_PRIVATE_KEY` | yes | The agent's key: it proposes trades. Made by `npm run arc:keygen`. |
-| `EXECUTOR_PRIVATE_KEY` | for the executor | The executor's key: it records fills (`recordResult`). Made by `npm run arc:keygen`. The executor's Arc support (reading this key) comes with the executor change after #118; until then nothing executes approved intents on Arc. |
+| `EXECUTOR_PRIVATE_KEY` | for the executor | The executor's key: it records fills (`recordResult`). Made by `npm run arc:keygen`. Read only for a contract named by `POLICY_ADDRESS`; on the devchain the executor is anvil's account 2. |
 | `ARC_OWNER_ADDRESS` | no | The owner's wallet address, for `npm run arc:doctor` only (or `--owner 0x...`). Never a key: the owner signs in their own browser wallet. |
 
 ### Keys
@@ -37,11 +37,16 @@ It keeps keys that are already there; `-- --replace` replaces them.
 It refuses, changing nothing, a value that is not a key, the same key for both roles, and any of anvil's published test keys (from the mnemonic `test test ... junk`, which anyone can sign with).
 The owner role is not a key the stack holds: it is the owner's browser wallet.
 
-The services refuse anvil's published keys too, wherever they would sign on a chain that is not the devchain.
+The MCP server and the executor refuse anvil's published keys too, wherever they would sign on a chain that is not the devchain.
 The devchain uses Arc testnet's chain id, 5042002, so the chain id cannot tell them apart; where the process signs does.
 For the MCP server the devchain is a loopback RPC (`127.0.0.1`, `localhost`, `[::1]`), or a deployment file (`POLICY_DEPLOYMENT_FILE`) whose RPC is loopback or a bare compose service name without a dot, as the hosted demo chain's `http://anvil:8545`.
 A name is not resolved to decide this: `ARC_RPC_URL=http://anvil:8545` typed in by hand is refused like any other host, because only the deployment file the devchain writes marks a chain as local, and that mark is not an environment variable.
 A deployment file that names `rpc.testnet.arc.io`, a QuickNode host or a private IP address is refused as well.
+The executor follows the same rule: on the devchain's deployment file it signs with anvil's executor account, and for a contract named by `POLICY_ADDRESS` with `EXECUTOR_PRIVATE_KEY`, which may be one of anvil's keys only on a loopback RPC.
+Off a loopback RPC it also needs `POLICY_DEPLOY_BLOCK`, so it never scans from block 0.
+
+Until the contract's `executor()` is its key, the executor does not exit: it logs `not the executor yet: ... Ask the contract's owner to call setExecutor(0x...)` once, reads the role again every 30 s, and starts serving when the owner has made the call.
+On Arc it fills with the simulated venue unless `EXECUTOR_VENUE=gemini`, which trades on Gemini's sandbox only: it refuses `GEMINI_ENV=production` there, as on the devchain.
 
 ### The doctor
 
@@ -101,10 +106,10 @@ npm run arc:keygen                        # once; prints the agent and executor 
 npm run arc:doctor -- --owner 0x<owner>   # until it says READY: faucet, then the owner's setAgent and setExecutor
 npm run dev -w @mandate/dashboard         # the console on http://localhost:3000; the owner signs with their wallet
 npm run dev:mcp                           # the MCP server on 127.0.0.1:8787
+npm run dev:executor                      # fills approved intents, simulated by default
 ```
 
 Leave `NEXT_PUBLIC_DEV_SIGNER` unset: its signer is anvil's account 0, whose key is public.
-The executor joins once its Arc support is in (see `EXECUTOR_PRIVATE_KEY` above); until then intents are proposed and approved but not filled.
 Run one stack per key at a time: a laptop and the hosted machine signing with the same agent key would race for its nonces.
 
 ## Agent (MCP server)
@@ -173,7 +178,7 @@ Each logs the environment it reads when it starts, and the parts check each othe
 
 ## Executor
 
-The executor (`npm run dev:executor`, and the `executor` service of the hosted demo chain) fills approved intents and settles filled positions at expiry; [order-lifecycle.md](order-lifecycle.md) explains both, and [gemini-venue.md](gemini-venue.md) the Gemini venue.
+The executor (`npm run dev:executor`, and the `executor` service of the hosted demo chain and of Arc testnet) fills approved intents and settles filled positions at expiry; [order-lifecycle.md](order-lifecycle.md) explains both, and [gemini-venue.md](gemini-venue.md) the Gemini venue.
 
 | Variable | Required | Meaning |
 | --- | --- | --- |

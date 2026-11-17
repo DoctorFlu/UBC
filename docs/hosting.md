@@ -17,7 +17,7 @@ Everything is in [`deploy/`](../deploy).
 | `signals` | The x402 signal API. Only the MCP server calls it. | no |
 | `anvil` | Demo chain only: a local chain with Arc's chain id 5042002. | `/rpc`, for members of the first workspace only |
 | `chain-init` | Demo chain only: deploys the Policy contract once, then exits. | no |
-| `executor` | Demo chain only: the simulated executor, which records fills without placing orders. | no |
+| `executor` | Fills approved intents and settles positions: simulated by default, which records fills without placing orders; with its own key on Arc testnet. | no |
 
 The chain is chosen by `COMPOSE_FILE` in `deploy/.env`.
 
@@ -25,8 +25,8 @@ The chain is chosen by `COMPOSE_FILE` in `deploy/.env`.
   The contract is deployed with the demo rules on first start, and the chain keeps its state across restarts.
   The owner signs with the console's built-in test signer, anvil account 0, whose key is public.
 - `compose.yml:compose.arc.yml` uses a Policy contract already deployed on Arc testnet.
-  There is no anvil and no executor, and the owner signs with a real browser wallet.
-  It refuses to start until `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and `AGENT_PRIVATE_KEY` are set.
+  There is no anvil, the executor signs with a key of its own, and the owner signs with a real browser wallet.
+  It refuses to start until `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY` are set.
   The console keeps a database of its own in this mode; the switch is in [Arc testnet](#arc-testnet).
 
 Two optional files go after the chain's:
@@ -169,7 +169,6 @@ It prints only the name, the value's length and the first 12 hex digits of its S
 The executor reads `GEMINI_API_KEY` and `GEMINI_API_SECRET` when `EXECUTOR_VENUE=gemini` ([gemini-venue.md](gemini-venue.md)); it trades on Gemini's sandbox only, and the demo chain refuses production.
 
 For the Arc testnet mode, follow [Arc testnet](#arc-testnet): keys from `npm run arc:keygen`, gas and roles until `npm run arc:doctor` says `READY`, then `COMPOSE_FILE=compose.yml:compose.arc.yml` with `POLICY_ADDRESS` and `POLICY_DEPLOY_BLOCK`.
-Nothing executes approved intents in this mode yet: there is no executor for Arc testnet in this setup.
 
 ## 5. Start
 
@@ -829,13 +828,15 @@ What each setting means, the doctor, and the RPC budget are in [configuration.md
 
 What changes:
 
-- `COMPOSE_FILE` takes `compose.arc.yml` instead of `compose.demo.yml`: no anvil, no `chain-init`, no demo executor, and a console image (`mandate-console:arc`) without the test signer, so the owner signs with their own browser wallet.
+- `COMPOSE_FILE` takes `compose.arc.yml` instead of `compose.demo.yml`: no anvil and no `chain-init`, an executor with a key of its own, and a console image (`mandate-console:arc`) without the test signer, so the owner signs with their own browser wallet.
 - The env file gains `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY`; `ARC_RPC_URL` stays empty, so every service uses Arc's public RPC and spends no QuickNode credits.
 - The console uses a database of its own, in the volume `mandate_console-data-arc`, and leaves the demo chain's `mandate_console-data` as it is.
   Chain events are kept per deployment, but the first mandate's offchain records (holdings, hedge plans, change requests, wake-ups) are kept per mandate, so in one database the demo chain's would show against the Arc contract.
   So on Arc the first workspace is claimed again, with new passkeys; `MCP_AUTH_TOKEN` keeps working for Grok Bot (the console registers it on first use), but tokens made in the Agents section belong to the demo database.
   Switching back to the demo chain finds its database, its chain and its tokens as they were.
-- Nothing executes approved intents on Arc yet: the executor's Arc support (its key, its role check, the simulated venue as the default) comes after #118, with an `executor` service in `compose.arc.yml`.
+- The executor fills with the simulated venue unless `EXECUTOR_VENUE=gemini` (Gemini's sandbox only), and serves the server's contract and every mandate's contract that names it.
+  Until the contract's `executor()` is its key it waits and logs the `setExecutor` call the owner must make, rather than restarting in a loop.
+  New mandates name the server contract's executor, so set the roles before anyone creates one.
 
 ### 1. Keys, gas and roles (before touching the machine)
 
@@ -887,7 +888,8 @@ cd /data/mandate/repo/deploy
 docker compose --env-file /data/mandate/mandate.env up -d --build --remove-orphans
 ```
 
-Compose refuses to start while `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` or `AGENT_PRIVATE_KEY` is missing, and the MCP server refuses to start with one of anvil's published keys.
+Compose refuses to start while `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_PRIVATE_KEY` or `EXECUTOR_PRIVATE_KEY` is missing, and the MCP server and the executor refuse to start with one of anvil's published keys.
+`docker compose --env-file /data/mandate/mandate.env logs executor` shows `serving 0x571d...82f3 from block 72740419`, or `not the executor yet` with the call the owner still has to make.
 
 ### 5. Claim and check
 
