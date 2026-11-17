@@ -86,6 +86,17 @@ export async function registerOnPage(page: Page, action: string): Promise<string
   return recoveryCode;
 }
 
+/**
+ * Signs a test's browser context in as the owner, from the session `claimOwnerOnce` saved. For suites that
+ * claim their console in `beforeAll`: a `storageState` option names a file that must exist before that.
+ */
+export async function signInAsOwner(context: BrowserContext, baseURL: string): Promise<void> {
+  const state = JSON.parse(readFileSync(ownerStatePath(baseURL), "utf8")) as {
+    cookies: Parameters<BrowserContext["addCookies"]>[0];
+  };
+  await context.addCookies(state.cookies);
+}
+
 /** `claimOwner` in a browser of its own, for suites that start their console outside a test. */
 export async function claimOwnerOnce(baseURL: string, dataDir: string): Promise<void> {
   if (ownerCookie(baseURL) !== null) return;

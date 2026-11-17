@@ -24,7 +24,7 @@ import {
   waitForConsole,
   waitForSnapshot,
 } from "./support/console";
-import { claimOwnerOnce, forgetOwner, ownerStatePath } from "./support/session";
+import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
 import { type FakeGemini, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 import { type FakeWebhook, startFakeWebhook } from "./support/fake-webhook";
 
@@ -45,7 +45,7 @@ const baseURL = `http://localhost:${PORT.toString()}`;
 const DAILY_CAP = 4;
 
 test.describe.configure({ mode: "serial" });
-test.use({ baseURL, viewport: { width: 1440, height: 900 }, storageState: ownerStatePath(baseURL) });
+test.use({ baseURL, viewport: { width: 1440, height: 900 } });
 
 let chain: TestChain;
 let gemini: FakeGemini;
@@ -139,6 +139,11 @@ test.beforeAll(async () => {
   // Before the console first reads the chain: history, which must wake nothing.
   await chain.user.setPolicy(DEMO_POLICY);
   await startConsole();
+});
+
+// The owner's session, which `beforeAll` made when it claimed the console.
+test.beforeEach(async ({ context }) => {
+  await signInAsOwner(context, baseURL);
 });
 
 test.afterAll(async () => {

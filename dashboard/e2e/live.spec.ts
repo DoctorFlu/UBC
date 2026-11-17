@@ -37,7 +37,7 @@ import {
   recordedPlanRequest,
   startFakeGemini,
 } from "./support/fake-gemini";
-import { claimOwnerOnce, forgetOwner, ownerStatePath } from "./support/session";
+import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first rules, watch
@@ -56,7 +56,7 @@ const baseURL = `http://localhost:${PORT.toString()}`;
 const UNLISTED_MARKET = "GEMI-NOPE2611202200-X";
 
 test.describe.configure({ mode: "serial" });
-test.use({ baseURL, viewport: { width: 1440, height: 900 }, storageState: ownerStatePath(baseURL) });
+test.use({ baseURL, viewport: { width: 1440, height: 900 } });
 
 let chain: TestChain;
 let gemini: FakeGemini;
@@ -167,6 +167,11 @@ test.beforeAll(async () => {
   gemini = await startFakeGemini(GEMINI_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
   await startConsole();
+});
+
+// The owner's session, which `beforeAll` made when it claimed the console.
+test.beforeEach(async ({ context }) => {
+  await signInAsOwner(context, baseURL);
 });
 
 test.afterAll(async () => {
