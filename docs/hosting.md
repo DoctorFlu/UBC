@@ -452,7 +452,8 @@ Only the console reads the two Grok Bot settings, so after both are set, recreat
 instabox ssh mandate -- 'cd /data/mandate/repo/deploy && docker compose --env-file /data/mandate/mandate.env up -d --no-deps --no-build console'
 ```
 
-The console answers 502 for about 15 seconds while it restarts.
+The console answers 502 for a few seconds while it restarts (about 3 seconds when an update recreated only the console and Caddy).
+Nothing reads `GEMINI_API_KEY` or `GEMINI_API_SECRET` yet, so setting them needs no restart until a service does.
 Then check that wake-ups are on, without showing either value: the console's Setup page says so in Advanced view, or from the laptop:
 
 ```sh

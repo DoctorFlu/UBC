@@ -148,6 +148,16 @@ describe.skipIf(!hasBash)("deploy/set-secret.sh", () => {
     expect(run(["GROK_WEBHOOK_KEY", "GROK_WEBHOOK_URL"], "v\n").status).toBe(2);
   });
 
+  it("never echoes an argument that is not a name, in case a value was pasted there", () => {
+    const before = read();
+    const pasted = "https://hooks.example.test/pasted-by-mistake";
+    const result = run([pasted], "");
+    expect(result.status).toBe(2);
+    expect(result.output).toContain("That name cannot be set with this script.");
+    expect(result.output).not.toContain("pasted-by-mistake");
+    expect(read()).toBe(before);
+  });
+
   it.each([
     ["", "the value is empty."],
     ["\n", "the value is empty."],

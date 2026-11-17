@@ -38,7 +38,8 @@ name="$1"
 case " $ALLOWED " in
   *" $name "*) ;;
   *)
-    echo "$name cannot be set with this script." >&2
+    # Not echoed: a value pasted here by mistake must not be shown.
+    echo "That name cannot be set with this script." >&2
     usage
     ;;
 esac
