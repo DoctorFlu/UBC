@@ -231,6 +231,31 @@ describe("the MCP endpoint with several workspaces", () => {
     const signal = await call(server, other.token, "buy_signal", { asset: "BTC" });
     expect(JSON.stringify(signal.structuredContent)).toContain("NOT_CONFIGURED");
   });
+
+  it("gives another agent nothing for a plan id it did not make", async () => {
+    const { server, fake } = setup();
+    // An agent that could execute a plan: it has a key in the console and a contract to propose to.
+    const other = fake.addAgent({
+      privateKey: TEST_BUYER_KEY,
+      contract: { policyAddress: TEST_POLICY, chainId: 5_042_002 },
+    });
+    const planned = await call(server, TEST_TOKEN, "plan_hedge", {
+      asset: "BTC",
+      floorCents: 6_200_000,
+      maxCostCents: 5_000,
+      requestText: "Protect my BTC to $62k.",
+    });
+    const planId = (planned.structuredContent?.plan as { planId?: string } | null)?.planId;
+    expect(planId).toEqual(expect.any(String));
+
+    const stolen = await call(server, other.token, "execute_plan", {
+      planId,
+      reason: "Someone else's plan.",
+    });
+    expect(stolen.structuredContent).toMatchObject({ reasons: [{ code: "PLAN_NOT_FOUND" }] });
+    expect(fake.stateOf(other.agentId).contexts.size).toBe(0);
+    expect(fake.state.contexts.size).toBe(0);
+  });
 });
 
 describe("the console-held signer", () => {
