@@ -1,0 +1,731 @@
+{
+  "id": "428913",
+  "title": "BTC price on November 13",
+  "slug": "btc-price-on-november-13",
+  "type": "categorical",
+  "category": "Crypto",
+  "ticker": "BTC2611132200",
+  "status": "settled",
+  "createdAt": "2026-11-06T10:26:05.369Z",
+  "contracts": [
+    {
+      "id": "428913-1027193",
+      "label": "$74,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI74000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI74000",
+      "marketState": "closed",
+      "abbreviatedName": ">$74,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:12.020Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 0,
+      "strike": {
+        "type": "above",
+        "value": "74000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1027194",
+      "label": "$74,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI74500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI74500",
+      "marketState": "closed",
+      "abbreviatedName": ">$74,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:12.179Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 1,
+      "strike": {
+        "type": "above",
+        "value": "74500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1027196",
+      "label": "$75,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI75000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI75000",
+      "marketState": "closed",
+      "abbreviatedName": ">$75,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:09.208Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 2,
+      "strike": {
+        "type": "above",
+        "value": "75000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1027197",
+      "label": "$75,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI75500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI75500",
+      "marketState": "closed",
+      "abbreviatedName": ">$75,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:10.291Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 3,
+      "strike": {
+        "type": "above",
+        "value": "75500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1027199",
+      "label": "$76,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI76000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI76000",
+      "marketState": "closed",
+      "abbreviatedName": ">$76,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:11.445Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 4,
+      "strike": {
+        "type": "above",
+        "value": "76000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1027200",
+      "label": "$76,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI76500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI76500",
+      "marketState": "closed",
+      "abbreviatedName": ">$76,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:09.927Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 5,
+      "strike": {
+        "type": "above",
+        "value": "76500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1027201",
+      "label": "$77,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI77000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI77000",
+      "marketState": "closed",
+      "abbreviatedName": ">$77,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:12.096Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 6,
+      "strike": {
+        "type": "above",
+        "value": "77000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1027203",
+      "label": "$77,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI77500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI77500",
+      "marketState": "closed",
+      "abbreviatedName": ">$77,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:09.960Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 7,
+      "strike": {
+        "type": "above",
+        "value": "77500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1061754",
+      "label": "$73,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI73000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI73000",
+      "marketState": "closed",
+      "abbreviatedName": ">$73,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:09.480Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 8,
+      "strike": {
+        "type": "above",
+        "value": "73000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1061757",
+      "label": "$73,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI73500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI73500",
+      "marketState": "closed",
+      "abbreviatedName": ">$73,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:11.137Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 9,
+      "strike": {
+        "type": "above",
+        "value": "73500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1069420",
+      "label": "$72,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI72500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI72500",
+      "marketState": "closed",
+      "abbreviatedName": ">$72,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:11.916Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 10,
+      "strike": {
+        "type": "above",
+        "value": "72500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1085916",
+      "label": "$72,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI72000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI72000",
+      "marketState": "closed",
+      "abbreviatedName": ">$72,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:12.079Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 11,
+      "strike": {
+        "type": "above",
+        "value": "72000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1086549",
+      "label": "$71,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI71500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI71500",
+      "marketState": "closed",
+      "abbreviatedName": ">$71,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:09.857Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 12,
+      "strike": {
+        "type": "above",
+        "value": "71500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1111687",
+      "label": "$71,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI71000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI71000",
+      "marketState": "closed",
+      "abbreviatedName": ">$71,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:11.726Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 13,
+      "strike": {
+        "type": "above",
+        "value": "71000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1111770",
+      "label": "$70,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI70500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI70500",
+      "marketState": "closed",
+      "abbreviatedName": ">$70,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:12.185Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 14,
+      "strike": {
+        "type": "above",
+        "value": "70500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1111958",
+      "label": "$70,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI70000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI70000",
+      "marketState": "closed",
+      "abbreviatedName": ">$70,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:08.324Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 15,
+      "strike": {
+        "type": "above",
+        "value": "70000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1124070",
+      "label": "$69,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI69500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI69500",
+      "marketState": "closed",
+      "abbreviatedName": ">$69,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:11.496Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 16,
+      "strike": {
+        "type": "above",
+        "value": "69500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1125194",
+      "label": "$69,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI69000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI69000",
+      "marketState": "closed",
+      "abbreviatedName": ">$69,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:12.078Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 17,
+      "strike": {
+        "type": "above",
+        "value": "69000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1125538",
+      "label": "$68,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI68500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI68500",
+      "marketState": "closed",
+      "abbreviatedName": ">$68,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-13T22:00:09.103Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 18,
+      "strike": {
+        "type": "above",
+        "value": "68500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1125609",
+      "label": "$68,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI68000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI68000",
+      "marketState": "closed",
+      "abbreviatedName": ">$68,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "yes",
+      "resolvedAt": "2026-11-13T22:00:11.626Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 19,
+      "strike": {
+        "type": "above",
+        "value": "68000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1125735",
+      "label": "$67,500 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI67500",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI67500",
+      "marketState": "closed",
+      "abbreviatedName": ">$67,500",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "yes",
+      "resolvedAt": "2026-11-13T22:00:09.286Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 20,
+      "strike": {
+        "type": "above",
+        "value": "67500"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    },
+    {
+      "id": "428913-1126692",
+      "label": "$67,000 or above",
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-06T10:26:05.369Z",
+      "ticker": "HI67000",
+      "instrumentSymbol": "GEMI-BTC2611132200-HI67000",
+      "marketState": "closed",
+      "abbreviatedName": ">$67,000",
+      "expiryDate": "2026-11-13T22:00:00.000Z",
+      "resolutionSide": "yes",
+      "resolvedAt": "2026-11-13T22:00:10.063Z",
+      "effectiveDate": "2026-11-06T10:30:00.000Z",
+      "sortOrder": 21,
+      "strike": {
+        "type": "above",
+        "value": "67000"
+      },
+      "source": "LS-LRRR-XBTUSD",
+      "settlementValue": "68332.8725",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    }
+  ],
+  "effectiveDate": "2026-11-06T10:26:05.369Z",
+  "isLive": false,
+  "series": "BTC1H",
+  "resolvedAt": "2026-11-13T22:00:12.185Z",
+  "volume": "38530.09",
+  "volume24h": "0",
+  "tags": [
+    "Bitcoin"
+  ],
+  "expiryDate": "2026-11-13T22:00:00.000Z",
+  "startTime": "2026-11-06T10:30:00.000Z",
+  "subcategory": {
+    "id": 32,
+    "slug": "crypto_bitcoin",
+    "name": "Bitcoin",
+    "path": [
+      "Crypto",
+      "Bitcoin"
+    ]
+  },
+  "template": "prices-ladder",
+  "eventTags": [
+    {
+      "id": 18,
+      "name": "Reference",
+      "slug": "reference"
+    }
+  ],
+  "source": "LS-LRRR-XBTUSD",
+  "settlement": {
+    "value": "68332.8725"
+  },
+  "sourceDetails": {
+    "agency": "lukka",
+    "index": "LS-LRRR-XBTUSD"
+  },
+  "volumeDelta24hPct": "0"
+}

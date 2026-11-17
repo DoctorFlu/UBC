@@ -117,6 +117,7 @@ export function normalizeContract(contract: RawContract): MarketContract {
           },
     quote: normalizeQuote(contract.prices),
     resolutionSide: contract.resolutionSide ?? null,
+    resolvedAt: contract.resolvedAt ?? null,
     settlementValue: contract.settlementValue ?? null,
   };
 }
