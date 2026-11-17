@@ -267,6 +267,8 @@ docker compose start
 ```
 
 `mandate_chain` exists only in the demo mode; skip it otherwise.
+Archive each volume whole: the console's SQLite file runs in WAL mode, so `console.sqlite` alone, without its `-wal` file, can be almost empty.
+To back it up without stopping anything, as before an update that changes its schema, see [Updates that change the console's database](#updates-that-change-the-consoles-database).
 Copy the archives off the VM, together with `deploy/.env`, which holds the tokens and keys and must stay private.
 
 To restore, with the stack stopped (`docker compose down`), unpack each archive into its volume, then start:
@@ -519,6 +521,147 @@ The env file and the volumes are outside `repo`, so they are kept, and `repo.old
 The update never writes the env file, so a password the owner sets in the meantime stays.
 Caddy is recreated because its configuration files are mounted one by one from `repo`: after `mv repo repo.old` a running Caddy still reads the old files (checked on the machine), so new routes would apply only at its next restart.
 Every other command in this runbook works the same way with `--env-file /data/mandate/mandate.env` added after `docker compose`.
+
+### Updates that change the console's database
+
+The console keeps its records in SQLite, `/data/console/console.sqlite` in the `mandate_console-data` volume.
+Its schema version is `PRAGMA user_version`: one per entry of `MIGRATIONS` in `dashboard/src/server/db.ts`.
+The new console upgrades the file when it first opens it, one version per transaction, and nothing ever downgrades it.
+After the first block of [Update](#update-1), this shows whether the new version changes the schema (any added `MIGRATIONS` entry does):
+
+```sh
+diff /data/mandate/repo.old/dashboard/src/server/db.ts /data/mandate/repo/dashboard/src/server/db.ts
+```
+
+If it does, back up the live file and rehearse the upgrade on a copy before the swap, as below.
+The steps were first used for the update from version 5 to 6 (the `settlements` table) on 17 Nov 2026.
+
+> **Never back up `console.sqlite` by copying the file.**
+> The database runs in WAL mode, and recent writes stay in `console.sqlite-wal` until SQLite checkpoints them.
+> On the machine the main file was 4 KB while the data, about 230 KB, was all in a 647 KB WAL, so a copy of `console.sqlite` alone is almost empty.
+> SQLite's backup API, below, copies a consistent snapshot while the console keeps running.
+
+1. Before the build, keep the running images under a rollback tag; the build moves `demo` and `latest` to the new images, and `docker image prune` would then delete the old ones.
+   The next update's tag replaces these, so the old images go with that update's prune.
+
+   ```sh
+   docker tag mandate-console:demo mandate-console:rollback     # mandate-console:arc on Arc testnet
+   docker tag mandate-services:latest mandate-services:rollback
+   ```
+
+2. After the build, back up the live database with SQLite's backup API inside the running console, into its `/tmp`, then stream the copy out.
+   The console's `/tmp` is a tmpfs, which `docker cp` cannot read, so the copy leaves through `docker exec cat`.
+   The copy is switched to a plain journal, so it is one self-contained file; put the current version (here 5) in its name.
+
+   ```sh
+   mkdir -p -m 700 /data/mandate/backups
+   b=/data/mandate/backups/console-$(date -u +%Y%m%dT%H%M%SZ)-v5.sqlite
+   docker exec mandate-console-1 node --no-warnings -e '
+   const { DatabaseSync, backup } = require("node:sqlite");
+   backup(new DatabaseSync("/data/console/console.sqlite", { readOnly: true }), "/tmp/backup.sqlite").then(() => {
+     const copy = new DatabaseSync("/tmp/backup.sqlite");
+     copy.exec("PRAGMA journal_mode = DELETE");
+     copy.close();
+   });'
+   (umask 077; docker exec mandate-console-1 cat /tmp/backup.sqlite > "$b")
+   docker exec mandate-console-1 rm /tmp/backup.sqlite
+   ```
+
+   Keep the file: it is also the rollback point.
+   It holds the owner's private records (holdings, plans, pairing, payments), so it stays mode 600 in a folder of mode 700, and never leaves the machine unencrypted.
+   Each one is a few hundred KB; delete old ones once a later update has run for a while.
+
+3. Check the copy against the live file: the same version, `integrity_check` ok, and the same rows and content hash in every table.
+
+   ```sh
+   sum='const { DatabaseSync } = require("node:sqlite"); const { createHash } = require("node:crypto");
+   const db = new DatabaseSync(process.argv[1], { readOnly: true });
+   console.log("version", db.prepare("PRAGMA user_version").get().user_version, "integrity", db.prepare("PRAGMA integrity_check").get().integrity_check);
+   for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = ? ORDER BY name").all("table")) {
+     const rows = db.prepare(`SELECT * FROM "${name}"`).all();
+     console.log(name, rows.length, createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 12));
+   }'
+   r=$(mktemp -d)
+   docker exec mandate-console-1 node --no-warnings -e "$sum" /data/console/console.sqlite > "$r/live.txt"
+   docker run --rm --network none --user "$(id -u):$(id -g)" -v "$b:/copy.sqlite:ro" --entrypoint node mandate-services:latest --no-warnings -e "$sum" /copy.sqlite > "$r/backup.txt"
+   diff "$r/live.txt" "$r/backup.txt" && echo "backup matches the live database"
+   ```
+
+4. Rehearse the upgrade on a second copy, never on the live file or the kept backup.
+   This runs the new version's own `openDatabase` (`db.ts`, the code the console runs when it starts) in a throwaway container of the new services image, without network.
+   `db.ts` starts with `import "server-only"`, a marker Next.js resolves to an empty module on the server; the services image does not have it, so an empty one stands in.
+
+   ```sh
+   mkdir -p "$r/db" "$r/code/node_modules/server-only"
+   cp "$b" "$r/db/console.sqlite"
+   cp /data/mandate/repo/dashboard/src/server/db.ts "$r/code/"
+   echo '{ "name": "server-only", "main": "index.js" }' > "$r/code/node_modules/server-only/package.json"
+   touch "$r/code/node_modules/server-only/index.js"
+   echo 'import { DatabaseSync } from "node:sqlite";
+   import { openDatabase } from "./db.ts";
+   for (const pass of ["first", "second"]) {
+     const before = new DatabaseSync("/rehearsal/console.sqlite").prepare("PRAGMA user_version").get().user_version;
+     const db = openDatabase("/rehearsal");
+     console.log(pass, "open: version", before, "->", db.prepare("PRAGMA user_version").get().user_version);
+     db.close();
+   }' > "$r/code/migrate.mjs"
+   docker run --rm --network none --user "$(id -u):$(id -g)" -v "$r/code:/app/rehearsal:ro" -v "$r/db:/rehearsal" --entrypoint node mandate-services:latest --no-warnings --import tsx /app/rehearsal/migrate.mjs
+   docker run --rm --network none --user "$(id -u):$(id -g)" -v "$r/db:/rehearsal" --entrypoint node mandate-services:latest --no-warnings -e "$sum" /rehearsal/console.sqlite > "$r/upgraded.txt"
+   diff "$r/backup.txt" "$r/upgraded.txt"
+   ```
+
+   The first open must go from the old version to the new one and the second must change nothing (`6 -> 6`).
+   The `diff` must show only the version line and the new tables, each with 0 rows: every earlier table keeps its rows and hash, and `integrity` stays `ok`.
+   If anything else differs, stop: nothing live has changed yet, and the swap waits for a fix.
+
+5. Swap as in [Update](#update-1), then compare the live file with the backup, and clean up:
+
+   ```sh
+   docker exec mandate-console-1 node --no-warnings -e "$sum" /data/console/console.sqlite > "$r/live-after.txt"
+   diff "$r/backup.txt" "$r/live-after.txt"
+   rm -rf "$r"
+   ```
+
+   The same `diff` as in the rehearsal is expected, with one more line: `signal_budget` changes its hash on every update, because the MCP server sends the console its budget again when it starts.
+   Only the times in that row change (`as_of`, `stored_at` and the snapshot's `asOf`), not the amounts.
+
+If the new version misbehaves after the swap, roll back to the old images and the old `repo`.
+The old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
+So the backup is restored only if the upgrade damaged the data, and restoring it loses what was written since the backup (the onchain part comes back from the chain, offchain records do not).
+The rollback is three blocks, and the second one is run only to restore the backup.
+
+First, put the old `repo` and the old images back:
+
+```sh
+cd /data/mandate
+mv repo repo.failed
+mv repo.old repo
+docker tag mandate-console:rollback mandate-console:demo         # :arc on Arc testnet
+docker tag mandate-services:rollback mandate-services:latest
+```
+
+Second, and only if the data was damaged, restore the backup.
+Skip this block to keep the upgraded file.
+In a new shell, set `b` to the kept backup's path first.
+
+```sh
+cd /data/mandate/repo/deploy
+docker compose --env-file /data/mandate/mandate.env stop console executor
+docker run --rm --network none -v mandate_console-data:/v -v "$b:/backup.sqlite:ro" --entrypoint sh mandate-services:latest -c \
+  'mkdir -p /v/failed && mv -f /v/console.sqlite* /v/failed/ && cp /backup.sqlite /v/console.sqlite && chmod 644 /v/console.sqlite'
+```
+
+Third, start the old version:
+
+```sh
+cd /data/mandate/repo/deploy
+docker compose --env-file /data/mandate/mandate.env up -d --no-build --remove-orphans
+docker compose --env-file /data/mandate/mandate.env up -d --force-recreate --no-deps caddy
+```
+
+The WAL and shared-memory files go with the file they belong to: a stale WAL next to the restored file would be replayed over it, so the copy runs only after they have moved.
+The container runs as the console's user (`node`, uid 1000), so the restored file has the console's owner.
+`repo.old` is gone after the next update, so a rollback is possible only until then.
 
 ### Pauses and the free plan's limits
 
