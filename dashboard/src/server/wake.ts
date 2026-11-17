@@ -7,7 +7,9 @@ import {
   type PolicyEvent,
   type PriceGoal,
   type WakeFetch,
+  type WakeGate,
   WakeNotifier,
+  type WakeTarget,
   chainWakes,
   initialPriceMemory,
   ladderSettledWake,
@@ -52,9 +54,10 @@ export const MAX_PRICE_GOALS = 4;
  * - Settlements: the executor API hands each newly stored settlement of this mandate's deployment here;
  *   a ladder wakes the Bot once, when its last filled position is settled.
  *
- * One instance serves one mandate (`mandateId`), whose records it alone reads and writes. Until each
- * mandate has a webhook of its own, the console runs one, for the mandate on the server's contract, with
- * the webhook in the settings (docs/accounts.md).
+ * One instance serves one mandate (`mandateId`), whose records it alone reads and writes, and posts to
+ * that mandate's agent's webhook only (#112): the agent's own, or for the mandate on the server's contract
+ * until its agent has one, the webhook in the settings (`MandateWakes`, docs/event-wake.md). Every
+ * instance keeps its own cap, debounce windows, price memory and queue.
  */
 export class ConsoleWake {
   readonly notifier: WakeNotifier;
@@ -62,34 +65,59 @@ export class ConsoleWake {
   private lastPriceCheckAt: number | null = null;
   private priceCheck: Promise<void> | null = null;
   private priceProblem: string | null = null;
+  private offReason: string | null;
+  private send: WakeFetch;
 
   constructor(
     private readonly config: ConsoleConfig,
     db: Database,
     readonly mandateId: string,
     private readonly options: {
+      /** Where to post; null while this mandate has no webhook. Defaults to the settings' webhook. */
+      target?: WakeTarget | null;
+      /** Why wake-ups are off, when `target` is null. Defaults to the settings' reason. */
+      offReason?: string | null;
       ladder?: LadderSource;
       logger: { info: (message: string) => void; warn: (message: string) => void };
       onChange: () => void;
       fetch?: WakeFetch;
+      /** Bounds the requests in flight across every mandate's wake-ups. */
+      gate?: WakeGate;
       now?: () => number;
       /** Runs a task after some time on the same clock as `now` (`test-clock.ts`). */
       schedule?: (task: () => void, ms: number) => () => void;
     },
   ) {
+    const target = options.target === undefined ? config.wake.target : options.target;
+    this.offReason = options.offReason === undefined ? config.wake.offReason : options.offReason;
+    this.send = options.fetch ?? ((url, init) => fetch(url, init));
     this.store = new SqliteWakeStore(db, mandateId);
     this.notifier = new WakeNotifier({
-      target: config.wake.target,
+      target,
       dailyCap: config.wake.dailyCap,
       store: this.store,
       // Links open this mandate's own pages (#95).
       publicUrl: `${config.publicUrl}${mandatePath(mandateId)}`,
       logger: { info: (m) => options.logger.info(m), warn: (m) => options.logger.warn(m) },
       onChange: options.onChange,
-      ...(options.fetch ? { fetch: options.fetch } : {}),
+      // Through `send`, so `retarget` can change how as well as where.
+      fetch: (url, init) => this.send(url, init),
+      ...(options.gate ? { gate: options.gate } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.schedule ? { schedule: options.schedule } : {}),
     });
+  }
+
+  /**
+   * Points this mandate's wake-ups at another webhook, sent with `send`, or turns them off (`target` null,
+   * with the reason the owner sees). What was waiting for the old webhook is never sent to the new one.
+   */
+  retarget(target: WakeTarget | null, offReason: string | null, send: WakeFetch): void {
+    this.send = send;
+    this.offReason = target === null ? offReason : null;
+    if (target !== null && !this.enabled) this.store.prune(this.now);
+    this.notifier.setTarget(target);
+    this.options.onChange();
   }
 
   private get now(): number {
@@ -159,7 +187,7 @@ export class ConsoleWake {
   status(): ConsoleWakeStatus {
     return {
       ...this.notifier.status(),
-      offReason: this.config.wake.offReason,
+      offReason: this.enabled ? null : this.offReason,
       priceCheckEveryMs: this.config.wake.priceCheckMs,
       lastPriceCheckAt: this.lastPriceCheckAt === null ? null : new Date(this.lastPriceCheckAt).toISOString(),
       priceProblem: this.priceProblem,
@@ -213,9 +241,9 @@ export class ConsoleWake {
   }
 }
 
-/** Why a mandate other than the one on the server's contract has no wake-ups yet. */
+/** Why a mandate whose agent has no webhook sends no wake-ups (#112). */
 export const NO_WAKE_TARGET_REASON =
-  "Event wake-ups are set up for the first workspace only, which runs on the server's own contract.";
+  "Connect this agent's Grok Bot routine under Agents in Setup to turn wake-ups on.";
 
 /** The wake-up status of a mandate the console sends no wake-ups for: off, with nothing recorded. */
 export function wakeOffStatus(config: ConsoleConfig, offReason: string): ConsoleWakeStatus {

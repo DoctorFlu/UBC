@@ -41,13 +41,14 @@ function shippedHash(versions: number): string {
 
 /**
  * SHA-256 of the schema a version leaves (every table, index and trigger as SQLite stores it, by name), for
- * the migrations written as code: version 8 is the accounts of #94 as main shipped them at cf43611, and
- * version 9 the several mandates of #95. Once 9 is on main, a change here means it was edited after a
- * console ran it.
+ * the migrations written as code: version 8 is the accounts of #94 as main shipped them at cf43611,
+ * version 9 the several mandates of #95, and version 10 the agents' own webhooks of #112. Once a version
+ * is on main, a change here means it was edited after a console ran it.
  */
 const SHIPPED_SCHEMA_SHA256 = {
   8: "a1b6c0b890cc9585c59d9aad44bcab810a4af2fe052015f46e0f4d8871523e94",
   9: "2aec9eec5ca927a45ea82498ef77b77c040e31ecee086c921604f28e4fbab6a3",
+  10: "bb97612cd8b3e570a89cadce4df36dc45eebe348cf42d17e225e32bce5157bd2",
 } as const;
 
 function schemaHash(version: number): string {
@@ -290,8 +291,47 @@ function hostedDatabase(version = HOSTED_VERSION): string {
     migrate(db, 8);
     addAccountRows(db);
   }
+  if (version >= 9) {
+    migrate(db, 9);
+    addMandateRows(db);
+  }
   db.close();
   return dataDir;
+}
+
+/** A mandate on a contract the console deployed, with its agent, made on version 9 (#95). */
+const DEPLOYED = { mandate: "mnd_deployed", agent: "agt_deployed" };
+
+/**
+ * What version 9 consoles wrote: Bob's second mandate on a contract the console deployed (with its sealed
+ * owner key), its agent, and an owner action the console signed for it.
+ */
+function addMandateRows(db: DatabaseSync): void {
+  const run = (sql: string, ...values: (string | number | null)[]) => db.prepare(sql).run(...values);
+  run(
+    `INSERT INTO mandates (id, workspace_id, name, deployment, chain_id, policy_address, deploy_block,
+       contract_kind, executor_address, owner_address, sealed_owner_key, created_at)
+     VALUES (?, ?, 'Approvals', 'server', 31337, ?, 12, 'production', ?, ?, '{"v":1}', ?)`,
+    DEPLOYED.mandate,
+    SIGNED_UP.workspace,
+    `0x${"12".repeat(20)}`,
+    OWNER,
+    AGENT,
+    T,
+  );
+  run(
+    "INSERT INTO agents VALUES (?, ?, 'Agent', 'console', ?, '{\"v\":1}', ?)",
+    DEPLOYED.agent,
+    DEPLOYED.mandate,
+    "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+    T,
+  );
+  run(
+    "INSERT INTO owner_actions VALUES ('oac_1', ?, 'mbr_bob', 'cred_mbr_bob', 'pause', '0x8456cb59', 'sent', ?, NULL, ?)",
+    DEPLOYED.mandate,
+    hex("77"),
+    T,
+  );
 }
 
 /** The second workspace's ids, made by a sign-up on version 8. */
@@ -397,6 +437,7 @@ describe("the migrations", () => {
     expect(shippedHash(7)).toBe(SHIPPED_SHA256[7]);
     expect(schemaHash(8)).toBe(SHIPPED_SCHEMA_SHA256[8]);
     expect(schemaHash(9)).toBe(SHIPPED_SCHEMA_SHA256[9]);
+    expect(schemaHash(10)).toBe(SHIPPED_SCHEMA_SHA256[10]);
   });
 
   it("keep main's order: the hosted version is exactly the schema the hosted console has", () => {
@@ -579,8 +620,10 @@ describe("migration to several mandates (after the hosted version 8)", () => {
     for (const [table, n] of Object.entries(counts)) expect(n, table).toBeGreaterThan(0);
 
     const db = openDatabase(dataDir);
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(9);
-    expect(MIGRATIONS.length).toBe(HOSTED_VERSION + 1);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(
+      MIGRATIONS.length,
+    );
+    expect(MIGRATIONS.length).toBe(HOSTED_VERSION + 2);
     for (const [table, n] of Object.entries(counts)) expect(count(db, table), table).toBe(n);
     expect(count(db, "owner_actions")).toBe(0);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
@@ -673,5 +716,45 @@ describe("migration to several mandates (after the hosted version 8)", () => {
     expect(count(db, "holdings")).toBe(0);
     expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+  });
+});
+
+describe("migration to agents' own webhooks (version 9 to 10, #112)", () => {
+  const columnsOf = (db: Database, table: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name);
+
+  it.each([9, 8])("upgrades a populated version %i database: every row kept, no webhook set", (from) => {
+    const dataDir = hostedDatabase(from);
+    const before = new DatabaseSync(join(dataDir, "console.sqlite"));
+    expect((before.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(from);
+    expect(tables(before)).not.toContain("agent_webhooks");
+    const counts = Object.fromEntries(tables(before).map((table) => [table, count(before, table)]));
+    before.close();
+    for (const [table, n] of Object.entries(counts)) expect(n, table).toBeGreaterThan(0);
+
+    const db = openDatabase(dataDir);
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
+    expect(MIGRATIONS.length).toBe(10);
+    for (const [table, n] of Object.entries(counts)) expect(count(db, table), table).toBe(n);
+    expect(count(db, "agent_webhooks")).toBe(0);
+    expect(columnsOf(db, "agent_webhooks")).toEqual(["agent_id", "host", "sealed", "set_by", "set_at"]);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+    db.close();
+  });
+
+  it("keeps one webhook per agent, of an agent and a member that exist", () => {
+    const db = openDatabase(hostedDatabase(9));
+    const insert = db.prepare("INSERT INTO agent_webhooks VALUES (?, ?, '{}', ?, ?)");
+    insert.run(DEPLOYED.agent, "hooks.example.test", "mbr_bob", MS);
+    expect(() => insert.run(DEPLOYED.agent, "hooks.example.test", "mbr_bob", MS)).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => insert.run("agt_missing", "hooks.example.test", "mbr_bob", MS)).toThrow(/FOREIGN KEY/);
+    expect(() => insert.run(SIGNED_UP.agent, "hooks.example.test", "mbr_missing", MS)).toThrow(/FOREIGN KEY/);
+    expect(() => insert.run(SIGNED_UP.agent, "", "mbr_bob", MS)).toThrow(/CHECK/);
+    expect(() => insert.run(SIGNED_UP.agent, "hooks.example.test", "mbr_bob", "soon")).toThrow(
+      /INTEGER|datatype/,
+    );
+    db.close();
   });
 });

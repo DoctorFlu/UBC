@@ -226,6 +226,18 @@ export const MIGRATIONS: readonly Migration[] = [
   // the console on the demo chain (with an owner key the console seals) or by the owner's wallet on Arc;
   // owner actions the console signs are recorded with the member and passkey that authorised them.
   { withoutForeignKeys: migrateToMandates },
+  // 10: each agent's own Grok Bot routine webhook (#112). The address and key are sealed together under
+  // the master key, bound to the agent and the host; only the host is kept in the clear, for the Setup
+  // page. `set_at` is unix ms on the wake-ups' clock, so the last delivery shown is one made since.
+  `
+  CREATE TABLE agent_webhooks (
+    agent_id TEXT    NOT NULL PRIMARY KEY REFERENCES agents (id),
+    host     TEXT    NOT NULL CHECK (length(host) BETWEEN 1 AND 300),
+    sealed   TEXT    NOT NULL,
+    set_by   TEXT    NOT NULL REFERENCES members (id),
+    set_at   INTEGER NOT NULL
+  ) STRICT;
+  `,
 ];
 
 /**

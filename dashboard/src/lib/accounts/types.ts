@@ -20,6 +20,44 @@ export interface AgentView {
   mandate: { id: string; name: string; hasContract: boolean };
   /** Live tokens first, then newest first. */
   tokens: AgentTokenView[];
+  /** Where this agent's event wake-ups go (#112). Never the address or the key. */
+  wakeWebhook: AgentWebhookView;
+}
+
+/** The last wake-up the console tried to post to an agent's webhook: when and how it went, never the answer. */
+export interface WakeDeliveryResult {
+  at: string;
+  /** `sent`, `failed`, `queued` (waiting to retry), `sending`, `capped` or `dropped`. */
+  status: string;
+  /** A few fixed words, such as "HTTP 200" or "network error, retrying". */
+  result: string | null;
+}
+
+/**
+ * An agent's routine webhook as the Setup page shows it (#112):
+ * - `agent`: the agent's own, set in Setup;
+ * - `default`: the console's own webhook from its settings (the first mandate's agent only, until it has
+ *   its own);
+ * - `none`: wake-ups are off for this agent.
+ */
+export interface AgentWebhookView {
+  source: "agent" | "default" | "none";
+  /** The agent's own webhook's host, such as `hooks.example.com`; null for the others. */
+  host: string | null;
+  /** When the agent's own webhook was set; null for the others. */
+  setAt: string | null;
+  /** The last wake-up tried since it was set; null when none was. */
+  lastDelivery: WakeDeliveryResult | null;
+  /** True when the console could not open the stored webhook (another master key): set it again. */
+  unreadable: boolean;
+}
+
+/** Whether this console lets agents set their own webhooks, and where they may point. */
+export interface WakeWebhookSettings {
+  /** False when the operator allowed no host (`GROK_WAKE_WEBHOOK_HOSTS`). */
+  enabled: boolean;
+  /** The hosts a webhook may be on. */
+  hosts: string[];
 }
 
 /** GET /api/console/agents */
@@ -27,6 +65,12 @@ export interface AgentsResponse {
   /** Where Grok Bot reaches the MCP server, when configured. */
   mcpUrl: string | null;
   agents: AgentView[];
+  wakeWebhooks: WakeWebhookSettings;
+}
+
+/** PUT /api/console/agents/:agentId/webhook: the agent's webhook as it now is. Never the address or key. */
+export interface AgentWebhookAnswer {
+  wakeWebhook: AgentWebhookView;
 }
 
 /** POST /api/console/agents/:agentId/tokens: the only answer that ever carries the token. */

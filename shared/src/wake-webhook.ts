@@ -227,10 +227,17 @@ function refusedSend(reason: WebhookRefusal): WakeRefused {
  * A `WakeFetch` that checks the address again on every send (the allowlist may have changed, and DNS may
  * now answer otherwise), connects to the address it checked, and answers with the status alone.
  */
+/**
+ * Sends one checked request to `address` and resolves with the status. The default is the real request
+ * below; unit tests pass one that records the call, so every check before it still runs.
+ */
+export type WebhookTransport = (url: URL, address: LookupAddress, init: RequestInit) => Promise<number>;
+
 export function guardedWakeFetch(
   policy: () => WebhookPolicy,
-  options: { resolve?: WebhookResolver } = {},
+  options: { resolve?: WebhookResolver; transport?: WebhookTransport } = {},
 ): WakeFetch {
+  const transport = options.transport ?? post;
   return async (text, init) => {
     const current = policy();
     const checked = checkWebhookUrl(text, current);
@@ -242,7 +249,7 @@ export function guardedWakeFetch(
       if (resolved.reason === "no_address") throw new Error("no address");
       throw refusedSend(resolved.reason);
     }
-    const status = await post(url, resolved.address, init);
+    const status = await transport(url, resolved.address, init);
     return new Response(null, { status });
   };
 }

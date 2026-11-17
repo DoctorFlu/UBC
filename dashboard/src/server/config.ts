@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { inspect } from "node:util";
 
 import { WAKE_DEFAULT_DAILY_CAP, WakeTarget } from "@mandate/shared";
-import type { EnvVars } from "@mandate/shared/node";
+import { type EnvVars, normalizeAllowedHost } from "@mandate/shared/node";
 
 /**
  * Settings of the console backend, read once from the environment. Chain settings (`POLICY_ADDRESS`,
@@ -138,6 +138,18 @@ export interface WakeConfig {
    * `POST /api/dev/wake-clock`, so a debounce window ends when a test says so. Refused in production.
    */
   testClock: boolean;
+  /**
+   * Hosts an agent's own routine webhook may post to (#112), as the WHATWG parser writes them (`name` or
+   * `name:port`, punycode): `GROK_WAKE_WEBHOOK_HOSTS`, or by default the host of `GROK_WEBHOOK_URL`.
+   * Empty: agents cannot set webhooks of their own, and the Setup page says why.
+   */
+  webhookHosts: string[];
+  /**
+   * `GROK_WAKE_TEST_RECEIVERS=on`: an agent's webhook may be plain HTTP to a loopback address, still only
+   * on a host and port `webhookHosts` names, for the end-to-end tests' local receivers. Refused in
+   * production.
+   */
+  testReceivers: boolean;
 }
 
 /** Five minutes: a goal's floor is far from spot, and each check costs two Gemini requests per goal. */
@@ -253,12 +265,22 @@ export function readWakeConfig(env: EnvVars = process.env): WakeConfig {
   );
   const testClock =
     oneOf("GROK_WAKE_TEST_CLOCK", optional(env.GROK_WAKE_TEST_CLOCK), ["on", "off"] as const, "off") === "on";
+  const testReceivers =
+    oneOf(
+      "GROK_WAKE_TEST_RECEIVERS",
+      optional(env.GROK_WAKE_TEST_RECEIVERS),
+      ["on", "off"] as const,
+      "off",
+    ) === "on";
+  const webhookHosts = readWebhookHosts(env, url, testReceivers);
   const off = (offReason: string): WakeConfig => ({
     target: null,
     offReason,
     dailyCap,
     priceCheckMs,
     testClock,
+    webhookHosts,
+    testReceivers,
   });
   if (url === null && key === null) {
     return off("Set GROK_WEBHOOK_URL and GROK_WEBHOOK_KEY on the console to the routine's webhook.");
@@ -266,10 +288,45 @@ export function readWakeConfig(env: EnvVars = process.env): WakeConfig {
   if (url === null) return off("GROK_WEBHOOK_KEY is set but GROK_WEBHOOK_URL is empty.");
   if (key === null) return off("GROK_WEBHOOK_URL is set but GROK_WEBHOOK_KEY is empty.");
   try {
-    return { target: new WakeTarget(url, key), offReason: null, dailyCap, priceCheckMs, testClock };
+    return {
+      target: new WakeTarget(url, key),
+      offReason: null,
+      dailyCap,
+      priceCheckMs,
+      testClock,
+      webhookHosts,
+      testReceivers,
+    };
   } catch {
     return off("GROK_WEBHOOK_URL is not an http or https URL.");
   }
+}
+
+/**
+ * `GROK_WAKE_WEBHOOK_HOSTS`, comma separated, each normalized; by default the host of the env webhook, so
+ * an agent's routine on the same Grok Bot service works with no new setting. Never every host: with neither
+ * set, the list is empty. An entry that is not a bare host stops the console with its position.
+ */
+function readWebhookHosts(env: EnvVars, envWebhookUrl: string | null, plain: boolean): string[] {
+  const listed = optional(env.GROK_WAKE_WEBHOOK_HOSTS);
+  if (listed === null) {
+    if (envWebhookUrl === null || !URL.canParse(envWebhookUrl)) return [];
+    const url = new URL(envWebhookUrl);
+    // Only an https webhook's host: a plain-HTTP env webhook is a local test receiver.
+    return url.protocol === "https:" && url.username === "" && url.password === "" ? [url.host] : [];
+  }
+  const hosts: string[] = [];
+  for (const [index, entry] of listed.split(",").entries()) {
+    if (entry.trim() === "") continue;
+    const host = normalizeAllowedHost(entry, plain ? "http:" : "https:");
+    if (host === null) {
+      throw new Error(
+        `GROK_WAKE_WEBHOOK_HOSTS entry ${String(index + 1)} is not a host name (name or name:port, no scheme or path)`,
+      );
+    }
+    if (!hosts.includes(host)) hosts.push(host);
+  }
+  return hosts;
 }
 
 export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
@@ -283,6 +340,11 @@ export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
   if (accounts.mode === "production" && wake.testClock) {
     throw new Error(
       "GROK_WAKE_TEST_CLOCK=on is refused in production: anyone with the service token could move the wake-ups' clock.",
+    );
+  }
+  if (accounts.mode === "production" && wake.testReceivers) {
+    throw new Error(
+      "GROK_WAKE_TEST_RECEIVERS=on is refused in production: it lets an agent's webhook post over plain HTTP to a loopback address.",
     );
   }
   return {

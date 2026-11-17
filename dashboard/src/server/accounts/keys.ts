@@ -314,3 +314,63 @@ export function localAgentSigner(
     },
   };
 }
+
+// ------------------------------------------------------------------ agents' webhooks (#112)
+
+/** What a sealed webhook holds: the routine's "POST to" address and its key. */
+export interface WebhookSecret {
+  url: string;
+  key: string;
+}
+
+const webhookSecretSchema = z.strictObject({ url: z.string().min(1), key: z.string().min(1) });
+
+/**
+ * Encrypts an agent's routine webhook (address and key together) for the store. Sealed like the keys
+ * above, under labels of its own bound to the agent and to the host the Setup page shows, so a sealed
+ * webhook opens neither as another agent's nor under a host it was not set for.
+ */
+export function sealWebhook(master: MasterKey, agentId: string, host: string, secret: WebhookSecret): string {
+  const dataKey = randomBytes(KEY_BYTES);
+  const plaintext = Buffer.from(JSON.stringify(webhookSecretSchema.parse(secret)), "utf8");
+  try {
+    const sealed: z.infer<typeof sealedSchema> = {
+      v: 1,
+      kek: master.id,
+      dek: seal(master.bytes(), dataKey, `mandate.webhook-dek.v1:${agentId}`),
+      key: seal(dataKey, plaintext, `mandate.webhook.v1:${agentId}:${host}`),
+    };
+    return JSON.stringify(sealed);
+  } finally {
+    dataKey.fill(0);
+    plaintext.fill(0);
+  }
+}
+
+/** Decrypts a sealed webhook. Throws, without detail, when the master key, agent or host is wrong. */
+export function openWebhook(
+  master: MasterKey,
+  agentId: string,
+  host: string,
+  sealedText: string,
+): WebhookSecret {
+  let dataKey: Buffer | null = null;
+  try {
+    const sealed = sealedSchema.parse(JSON.parse(sealedText));
+    if (sealed.kek !== master.id) {
+      throw new MasterKeyError(
+        `This webhook was sealed with master key ${sealed.kek}, but the console has ${master.id}.`,
+      );
+    }
+    dataKey = open(master.bytes(), sealed.dek, `mandate.webhook-dek.v1:${agentId}`);
+    const plaintext = open(dataKey, sealed.key, `mandate.webhook.v1:${agentId}:${host}`);
+    const secret = webhookSecretSchema.parse(JSON.parse(plaintext.toString("utf8")));
+    plaintext.fill(0);
+    return secret;
+  } catch (error) {
+    if (error instanceof MasterKeyError) throw error;
+    throw new MasterKeyError("The webhook could not be decrypted.");
+  } finally {
+    dataKey?.fill(0);
+  }
+}
