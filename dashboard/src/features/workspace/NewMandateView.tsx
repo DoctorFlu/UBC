@@ -181,8 +181,8 @@ export function NewMandateView({ deployer, blocked }: NewMandateProps) {
                   </Field>
                 ))}
               </div>
-              <fieldset className={styles.step}>
-                <legend className={styles.stepTitle}>Allowed markets</legend>
+              <fieldset className={styles.markets}>
+                <legend className={styles.marketsLegend}>Allowed markets</legend>
                 <div className={styles.categories}>
                   {CATEGORY_IDS.map((category) => (
                     <Toggle

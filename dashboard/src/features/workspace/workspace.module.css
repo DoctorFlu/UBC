@@ -169,10 +169,32 @@
   gap: var(--space-4);
 }
 
+/* A field among the rules, not a step: no fieldset frame, and a legend the size of the other labels. */
+.markets {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.marketsLegend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
 .categories {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  display: grid;
+  clear: both;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: var(--space-2) var(--space-6);
+  padding-top: var(--space-3);
+}
+
+.markets .problem {
+  padding-top: var(--space-2);
 }
 
 .actions {
