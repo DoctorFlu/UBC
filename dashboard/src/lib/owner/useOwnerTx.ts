@@ -167,45 +167,53 @@ export function useOwnerTx() {
       busy.current = true;
       let hash: Hex | null = null;
       try {
-        setState({ phase: "checking", label });
-        const data = encode(call);
-        const estimate = await publicClient.estimateFeesPerGas({ type: "eip1559" });
-        const fees = applyFeeFloor(estimate, network.kind === "arc-testnet" ? ARC_MIN_MAX_FEE_PER_GAS : 0n);
-        try {
-          await publicClient.call({ account: access.address, to: policy, data, ...fees });
-        } catch (error) {
-          if (!(error instanceof BaseError)) throw error;
-          const refusal: BaseError = getContractError(error, {
-            abi: policyAbi,
-            address: policy,
-            functionName: call.functionName,
-            args: callArgs(call),
-            sender: access.address,
+        let sent: Hex;
+        if (access.signer === "passkey") {
+          // The console holds the owner key (#95): it simulates, signs, sends and waits for the receipt
+          // itself, and answers with a refusal's reason or a mined transaction. The browser never reads the
+          // chain here: on the hosted demo chain its RPC (/rpc) is the first workspace's alone.
+          setState({ phase: "signing", label, via: access.signer });
+          sent = await sendThroughConsole(call, mandateId, api);
+          hash = sent;
+          setState({ phase: "pending", label, hash: sent });
+        } else {
+          setState({ phase: "checking", label });
+          const data = encode(call);
+          const estimate = await publicClient.estimateFeesPerGas({ type: "eip1559" });
+          const fees = applyFeeFloor(estimate, network.kind === "arc-testnet" ? ARC_MIN_MAX_FEE_PER_GAS : 0n);
+          try {
+            await publicClient.call({ account: access.address, to: policy, data, ...fees });
+          } catch (error) {
+            if (!(error instanceof BaseError)) throw error;
+            const refusal: BaseError = getContractError(error, {
+              abi: policyAbi,
+              address: policy,
+              functionName: call.functionName,
+              args: callArgs(call),
+              sender: access.address,
+            });
+            throw refusal;
+          }
+
+          setState({ phase: "signing", label, via: access.signer });
+          sent = await sendTransaction(config, {
+            account: access.address,
+            chainId: network.chainId,
+            to: policy,
+            data,
+            ...fees,
           });
-          throw refusal;
-        }
+          hash = sent;
+          setState({ phase: "pending", label, hash: sent });
 
-        setState({ phase: "signing", label, via: access.signer });
-        const sent =
-          access.signer === "passkey"
-            ? await sendThroughConsole(call, mandateId, api)
-            : await sendTransaction(config, {
-                account: access.address,
-                chainId: network.chainId,
-                to: policy,
-                data,
-                ...fees,
-              });
-        hash = sent;
-        setState({ phase: "pending", label, hash: sent });
-
-        const receipt = await publicClient.waitForTransactionReceipt({
-          hash: sent,
-          pollingInterval: network.kind === "local" ? 100 : 500,
-          timeout: 120_000,
-        });
-        if (receipt.status !== "success") {
-          throw new Error("The transaction was mined but reverted. Nothing changed onchain.");
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash: sent,
+            pollingInterval: network.kind === "local" ? 100 : 500,
+            timeout: 120_000,
+          });
+          if (receipt.status !== "success") {
+            throw new Error("The transaction was mined but reverted. Nothing changed onchain.");
+          }
         }
 
         setState({ phase: "syncing", label, hash: sent });

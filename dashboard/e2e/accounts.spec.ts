@@ -142,6 +142,14 @@ test.describe("a second workspace", () => {
 
   test.beforeAll(async ({ browser, baseURL }) => {
     const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });
+    // As Caddy does on the hosted demo chain, the browser's chain RPC is the first workspace's alone
+    // (docs/accounts.md): Bob's pages, his deploy and every passkey-confirmed owner call work without it.
+    const { network } = await snapshot(baseURL ?? "");
+    const rpc = new URL(network.rpcUrl);
+    await context.route(
+      (url) => url.origin === rpc.origin && url.pathname === rpc.pathname,
+      (route) => route.fulfill({ status: 403, contentType: "text/plain", body: "Forbidden" }),
+    );
     page = await context.newPage();
     passkey = await addVirtualPasskey(page);
   });
