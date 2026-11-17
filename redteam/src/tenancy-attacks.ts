@@ -248,12 +248,23 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
             404,
           ],
           [
-            "dismiss her change request",
+            "dismiss her change request on her mandate",
+            await api.as("bob", "POST", `/api/console/change-requests/${requestId}/dismiss${foreign}`, {}),
+            404,
+          ],
+          [
+            "mark her change request applied on her mandate",
+            await api.as("bob", "POST", `/api/console/change-requests/${requestId}/applied${foreign}`, {}),
+            404,
+          ],
+          // From his own mandate the request is not his to find; the body is refused first, so any refusal.
+          [
+            "dismiss her change request from his mandate",
             await api.as("bob", "POST", `/api/console/change-requests/${requestId}/dismiss`, {}),
             0,
           ],
           [
-            "mark her change request applied",
+            "mark her change request applied from his mandate",
             await api.as("bob", "POST", `/api/console/change-requests/${requestId}/applied`, {}),
             0,
           ],
