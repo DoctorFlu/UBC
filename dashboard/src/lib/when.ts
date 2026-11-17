@@ -11,9 +11,12 @@ export interface WhenOptions {
 const MINUTE = 60_000;
 
 function dayKey(date: Date, timeZone: string | undefined): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
-    date,
-  );
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 export function relativeTime(date: Date, { now, timeZone, locale }: WhenOptions): string {
@@ -22,7 +25,9 @@ export function relativeTime(date: Date, { now, timeZone, locale }: WhenOptions)
   if (ago > -MINUTE && ago < MINUTE) return "Just now";
   if (ago >= MINUTE && ago < 60 * MINUTE) return `${Math.floor(ago / MINUTE).toString()} min ago`;
 
-  const clock = new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(date);
+  const clock = new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(
+    date,
+  );
   const day = dayKey(date, timeZone);
   if (day === dayKey(now, timeZone)) return `Today, ${clock}`;
   if (day === dayKey(new Date(now.getTime() - 24 * 60 * MINUTE), timeZone)) return `Yesterday, ${clock}`;

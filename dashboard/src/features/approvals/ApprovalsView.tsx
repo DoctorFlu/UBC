@@ -1,6 +1,5 @@
 "use client";
 
-
 import { IntentLink, IntentVerdict, MarketName, amountLabel } from "@/components/domain/Intent";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
@@ -11,11 +10,11 @@ import { type Column, Table } from "@/components/ui/Table";
 import { Tabs } from "@/components/ui/Tabs";
 import { When } from "@/components/ui/When";
 import { useAdvanced } from "@/lib/advanced/Advanced";
-import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { formatUsdCents } from "@/lib/format";
 import { type HeldDecision, decidedAfterHold, needsOwner } from "@/lib/live/attention";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { useQueryTab } from "@/lib/useQueryTab";
-import { isoFromUnix } from "@/lib/live/derive";
+
 import type { ConsoleSnapshot } from "@/lib/live/types";
 
 import styles from "./approvals.module.css";

@@ -162,9 +162,14 @@ function RequestCard({
           ) : (
             <p className={styles.resolved}>
               {request.status === "applied" ? "Applied" : "Dismissed"}
-              {request.resolvedAt
-                ? <> <When at={request.resolvedAt} date /></>
-                : ""}
+              {request.resolvedAt ? (
+                <>
+                  {" "}
+                  <When at={request.resolvedAt} date />
+                </>
+              ) : (
+                ""
+              )}
               {request.appliedTxHash ? <HexValue label="in" value={request.appliedTxHash} kind="tx" /> : null}
             </p>
           )}

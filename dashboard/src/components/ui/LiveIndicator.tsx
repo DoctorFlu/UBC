@@ -45,7 +45,11 @@ export function LiveIndicator({
 }: LiveIndicatorProps) {
   const { advanced } = useAdvanced();
   const sourceName = sourceNames[source];
-  const title = [`${healthWords[health]} via the ${sourceName}.`, detail, lastEventAt ? `Last event ${formatTimeUtc(lastEventAt)}.` : null]
+  const title = [
+    `${healthWords[health]} via the ${sourceName}.`,
+    detail,
+    lastEventAt ? `Last event ${formatTimeUtc(lastEventAt)}.` : null,
+  ]
     .filter(Boolean)
     .join(" ");
   return (

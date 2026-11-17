@@ -17,9 +17,9 @@ import { ButtonLink } from "@/components/ui/Button";
 import { HexValue } from "@/components/ui/HexValue";
 import { When } from "@/components/ui/When";
 import { Advanced } from "@/lib/advanced/Advanced";
-import { formatTimeUtc } from "@/lib/format";
+
 import type { Attention } from "@/lib/live/attention";
-import { agentName, isoFromUnix, sealedReasonText } from "@/lib/live/derive";
+import { agentName, sealedReasonText } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot } from "@/lib/live/types";
 
 import styles from "./approvals.module.css";
@@ -83,7 +83,9 @@ export function NeedsYou({ snapshot, attention }: { snapshot: ConsoleSnapshot; a
                   <span className={styles.taskTitle}>
                     {name} asks to change {count.toString()} {count === 1 ? "rule" : "rules"}
                   </span>
-                  <span className={styles.taskMeta}>Sent <When at={request.createdAt} /></span>
+                  <span className={styles.taskMeta}>
+                    Sent <When at={request.createdAt} />
+                  </span>
                 </span>
                 <ButtonLink href="/rules?tab=requests" size="sm" variant="secondary">
                   Review
