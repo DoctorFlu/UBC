@@ -17,6 +17,7 @@ import { Advanced } from "@/lib/advanced/Advanced";
 import { When } from "@/components/ui/When";
 
 import { AgentsSection } from "./AgentsSection";
+import { DeployCard } from "./DeployCard";
 import styles from "./setup.module.css";
 import { WakeUpsCard } from "./WakeUps";
 
@@ -37,6 +38,8 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
         title="Setup"
         description={`Pair Grok Bot with this console. ${formatCount(done)} of ${formatCount(steps.length)} steps done.`}
       />
+
+      <DeployCard />
 
       <div className={styles.layout}>
         <Card title="Pairing checklist" headingLevel={2} className={styles.checklist}>
@@ -107,7 +110,7 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
                   </div>
                 </dl>
                 {pairing.status === "pending" ? (
-                  <ButtonLink href={`/setup/pair/${pairing.agentAddress}`} variant="primary">
+                  <ButtonLink view href={`/setup/pair/${pairing.agentAddress}`} variant="primary">
                     Review and confirm
                   </ButtonLink>
                 ) : null}

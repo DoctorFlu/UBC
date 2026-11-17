@@ -46,7 +46,7 @@ import type { Mandate } from "./accounts/store";
 import type { ConsoleConfig } from "./config";
 import type { Database } from "./db";
 import { ContractFollower, type FollowTarget, type Logger, type Session } from "./follower";
-import { UNCONFIGURED_NETWORK, resolveDeployment } from "./ingest/deployment";
+import { resolveDeployment } from "./ingest/deployment";
 import { StreamReceiver } from "./ingest/stream";
 import { EventStore, type IngestSource } from "./store/events";
 import { ListingStore } from "./store/listings";
@@ -488,7 +488,8 @@ export class ConsoleService {
     });
     const snapshot: ConsoleSnapshot = {
       seq,
-      network: follower ? follower.network : UNCONFIGURED_NETWORK,
+      // Without its own contract yet, the network the console runs on: the one a wallet deploys it to.
+      network: follower ? follower.network : this.envFollower.network,
       feed: follower
         ? {
             ...follower.feed,

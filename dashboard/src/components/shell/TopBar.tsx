@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
 import { type StreamConnection, useLiveConsole } from "@/lib/live/LiveConsole";
+import { useMandateScope } from "@/lib/mandate/MandateContext";
 
 import { Brand } from "./Brand";
 import { DevSignerBadge } from "./DevSignerBadge";
 import { Isolator } from "./Isolator";
+import { MandateSwitcher } from "./MandateSwitcher";
 import { NavLinks } from "./NavLinks";
 import styles from "./Shell.module.css";
 import { VenueBadge } from "./VenueBadge";
@@ -42,6 +44,7 @@ function useSlowToConnect(connection: StreamConnection): boolean {
  */
 export function TopBar({ navCounts, foot }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const scope = useMandateScope();
   const { snapshot, connection } = useLiveConsole();
   const slow = useSlowToConnect(connection);
   const { feed } = snapshot;
@@ -104,6 +107,13 @@ export function TopBar({ navCounts, foot }: TopBarProps) {
       </div>
       <Dialog open={menuOpen} onClose={() => setMenuOpen(false)} title={<Brand showTag />} variant="drawer">
         <div className={styles.drawerBody}>
+          {scope ? (
+            <MandateSwitcher
+              mandates={scope.mandates}
+              current={scope.mandate}
+              onNavigate={() => setMenuOpen(false)}
+            />
+          ) : null}
           <div className={styles.drawerWallet}>
             <WalletButton block />
           </div>
