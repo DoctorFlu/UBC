@@ -37,7 +37,18 @@ forge script script/Deploy.s.sol --rpc-url https://rpc.testnet.arc.io \
 ```
 
 The script prints the address and the deploy block. Put them in `POLICY_ADDRESS` and
-`POLICY_DEPLOY_BLOCK`. `@mandate/shared` keeps a typed copy of the ABI that CI checks
+`POLICY_DEPLOY_BLOCK`.
+
+Current deployment (Arc testnet, chain id 5042002):
+
+| | |
+|---|---|
+| `POLICY_ADDRESS` | [`0x571D8ea7C86c80a230C10818743f8861084F82f3`](https://explorer.testnet.arc.io/address/0x571D8ea7C86c80a230C10818743f8861084F82f3) |
+| `POLICY_DEPLOY_BLOCK` | `72740419` |
+| Deploy tx | [`0x78ff7ee3...553964e`](https://explorer.testnet.arc.io/tx/0x78ff7ee398909a9ad5f06b0b4b46fd8c13146323ce9fa62904ddc15fc553964e) |
+| Rules | the demo policy from the deploy script |
+
+Roles are set with `setUser`, `setAgent` and `setExecutor` once the real addresses are known. `@mandate/shared` keeps a typed copy of the ABI that CI checks
 against `out/Policy.sol/Policy.json`.
 
 ## Roles
