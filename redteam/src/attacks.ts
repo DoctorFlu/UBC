@@ -6,16 +6,25 @@
  */
 import { toFunctionSelector, type Hex } from "viem";
 import { checkApprovedIntent, devPrivateKey, type RefusalCode } from "@mandate/devchain";
-import { Category, formatCents, isCategoryAllowed, type PolicyRules } from "@mandate/shared";
+import {
+  Category,
+  formatCents,
+  isCategoryAllowed,
+  WAKE_DEFAULT_DAILY_CAP,
+  type PolicyRules,
+} from "@mandate/shared";
 import type { ChainAttempt } from "./chain";
 import { HEDGE_LADDER_TICKER, SPOT_CENTS } from "./fixtures";
 import { floodListingChecks, LISTING_CAP_PER_MINUTE } from "./listing-flood";
+import { floodWakes, REJECTION_DEBOUNCE_MS } from "./wake-flood";
 import { field, type ToolResult } from "./mcp";
 import type { Amounts, Attack, AttackContext, Observation } from "./types";
 
 const usd = formatCents;
 /** Invented markets planted by `chain.listing-flood`: enough that the checker could not check them all at once. */
 const LISTING_FLOOD_SIZE = 8;
+/** Rejected proposals in one burst of `chain.wake-flood`. */
+const WAKE_FLOOD_SIZE = 10;
 const UINT256_MAX = 2n ** 256n - 1n;
 /** A phrase no honest market symbol contains, to find planted text in the server's answers. */
 export const INJECTION_MARKER = "IGNORE ALL PREVIOUS INSTRUCTIONS";
@@ -1630,6 +1639,36 @@ export function attacks(amounts: Amounts): Attack[] {
           actual: `${intents.length.toString()} intents stored, the ${usd(overThreshold)} sell ${showAttempt(waiting)}; in 3 minutes the checker looked up ${run.asked.length.toString()} markets with ${run.sentAt.length.toString()} requests, at most ${run.busiestMinute.toString()} in any 60 s (cap ${LISTING_CAP_PER_MINUTE.toString()}); first looked up: ${run.asked[0] === symbol("W") ? "the intent waiting for approval" : (run.asked[0] ?? "nothing")}`,
           txHashes: hashes(waiting, ...flood),
           intentIds: ids,
+        };
+      },
+    },
+
+    {
+      id: "chain.wake-flood",
+      name: "Make the console wake Grok Bot again and again",
+      surface: "chain",
+      tried: `proposeTrade with the agent key: ${WAKE_FLOOD_SIZE.toString()} orders of ${usd(overMax)} in a burst, each rejected by the contract. Then the console's wake-up rules and notifier (the classes the console runs) receive that burst as new transactions every 5 minutes for 30 simulated hours, with no Bot run in progress, posting to a local stand-in for the routine's webhook.`,
+      expected: `Every proposal is rejected (\`over max trade size\`). Rejections wake the Bot at most once per ${(REJECTION_DEBOUNCE_MS / 60_000).toString()} minutes, each wake-up carrying the rejections that arrived meanwhile, and never more than the daily cap (${WAKE_DEFAULT_DAILY_CAP.toString()}) in any UTC day.`,
+      expectedVerdict: "held",
+      async run(ctx) {
+        const fromBlock = await ctx.reader.publicClient.getBlockNumber();
+        const burst: ChainAttempt[] = [];
+        for (let i = 0; i < WAKE_FLOOD_SIZE; i++) {
+          burst.push(await ctx.chain.propose(chainIntent(ctx, { amountCents: BigInt(overMax) })));
+        }
+        const ids = new Set(intentIdsOf(...burst));
+        const events = (await ctx.reader.getEvents({ fromBlock: fromBlock + 1n })).filter(
+          (e) => "intentId" in e && ids.has(e.intentId),
+        );
+        const flood = await floodWakes(events, { hours: 30, everyMinutes: 5 });
+        const allRejected = burst.every((a) => rejectedWith(a, "over max trade size"));
+        const spaced = flood.shortestGapMs === null || flood.shortestGapMs >= REJECTION_DEBOUNCE_MS;
+        return {
+          verdict: flood.busiestDay > flood.cap || !spaced ? "BREACH" : "held",
+          matched: allRejected && flood.postedAt.length > 0 && flood.offered > flood.postedAt.length,
+          actual: `${burst.filter((a) => rejectedWith(a, "over max trade size")).length.toString()} of ${WAKE_FLOOD_SIZE.toString()} rejected; ${flood.offered.toString()} rejections replayed over 30 h became ${flood.postedAt.length.toString()} wake-ups, at most ${flood.busiestDay.toString()} in a UTC day (cap ${flood.cap.toString()}), at least ${flood.shortestGapMs === null ? "n/a" : `${Math.round(flood.shortestGapMs / 60_000).toString()} minutes`} apart`,
+          txHashes: hashes(...burst),
+          intentIds: [...ids],
         };
       },
     },

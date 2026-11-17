@@ -18,7 +18,8 @@ import { newId } from "./accounts/secrets";
  *   plans, policy change requests, agent pairing and intent-to-context links, each keyed by mandate;
  * - accounts: workspaces, members, passkeys, sessions, mandates, agents and agent tokens, with every
  *   secret stored as a hash and every agent key sealed (docs/accounts.md);
- * - what Gemini said about each intent's market the first time the console checked it.
+ * - what Gemini said about each intent's market the first time the console checked it;
+ * - the event wake-ups of each mandate's Grok Bot routine (docs/event-wake.md).
  */
 export type Database = DatabaseSync;
 
@@ -135,13 +136,47 @@ const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
     checked_at TEXT    NOT NULL
   ) STRICT;
   `,
-  // 5: accounts (#94). Workspaces, members, passkeys, sessions, mandates, agents and their tokens; every
-  // offchain record now belongs to a mandate. The single-tenant data becomes the first workspace's mandate.
+  // 5: event wake-ups of the Grok Bot routine (#40): each wake-up, the triggers it carries (so a trigger
+  // is offered once, across restarts), and what the last price check of each goal saw. Times in unix ms.
+  `
+  CREATE TABLE wake_deliveries (
+    id               TEXT    NOT NULL PRIMARY KEY,
+    kind             TEXT    NOT NULL,
+    status           TEXT    NOT NULL,
+    detail           TEXT    NOT NULL,
+    count            INTEGER NOT NULL,
+    occurred_at      INTEGER NOT NULL,
+    created_at       INTEGER NOT NULL,
+    due_at           INTEGER NOT NULL,
+    attempts         INTEGER NOT NULL,
+    attempted_at     INTEGER,
+    sent_at          INTEGER,
+    result           TEXT,
+    counts_toward_cap INTEGER NOT NULL
+  ) STRICT;
+  CREATE INDEX wake_deliveries_status ON wake_deliveries (status, due_at);
+  CREATE INDEX wake_deliveries_created ON wake_deliveries (created_at);
+
+  CREATE TABLE wake_sources (
+    source_id   TEXT    NOT NULL PRIMARY KEY,
+    delivery_id TEXT    NOT NULL,
+    seen_at     INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE TABLE wake_price_memory (
+    plan_id    TEXT    NOT NULL PRIMARY KEY,
+    memory     TEXT    NOT NULL,
+    updated_at INTEGER NOT NULL
+  ) STRICT;
+  `,
+  // 6: accounts (#94). Workspaces, members, passkeys, sessions, mandates, agents and their tokens; every
+  // offchain record and every wake-up record now belongs to a mandate. The single-tenant data becomes the
+  // first workspace's mandate. Every migration above is applied on the hosted database: never reorder them.
   migrateToAccounts,
 ];
 
 /**
- * Version 5. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
+ * Version 6. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
  * (which follows the contract the server is configured with) and that mandate's agent (whose key the MCP
  * server holds), and moves every existing offchain row into that mandate without losing one.
  */
@@ -317,18 +352,45 @@ function migrateToAccounts(db: Database): void {
         stored_at TEXT NOT NULL`,
       columns: "as_of, snapshot, stored_at",
     },
+    // Event wake-ups (#40): their ids and trigger ids are derived from chain positions and plan ids, which
+    // two mandates could share, so the mandate is part of each key. Phase 1 sends only the first
+    // workspace's wake-ups, to the one webhook in the settings; a webhook per mandate needs no new key.
+    {
+      table: "wake_deliveries",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), id TEXT NOT NULL, kind TEXT NOT NULL,
+        status TEXT NOT NULL, detail TEXT NOT NULL, count INTEGER NOT NULL, occurred_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL, due_at INTEGER NOT NULL, attempts INTEGER NOT NULL, attempted_at INTEGER,
+        sent_at INTEGER, result TEXT, counts_toward_cap INTEGER NOT NULL, PRIMARY KEY (mandate_id, id)`,
+      columns:
+        "id, kind, status, detail, count, occurred_at, created_at, due_at, attempts, attempted_at, sent_at, result, counts_toward_cap",
+    },
+    {
+      table: "wake_sources",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), source_id TEXT NOT NULL, delivery_id TEXT NOT NULL,
+        seen_at INTEGER NOT NULL, PRIMARY KEY (mandate_id, source_id)`,
+      columns: "source_id, delivery_id, seen_at",
+    },
+    {
+      table: "wake_price_memory",
+      create: `mandate_id TEXT NOT NULL REFERENCES mandates (id), plan_id TEXT NOT NULL, memory TEXT NOT NULL,
+        updated_at INTEGER NOT NULL, PRIMARY KEY (mandate_id, plan_id)`,
+      columns: "plan_id, memory, updated_at",
+    },
   ];
   for (const { table, create, columns } of scoped) {
-    db.exec(`CREATE TABLE ${table}_v5 (${create}) STRICT`);
+    db.exec(`CREATE TABLE ${table}_scoped (${create}) STRICT`);
     db.prepare(
-      `INSERT INTO ${table}_v5 (mandate_id, ${columns}) SELECT ?, ${columns} FROM ${table} ORDER BY rowid`,
+      `INSERT INTO ${table}_scoped (mandate_id, ${columns}) SELECT ?, ${columns} FROM ${table} ORDER BY rowid`,
     ).run(mandateId);
     db.exec(`DROP TABLE ${table}`);
-    db.exec(`ALTER TABLE ${table}_v5 RENAME TO ${table}`);
+    db.exec(`ALTER TABLE ${table}_scoped RENAME TO ${table}`);
   }
+  // Dropping a table drops its indexes: these replace version 5's wake-up indexes, with the mandate first.
   db.exec(`
   CREATE INDEX policy_change_requests_created ON policy_change_requests (mandate_id, created_at);
   CREATE INDEX signal_payments_paid ON signal_payments (mandate_id, paid_at);
+  CREATE INDEX wake_deliveries_status ON wake_deliveries (mandate_id, status, due_at);
+  CREATE INDEX wake_deliveries_created ON wake_deliveries (mandate_id, created_at);
   `);
 }
 

@@ -3,6 +3,7 @@ import "server-only";
 import { resolve } from "node:path";
 import { inspect } from "node:util";
 
+import { WAKE_DEFAULT_DAILY_CAP, WakeTarget } from "@mandate/shared";
 import type { EnvVars } from "@mandate/shared/node";
 
 /**
@@ -71,7 +72,23 @@ export interface ConsoleConfig {
   /** Address of the MCP server as Grok Bot reaches it, shown on the setup page, or null when unknown. */
   mcpPublicUrl: string | null;
   accounts: AccountsConfig;
+  /** Event wake-ups of the Grok Bot routine (issue #40). */
+  wake: WakeConfig;
 }
+
+export interface WakeConfig {
+  /** The routine's webhook, or null when wake-ups are off. Prints as `[redacted]`. */
+  target: WakeTarget | null;
+  /** Why wake-ups are off, in one sentence that never quotes a value; null when on. */
+  offReason: string | null;
+  /** Most wake-ups sent per UTC day. */
+  dailyCap: number;
+  /** Least time between two price checks while the console runs. */
+  priceCheckMs: number;
+}
+
+/** Five minutes: a goal's floor is far from spot, and each check costs two Gemini requests per goal. */
+export const DEFAULT_PRICE_CHECK_MS = 300_000;
 
 /**
  * The default data directory: `dashboard/.data`, git-ignored. `turbopackIgnore` keeps the bundler from
@@ -151,6 +168,49 @@ export function readAccountsConfig(env: EnvVars, publicUrl: string): AccountsCon
   };
 }
 
+function wholeNumber(name: string, value: string | undefined, fallback: number, min: number, max: number) {
+  if (value === undefined || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be a whole number from ${String(min)} to ${String(max)}, got "${value}"`);
+  }
+  return parsed;
+}
+
+/**
+ * The webhook's URL and key are secrets: an error or a reason here names the variable, never its value.
+ * Both empty is the normal "off"; only one set is off too, and says which is missing.
+ */
+export function readWakeConfig(env: EnvVars = process.env): WakeConfig {
+  const url = optional(env.GROK_WEBHOOK_URL);
+  const key = optional(env.GROK_WEBHOOK_KEY);
+  const dailyCap = wholeNumber(
+    "GROK_WAKE_DAILY_CAP",
+    env.GROK_WAKE_DAILY_CAP,
+    WAKE_DEFAULT_DAILY_CAP,
+    0,
+    1_000,
+  );
+  const priceCheckMs = wholeNumber(
+    "GROK_WAKE_PRICE_CHECK_MS",
+    env.GROK_WAKE_PRICE_CHECK_MS,
+    DEFAULT_PRICE_CHECK_MS,
+    1_000,
+    86_400_000,
+  );
+  const off = (offReason: string): WakeConfig => ({ target: null, offReason, dailyCap, priceCheckMs });
+  if (url === null && key === null) {
+    return off("Set GROK_WEBHOOK_URL and GROK_WEBHOOK_KEY on the console to the routine's webhook.");
+  }
+  if (url === null) return off("GROK_WEBHOOK_KEY is set but GROK_WEBHOOK_URL is empty.");
+  if (key === null) return off("GROK_WEBHOOK_URL is set but GROK_WEBHOOK_KEY is empty.");
+  try {
+    return { target: new WakeTarget(url, key), offReason: null, dailyCap, priceCheckMs };
+  } catch {
+    return off("GROK_WEBHOOK_URL is not an http or https URL.");
+  }
+}
+
 export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
   const source = env.CONSOLE_EVENT_SOURCE?.trim() || "rpc";
   if (source !== "rpc" && source !== "stream") {
@@ -166,6 +226,7 @@ export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
     publicUrl,
     mcpPublicUrl: optional(env.MCP_PUBLIC_URL),
     accounts: readAccountsConfig(env, publicUrl),
+    wake: readWakeConfig(env),
   };
 }
 
@@ -184,6 +245,7 @@ export function testConsoleConfig(
     streamSecurityToken: null,
     publicUrl,
     mcpPublicUrl: null,
+    wake: readWakeConfig({}),
     ...rest,
     accounts: { ...readAccountsConfig({ CONSOLE_MODE: "development" }, publicUrl), ...accounts },
   };

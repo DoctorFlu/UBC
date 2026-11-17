@@ -98,6 +98,9 @@ export function agentRoute(handler: AgentHandler) {
   return serviceRoute((request, service, params) => {
     const scope = agentScopeOf(request, service);
     if (scope instanceof Response) return Promise.resolve(scope);
+    // The MCP server calls for an agent during every one of its Bot runs: events the run causes meanwhile
+    // must not wake that Bot again (docs/event-wake.md).
+    service.noteAgentActivity(scope.mandate);
     return handler(request, service, scope, params);
   });
 }

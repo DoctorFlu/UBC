@@ -25,8 +25,16 @@ erDiagram
   Phase 1 keeps one mandate per workspace, but every record, route and token lookup is keyed by mandate.
 - An **agent** has its own onchain key and one or more **agent tokens**.
   A token is what an MCP client presents as `Authorization: Bearer <token>`; it decides which agent, and so which mandate, a call acts on.
-- **Records** the console keeps (holdings, decision contexts, hedge plans, intent-to-context links, pairing, change requests, signal payments and budget) carry the mandate they belong to.
+- **Records** the console keeps (holdings, decision contexts, hedge plans, intent-to-context links, pairing, change requests, signal payments and budget, and event wake-ups) carry the mandate they belong to.
   The Policy event cache stays keyed by deployment, because events are public chain data; a mandate names the deployment it follows.
+
+### Event wake-ups
+
+Event wake-ups ([event-wake.md](event-wake.md)) belong to a mandate: each wake-up, each trigger it carries and each price check's memory has the mandate in its key, and the daily cap counts one mandate's wake-ups.
+Phase 1 has one webhook, the one in `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY`, and sends wake-ups only for the mandate that follows the server's contract, from its chain events and its own plans and holdings.
+Only that mandate's agent marks a run in progress, so another workspace's agent cannot hold back its wake-ups.
+Every other mandate's Setup page shows wake-ups as off, with that reason.
+Phase 2 adds a webhook per mandate, which needs no new key.
 
 ### Where the contract comes from
 

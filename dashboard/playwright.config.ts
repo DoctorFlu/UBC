@@ -50,7 +50,8 @@ export default defineConfig({
     { name: "smoke", testMatch: /(smoke|shell|icons)\.spec\.ts/ },
     { name: "screenshots", testMatch: /screenshots\.spec\.ts/ },
     { name: "prod", testMatch: /prod\.spec\.ts/ },
-    { name: "live", testMatch: /live\.spec\.ts/, timeout: 240_000 },
+    // One worker: each spec starts its own `next dev` on this folder's `.next`, so they run one after the other.
+    { name: "live", testMatch: /(live|wake)\.spec\.ts/, timeout: 240_000, workers: 1 },
   ],
   webServer: live
     ? []

@@ -291,6 +291,40 @@ export const fixtureSnapshot: ConsoleSnapshot = {
     },
   },
   mcpPublicUrl: "https://mandate-mcp.example.dev/mcp",
+  wake: {
+    enabled: true,
+    dailyCap: 12,
+    usedToday: 2,
+    leftToday: 10,
+    offReason: null,
+    priceCheckEveryMs: 300_000,
+    lastPriceCheckAt: "2026-11-15T13:25:00.000Z",
+    priceProblem: null,
+    recent: [
+      {
+        id: "wk_5b1e0f3a9c2d4e6f7a8b9c0d",
+        kind: "owner_decision",
+        summary: "The owner rejected #6 (rejected by user).",
+        count: 1,
+        status: "sent",
+        result: "HTTP 200",
+        occurredAt: "2026-11-15T13:22:10.000Z",
+        attemptedAt: "2026-11-15T13:22:11.000Z",
+        dueAt: null,
+      },
+      {
+        id: "wk_0c7d2a9e4b1f3a5c6d8e0f12",
+        kind: "mandate_changed",
+        summary: "The owner changed the rules.",
+        count: 1,
+        status: "sent",
+        result: "HTTP 200",
+        occurredAt: "2026-11-15T09:02:40.000Z",
+        attemptedAt: "2026-11-15T09:02:41.000Z",
+        dueAt: null,
+      },
+    ],
+  },
 };
 
 /** The same console with a mandate set and nothing else yet: no intents, holdings, pairing or requests. */

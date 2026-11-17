@@ -68,8 +68,10 @@ The sender posts to the URL with `Authorization: Bearer <key>` and an optional J
 A `200` response means a run started, not that it finished.
 
 This lets our backend wake the Bot when something happens onchain or in the market.
-Examples: the price crosses the protection floor, a hedge rung settles, or the owner changes the mandate.
-The webhook URL and key are secrets and belong in `.env`.
+The console does it (issue #40): it posts a versioned `mandate.wake` event when spot falls below the goal's floor or a rise loses cover, the owner decides on a held order, changes the rules, pauses or resumes, an intent is rejected outside a run, or an order fills late or fails.
+Events the Bot's own run causes, and the fill that follows an approval, wake nothing; a debounce per kind and a daily cap bound the rest.
+[event-wake.md](event-wake.md) has the body, the reasoning and the limits, and the routine says what to do with each kind.
+The webhook URL and key are secrets and belong in `.env` (`GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, see [configuration.md](configuration.md#grok-bot-event-wake-ups)).
 
 ## Whether a goal is already covered (issue #88)
 
@@ -126,5 +128,5 @@ Checked on 2026-11-15 against our server through a Cloudflare quick tunnel.
 
 1. Whether Auto Review asks before a write tool on a scheduled or webhook run.
 2. Tool result size limits and timeouts beyond what we have seen.
-3. A webhook-triggered routine receives our JSON body.
+3. A webhook-triggered routine receives our JSON body (`mandate.wake`, [event-wake.md](event-wake.md)), and how the Bot sees it beside the instruction. The notifier is tested only against a local fake receiver.
 4. The export method.

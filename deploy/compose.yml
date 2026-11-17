@@ -108,6 +108,11 @@ services:
       CONSOLE_EVENT_SOURCE: ${CONSOLE_EVENT_SOURCE:-rpc}
       CONSOLE_POLL_INTERVAL_MS: ${CONSOLE_POLL_INTERVAL_MS:-}
       QUICKNODE_STREAM_SECURITY_TOKEN: ${QUICKNODE_STREAM_SECURITY_TOKEN:-}
+      # Event wake-ups of Grok Bot's routine (docs/event-wake.md). Empty URL or key: off.
+      GROK_WEBHOOK_URL: ${GROK_WEBHOOK_URL:-}
+      GROK_WEBHOOK_KEY: ${GROK_WEBHOOK_KEY:-}
+      GROK_WAKE_DAILY_CAP: ${GROK_WAKE_DAILY_CAP:-}
+      GROK_WAKE_PRICE_CHECK_MS: ${GROK_WAKE_PRICE_CHECK_MS:-}
       NODE_OPTIONS: --max-old-space-size=384
     volumes:
       - console-data:/data/console

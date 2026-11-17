@@ -213,6 +213,17 @@ export interface LadderListing {
 export const CANDLE_TIME_FRAMES = ["1m", "5m", "15m", "30m", "1hr", "6hr", "1day"] as const;
 export type CandleTimeFrame = (typeof CANDLE_TIME_FRAMES)[number];
 
+/** Width of one candle of each time frame, in milliseconds. */
+export const CANDLE_INTERVAL_MS: Readonly<Record<CandleTimeFrame, number>> = {
+  "1m": 60_000,
+  "5m": 300_000,
+  "15m": 900_000,
+  "30m": 1_800_000,
+  "1hr": 3_600_000,
+  "6hr": 21_600_000,
+  "1day": 86_400_000,
+};
+
 /** One spot-market candle. Prices are integer cents, rounded half-up from Gemini's decimal. */
 export interface Candle {
   /** Start of the candle's interval, in Unix milliseconds. */
