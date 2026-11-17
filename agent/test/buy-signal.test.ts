@@ -35,6 +35,8 @@ async function setup(
     console?: boolean;
     /** Serve the hourly candles recorded with a 14-hour gap (issue #98), at the time they were recorded. */
     gappedCandles?: boolean;
+    /** The Gemini this server plans on, which the signal API's health must name before anything is paid. */
+    marketData?: { environment: "sandbox" | "production"; settings: string };
   } = {},
 ) {
   const seller = recordedSignalsApp({
@@ -74,6 +76,7 @@ async function setup(
     signalsUrl: SIGNALS_URL,
     dailyBudget: options.dailyBudget ?? 1_000n,
     maxPrice: options.maxPrice ?? 500n,
+    ...(options.marketData === undefined ? {} : { marketData: options.marketData }),
   });
   const fake = createFakeConsole({ token: CONSOLE_TOKEN });
   const consoleClient =
@@ -279,6 +282,34 @@ describe("buy_signal", () => {
     expect(noLadder.structured).toMatchObject({ status: "unavailable", reasons: [{ code: "NO_LADDER" }] });
     expect(noLadder.text).toContain("Nothing was paid.");
 
+    expect(sign).not.toHaveBeenCalled();
+    expect(ledger.entriesOn(DAY)).toHaveLength(0);
+  });
+
+  it("buys only from a signal API on the same Gemini, asking its free health route first", async () => {
+    const same = await setup({
+      marketData: { environment: "production", settings: "EXECUTOR_VENUE=simulated (the default)" },
+    });
+    expect((await same.buy()).structured.status).toBe("approved");
+    expect(same.seen.map((r) => new URL(r.url).pathname)[0]).toBe("/health");
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+
+    const { buy, sign, seen, ledger } = await setup({
+      marketData: { environment: "sandbox", settings: "EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox" },
+    });
+    const { structured, text } = await buy();
+    expect(structured).toMatchObject({
+      status: "unavailable",
+      reasons: [{ code: "MARKET_ENVIRONMENT_MISMATCH" }],
+      nextAction: { actor: "owner" },
+    });
+    expect(text).toContain(
+      "This MCP server reads Gemini's sandbox (EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox), but the signal API",
+    );
+    expect(text).toContain("Nothing was paid.");
+    // Only the free health route was asked: no price probe, no signature, no reservation.
+    expect(seen.map((r) => new URL(r.url).pathname)).toEqual(["/health"]);
     expect(sign).not.toHaveBeenCalled();
     expect(ledger.entriesOn(DAY)).toHaveLength(0);
   });

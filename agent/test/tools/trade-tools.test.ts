@@ -124,6 +124,31 @@ describe("propose_trade", () => {
     expect(no.summary).toContain("rejected by the mandate (over max trade size)");
   });
 
+  it("proposes nothing while the console reads another Gemini, and names both sides' settings", async () => {
+    // EXECUTOR_VENUE=gemini: this server plans on the sandbox; the console still reads production.
+    const h = harness({ env: { EXECUTOR_VENUE: "gemini" } });
+    const refused = await proposeTrade.run({ ...args, amountCents: 1_000 }, h.ctx);
+    expect(refused.structured).toMatchObject({
+      status: "unavailable",
+      reasons: [
+        {
+          code: "MARKET_ENVIRONMENT_MISMATCH",
+          message:
+            "This MCP server reads Gemini's sandbox (EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox), but the " +
+            "console reads Gemini (production) (its /api/health). Give the executor, the console, the MCP " +
+            "server and the signal service the same EXECUTOR_VENUE and GEMINI_ENV. Nothing was proposed.",
+        },
+      ],
+      nextAction: { actor: "owner" },
+    });
+    expect(h.policy.proposed).toHaveLength(0);
+    expect(h.console.state.contexts.size).toBe(0);
+
+    h.console.setMarketEnvironment("sandbox");
+    const ok = await proposeTrade.run({ ...args, amountCents: 1_000 }, h.ctx);
+    expect(ok.structured).toMatchObject({ status: "approved", proposal: { intentId: 0 } });
+  });
+
   it("sends the category Gemini lists, so a Sports market is rejected onchain", async () => {
     const h = harness();
     const { structured } = await proposeTrade.run(

@@ -1,4 +1,5 @@
 import { BatchFacilitatorClient, GatewayEvmScheme } from "@circle-fin/x402-batching/server";
+import type { GeminiEnvironment } from "@mandate/gemini";
 import { ARC_TESTNET } from "@mandate/shared";
 import type { FacilitatorClient, RoutesConfig } from "@x402/core/server";
 import type { Network } from "@x402/core/types";
@@ -21,6 +22,11 @@ export interface SignalsAppOptions {
   facilitatorUrl?: string;
   /** Paid routes to serve. Defaults to the hello route. */
   routes?: readonly PaidRoute[];
+  /**
+   * Which Gemini the signals read (`marketDataSource`), told on the free health route so the MCP server
+   * can check it agrees before it pays. Defaults to production.
+   */
+  marketEnvironment?: GeminiEnvironment;
 }
 
 /** Discovery document served at `GET /v1/resources`. */
@@ -80,7 +86,8 @@ export function createSignalsApp(options: SignalsAppOptions): Hono {
 
   const app = new Hono();
 
-  app.get("/health", (c) => c.json({ ok: true, service: "@mandate/signals" }));
+  const marketEnvironment = options.marketEnvironment ?? "production";
+  app.get("/health", (c) => c.json({ ok: true, service: "@mandate/signals", marketEnvironment }));
 
   app.get("/v1/resources", (c) => {
     const origin = new URL(c.req.url).origin;

@@ -12,7 +12,7 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 - **Signed requests go to Gemini's own hosts only.**
   The private client (`@mandate/gemini/private`) sends to `https://api.sandbox.gemini.com` or `https://api.gemini.com`, never to `GEMINI_API_URL`; tests may use a loopback address only.
   It never follows a redirect, because fetch keeps custom headers across hosts and would hand the key, payload and signature to whatever host the answer names; a redirect is reported as `redirected`, an unknown outcome.
-  The executor's market checks read the public data of the environment its orders go to, because the sandbox lists other strikes than production.
+  The executor's market checks, and the rest of the stack's market data, read the public data of the environment its orders go to, because the sandbox lists other strikes than production (see below).
 - **One order per intent, whatever fails.**
   Every order carries our client order id, `mandate-<chain id>-<first 8 hex digits of the contract>-<intent id>`, but safety does not depend on Gemini honouring it (see below).
   Before an order is sent, the executor writes a "placing" record to its journal in the console; when that write fails, nothing is sent.
@@ -101,9 +101,18 @@ Its exit status is 0 when ready, 1 when not, 2 when the sandbox could not be rea
 5. Run `npm run gemini:doctor` until it says `READY`.
 6. Set `EXECUTOR_VENUE=gemini` and restart the executor.
 
-The agent and the console read Gemini's production listings, while the executor checks orders against the sandbox's.
-The sandbox lists fewer strikes (for example 8 of production's 21 on the BTC ladder of 20 November 2026), so a proposal on a strike the sandbox does not list is refused as `market_not_listed` and recorded as not filled.
-The sandbox's order books are mostly empty, so a sandbox order may rest unfilled until its time is up and be cancelled.
+## One environment for the whole stack
+
+With `EXECUTOR_VENUE=gemini`, the console, the MCP server and the signal API read the public market data of the environment the orders go to (`GEMINI_ENV`, the sandbox by default), not production's.
+The sandbox lists fewer strikes (for example 8 of production's 21 on the BTC ladder of 20 November 2026), has its own books and its own spot price (about 1 % from production's), so planning on production would propose strikes the executor cannot place.
+Give every service the same `EXECUTOR_VENUE` and `GEMINI_ENV`; the demo compose file does.
+When they disagree, nothing is traded on the wrong exchange:
+
+- The console refuses the executor's venue announcement with 409 `environment_mismatch`, naming both sides' settings, and the executor stops before it trades.
+- The MCP server proposes nothing while the console names another environment, and pays for no signal while the signal API does; both answer `MARKET_ENVIRONMENT_MISMATCH`.
+- A `GEMINI_API_URL` on another host than the environment's is refused at start (a loopback test server is allowed), and the console's health answers 503.
+
+[configuration.md](configuration.md#one-gemini-for-the-whole-stack) has the table of settings.
 
 ## What is verified and what is not
 

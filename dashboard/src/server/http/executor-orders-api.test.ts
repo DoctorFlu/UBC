@@ -49,12 +49,19 @@ let unseenId: number;
 
 const executorSign: RecordSigner = (hash) => devAccount("executor").signMessage({ message: { raw: hash } });
 const agentSign: RecordSigner = (hash) => devAccount("agent").signMessage({ message: { raw: hash } });
+type ConsoleMarketData = Parameters<typeof putExecutorVenue>[0];
+/** A console on Gemini's sandbox, as `EXECUTOR_VENUE=gemini` with the default `GEMINI_ENV` makes it. */
+const sandboxConsole: ConsoleMarketData = () => ({
+  environment: "sandbox",
+  settings: "EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox",
+});
 
 /** The console's executor routes, reached the way `consoleOrderJournal` reaches them over HTTP. */
 async function consoleFetch(input: string, init: RequestInit): Promise<Response> {
   const url = new URL(input);
   const request = new Request(url, init);
-  if (url.pathname === CONSOLE_EXECUTOR_ROUTES.venue) return putExecutorVenue(request, service, {});
+  if (url.pathname === CONSOLE_EXECUTOR_ROUTES.venue)
+    return putExecutorVenue(sandboxConsole)(request, service, {});
   const match = /^\/api\/executor\/v1\/orders\/([^/]+)$/.exec(url.pathname);
   if (!match?.[1]) return new Response("<html>Not found</html>", { status: 404 });
   const params = { intentId: decodeURIComponent(match[1]) };
@@ -274,9 +281,9 @@ describe("the executor's order journal in the console", () => {
   });
 
   it("shows the venue the executor announced, signed by it, and never an older announcement", async () => {
-    const announce = async (document: ExecutorVenue, sign = executorSign) => {
+    const announce = async (document: ExecutorVenue, sign = executorSign, console = sandboxConsole) => {
       const signature = await sign(hashExecutorRecord(document));
-      return putExecutorVenue(
+      return putExecutorVenue(console)(
         new Request(`http://console.test${CONSOLE_EXECUTOR_ROUTES.venue}`, {
           method: "PUT",
           headers: { "content-type": "application/json" },
@@ -305,5 +312,50 @@ describe("the executor's order journal in the console", () => {
       announcedAt: base.announcedAt,
     });
     await expectError(await announce({ ...base, announcedAt: "2026-11-17T07:00:00.000Z" }), 409, "stale");
+  });
+
+  it("refuses an executor that reads another Gemini than the console, naming both sides' settings", async () => {
+    const announce = async (document: ExecutorVenue, console: ConsoleMarketData) => {
+      const signature = await executorSign(hashExecutorRecord(document));
+      return putExecutorVenue(console)(
+        new Request(`http://console.test${CONSOLE_EXECUTOR_ROUTES.venue}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ document, signature }),
+        }),
+        service,
+        {},
+      );
+    };
+    const gemini: ExecutorVenue = {
+      kind: "executor-venue",
+      version: 1,
+      chainId: chain.executor.publicClient.chain.id,
+      policy: chain.address.toLowerCase() as `0x${string}`,
+      venue: "gemini",
+      environment: "sandbox",
+      announcedAt: "2026-11-17T09:00:00.000Z",
+    };
+    const productionConsole: ConsoleMarketData = () =>
+      ({ environment: "production", settings: "EXECUTOR_VENUE=simulated (the default)" }) as const;
+    const shown = service.snapshot().chain?.venue;
+    const refused = await announce(gemini, productionConsole);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: {
+        code: "environment_mismatch",
+        message:
+          "This console reads Gemini (production) (EXECUTOR_VENUE=simulated (the default)), but the executor " +
+          "reads Gemini's sandbox (EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox). Give the executor, the console, " +
+          "the MCP server and the signal service the same EXECUTOR_VENUE and GEMINI_ENV.",
+      },
+    });
+    // The simulated executor reads production, so a sandbox console refuses it too.
+    const simulated: ExecutorVenue = { ...gemini, venue: "simulated", environment: null };
+    await expectError(await announce(simulated, sandboxConsole), 409, "environment_mismatch");
+    // Nothing refused is shown.
+    expect(service.snapshot().chain?.venue).toEqual(shown);
+    expect((await announce(simulated, productionConsole)).status).toBe(201);
+    expect(service.snapshot().chain?.venue?.venue).toBe("simulated");
   });
 });

@@ -143,7 +143,7 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
 export async function announceVenue(
   options: ConsoleJournalOptions,
   document: ExecutorVenue,
-): Promise<string | null> {
+): Promise<VenueAnnouncementProblem | null> {
   const base = options.consoleUrl.replace(/\/+$/, "");
   const send = options.fetch ?? ((input: string, init: RequestInit) => fetch(input, init));
   const signature = await options.sign(hashExecutorRecord(document));
@@ -157,9 +157,26 @@ export async function announceVenue(
       signal: AbortSignal.timeout(options.timeoutMs ?? 8_000),
     });
   } catch (error) {
-    return `the console at ${base} did not answer (${error instanceof Error ? error.message : String(error)})`;
+    return {
+      mismatch: false,
+      message: `the console at ${base} did not answer (${error instanceof Error ? error.message : String(error)})`,
+    };
   }
-  return response.ok ? null : `the console answered ${await answerText(response)}`;
+  if (response.ok) return null;
+  const answer = await consoleAnswer(response);
+  return answer.code === "environment_mismatch"
+    ? { mismatch: true, message: answer.text.replace(/^environment_mismatch: /, "") }
+    : { mismatch: false, message: `the console answered ${answer.text}` };
+}
+
+/** Why the console has not taken the executor's venue announcement. */
+export interface VenueAnnouncementProblem {
+  /**
+   * True when the console reads another Gemini than the executor (409 `environment_mismatch`): settings
+   * to fix, never resolved by trying again, so the executor stops. Otherwise the console is not up yet.
+   */
+  mismatch: boolean;
+  message: string;
 }
 
 /** A journal in memory, for tests: it keeps the same rules as the console's on revisions. */

@@ -31,6 +31,14 @@ x-node-service: &node-service
   networks:
     - mandate
 
+# Which Gemini the whole stack reads (docs/gemini-venue.md): the executor's venue and environment, given to
+# every service that reads market data, so the agent plans, the owner approves and the executor trades on
+# the same exchange. The console refuses an executor that disagrees, and the MCP server a console or a
+# signal API that does.
+x-market-data: &market-data
+  EXECUTOR_VENUE: ${EXECUTOR_VENUE:-simulated}
+  GEMINI_ENV: ${GEMINI_ENV:-sandbox}
+
 services:
   anvil:
     <<: *node-service
@@ -105,9 +113,8 @@ services:
       # What fills approved orders: simulated (default, places nothing) or gemini (Gemini's sandbox, with the
       # key below; run npm run gemini:doctor first). Live trading is refused on the demo chain, so no
       # GEMINI_LIVE_TRADING is passed here.
-      EXECUTOR_VENUE: ${EXECUTOR_VENUE:-simulated}
+      <<: *market-data
       EXECUTOR_ORDER_TTL_MS: ${EXECUTOR_ORDER_TTL_MS:-600000}
-      GEMINI_ENV: ${GEMINI_ENV:-sandbox}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_API_SECRET: ${GEMINI_API_SECRET:-}
       NODE_OPTIONS: --max-old-space-size=192
@@ -149,6 +156,7 @@ services:
       # The console's own default on the devchain is 250 ms, made for a laptop; once a second is enough for
       # a hosted demo and keeps the machine quieter.
       CONSOLE_POLL_INTERVAL_MS: ${CONSOLE_POLL_INTERVAL_MS:-1000}
+      <<: *market-data
     volumes:
       - chain:/data/chain:ro
     depends_on:
@@ -160,11 +168,16 @@ services:
       POLICY_DEPLOYMENT_FILE: /data/chain/deployment.json
       # anvil account 1, a public test key: the agent role of the demo contract, worthless anywhere else.
       AGENT_PRIVATE_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      <<: *market-data
     volumes:
       - chain:/data/chain:ro
     depends_on:
       chain-init:
         condition: service_completed_successfully
+
+  signals:
+    environment:
+      <<: *market-data
 
   caddy:
     volumes:

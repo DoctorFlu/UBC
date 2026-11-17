@@ -15,6 +15,7 @@
  * one is given, and the first record of an intent wins (200 for the same one, 409 `conflict` otherwise).
  * It does not check the fill onchain; the real console does.
  */
+import type { GeminiEnvironment } from "@mandate/gemini";
 import { Hono, type Context } from "hono";
 import { isAddressEqual, recoverMessageAddress, type Address } from "viem";
 import type * as z from "zod";
@@ -73,6 +74,8 @@ export interface FakeConsoleOptions {
   /** The contract's executor: a settlement signed by anyone else is refused (403). Any signer when unset. */
   executorAddress?: Address;
   now?: () => Date;
+  /** Which Gemini its public `GET /api/health` says it reads. Production by default. */
+  marketEnvironment?: GeminiEnvironment;
 }
 
 export interface FakeConsole {
@@ -87,6 +90,8 @@ export interface FakeConsole {
   readonly setDown: (down: boolean) => void;
   /** Serve the signal payment and budget routes (default), or answer 404 as a console without them. */
   readonly setSignalRoutes: (served: boolean) => void;
+  /** Change the Gemini environment its health answer names. */
+  readonly setMarketEnvironment: (environment: GeminiEnvironment) => void;
 }
 
 function fail(c: Context, status: 401 | 403 | 404 | 409 | 422, code: string, message: string): Response {
@@ -127,6 +132,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
   let down = false;
   let signalRoutes = true;
   let nextRequestId = 1;
+  let marketEnvironment: GeminiEnvironment = options.marketEnvironment ?? "production";
 
   const app = new Hono();
   app.use("*", async (c, next) => {
@@ -314,6 +320,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
 
   app.route(CONSOLE_AGENT_API_BASE, api);
   app.route(CONSOLE_EXECUTOR_API_BASE, executor);
+  app.get("/api/health", (c) => c.json({ status: "ok", feed: "live", marketEnvironment }));
 
   const handle = async (request: Request): Promise<Response> => app.fetch(request);
   return {
@@ -325,6 +332,9 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     },
     setDown: (value) => {
       down = value;
+    },
+    setMarketEnvironment: (environment) => {
+      marketEnvironment = environment;
     },
     setSignalRoutes: (served) => {
       signalRoutes = served;

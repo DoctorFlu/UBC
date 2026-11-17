@@ -1,5 +1,6 @@
 import { privateKeyToAccount } from "viem/accounts";
 import * as z from "zod";
+import { marketDataSource, type MarketDataSource } from "@mandate/gemini";
 import { ARC_TESTNET } from "@mandate/shared";
 import { Secret } from "./secret";
 import {
@@ -89,6 +90,11 @@ export interface Config {
   readonly consoleUrl: string;
   readonly consoleServiceToken: Secret | undefined;
   readonly signalsUrl: string;
+  /**
+   * Which Gemini the agent plans on: the executor's environment when EXECUTOR_VENUE=gemini (GEMINI_ENV,
+   * sandbox by default), production otherwise. The console and the signal service use the same rule.
+   */
+  readonly marketData: MarketDataSource;
   readonly limits: Limits;
   /** Paying for signals: buyer key, daily budget, price cap, data directory. */
   readonly payments: PaymentsConfig;
@@ -201,6 +207,12 @@ export function parseConfig(
   }
   const payments = paymentsConfigFrom(vars);
   if (!payments.ok) throw new ConfigError(payments.problems);
+  let marketData: MarketDataSource;
+  try {
+    marketData = marketDataSource(env);
+  } catch (error) {
+    throw new ConfigError([error instanceof Error ? error.message : String(error)]);
+  }
 
   return {
     port: vars.MCP_PORT,
@@ -218,6 +230,7 @@ export function parseConfig(
     consoleServiceToken:
       vars.CONSOLE_SERVICE_TOKEN === undefined ? undefined : new Secret(vars.CONSOLE_SERVICE_TOKEN),
     signalsUrl: vars.SIGNALS_URL,
+    marketData,
     limits:
       vars.MCP_TOOL_DEADLINE_MS === undefined
         ? limits

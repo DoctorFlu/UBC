@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createGeminiClient } from "@mandate/gemini";
+import { createGeminiClient, marketDataSource } from "@mandate/gemini";
 import { loadEnv } from "@mandate/shared";
 import { createSignalsApp } from "./app";
 import { readSignalsConfig } from "./config";
@@ -10,6 +10,8 @@ import { createHedgeSignalService } from "./signal/service";
 
 loadEnv();
 const config = readSignalsConfig();
+/** Which Gemini the signals price: the same rule as the console, the MCP server and the executor. */
+const marketData = marketDataSource(process.env);
 
 /**
  * Public Gemini market data, cached so that request volume never turns into Gemini volume: at most
@@ -18,6 +20,7 @@ const config = readSignalsConfig();
  * public limit of 120 requests a minute regardless.
  */
 const gemini = createGeminiClient({
+  baseUrl: marketData.baseUrl,
   cacheTtlMs: { events: 60_000, event: 5_000, spot: 5_000, candles: 300_000 },
 });
 
@@ -39,6 +42,7 @@ const app = createSignalsApp({
   network: config.network,
   facilitatorUrl: config.facilitatorUrl,
   routes: [helloRoute, hedgeRoute],
+  marketEnvironment: marketData.environment,
 });
 
 // Idle keep-alive must outlast the proxy in front of this server (cloudflared reuses an idle
@@ -50,6 +54,7 @@ serve(
   (info) => {
     console.log(`signals listening on http://localhost:${info.port}`);
     console.log(`seller ${config.sellerAddress} on ${config.network} via ${config.facilitatorUrl}`);
+    console.log(`market data from Gemini's ${marketData.environment} (${marketData.settings})`);
     console.log(
       `hedge signal $${config.hedge.priceUsd} per request for ${config.hedge.assets.join(", ")}, ` +
         `fair band ${config.hedge.fairBandCents} cents, volatility window ${config.hedge.volWindowHours} hours`,

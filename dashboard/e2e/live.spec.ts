@@ -128,6 +128,11 @@ async function startConsole(budgetMs = 225_000): Promise<void> {
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
       GEMINI_API_URL: gemini.url,
+      // The Gemini test's executor trades on the sandbox (a fake of it), and the console refuses an
+      // executor that reads another Gemini than itself, so this console reads "the sandbox" too: the fake
+      // above, by its loopback stand-in. The in-process simulated executors never announce a venue.
+      EXECUTOR_VENUE: "gemini",
+      GEMINI_ENV: "sandbox",
       // Never the compile cache an earlier run left (the smoke suite shares this folder's .next): with
       // a stale one, every page reloads in a loop. See next.config.ts.
       NEXT_DEV_CACHE: "off",
@@ -1279,20 +1284,20 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
   const sign = (hash: `0x${string}`) => devAccount("executor").signMessage({ message: { raw: hash } });
   const chainId = chain.executor.publicClient.chain.id;
   const policy = chain.address.toLowerCase() as `0x${string}`;
+  const announcement = {
+    kind: "executor-venue",
+    version: 1,
+    chainId,
+    policy,
+    venue: "gemini",
+    environment: "sandbox",
+    announcedAt: new Date().toISOString(),
+  } as const;
+  // An executor on Gemini's production would read another exchange than this console: refused, never shown.
   expect(
-    await announceVenue(
-      { consoleUrl: baseURL, sign },
-      {
-        kind: "executor-venue",
-        version: 1,
-        chainId,
-        policy,
-        venue: "gemini",
-        environment: "sandbox",
-        announcedAt: new Date().toISOString(),
-      },
-    ),
-  ).toBeNull();
+    await announceVenue({ consoleUrl: baseURL, sign }, { ...announcement, environment: "production" }),
+  ).toMatchObject({ mismatch: true, message: expect.stringContaining("GEMINI_ENV=production") });
+  expect(await announceVenue({ consoleUrl: baseURL, sign }, announcement)).toBeNull();
   // The test waits on what happens, never on a clock: the order reaching the fake, and the executor's own
   // line for the fill. Its log is attached to the test, so a failure shows what it did and when.
   const logs: string[] = [];

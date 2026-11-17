@@ -11,6 +11,20 @@ export {
   type SettledOptions,
 } from "./client";
 export type { RequestOptions } from "./abort";
+export {
+  announcedSource,
+  describeEnvironment,
+  environmentMismatch,
+  executorVenueKind,
+  GEMINI_ENVIRONMENTS,
+  GEMINI_HOSTS,
+  geminiEnvironmentSetting,
+  isLoopbackTestUrl,
+  marketDataSource,
+  type ExecutorVenueKind,
+  type GeminiEnvironment,
+  type MarketDataSource,
+} from "./environment";
 export { GeminiError, isGeminiError, type GeminiErrorCode } from "./errors";
 export type { FetchLike } from "./http";
 export {

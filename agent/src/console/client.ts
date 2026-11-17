@@ -3,7 +3,8 @@
  * validated before it leaves and every response is validated when it arrives, with the same
  * schemas the console uses, so drift between the two sides fails loudly instead of silently.
  */
-import type * as z from "zod";
+import type { GeminiEnvironment } from "@mandate/gemini";
+import * as z from "zod";
 import {
   CONSOLE_AGENT_ROUTES,
   consoleErrorSchema,
@@ -43,6 +44,9 @@ import {
 import type { Config } from "../config";
 import type { Secret } from "../secret";
 import type { ConsoleClient } from "../services";
+
+/** The part of the console's public health answer the agent reads. */
+const consoleHealthSchema = z.object({ marketEnvironment: z.enum(["sandbox", "production"]).optional() });
 
 /**
  * Why a console call failed:
@@ -137,6 +141,11 @@ export class HttpConsoleClient implements ConsoleClient {
       body,
       signal,
     });
+  }
+
+  async getMarketEnvironment(signal?: AbortSignal): Promise<GeminiEnvironment> {
+    const health = await this.#call("GET", "/api/health", consoleHealthSchema, { signal });
+    return health.marketEnvironment ?? "production";
   }
 
   async putPairing(request: PutPairingRequest, signal?: AbortSignal): Promise<PairingResponse> {
