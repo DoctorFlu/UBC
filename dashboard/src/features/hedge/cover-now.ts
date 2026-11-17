@@ -1,11 +1,4 @@
-import {
-  assessCover,
-  type CoverAssessment,
-  type HedgePlan,
-  type IntentPosition,
-  positionsFromIntents,
-  type ProtectionGoal,
-} from "@mandate/planner";
+import { type CoverAssessment, coverOfPlan, type HedgePlan, type IntentPosition } from "@mandate/planner";
 import type { IntentView } from "@mandate/shared";
 
 import { formatPercentBps, formatUsdCents } from "@/lib/format";
@@ -24,7 +17,7 @@ export interface CoverNow {
 
 /**
  * The cover the owner holds now against the goal of the agent's latest plan, measured with the same
- * planner function the MCP server uses (`docs/cover.md`): positions from the chain's intents on the
+ * planner function the MCP server uses (`docs/cover.md`, `coverOfPlan`): positions from the chain's intents on the
  * plan's ladder, the holding as saved, today's spot, the plan's floor, and its ceiling when the agent
  * set one (a ceiling equal to the plan's spot is the default, which moves with spot).
  */
@@ -37,27 +30,14 @@ export function coverNow(input: {
   quotes: Pick<LadderQuotes, "asset" | "eventTicker" | "spotCents" | "rungs">;
   intents: readonly IntentView[];
 }): CoverNow | null {
-  const { plan, quotes } = input;
-  if (plan.floorCents === null || quotes.eventTicker !== plan.eventTicker) return null;
-  const goal: ProtectionGoal =
-    plan.ceilingCents !== null && plan.ceilingCents !== plan.spotCents
-      ? { floorCents: plan.floorCents, ceilingCents: plan.ceilingCents }
-      : { floorCents: plan.floorCents };
-  const ladder = { asset: quotes.asset, eventTicker: quotes.eventTicker, rungs: quotes.rungs };
-  const positions = positionsFromIntents(input.intents, ladder);
-  try {
-    const assessment = assessCover({
-      holding: { asset: plan.asset, quantity: input.holdingQuantity ?? plan.holdingQuantity },
-      ladder,
-      spotCents: quotes.spotCents,
-      goal,
-      held: positions,
-    });
-    return { assessment, positions };
-  } catch {
-    // A holding or goal the planner refuses (for example a quantity edited to nonsense) has no cover.
-    return null;
-  }
+  const { quotes } = input;
+  return coverOfPlan({
+    plan: input.plan,
+    holdingQuantity: input.holdingQuantity,
+    ladder: { asset: quotes.asset, eventTicker: quotes.eventTicker, rungs: quotes.rungs },
+    spotCents: quotes.spotCents,
+    intents: input.intents,
+  });
 }
 
 /** How much of the holding is covered now, in one or two plain sentences. */
