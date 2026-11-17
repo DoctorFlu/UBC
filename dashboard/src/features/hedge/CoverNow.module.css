@@ -1,0 +1,50 @@
+.cover {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sentence {
+  margin: 0;
+  max-width: 68ch;
+}
+
+/* The share of the goal held, on a plain rail: ink while short of the goal, the approved lamp once met. */
+.meter {
+  position: relative;
+  height: 0.5rem;
+  max-width: 40rem;
+}
+
+.track {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-rule);
+}
+
+.fill {
+  height: 100%;
+  background: var(--color-ink);
+}
+
+.met .fill {
+  background: var(--color-approved-lamp);
+}
+
+.detail {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums lining-nums;
+  max-width: 68ch;
+}
+
+@media (forced-colors: active) {
+  .fill,
+  .met .fill {
+    background: CanvasText;
+  }
+}
