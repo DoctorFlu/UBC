@@ -252,6 +252,28 @@ describe("owner-signed console routes", () => {
     expect(service.offchain.changeRequest(mandateId(), filed.id)?.status).toBe("dismissed");
   });
 
+  it("cannot dismiss another workspace's change request, even with a valid owner signature", async () => {
+    const stranger = signUpWorkspace(service, "Other workspace");
+    const [theirs] = service.accounts.store.agentsOf(stranger.workspaceId);
+    if (!theirs) throw new Error("no mandate");
+    const filed = service.offchain.createChangeRequest(theirs.mandate.id, {
+      agentAddress: agentAddress(),
+      proposed: { maxTradeCents: 3_000 },
+      reason: "Someone else's request.",
+    });
+    // The first workspace's owner signs for the id; the session's mandate has no such request.
+    await expectError(
+      await dismissChangeRequest(
+        await signed(chain.user, "change-request.dismiss", { id: filed.id }),
+        service,
+        { id: filed.id },
+      ),
+      404,
+      "not_found",
+    );
+    expect(service.offchain.changeRequest(theirs.mandate.id, filed.id)?.status).toBe("pending");
+  });
+
   it("marks a change request applied only for the owner's matching setPolicy transaction", async () => {
     const filed = service.offchain.createChangeRequest(mandateId(), {
       agentAddress: agentAddress(),
