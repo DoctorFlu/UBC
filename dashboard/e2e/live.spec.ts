@@ -269,7 +269,7 @@ test("a rules change signed while the live stream is quiet still syncs, and ever
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/console/events", async (route) => {
+  await page.route("**/api/console/events?*", async (route) => {
     await held;
     await route.abort().catch(() => {});
   });
@@ -494,7 +494,7 @@ test("saved holdings show as saved, with their preview, even while the live stre
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/console/events", async (route) => {
+  await page.route("**/api/console/events?*", async (route) => {
     await held;
     await route.abort().catch(() => {});
   });

@@ -30,8 +30,9 @@ test.describe("route loading fallback", () => {
       release = resolve;
     });
     // Only the navigation itself: the prefetch that brought loading.tsx along has already arrived.
+    const audit = await firstMandatePath(baseURL ?? "", "/audit");
     await page.route(
-      (url) => url.pathname === "/audit",
+      (url) => url.pathname === audit,
       async (route) => {
         const headers = route.request().headers();
         const prefetch = "next-router-prefetch" in headers || "next-router-segment-prefetch" in headers;
