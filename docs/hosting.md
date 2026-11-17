@@ -228,13 +228,15 @@ docker compose build
 docker compose up -d --remove-orphans
 docker compose up -d --force-recreate --no-deps caddy
 docker image prune -f
-docker builder prune -f --filter until=24h
+docker builder prune -f --filter until=1h
 ```
 
 `docker compose build` builds the new images while the old version keeps serving; only the two `up` lines interrupt it, for about 20 seconds.
 `up` replaces only the containers whose image or settings changed, and keeps every volume.
 Caddy's configuration files are mounted one by one, and a mounted file that is replaced (as `git pull` does) stays the old file inside a running container, so the second `up` recreates Caddy to load the new routes; it takes a second.
 The last two lines keep the disk from filling: a full build caches about 4 GB, and each build whose dependencies changed adds about as much again.
+`until=1h` removes the cache that the build just now did not use, and keeps what it used, so the next build is fast too.
+A longer window keeps the cache of every recent build: with `until=24h`, two updates an hour apart left 7.7 GB of build cache on the machine, and the prune removed nothing.
 After changing `deploy/.env`, `docker compose up -d` applies it.
 After switching `COMPOSE_FILE` between the modes, `--remove-orphans` removes the containers the new mode does not use.
 
@@ -462,10 +464,12 @@ Then swap to the new version, which is the only interruption, and clean up:
 docker compose --env-file /data/mandate/mandate.env up -d --remove-orphans
 docker compose --env-file /data/mandate/mandate.env up -d --force-recreate --no-deps caddy
 docker image prune -f
-docker builder prune -f --filter until=24h
+docker builder prune -f --filter until=1h
 ```
 
-Measured on the free machine, the swap took 25 seconds: the console answered 502 for about 15 seconds and `/mcp` for about 8, while the containers were recreated in order, and both for a second more while Caddy was recreated.
+Measured on the free machine, a swap that recreates every container took 25 to 36 seconds: the console answered 502 for 15 to 27 seconds and `/mcp` for 8 to 19, while the containers were recreated in order, and both for a second more while Caddy was recreated.
+An update that changes only the console recreates only the console and Caddy, for about 4 seconds.
+The prune keeps only the build cache the new version used (see [Update](#update) for why).
 Pick a moment when nothing is scheduled to call the app, such as a Grok Bot routine at the top of the hour.
 The landing page keeps serving the previous build until Caddy is recreated, then the new one.
 
