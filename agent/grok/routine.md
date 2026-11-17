@@ -20,9 +20,14 @@ On each run:
 1. Call `get_setup_state`. If setup is incomplete, report what is missing and stop.
 2. Call `get_policy`. If the mandate is paused or the daily loss limit is reached, report that and stop.
 3. Call `get_activity`. Report any new fills, any order still waiting for my approval, and any rejection since the last run.
-4. Call `get_portfolio` and `get_ladder`. If my current protection already covers the goal, say so and stop without trading.
-5. Otherwise call `buy_signal` for that ladder, then `plan_hedge` for the uncovered part with the signal's `receiptId` as `signalReceiptId`, then `execute_plan`.
-   If `buy_signal` is rejected or unavailable, plan without it and say so.
+4. Call `plan_hedge` for the goal, without a signal.
+   The server counts the protection already held on that ladder (filled, waiting to fill, waiting for my approval) and answers in `cover`.
+   If `cover.state` is `met` (reason `ALREADY_COVERED`), say that my holding is covered, give the numbers it reports, and stop without trading.
+   Never decide this yourself from `get_activity`, `get_portfolio` or `get_ladder`.
+5. Otherwise call `buy_signal` for the plan's ladder (its `eventTicker`), then `plan_hedge` again with the same goal and the signal's `receiptId` as `signalReceiptId`, then `execute_plan` with that plan.
+   Its orders are only the missing part.
+   If `buy_signal` is rejected or unavailable, execute the plan from step 4 and say so.
+   If `execute_plan` answers `COVER_CHANGED`, call `plan_hedge` once more and follow its answer; never execute an older plan to top up.
 6. If the mandate rejects an order, do not work around it. Tell me which rule stopped it. If the same rule has stopped the goal on two runs in a row, call `request_policy_change` once with the reason.
 
 End with a three-line summary: what you checked, what you did, what I need to do.

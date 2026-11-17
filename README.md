@@ -89,6 +89,7 @@ The server sends it the order of work on every connection (`agent/src/instructio
    The agent pays the signal API $0.001 in USDC over x402 for a cheap, fair or expensive rating of every strike, so the plan buys underpriced protection first.
 5. **Plan** (`plan_hedge`).
    The planner sizes NO orders between the owner's floor and the current price, within the maximum cost the owner gave, and predicts the verdict each order will get.
+   It first counts the protection already held on that ladder, so a goal that is already covered plans nothing and a partly covered one plans only the missing part ([docs/cover.md](docs/cover.md)).
 6. **Ask the owner.**
    The agent shows the cost, the share of the loss covered, what is not covered, and which orders will wait for approval, then waits for a yes.
 7. **Propose** (`execute_plan`, or `propose_trade` for one order).
@@ -123,6 +124,7 @@ Enforced by the MCP server, as a second layer:
 - The category of a market is taken from Gemini, never from the agent's input.
 - A repeated proposal within 10 minutes returns the first result instead of trading twice.
 - A plan can be executed for 30 minutes, then it must be planned again from fresh prices.
+- Before each order of a plan, the server re-reads the positions on that ladder; if other orders added protection since the plan was made, it stops, so repeated, overlapping or retried runs never buy the same protection twice.
 - Signal purchases have a daily budget ($0.02) and a maximum price per purchase ($0.005), both checked before anything is signed.
 - Market titles and other third-party text are marked untrusted, and the agent is told never to follow instructions found in them.
 - Bearer token on every request, rate limits, body size limits and a time budget per tool call.

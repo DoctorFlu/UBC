@@ -71,6 +71,20 @@ This lets our backend wake the Bot when something happens onchain or in the mark
 Examples: the price crosses the protection floor, a hedge rung settles, or the owner changes the mandate.
 The webhook URL and key are secrets and belong in `.env`.
 
+## Whether a goal is already covered (issue #88)
+
+An unattended routine runs the same goal every hour, so each run must know what earlier runs already bought.
+That is not left to the model: on 17 Nov 2026 a run read the fills, judged the holding "not yet fully" covered at about 99%, and bought a second full ladder.
+
+- `plan_hedge` counts the protection already held on the ladder (filled, waiting to fill, waiting for the owner) and returns a `cover` object the server computed, with the reason `ALREADY_COVERED` and no orders when the goal is met.
+  Otherwise its orders are only the missing part.
+- `execute_plan` re-reads the positions before each order and stops with `COVER_CHANGED` if other orders added protection since the plan was made.
+- The server instructions (`agent/src/instructions.ts`, sent on every connection), the routine and the skill tell the agent to rely on that answer and never to add up positions itself.
+
+The definition of "covered" is in [cover.md](cover.md).
+This changed what the tools return and the descriptions of `plan_hedge` and `execute_plan`, not any tool name or input schema.
+The Bot reads descriptions only when the connector is added, so until it is added again it sees the old descriptions; the behaviour does not depend on them, because the server instructions arrive on every connection and every result says what to do next.
+
 ## Grok Bot's own approvals, and why the mandate still matters
 
 Grok Bot has Auto Review, which checks each action before it runs and shows an approval card when it decides the owner should confirm.
