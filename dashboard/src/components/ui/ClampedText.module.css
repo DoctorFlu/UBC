@@ -1,0 +1,52 @@
+/* The surface behind the text, for the fade under "Show more": hosts on another surface set --clamp-surface. */
+.clamp {
+  position: relative;
+  min-width: 0;
+}
+
+.text {
+  margin: 0;
+  /* Agent-written text can be one 2,000-character word: never let it widen the card. */
+  overflow-wrap: anywhere;
+}
+
+.clamp:not([data-expanded]) .text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--clamp-lines);
+  line-clamp: var(--clamp-lines);
+  overflow: hidden;
+}
+
+.toggle {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-link);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  text-decoration: underline;
+}
+
+/* Over the end of the last line, so it takes no room of its own and its arrival moves nothing. */
+.clamp:not([data-expanded]) .toggle {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  padding-inline-start: 2.5em;
+  background: linear-gradient(to right, transparent, var(--clamp-surface, var(--color-surface)) 2em);
+}
+
+.clamp:not([data-expanded]) .toggle:dir(rtl) {
+  background: linear-gradient(to left, transparent, var(--clamp-surface, var(--color-surface)) 2em);
+}
+
+.clamp[data-expanded] .toggle {
+  display: block;
+  margin-block-start: var(--space-1);
+}

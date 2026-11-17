@@ -13,6 +13,7 @@ import { Fragment } from "react";
 import type { Hex } from "viem";
 
 import { AgentReason } from "@/components/domain/AgentReason";
+import { RequestText } from "@/components/domain/RequestText";
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { amountLabel, FlaggedBadge, intentFlags, MarketName, OrderSummary } from "@/components/domain/Intent";
 import { SimulatedFill } from "@/components/domain/SimulatedFill";
@@ -304,7 +305,7 @@ function SealedReasonCard({
           <AgentReason text={doc.reason} label="In the agent's own words" />
           <dl className={styles.facts}>
             <dt>Your request</dt>
-            <dd>{doc.requestText}</dd>
+            <dd>{doc.requestText ? <RequestText text={doc.requestText} /> : "None given"}</dd>
             <dt>Plan</dt>
             <dd className="mono">
               <Link href={evidenceHref(doc.planId)}>{doc.planId}</Link>, rung {(doc.rungIndex + 1).toString()}
