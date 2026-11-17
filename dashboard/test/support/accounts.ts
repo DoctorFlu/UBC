@@ -8,7 +8,7 @@ import { sessionCookieName } from "../../src/server/http/session";
 /**
  * Accounts for server tests, without a browser: members are added through the store with a stand-in
  * passkey, and sessions are opened directly. The WebAuthn ceremonies themselves are tested in
- * accounts.test.ts and end to end with a virtual authenticator.
+ * src/server/http/auth-api.test.ts (a software passkey) and end to end with a virtual authenticator.
  */
 
 /** A passkey record that no authenticator holds. Enough for everything but a real ceremony. */
