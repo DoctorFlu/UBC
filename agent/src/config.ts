@@ -18,6 +18,7 @@ export const ENV_KEYS = [
   "MCP_LOG_LEVEL",
   "MCP_ADVERTISE_OUTPUT_SCHEMAS",
   "MCP_TRUST_PROXY",
+  "MCP_TOOL_DEADLINE_MS",
   "ARC_RPC_URL",
   "POLICY_ADDRESS",
   "POLICY_DEPLOY_BLOCK",
@@ -49,11 +50,17 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
 
+/** Bounds of `MCP_TOOL_DEADLINE_MS`: well under the 60 s an MCP client waits by default. */
+export const TOOL_DEADLINE_RANGE_MS = { min: 1_000, max: 40_000 } as const;
+
 export interface Limits {
   /** Largest accepted request body, in bytes. */
   readonly maxBodyBytes: number;
-  /** Default time budget for one tool call, in milliseconds. */
-  readonly toolTimeoutMs: number;
+  /**
+   * Time budget for one tool call, in milliseconds (`MCP_TOOL_DEADLINE_MS`). When it runs out, every
+   * upstream request of the call is aborted and the tool answers with what was slow.
+   */
+  readonly toolDeadlineMs: number;
   /** Token bucket of tool calls per bearer token: burst size and steady refill rate. */
   readonly rateLimit: { readonly capacity: number; readonly refillPerSecond: number };
 }
@@ -98,7 +105,7 @@ export interface Config {
 
 export const DEFAULT_LIMITS: Limits = {
   maxBodyBytes: 256 * 1024,
-  toolTimeoutMs: 20_000,
+  toolDeadlineMs: 25_000,
   rateLimit: { capacity: 60, refillPerSecond: 1 },
 };
 
@@ -136,6 +143,16 @@ const EnvSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  MCP_TOOL_DEADLINE_MS: z.coerce
+    .number()
+    .int({ message: "must be a whole number of milliseconds" })
+    .min(TOOL_DEADLINE_RANGE_MS.min, {
+      message: `must be at least ${TOOL_DEADLINE_RANGE_MS.min} ms`,
+    })
+    .max(TOOL_DEADLINE_RANGE_MS.max, {
+      message: `must be at most ${TOOL_DEADLINE_RANGE_MS.max} ms, well under the 60 s MCP clients wait`,
+    })
+    .optional(),
   ARC_RPC_URL: url("the Arc RPC").default(ARC_TESTNET.rpcUrl),
   POLICY_ADDRESS: z
     .string()
@@ -215,7 +232,10 @@ export function parseConfig(
     consoleServiceToken:
       vars.CONSOLE_SERVICE_TOKEN === undefined ? undefined : new Secret(vars.CONSOLE_SERVICE_TOKEN),
     signalsUrl: vars.SIGNALS_URL,
-    limits,
+    limits:
+      vars.MCP_TOOL_DEADLINE_MS === undefined
+        ? limits
+        : { ...limits, toolDeadlineMs: vars.MCP_TOOL_DEADLINE_MS },
     payments: payments.config,
   };
 }

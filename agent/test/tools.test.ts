@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createAppContext, type ToolContext } from "../src/context";
 import { silentLogger } from "../src/logger";
+import { CallDeadline } from "../src/mcp/deadline";
+import { toolContext } from "../src/mcp/tool";
 import { ToolError } from "../src/mcp/errors";
 import { getSetupState } from "../src/tools/get-setup-state";
 import { tools } from "../src/tools";
@@ -10,7 +12,7 @@ import { fixedClock, TEST_ADDRESS, TEST_POLICY, TEST_PRIVATE_KEY, testConfig } f
 /** Tools are plain objects: call `run` with a fake context, no server or transport needed. */
 function fakeContext(env: Record<string, string> = {}): ToolContext {
   const app = createAppContext(testConfig(env), silentLogger, { clock: fixedClock });
-  return { ...app, requestId: "test", signal: new AbortController().signal };
+  return toolContext(app, new CallDeadline({ budgetMs: 25_000 }), { requestId: "test" });
 }
 
 describe("registry", () => {

@@ -30,6 +30,7 @@ The browser never receives `ARC_RPC_URL`, because it may carry a provider key; i
 | `MCP_ALLOWED_ORIGINS` | no | Comma-separated hostnames allowed in a browser `Origin` header, in addition to localhost. |
 | `MCP_LOG_LEVEL` | no | `debug`, `info`, `warn` or `error`. Defaults to `info`. |
 | `MCP_ADVERTISE_OUTPUT_SCHEMAS` | no | `true` to include each tool's output schema in `tools/list`. Defaults to `false`, which makes the list about four times smaller; results are validated on the server either way. |
+| `MCP_TOOL_DEADLINE_MS` | no | Most one tool call may take, in milliseconds, from 1000 to 40000. Defaults to `25000`, well under the 60 s an MCP client waits. When it passes, every Gemini, chain and console request of the call is aborted and the tool answers `unavailable` (`TIMED_OUT`), naming what was slow. A proposal or payment already sent is still followed to its answer. |
 
 The MCP server starts with only `MCP_AUTH_TOKEN`, but it answers calls only with `CONSOLE_SERVICE_TOKEN` too: it asks the console which agent every token belongs to, and refuses every call (503) while it cannot.
 A variable marked "for ... tools" becomes required once a registered tool declares it; until then `get_setup_state` reports it as a remaining step.

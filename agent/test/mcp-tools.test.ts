@@ -17,7 +17,7 @@ afterEach(async () => {
 function server(): { server: MandateServer; lines: string[]; h: ReturnType<typeof harness> } {
   const h = harness();
   const { logger, lines } = captureLogs();
-  const { policy, markets, planner, console: consoleClient } = h.ctx;
+  const { policy, markets, planner, console: consoleClient } = h.app;
   const built = createMandateServer(h.ctx.config, logger, {
     clock: fixedClock,
     resolver: testResolver(),

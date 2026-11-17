@@ -16,8 +16,10 @@ import {
   verdictSchema,
   type Verdict,
 } from "../mcp/envelope";
+import { NotEnoughTime } from "../mcp/deadline";
 import { ToolError } from "../mcp/errors";
 import { describeIssues, defineTool } from "../mcp/tool";
+import { describeFailure, unavailableFor } from "../support/failures";
 import type { BudgetState, BuySignalOutcome } from "../x402/payments";
 import { SignalSellerError } from "../x402/payments";
 
@@ -130,7 +132,6 @@ export const buySignal = defineTool({
   }),
   outputSchema: OutputSchema,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  timeoutMs: 45_000,
   handler: async (input, ctx) => {
     const payments = ctx.payments;
     if (payments === undefined) {
@@ -169,10 +170,21 @@ export const buySignal = defineTool({
 
     let outcome: BuySignalOutcome;
     try {
-      outcome = await payments.buySignal({ query: query.data, at: ctx.clock.now(), signal: ctx.signal });
+      outcome = await payments.buySignal({ query: query.data, at: ctx.clock.now() });
     } catch (error) {
       if (error instanceof SignalSellerError)
         throw new ToolError("UPSTREAM_ERROR", error.message, { cause: error });
+      // Stopped before anything was signed (issue #105): nothing was paid and the budget is untouched.
+      if (ctx.deadline.stop !== undefined || error instanceof NotEnoughTime) {
+        const v = unavailableFor(describeFailure(error, ctx));
+        return result(v, {
+          receiptId: null,
+          signalId: null,
+          priceUsdc: null,
+          budget: budgetView(payments.budget(ctx.clock.now())),
+          signal: null,
+        });
+      }
       throw error;
     }
     // Best effort and bounded: the console being down never changes the purchase result.

@@ -149,6 +149,7 @@ services:
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in deploy/.env}
       MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
       MCP_ADVERTISE_OUTPUT_SCHEMAS: ${MCP_ADVERTISE_OUTPUT_SCHEMAS:-}
+      MCP_TOOL_DEADLINE_MS: ${MCP_TOOL_DEADLINE_MS:-}
       # Caddy appends the client's address to X-Forwarded-For; the failed-token limit keys on it.
       MCP_TRUST_PROXY: "true"
       # The console's agent API, on the private network. It resolves every bearer token (MCP_AUTH_TOKEN

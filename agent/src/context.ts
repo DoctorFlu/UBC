@@ -1,6 +1,8 @@
 import type { Config } from "./config";
 import { createPaymentReporter } from "./console/payment-reports";
 import type { Logger } from "./logger";
+import type { CallDeadline } from "./mcp/deadline";
+import type { ScopedServices } from "./mcp/scoped-services";
 import { createServices, type Services } from "./services";
 import { SERVER_AGENT, type AgentIdentity } from "./tenancy/agents";
 
@@ -22,12 +24,20 @@ export interface AppContext extends Services {
   readonly agent: AgentIdentity;
 }
 
-/** What a tool handler receives: the app context plus request-scoped values. */
-export interface ToolContext extends AppContext {
+/**
+ * What a tool handler receives: the app context with its upstream services bound to this call's
+ * deadline (`mcp/scoped-services.ts`), plus request-scoped values.
+ */
+export interface ToolContext extends Omit<AppContext, keyof ScopedServices>, ScopedServices {
   /** Correlates log lines for one HTTP request. */
   readonly requestId: string;
-  /** Aborted when the tool call times out or the server shuts down. Pass it to upstream calls. */
+  /**
+   * Aborted when the call runs out of time or the client goes away. The scoped services pass it on
+   * by themselves; pass it to anything else that waits.
+   */
   readonly signal: AbortSignal;
+  /** This call's time budget: what is left, and what was slow when it ran out. */
+  readonly deadline: CallDeadline;
 }
 
 export function createAppContext(

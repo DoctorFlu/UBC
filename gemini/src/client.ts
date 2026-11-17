@@ -2,6 +2,8 @@
  * Read-only client for Gemini's public prediction-market and spot endpoints. No API key, no
  * authenticated route, no order placement: every call here is a public GET.
  */
+import { raceAbort } from "@mandate/shared";
+import type { RequestOptions } from "./abort";
 import { TtlCache } from "./cache";
 import { GeminiError } from "./errors";
 import { getJson, type FetchLike, type HttpOptions } from "./http";
@@ -145,11 +147,14 @@ export interface GetLadderOptions {
   depth?: DepthMode;
 }
 
+/**
+ * Every method takes `RequestOptions` last: its `signal` stops the call (see `RequestOptions`).
+ */
 export interface GeminiClient {
-  listEvents(options?: ListEventsOptions): Promise<EventSummary[]>;
-  getEvent(eventTicker: string): Promise<MarketEvent>;
-  getOrderBook(instrumentSymbol: string): Promise<OrderBook>;
-  getSpot(asset: string): Promise<SpotPrice>;
+  listEvents(options?: ListEventsOptions, request?: RequestOptions): Promise<EventSummary[]>;
+  getEvent(eventTicker: string, request?: RequestOptions): Promise<MarketEvent>;
+  getOrderBook(instrumentSymbol: string, request?: RequestOptions): Promise<OrderBook>;
+  getSpot(asset: string, request?: RequestOptions): Promise<SpotPrice>;
   /**
    * Spot-market candles for the asset against USD, oldest first. Gemini returns about 60 days of hourly
    * candles. Gemini sometimes answers with candles missing inside the series (issue #98: 14 hourly rows
@@ -157,12 +162,12 @@ export interface GeminiClient {
    * and whichever answer misses fewer candles is kept and cached. A gap that remains is returned as it
    * is: missing candles are never filled in.
    */
-  getCandles(asset: string, timeFrame: CandleTimeFrame): Promise<Candle[]>;
-  listRecentlySettled(options?: SettledOptions): Promise<SettledEvent[]>;
-  listCategories(): Promise<string[]>;
+  getCandles(asset: string, timeFrame: CandleTimeFrame, request?: RequestOptions): Promise<Candle[]>;
+  listRecentlySettled(options?: SettledOptions, request?: RequestOptions): Promise<SettledEvent[]>;
+  listCategories(request?: RequestOptions): Promise<string[]>;
   /** Open ladders for an asset, soonest expiry first. */
-  listLadders(asset: string): Promise<LadderListing[]>;
-  getLadder(options: GetLadderOptions): Promise<Ladder>;
+  listLadders(asset: string, request?: RequestOptions): Promise<LadderListing[]>;
+  getLadder(options: GetLadderOptions, request?: RequestOptions): Promise<Ladder>;
   clearCache(): void;
 }
 
@@ -191,14 +196,23 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
   const candleGapRetryDelayMs = options.candleGapRetryDelayMs ?? 1_000;
   const isoNow = () => new Date(now()).toISOString();
 
-  async function fetchEventPages(query: URLSearchParams, maxPages: number): Promise<RawEvent[]> {
+  async function fetchEventPages(
+    query: URLSearchParams,
+    maxPages: number,
+    signal: AbortSignal | undefined,
+  ): Promise<RawEvent[]> {
     const events: RawEvent[] = [];
     for (let page = 0; page < maxPages; page++) {
       const params = new URLSearchParams(query);
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(page * PAGE_SIZE));
       const path = `/v1/prediction-markets/events?${params.toString()}`;
-      const body = await cache.getOrLoad(path, ttl.events, () => getJson(http, path, eventsResponseSchema));
+      const body = await cache.getOrLoad(
+        path,
+        ttl.events,
+        (shared) => getJson(http, path, eventsResponseSchema, shared),
+        signal,
+      );
       events.push(...body.data);
       const total = body.pagination?.total;
       if (body.data.length < PAGE_SIZE || (total !== undefined && (page + 1) * PAGE_SIZE >= total)) break;
@@ -208,7 +222,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     return events.filter((event) => !seen.has(event.ticker) && seen.add(event.ticker));
   }
 
-  async function rawEvents(opts: ListEventsOptions): Promise<RawEvent[]> {
+  async function rawEvents(opts: ListEventsOptions, signal: AbortSignal | undefined): Promise<RawEvent[]> {
     const query = new URLSearchParams();
     for (const status of toList(opts.status ?? "active")) query.append("status", status);
     const categories = toList(
@@ -216,12 +230,15 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     );
     for (const category of categories) query.append("category", category);
     if (opts.search !== undefined) query.set("search", opts.search);
-    return fetchEventPages(query, opts.maxPages ?? 10);
+    return fetchEventPages(query, opts.maxPages ?? 10, signal);
   }
 
-  async function listEvents(opts: ListEventsOptions = {}): Promise<EventSummary[]> {
+  async function listEvents(
+    opts: ListEventsOptions = {},
+    request: RequestOptions = {},
+  ): Promise<EventSummary[]> {
     const asset = opts.asset?.toUpperCase();
-    return (await rawEvents(opts))
+    return (await rawEvents(opts, request.signal))
       .map(summarizeEvent)
       .filter(
         (e) =>
@@ -229,25 +246,40 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
       );
   }
 
-  async function getEvent(eventTicker: string): Promise<MarketEvent> {
+  async function getEvent(eventTicker: string, request: RequestOptions = {}): Promise<MarketEvent> {
     requireToken(eventTicker, "eventTicker");
     const path = eventPath(eventTicker);
-    const raw = await cache.getOrLoad(path, ttl.event, () => getJson(http, path, eventSchema));
+    const raw = await cache.getOrLoad(
+      path,
+      ttl.event,
+      (shared) => getJson(http, path, eventSchema, shared),
+      request.signal,
+    );
     return normalizeEvent(raw);
   }
 
-  async function getOrderBook(instrumentSymbol: string): Promise<OrderBook> {
+  async function getOrderBook(instrumentSymbol: string, request: RequestOptions = {}): Promise<OrderBook> {
     requireToken(instrumentSymbol, "instrumentSymbol");
     const path = `/v1/book/${encodeURIComponent(instrumentSymbol)}`;
-    const raw = await cache.getOrLoad(path, ttl.book, () => getJson(http, path, orderBookSchema));
+    const raw = await cache.getOrLoad(
+      path,
+      ttl.book,
+      (shared) => getJson(http, path, orderBookSchema, shared),
+      request.signal,
+    );
     return normalizeBook(instrumentSymbol, raw, isoNow());
   }
 
-  async function getSpot(asset: string): Promise<SpotPrice> {
+  async function getSpot(asset: string, request: RequestOptions = {}): Promise<SpotPrice> {
     requireToken(asset, "asset");
     const upper = asset.toUpperCase();
     const path = `/v1/pubticker/${spotSymbol(upper)}`;
-    const raw = await cache.getOrLoad(path, ttl.spot, () => getJson(http, path, tickerSchema));
+    const raw = await cache.getOrLoad(
+      path,
+      ttl.spot,
+      (shared) => getJson(http, path, tickerSchema, shared),
+      request.signal,
+    );
     const spot = normalizeTicker(upper, raw, isoNow());
     if (spot === null) {
       throw new GeminiError("invalid_response", `GET ${path} returned no usable bid, ask or last price`, {
@@ -257,25 +289,34 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     return spot;
   }
 
-  async function getCandles(asset: string, timeFrame: CandleTimeFrame): Promise<Candle[]> {
+  async function getCandles(
+    asset: string,
+    timeFrame: CandleTimeFrame,
+    request: RequestOptions = {},
+  ): Promise<Candle[]> {
     requireToken(asset, "asset");
     requireToken(timeFrame, "timeFrame");
     const path = `/v2/candles/${spotSymbol(asset.toUpperCase())}/${timeFrame}`;
     // A copy, so no caller can reorder the cached series for the next one.
     return [
-      ...(await cache.getOrLoad(path, ttl.candles, () => loadCandles(path, CANDLE_INTERVAL_MS[timeFrame]))),
+      ...(await cache.getOrLoad(
+        path,
+        ttl.candles,
+        (shared) => loadCandles(path, CANDLE_INTERVAL_MS[timeFrame], shared),
+        request.signal,
+      )),
     ];
   }
 
   /** One request, and one more only when the first answer has candles missing inside it. */
-  async function loadCandles(path: string, intervalMs: number): Promise<Candle[]> {
-    const first = normalizeCandles(await getJson(http, path, candlesSchema));
+  async function loadCandles(path: string, intervalMs: number, signal: AbortSignal): Promise<Candle[]> {
+    const first = normalizeCandles(await getJson(http, path, candlesSchema, signal));
     const firstMissing = countMissingCandles(first, intervalMs);
     if (firstMissing === 0) return first;
-    await sleep(candleGapRetryDelayMs);
+    await raceAbort(sleep(candleGapRetryDelayMs), signal);
     let second: Candle[];
     try {
-      second = normalizeCandles(await getJson(http, path, candlesSchema));
+      second = normalizeCandles(await getJson(http, path, candlesSchema, signal));
     } catch {
       // The first answer is still a real answer; its gap is the caller's to handle.
       return first;
@@ -283,7 +324,10 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     return countMissingCandles(second, intervalMs) <= firstMissing ? second : first;
   }
 
-  async function listRecentlySettled(opts: SettledOptions = {}): Promise<SettledEvent[]> {
+  async function listRecentlySettled(
+    opts: SettledOptions = {},
+    request: RequestOptions = {},
+  ): Promise<SettledEvent[]> {
     const limit = opts.limit ?? 50;
     if (!Number.isInteger(limit) || limit < 1 || limit > PAGE_SIZE) {
       throw new GeminiError("invalid_argument", `limit must be an integer from 1 to ${PAGE_SIZE}`);
@@ -295,22 +339,32 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     }
     query.set("limit", String(limit));
     const path = `/v1/prediction-markets/events/recently-settled?${query.toString()}`;
-    const body = await cache.getOrLoad(path, ttl.settled, () => getJson(http, path, eventsResponseSchema));
+    const body = await cache.getOrLoad(
+      path,
+      ttl.settled,
+      (shared) => getJson(http, path, eventsResponseSchema, shared),
+      request.signal,
+    );
     return body.data.map(normalizeSettled).filter((e) => asset === undefined || e.asset === asset);
   }
 
-  async function listCategories(): Promise<string[]> {
+  async function listCategories(request: RequestOptions = {}): Promise<string[]> {
     const path = "/v1/prediction-markets/categories";
-    const body = await cache.getOrLoad(path, ttl.categories, () => getJson(http, path, categoriesSchema));
+    const body = await cache.getOrLoad(
+      path,
+      ttl.categories,
+      (shared) => getJson(http, path, categoriesSchema, shared),
+      request.signal,
+    );
     return body.categories;
   }
 
-  async function listLadders(asset: string): Promise<LadderListing[]> {
+  async function listLadders(asset: string, request: RequestOptions = {}): Promise<LadderListing[]> {
     requireToken(asset, "asset");
     const upper = asset.toUpperCase();
     const nowMs = now();
     const listings: LadderListing[] = [];
-    for (const raw of await rawEvents({ category: CRYPTO_CATEGORY })) {
+    for (const raw of await rawEvents({ category: CRYPTO_CATEGORY }, request.signal)) {
       const listing = listingFromEvent(normalizeEvent(raw));
       if (listing === null || listing.asset !== upper) continue;
       if (Date.parse(listing.expiry) <= nowMs || listing.strikeCount === 0) continue;
@@ -321,12 +375,16 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     );
   }
 
-  async function chooseEventTicker(opts: GetLadderOptions, asset: string): Promise<string> {
+  async function chooseEventTicker(
+    opts: GetLadderOptions,
+    asset: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
     if (opts.eventTicker !== undefined) return opts.eventTicker;
     if (opts.expiry === undefined && opts.horizon === undefined) {
       throw new GeminiError("invalid_argument", "getLadder needs an eventTicker, an expiry or a horizon");
     }
-    const ladders = (await listLadders(asset)).filter((l) => l.openStrikeCount > 0);
+    const ladders = (await listLadders(asset, { signal })).filter((l) => l.openStrikeCount > 0);
     const available = ladders.map((l) => `${l.kind} ${l.expiry} (${l.eventTicker})`).join("; ") || "none";
     if (opts.expiry !== undefined) {
       const target = typeof opts.expiry === "string" ? Date.parse(opts.expiry) : opts.expiry.getTime();
@@ -350,15 +408,15 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     return match.eventTicker;
   }
 
-  async function getLadder(opts: GetLadderOptions): Promise<Ladder> {
+  async function getLadder(opts: GetLadderOptions, request: RequestOptions = {}): Promise<Ladder> {
     requireToken(opts.asset, "asset");
     const asset = opts.asset.toUpperCase();
-    const ticker = await chooseEventTicker(opts, asset);
-    const [event, spot] = await Promise.all([getEvent(ticker), getSpot(asset)]);
+    const ticker = await chooseEventTicker(opts, asset, request.signal);
+    const [event, spot] = await Promise.all([getEvent(ticker, request), getSpot(asset, request)]);
     if (event.asset !== asset) {
       throw new GeminiError("no_ladder", `Event ${ticker} is not a ${asset} event`);
     }
-    const depth = await fetchDepth(event, spot, opts.depth ?? "none");
+    const depth = await fetchDepth(event, spot, opts.depth ?? "none", request);
     const ladder = buildLadder(event, spot, { fetchedAt: isoNow(), depth });
     if (ladder === null || ladder.rungs.length === 0) {
       throw new GeminiError("no_ladder", `Event ${ticker} is not a strike ladder`);
@@ -370,6 +428,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     event: MarketEvent,
     spot: SpotPrice,
     mode: DepthMode,
+    request: RequestOptions,
   ): Promise<Map<string, RungDepth>> {
     const depth = new Map<string, RungDepth>();
     if (mode === "none") return depth;
@@ -381,7 +440,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
       .filter((r) => mode === "all" || r.strikeCents <= limit)
       .map((r) => r.instrumentSymbol);
     // The token bucket paces these; Promise.all only overlaps the waiting.
-    const books = await Promise.all(symbols.map((symbol) => getOrderBook(symbol)));
+    const books = await Promise.all(symbols.map((symbol) => getOrderBook(symbol, request)));
     for (const book of books) depth.set(book.instrumentSymbol, depthFromBook(book));
     return depth;
   }

@@ -78,5 +78,13 @@ So two runs at the same moment, a retried `execute_plan`, and a stored plan exec
 The lock is in the server process; the hosted stack runs one.
 The event index answers as of the block that was latest when a read started, so a read right after a proposal always sees it.
 
+A call's deadline (`MCP_TOOL_DEADLINE_MS`) ends a run between two orders, never inside one.
+An order starts only while there is time left for its proposal and receipt, and a proposal is broadcast only with that time still left.
+A broadcast proposal is followed to its receipt, up to 3 s past the deadline; one still without a receipt is recorded as `TX_UNCONFIRMED`, the run stops there, and that order is never sent again.
+So when a run stops, every order of the plan is either recorded or was never sent, and the next `execute_plan` goes on from the first unsent order, after the same re-check.
+If another proposal added protection on the ladder in between, that re-check answers `COVER_CHANGED` as above.
+A call that gives up waiting for the ladder's lock never sends anything later.
+`agent/test/deadline.e2e.test.ts` stops a run while the console holds the second order's decision context and checks both continuations.
+
 `agent/test/routine.e2e.test.ts` runs the routine against the real server, a Policy contract on anvil and the simulated executor: twice in a row, twice at the same moment with retries, with a stale plan, with an order waiting for the owner, and after a plan the cost cap cut short.
 The red-team attack `mcp.repeat-and-overlap-runs` does the same against the server as a hostile agent would.

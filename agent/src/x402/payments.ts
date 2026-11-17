@@ -149,10 +149,17 @@ export class SignalPayments {
     return this.options.store.load(receiptId);
   }
 
+  /**
+   * `signal` stops the purchase while nothing is signed (the reservation is released and the stop is
+   * rethrown); once the payment is signed it runs to its own bound (`PAID_REQUEST_TIMEOUT_MS`) and a
+   * payment without an answer is `payment_unknown`. `beforePayment` runs right before signing and may
+   * throw to stop it the same way.
+   */
   async buySignal(request: {
     query: HedgeSignalQuery;
     at: Date;
     signal?: AbortSignal | undefined;
+    beforePayment?: (() => AbortSignal | undefined) | undefined;
   }): Promise<BuySignalOutcome> {
     const { at } = request;
     const url = `${this.options.signalsUrl.replace(/\/+$/, "")}${HEDGE_SIGNAL_PATH}${hedgeSignalSearch(request.query)}`;
@@ -178,7 +185,11 @@ export class SignalPayments {
 
     let paid: Awaited<ReturnType<X402Buyer["pay"]>>;
     try {
-      paid = await this.options.buyer.pay(url, { maxPrice: formatUnits(price, USDC_DECIMALS) });
+      paid = await this.options.buyer.pay(url, {
+        maxPrice: formatUnits(price, USDC_DECIMALS),
+        signal: request.signal,
+        beforeSigning: request.beforePayment,
+      });
     } catch (error) {
       if (error instanceof PriceAboveMaximumError) {
         this.options.ledger.release(reservation.id, "price_changed", new Date());
@@ -195,6 +206,8 @@ export class SignalPayments {
       }
       if (error instanceof PaymentNotSentError) {
         this.options.ledger.release(reservation.id, "not_sent", new Date());
+        // The caller stopped it before signing: report the caller's reason, not the seller's.
+        if (error.stopped) throw error.cause;
         return {
           kind: "seller_unreachable",
           message:
@@ -264,6 +277,8 @@ export class SignalPayments {
         signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
       });
     } catch (error) {
+      // The caller stopped (its deadline): say so, rather than blame the signal API.
+      if (signal?.aborted === true) throw signal.reason;
       return {
         kind: "seller_unreachable",
         message: `The signal API at ${new URL(url).origin} did not answer (${error instanceof Error ? error.name : "error"}).`,
