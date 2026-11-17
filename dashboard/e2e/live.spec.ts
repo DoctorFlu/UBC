@@ -535,7 +535,7 @@ test("the hedge view: an honest empty state and preview, then the agent's plan, 
     "No preview: Save your BTC holding to see a preview.",
   );
   // The ladder is one click away in the default view, and stays open as the page changes.
-  await page.getByRole("button", { name: "Live ladder" }).click();
+  await page.getByRole("button", { name: "Gemini's quotes" }).click();
   await expect(page.getByTestId("live-ladder")).toBeVisible();
 
   // Save a holding through the UI: the preview follows at once, made by the same planner.

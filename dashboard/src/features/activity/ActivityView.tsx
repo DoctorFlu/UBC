@@ -40,13 +40,16 @@ function SettledCell({ settlement }: { settlement: Settlement | undefined }) {
   if (!settlement) return null;
   return (
     <span className={styles.settled} data-testid="intent-settled">
-      {settlement.payoutCents > 0 ? (
-        <>
-          Paid <Money cents={settlement.payoutCents} />
-        </>
-      ) : (
-        "Paid nothing"
-      )}
+      {/* One line: in the column below, bare text and the amount would each take a line of their own. */}
+      <span>
+        {settlement.payoutCents > 0 ? (
+          <>
+            Paid <Money cents={settlement.payoutCents} />
+          </>
+        ) : (
+          "Paid nothing"
+        )}
+      </span>
       <span className={styles.net}>
         Net <Money cents={settlement.pnlCents} sign="always" />
       </span>
