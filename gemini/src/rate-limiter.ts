@@ -3,6 +3,8 @@
  * so the defaults (burst 5, refill 100 per minute) stay clearly under the limit even when the
  * bucket starts full: at most 5 + 100 = 105 requests in any 60-second window.
  */
+import { raceAbort } from "@mandate/shared";
+
 export interface TokenBucketOptions {
   /** Maximum burst size. */
   capacity: number;
@@ -28,15 +30,21 @@ export class TokenBucket {
     this.updatedAt = options.now();
   }
 
-  /** Resolves once a token has been taken. */
-  acquire(): Promise<void> {
-    const turn = this.queue.then(() => this.take());
+  /**
+   * Resolves once a token has been taken. When `signal` aborts first, rejects with its reason at
+   * once and takes no token: the waiters behind it move up.
+   */
+  acquire(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(signal.reason as Error);
+    const turn = this.queue.then(() => this.take(signal));
     this.queue = turn.catch(() => undefined);
-    return turn;
+    return raceAbort(turn, signal);
   }
 
-  private async take(): Promise<void> {
+  private async take(signal: AbortSignal | undefined): Promise<void> {
     for (;;) {
+      // A waiter that gave up while queued or sleeping leaves its token to the next one.
+      if (signal?.aborted) return;
       this.refill();
       if (this.tokens >= 1) {
         this.tokens -= 1;

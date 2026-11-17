@@ -4,6 +4,7 @@
  * Only unauthenticated GET requests exist in this package.
  */
 import type { z } from "zod";
+import { raceAbort } from "@mandate/shared";
 import { GeminiError } from "./errors";
 import type { TokenBucket } from "./rate-limiter";
 
@@ -29,30 +30,41 @@ type Outcome =
   | { kind: "retry"; error: GeminiError; retryAfterMs: number | null }
   | { kind: "fail"; error: GeminiError };
 
+/**
+ * One GET with its retries. When `signal` aborts, the request in flight is aborted, nothing more is
+ * sent or retried, and the call rejects with the signal's reason.
+ */
 export async function getJson<S extends z.ZodType>(
   options: HttpOptions,
   path: string,
   schema: S,
+  signal?: AbortSignal,
 ): Promise<z.output<S>> {
   const attempts = options.maxRetries + 1;
   let lastError: GeminiError | null = null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    await options.limiter.acquire();
+    signal?.throwIfAborted();
+    await options.limiter.acquire(signal);
     options.onRequest?.(path);
-    const outcome = await attemptOnce(options, path, attempt);
+    const outcome = await attemptOnce(options, path, attempt, signal);
     if (outcome.kind === "ok") return parseBody(outcome.body, schema, path, attempt);
     if (outcome.kind === "fail") throw outcome.error;
     lastError = outcome.error;
     if (attempt < attempts) {
       const ceiling = Math.min(options.maxDelayMs, options.baseDelayMs * 2 ** (attempt - 1));
       const jittered = Math.floor(options.random() * ceiling);
-      await options.sleep(Math.max(jittered, outcome.retryAfterMs ?? 0));
+      await raceAbort(options.sleep(Math.max(jittered, outcome.retryAfterMs ?? 0)), signal);
     }
   }
   throw lastError ?? new GeminiError("network", `GET ${path} failed`, { path, attempts });
 }
 
-async function attemptOnce(options: HttpOptions, path: string, attempt: number): Promise<Outcome> {
+async function attemptOnce(
+  options: HttpOptions,
+  path: string,
+  attempt: number,
+  caller: AbortSignal | undefined,
+): Promise<Outcome> {
   const controller = new AbortController();
   const timer = setTimeout(() => {
     controller.abort();
@@ -61,7 +73,7 @@ async function attemptOnce(options: HttpOptions, path: string, attempt: number):
     const response = await options.fetch(options.baseUrl + path, {
       method: "GET",
       headers: { accept: "application/json" },
-      signal: controller.signal,
+      signal: caller === undefined ? controller.signal : AbortSignal.any([controller.signal, caller]),
     });
     const body = await response.text();
     if (response.ok) return { kind: "ok", body };
@@ -79,6 +91,8 @@ async function attemptOnce(options: HttpOptions, path: string, attempt: number):
     const error = new GeminiError("http", detail, details);
     return response.status >= 500 ? { kind: "retry", error, retryAfterMs: null } : { kind: "fail", error };
   } catch (cause) {
+    // The caller gave up: not a failure of Gemini's, and never retried.
+    if (caller?.aborted) throw caller.reason as Error;
     if (controller.signal.aborted) {
       const error = new GeminiError("timeout", `GET ${path} timed out after ${options.timeoutMs} ms`, {
         path,

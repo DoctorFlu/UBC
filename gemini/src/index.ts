@@ -10,6 +10,7 @@ export {
   type ListEventsOptions,
   type SettledOptions,
 } from "./client";
+export type { RequestOptions } from "./abort";
 export { GeminiError, isGeminiError, type GeminiErrorCode } from "./errors";
 export type { FetchLike } from "./http";
 export {
