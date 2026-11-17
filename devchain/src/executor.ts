@@ -20,7 +20,7 @@
  * signed with the executor key. It is recorded at most once per intent, across restarts (the console keeps
  * the first record), and never before the outcome is published.
  */
-import { isInstrumentSymbol } from "@mandate/gemini";
+import { eventTickerCandidates, isInstrumentSymbol } from "@mandate/gemini";
 import {
   categoryLabel,
   formatCents,
@@ -32,7 +32,7 @@ import {
   type Settlement,
 } from "@mandate/shared";
 import type { SettlementSink } from "./settlement-sink";
-import type { HeldPosition, Venue } from "./venue";
+import type { HeldPosition, PositionOutcome, Venue } from "./venue";
 
 export type RefusalCode =
   | "market_not_a_symbol"
@@ -116,14 +116,26 @@ export interface ExecutorOptions {
   fillPollMs?: number;
   /** How long to wait before checking again when the venue could not be reached. */
   venueRetryMs?: number;
-  /** How often filled positions whose market has expired are checked for a published outcome. */
+  /**
+   * How often the settlement timer looks for a position that is due. A look is local: the venue and the
+   * console are asked only about a position whose market has expired (or whose wait below has ended).
+   */
   settleIntervalMs?: number;
   /**
-   * The longest a position on a market that is still open goes unchecked: it is checked at its expiry,
-   * or after this long if that comes first, in case the venue moved the expiry.
+   * Waits between two questions about a ladder that has expired without an outcome yet, or a settlement
+   * the console did not take: the first wait, then the next, the last one repeating. Default 1, 2, 5, 10,
+   * then every 30 minutes.
+   */
+  settleBackoffMs?: readonly number[];
+  /**
+   * Off by default: a position on a market that still trades is asked about again only at its expiry, so
+   * an idle machine makes no call. Set, it is also asked after this long, for a venue that may move an
+   * expiry (the end-to-end tests move the fake Gemini's).
    */
   openRecheckMs?: number;
   pollingIntervalMs?: number;
+  /** Clock in milliseconds, for settlement schedules. */
+  now?: () => number;
   log?: (line: string) => void;
 }
 
@@ -136,6 +148,26 @@ export interface Executor {
 /** Gemini publishes an outcome seconds after expiry; the first check after expiry waits this long. */
 const SETTLE_GRACE_MS = 5_000;
 
+const MINUTE_MS = 60_000;
+
+/**
+ * Waits while an expired ladder has no outcome yet: Gemini usually publishes within seconds, so the first
+ * questions come quickly, then they thin out. About 8 requests per ladder in its first two hours, against
+ * Gemini's public limit of 120 a minute.
+ */
+export const SETTLE_BACKOFF_MS: readonly number[] = [
+  MINUTE_MS,
+  2 * MINUTE_MS,
+  5 * MINUTE_MS,
+  10 * MINUTE_MS,
+  30 * MINUTE_MS,
+];
+
+/** The ladder a position is on: positions on one ladder expire and are resolved together. */
+function ladderOf(market: string): string {
+  return eventTickerCandidates(market)[0] ?? market;
+}
+
 /**
  * Watches for approvals and fills, handles each approval, and settles filled positions once their
  * market has resolved. A failure on one intent never stops the others.
@@ -146,7 +178,9 @@ export function startExecutor(options: ExecutorOptions): Executor {
   const fillPollMs = options.fillPollMs ?? 5_000;
   const venueRetryMs = options.venueRetryMs ?? 15_000;
   const settleIntervalMs = options.settleIntervalMs ?? 60_000;
-  const openRecheckMs = options.openRecheckMs ?? 3_600_000;
+  const settleBackoffMs = options.settleBackoffMs?.length ? options.settleBackoffMs : SETTLE_BACKOFF_MS;
+  const openRecheckMs = options.openRecheckMs;
+  const clock = options.now ?? Date.now;
   const tag = `[${venue.kind}-executor]`;
   const log =
     options.log ??
@@ -251,8 +285,11 @@ export function startExecutor(options: ExecutorOptions): Executor {
 
   // ---------------------------------------------------------------- settlement
 
-  /** Filled intents not settled yet, with when to ask about each again. */
-  const filled = new Map<number, number>();
+  /**
+   * Filled intents not settled yet: when to ask about each again (unix ms), and how many waits of
+   * `settleBackoffMs` in a row it has had.
+   */
+  const filled = new Map<number, { notBefore: number; waits: number }>();
   /** Settled, or never to be settled (a sell, a zero fill): done for good in this process. */
   const done = new Set<number>();
   /** Executed intents never change onchain again, so each is read once. */
@@ -289,7 +326,34 @@ export function startExecutor(options: ExecutorOptions): Executor {
     return held;
   }
 
-  async function settleOne(sink: SettlementSink, intentId: number): Promise<void> {
+  /** Asks again after the next wait of `settleBackoffMs`. */
+  function backOff(intentId: number): void {
+    const waits = filled.get(intentId)?.waits ?? 0;
+    const delay = settleBackoffMs[Math.min(waits, settleBackoffMs.length - 1)] ?? MINUTE_MS;
+    filled.set(intentId, { notBefore: clock() + delay, waits: waits + 1 });
+  }
+
+  /** Asks again at the market's expiry (or sooner with `openRecheckMs`), and nothing before. */
+  function untilExpiry(intentId: number, expiresAt: string): void {
+    const at = Date.parse(expiresAt) + SETTLE_GRACE_MS;
+    if (!Number.isFinite(at)) {
+      backOff(intentId);
+      return;
+    }
+    const notBefore = openRecheckMs === undefined ? at : Math.min(at, clock() + openRecheckMs);
+    filled.set(intentId, { notBefore, waits: 0 });
+  }
+
+  /**
+   * `ladders` holds what this pass learned about each ladder while it trades or waits for its outcome:
+   * that answer holds for every position on it, so a ladder costs one question per pass, not one per
+   * position.
+   */
+  async function settleOne(
+    sink: SettlementSink,
+    intentId: number,
+    ladders: Map<string, PositionOutcome>,
+  ): Promise<void> {
     const held = await position(intentId);
     if (held === null) {
       if (positions.has(intentId)) {
@@ -299,19 +363,21 @@ export function startExecutor(options: ExecutorOptions): Executor {
       }
       return;
     }
-    const outcome = await venue.positionOutcome(held);
+    const ladder = ladderOf(held.market);
+    const outcome = ladders.get(ladder) ?? (await venue.positionOutcome(held));
     switch (outcome.status) {
       case "open":
-        filled.set(
-          intentId,
-          Math.min(Date.parse(outcome.expiresAt) + SETTLE_GRACE_MS, Date.now() + openRecheckMs),
-        );
+        ladders.set(ladder, outcome);
+        untilExpiry(intentId, outcome.expiresAt);
         return;
       case "awaiting":
+        ladders.set(ladder, outcome);
         note(intentId, `${held.market} has expired; waiting for Gemini to publish its outcome`);
+        backOff(intentId);
         return;
       case "unlisted":
         note(intentId, `Gemini no longer lists ${held.market}; asking again later, never guessing`);
+        backOff(intentId);
         return;
       case "resolved":
         break;
@@ -363,21 +429,31 @@ export function startExecutor(options: ExecutorOptions): Executor {
         return;
       case "retry":
         note(intentId, `settlement not recorded yet: ${result.detail}`);
+        backOff(intentId);
         return;
     }
   }
 
+  /**
+   * Asks about the positions that are due, and only those: on a pass where none is, it makes no call at
+   * all, so an idle machine stays idle.
+   */
   async function settlePass(): Promise<void> {
     const sink = options.settlements;
     if (sink === undefined) return;
-    const now = Date.now();
-    for (const [intentId, notBefore] of [...filled].sort(([a], [b]) => a - b)) {
+    const now = clock();
+    const due = [...filled]
+      .filter(([intentId, { notBefore }]) => !done.has(intentId) && notBefore <= now)
+      .map(([intentId]) => intentId)
+      .sort((a, b) => a - b);
+    const ladders = new Map<string, PositionOutcome>();
+    for (const intentId of due) {
       if (isStopped()) return;
-      if (done.has(intentId) || notBefore > now) continue;
       try {
-        await settleOne(sink, intentId);
+        await settleOne(sink, intentId, ladders);
       } catch (error) {
         note(intentId, `could not settle yet (${errorText(error)}); asking again later`);
+        if (filled.has(intentId)) backOff(intentId);
       }
     }
   }
@@ -400,8 +476,10 @@ export function startExecutor(options: ExecutorOptions): Executor {
       for (const event of events) {
         if (event.type === "IntentApproved") void handle(event.intentId);
         if (event.type === "ResultRecorded" && event.filled && !done.has(event.intentId)) {
-          newFills ||= !filled.has(event.intentId);
-          filled.set(event.intentId, filled.get(event.intentId) ?? 0);
+          if (!filled.has(event.intentId)) {
+            newFills = true;
+            filled.set(event.intentId, { notBefore: 0, waits: 0 });
+          }
         }
       }
       // A new fill is looked at right away, which also learns when its market expires.

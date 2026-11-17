@@ -241,8 +241,10 @@ export async function startStack(options: {
       fillDelayMs: 0,
       pollingIntervalMs: 100,
       settleIntervalMs: 200,
-      // Ask about open markets on every pass: the test moves the ladder past expiry whenever it likes.
+      // Ask about open markets on every pass, and again 200 ms after an unpublished outcome: the test
+      // moves the ladder past expiry whenever it likes.
       openRecheckMs: 0,
+      settleBackoffMs: [200],
       log: () => undefined,
     });
 

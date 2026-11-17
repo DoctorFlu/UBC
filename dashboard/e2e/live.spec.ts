@@ -1033,6 +1033,7 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
       pollingIntervalMs: 200,
       settleIntervalMs: 1_000,
       openRecheckMs: 1_000,
+      settleBackoffMs: [1_000],
       log: (line) => logs.push(line),
     });
   let executor = begin();

@@ -5,8 +5,9 @@
  * SIM_EXECUTOR_POLL_MS    how often it asks the chain for new approvals (default 1000, the watcher's own
  *                         default, which suits a laptop). A hosted demo sets it higher so the machine can go
  *                         quiet between visits.
- * EXECUTOR_SETTLE_MS      how often it checks filled positions on expired markets for a published outcome
- *                         (default 60000). Gemini publishes an outcome seconds after expiry.
+ * EXECUTOR_SETTLE_MS      how often it looks for a filled position that is due to be settled (default
+ *                         60000). The look is local; Gemini and the console are asked only about a position
+ *                         whose market has expired, then with a backoff while the outcome is unpublished.
  * CONSOLE_URL             the console it records settlements in (default http://localhost:3000), the same
  *                         variable the MCP server reads.
  */

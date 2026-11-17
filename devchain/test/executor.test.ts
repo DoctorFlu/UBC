@@ -245,6 +245,10 @@ describe("settling filled positions at expiry (issue #92)", () => {
   let chain: TestPolicy;
   const executors: Executor[] = [];
   let lines: string[];
+  /** The executor's settlement clock, moved by hand: the fake ladder expires at `EXPIRY`. */
+  let clock: { now: number };
+  const EXPIRY = Date.parse("2026-11-20T22:00:00.000Z");
+  const DUE = EXPIRY + 5_000;
 
   beforeAll(async () => {
     anvil = await startTestAnvil();
@@ -258,6 +262,7 @@ describe("settling filled positions at expiry (issue #92)", () => {
     chain = await deployTestPolicy(anvil, "production");
     await chain.user.setPolicy(DEMO_POLICY);
     lines = [];
+    clock = { now: EXPIRY - 3_600_000 };
   });
 
   const start = (venue: Venue, settlements: SettlementSink): Executor => {
@@ -268,9 +273,9 @@ describe("settling filled positions at expiry (issue #92)", () => {
       fromBlock: chain.deployBlock,
       fillDelayMs: 0,
       pollingIntervalMs: 50,
-      // Passes run when a test asks for one, and a market that is still open is asked about every time.
+      // Passes run when a test asks for one.
       settleIntervalMs: 3_600_000,
-      openRecheckMs: 0,
+      now: () => clock.now,
       log: (line) => lines.push(line),
     });
     executors.push(executor);
@@ -279,10 +284,11 @@ describe("settling filled positions at expiry (issue #92)", () => {
 
   /** A $12.40 NO buy at 31c, filled: 40 contracts. Resolves once the executor has seen the fill. */
   async function filledPosition(executor: Executor, venue: FakeVenue): Promise<number> {
+    // Counted before the order exists: the watcher may look at the fill before the test sees it onchain.
+    const asked = venue.outcomeCalls;
     const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_240n, limitPrice: 31n }));
     await waitForStatus(chain.outsider, [id], (s) => s === "executed");
     // The fill's event reaches the executor's watcher a polling interval after the receipt.
-    const asked = venue.outcomeCalls;
     await vi.waitFor(async () => {
       await executor.settleNow();
       expect(venue.outcomeCalls).toBeGreaterThan(asked);
@@ -297,18 +303,22 @@ describe("settling filled positions at expiry (issue #92)", () => {
     const id = await filledPosition(executor, venue);
     expect(sink.calls).toBe(0);
 
+    clock.now = DUE;
     venue.outcome = { status: "awaiting", expiresAt: "2026-11-20T22:00:00.000Z" };
     await executor.settleNow();
+    clock.now += 60_000;
     await executor.settleNow();
     expect(sink.calls).toBe(0);
     expect(lines.filter((line) => line.includes("waiting for Gemini to publish its outcome"))).toHaveLength(
       1,
     );
 
+    clock.now += 120_000;
     venue.outcome = new Error("Gemini is unreachable");
     await executor.settleNow();
     expect(sink.calls).toBe(0);
 
+    clock.now += 300_000;
     venue.outcome = RESOLVED_NO;
     await executor.settleNow();
     const stored = sink.stored.get(id);
@@ -357,10 +367,13 @@ describe("settling filled positions at expiry (issue #92)", () => {
     sink.refuseNext = 1;
     const first = start(venue, sink);
     const id = await filledPosition(first, venue);
-    await vi.waitFor(async () => {
-      await first.settleNow();
-      expect(sink.stored.size).toBe(1);
-    });
+    expect(sink.calls).toBe(1);
+    // Not asked again before its wait is over.
+    await first.settleNow();
+    expect(sink.calls).toBe(1);
+    clock.now += 60_000;
+    await first.settleNow();
+    expect(sink.stored.size).toBe(1);
     expect(sink.calls).toBe(2);
     expect(sink.stored.get(id)?.document).toMatchObject({
       resolution: "yes",
@@ -389,6 +402,51 @@ describe("settling filled positions at expiry (issue #92)", () => {
       expect(lines.join("\n")).toContain("already holds another settlement");
     });
     expect(sink.stored.get(id)?.document).toMatchObject({ resolution: "yes", payoutCents: 0 });
+  });
+
+  it("makes no call while nothing is due, and asks once per ladder, backing off, until the outcome is out", async () => {
+    const venue = fakeVenue();
+    const sink = fakeSink();
+    const executor = start(venue, sink);
+    const ids = [
+      await filledPosition(executor, venue),
+      await filledPosition(executor, venue),
+      await filledPosition(executor, venue),
+    ];
+    // Each fill was looked at once, which told the executor when its ladder expires.
+    expect(venue.outcomeCalls).toBe(3);
+
+    // The ladder still trades: the timer's passes ask neither Gemini nor the console.
+    for (const at of [EXPIRY - 3_000_000, EXPIRY - 60_000, EXPIRY, DUE - 1]) {
+      clock.now = at;
+      await executor.settleNow();
+    }
+    expect(venue.outcomeCalls).toBe(3);
+    expect(sink.calls).toBe(0);
+
+    // Expired, outcome not published: one question for the three positions, then waits of 1 and 2 min.
+    venue.outcome = { status: "awaiting", expiresAt: "2026-11-20T22:00:00.000Z" };
+    const asked: number[] = [];
+    for (const step of [1, 0, 59_999, 1, 119_999, 1]) {
+      clock.now += step;
+      await executor.settleNow();
+      asked.push(venue.outcomeCalls - 3);
+    }
+    expect(asked).toEqual([1, 1, 1, 2, 2, 3]);
+    expect(sink.calls).toBe(0);
+
+    // Published: each position is asked about once more, for its own payout, and recorded once.
+    clock.now += 300_000;
+    venue.outcome = RESOLVED_NO;
+    await executor.settleNow();
+    expect(venue.outcomeCalls).toBe(9);
+    expect([...sink.stored.keys()].sort((a, b) => a - b)).toEqual(ids);
+
+    // Settled: nothing is asked again, however long the executor runs.
+    clock.now += 86_400_000;
+    await executor.settleNow();
+    expect(venue.outcomeCalls).toBe(9);
+    expect(sink.calls).toBe(3);
   });
 
   it("settles nothing that is not a filled buy", async () => {
