@@ -223,9 +223,10 @@ function timedOut(result: CallResult): boolean {
 }
 
 async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | undefined): Promise<void> {
-  const extended = contract === "reference";
+  // Both contracts have previewTrade and the contextHash overload: the production contract since its v2
+  // (issue #23), which the probing in PolicyClient finds by itself.
   process.stdout.write(
-    `\n=== ${contract} contract ${extended ? "(with previewTrade and contextHash)" : "(Policy.sol as is)"}\n`,
+    `\n=== ${contract} contract (${contract === "production" ? "Policy.sol as is" : "the devchain reference"}, with previewTrade and contextHash)\n`,
   );
 
   const chain = await startDevchain({ contract, port: await freePort() });
@@ -310,7 +311,7 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
     process.stdout.write("\n-- read\n");
     const policy = await run("get_policy");
     check(
-      field(policy.structuredContent, "policy", "contract", "contextHash") === extended,
+      field(policy.structuredContent, "policy", "contract", "contextHash") === true,
       "get_policy reports the contract's extensions",
     );
     await run("get_portfolio");
@@ -353,8 +354,8 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
       "simulate_trade predicts the $30 rejection",
     );
     check(
-      field(simulated.structuredContent, "simulation", "source") === (extended ? "contract" : "offchain"),
-      `simulate_trade uses ${extended ? "the contract's previewTrade" : "the offchain evaluator"}`,
+      field(simulated.structuredContent, "simulation", "source") === "contract",
+      "simulate_trade uses the contract's previewTrade",
     );
 
     process.stdout.write("\n-- the three demo cases\n");
@@ -409,8 +410,8 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
         `${label}: decision context stored in the console and matches its hash`,
       );
       check(
-        field(result.structuredContent, "proposal", "context", "contextHashRecorded") === extended,
-        `${label}: contextHashRecorded is ${String(extended)}`,
+        field(result.structuredContent, "proposal", "context", "contextHashRecorded") === true,
+        `${label}: contextHashRecorded is true`,
       );
       const intentId = Number(field(result.structuredContent, "proposal", "intentId"));
       const link = fake.state.intentContexts.get(intentId);
