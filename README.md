@@ -1,172 +1,191 @@
 # Mandate
 
-An AI agent that hedges your crypto on prediction markets, inside rules it cannot break.
+Mandate lets an AI agent hedge your crypto holding on Gemini's prediction markets inside rules you set once in a Policy contract.
+The agent, Grok Bot, plans the hedge, pays a fraction of a cent for a pricing signal, and proposes each order to the contract.
+The contract approves the order, holds it for your approval, or rejects it with the rule that stopped it, and the agent's key cannot do anything else.
 
 Built for the UBC 2026 Hackathon: track **Agentic Payments & AI**, **Best use of Arc**, and the **Gemini Prediction Markets**, **Grok Bot** and **QuickNode Streams** bounties.
 
 ![The owner's console](dashboard/docs/screenshots/home-1440-light.png)
 
-## The idea
+## Hosted demo
 
-You hold crypto and you want protection against a drop, but you do not want to hand an AI agent your exchange account and hope.
+- App: https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech, the console, and the MCP server at `/mcp`.
+- Site: https://8081-agq6mxapjuxoy3aavoouae6yri.instabox.tech, the landing page.
 
-With Mandate you write the rules once, in a Policy contract on Arc: a total budget, a maximum trade size, an approval threshold, a daily loss limit, the market categories allowed, and a pause switch.
-That set of rules is the **mandate**.
+The hosted demo runs the demo chain in gateway mode, as described in [docs/hosting.md](docs/hosting.md#instabox).
+The console needs a passkey sign-in, and a workspace there is opened with a code from the operator ([docs/accounts.md](docs/accounts.md#sign-in)).
+Two pages need no sign-in: the landing page, and the agent's public scorecard at [`/agent/0x70997970C51812dc3A010C7d01b50e0d17dc79C8`](https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech/agent/0x70997970C51812dc3A010C7d01b50e0d17dc79C8), which the landing page links to.
 
-The agent (Grok Bot) then does the work.
-It reads your holding, reads the Gemini prediction-market ladder for that asset, buys a pricing signal for a fraction of a cent, and plans a hedge.
-Every order it wants to place is first proposed to the contract, which answers with one of three verdicts:
-
-- **approved**: the executor may place the order;
-- **held**: the order waits for your approval in the console;
-- **rejected**: the order is refused, with the rule that stopped it recorded onchain.
-
-The agent's key can only propose.
-It cannot approve its own orders, change a rule, unpause, or touch the exchange key, and no prompt can talk it past the contract.
+<!-- #96 (members, roles and hosted sign-up): when it is merged, say here how a visitor signs up on the hosted demo. -->
 
 ## How it fits together
 
 ```mermaid
-sequenceDiagram
-    actor Owner
-    participant Grok as Grok Bot
-    participant MCP as MCP server
-    participant Policy as Policy contract on Arc
-    participant Console
-    participant Executor
-    participant Gemini
+flowchart TB
+    Owner([Owner])
+    Grok["Grok Bot<br/>chat or routine"]
 
-    Owner->>Console: set the mandate
-    Console->>Policy: owner-signed rules
-    Owner->>Grok: "Protect my BTC below $60,000"
-    Grok->>MCP: read rules, holding and prices
-    MCP->>Gemini: market data
-    Grok->>MCP: buy a signal (x402, USDC) and plan
-    Grok->>Owner: plan, cost and cover
-    Owner->>Grok: yes
-    Grok->>MCP: execute the plan
-    MCP->>Policy: propose each order (agent key)
-    Policy-->>MCP: approved, held or rejected with the rule
-    Policy-->>Console: events through a QuickNode Stream
-    Owner->>Console: approve or reject held orders
-    Policy-->>Executor: approved orders only
-    Executor->>Gemini: place the order
-    Executor->>Policy: record the result
+    subgraph repo["This repository"]
+        Console["Console<br/>dashboard/"]
+        MCP["MCP server<br/>agent/"]
+        Signals["Signal API<br/>signals/"]
+        Executor["Executor<br/>devchain/"]
+    end
+
+    subgraph outside["Chain and services"]
+        Policy[("Policy contract<br/>chain id 5042002")]
+        Gemini["Gemini<br/>Prediction Markets"]
+        Gateway["Circle Gateway<br/>x402 on Arc testnet"]
+        Streams["QuickNode Stream<br/>designed, not active"]
+    end
+
+    Owner -- "chat" --> Grok
+    Owner -- "rules, approvals" --> Console
+    Console -- "wake-up webhook" --> Grok
+    Grok -- "MCP tools" --> MCP
+    MCP -- "holdings, plans, reasons" --> Console
+    MCP -- "buys a signal" --> Signals
+    MCP -- "proposeTrade" --> Policy
+    MCP -- "market data" --> Gemini
+    Console -- "owner transactions" --> Policy
+    Policy -- "events, RPC poll" --> Console
+    Signals -- "payment" --> Gateway
+    Signals -- "prices" --> Gemini
+    Executor -- "approved intents, results" --> Policy
+    Executor -- "orders" --> Gemini
+    Executor -- "journal, settlements" --> Console
+    Policy -. "Logs dataset" .-> Streams
+    Streams -. "signed webhook" .-> Console
 ```
 
-One order, start to finish.
-The agent talks only to the MCP server, the MCP server can only propose, and nothing reaches the exchange without the contract's approval.
+The agent talks only to the MCP server, the MCP server can only propose, and nothing reaches Gemini without the contract's approval.
+The dotted edges are the QuickNode Stream, which is built and tested but not yet switched on (see [What is real and what is simulated](#what-is-real-and-what-is-simulated)).
 
 | Folder | What it is |
 | --- | --- |
 | `contracts/` | The Policy contract (Solidity, Foundry). |
-| `agent/` | The remote MCP server Grok Bot connects to: the agent's only way to act. |
-| `planner/` | The hedge planner: turns a holding and a price floor into a ladder of orders. |
-| `gemini/` | A read-only client for Gemini's public prediction-market data. |
-| `signals/` | The paid signal API (x402, Circle Nanopayments on Arc). |
+| `agent/` | The remote MCP server Grok Bot connects to: the agent's only way to act. Its Grok Bot skill and routine are in `agent/grok/`. |
+| `planner/` | The hedge planner: turns a holding and a price floor into a ladder of orders, and measures the cover already held. |
+| `gemini/` | Clients for Gemini's public prediction-market data and, for the executor only, its signed order API. |
+| `signals/` | The paid signal API (x402, Circle Gateway on Arc testnet). |
 | `streams/` | The QuickNode Stream: filter, configuration, management script, payload parser. |
 | `dashboard/` | The owner's console (Next.js). |
-| `site/` | The public landing page: a static export with a live check of a sample mandate, linking to the console. |
+| `site/` | The public landing page. |
 | `brand/` | Design tokens and the two self-hosted fonts, shared by every web app. |
-| `devchain/` | A local chain with Arc's chain id, the simulated executor, and `npm run dev:stack`. |
+| `devchain/` | A local chain with Arc's chain id, the executor, and `npm run dev:stack`. |
 | `redteam/` | A scripted adversary that attacks the mandate through the MCP server and with the agent key. |
 | `shared/` | Types, the contract ABI, the TypeScript copy of the rules, and the API contracts between services. |
-| `docs/` | Design notes and verified findings for each integration. |
+| `deploy/` | Docker Compose and Caddy files for the hosted demo. |
+| `docs/` | Design notes and verified findings for each integration (see [Docs map](#docs-map)). |
 
-## The agent's decision loop
+## The life of one hedge
 
-Grok Bot works through 16 tools on the MCP server.
-The server sends it the order of work on every connection (`agent/src/instructions.ts`), and every tool result names who acts next.
+The owner has entered a holding in the console, for example 0.05 BTC, and saved a Grok Bot routine with a standing goal such as "keep it protected below $60,000, spending at most $50 per plan".
 
-1. **Check setup** (`get_setup_state`).
-   If a step is missing, the agent says exactly what it is and who must do it.
-2. **Read the rules and the holding** (`get_policy`, `get_portfolio`).
-   The rules and today's usage come from the contract; the holding is what the owner entered in the console, valued at Gemini spot.
-3. **Read the market** (`get_ladder`).
-   A ladder is a set of contracts such as "BTC $63,000 or above", one per strike, for one expiry.
-   Buying NO on a strike pays $1 per contract if the price ends below it, which is what offsets the loss on the holding.
-4. **Buy a signal** (`buy_signal`).
-   The agent pays the signal API $0.001 in USDC over x402 for a cheap, fair or expensive rating of every strike, so the plan buys underpriced protection first.
-5. **Plan** (`plan_hedge`).
-   The planner sizes NO orders between the owner's floor and the current price, within the maximum cost the owner gave, and predicts the verdict each order will get.
-   It first counts the protection already held on that ladder, so a goal that is already covered plans nothing and a partly covered one plans only the missing part ([docs/cover.md](docs/cover.md)).
-6. **Ask the owner.**
-   The agent shows the cost, the share of the loss covered, what is not covered, and which orders will wait for approval, then waits for a yes.
-7. **Propose** (`execute_plan`, or `propose_trade` for one order).
-   Each order goes to the contract with a hash of the agent's reasons.
-   The run stops at the first rejection.
-8. **Report** (`get_intent`, `get_activity`).
-   Approved, waiting, rejected with the rule and the numbers, and filled.
+1. **Wake-up.**
+   The routine runs every hour, and also when the console posts a `mandate.wake` event to its webhook, for example when the spot price falls below the goal's floor.
+   [agent/grok/routine.md](agent/grok/routine.md), [docs/event-wake.md](docs/event-wake.md), [docs/grok-bot.md](docs/grok-bot.md#routines)
+2. **Read the state.**
+   The Bot calls `get_setup_state`, `get_policy` and `get_activity` on the MCP server: whether setup is complete, the rules and today's usage from the contract, and what happened since the last run.
+   [agent/README.md](agent/README.md)
+3. **Plan, and check the cover.**
+   `plan_hedge` sizes NO orders on the nearest Gemini ladder between the floor and the current price.
+   The server first counts the protection already held on that ladder, so a goal that is already met answers `ALREADY_COVERED` and nothing is bought.
+   [docs/cover.md](docs/cover.md)
+4. **Buy a signal.**
+   `buy_signal` pays the signal API $0.001 in USDC over x402 for a cheap, fair or expensive rating of each strike, and the Bot plans again with the signal's receipt.
+   [docs/x402.md](docs/x402.md#hedge-signal-issue-20-and-buy_signal-issue-21)
+5. **Propose.**
+   `execute_plan` re-reads the cover before each order and proposes it to the Policy contract with the agent key and the hash of a sealed reason (the request, the prices seen, the signal and the plan).
+   The contract answers each proposal with a verdict: approved, held for the owner, or rejected with its rule.
+   [docs/order-lifecycle.md](docs/order-lifecycle.md#1-proposal-and-verdict), [docs/contract-interface.md](docs/contract-interface.md)
+6. **The owner decides what is held.**
+   An order above the approval threshold waits in the console's Approvals page until the owner approves or rejects it with their wallet.
+   <!-- #95 (several mandates with passkey approvals): when it is merged, say here how an approval is signed. -->
+   [docs/order-lifecycle.md](docs/order-lifecycle.md#1-proposal-and-verdict)
+7. **The console follows the chain.**
+   The console stores every Policy event and builds the activity feed, approvals and audit trail from them.
+   [docs/quicknode-streams.md](docs/quicknode-streams.md)
+8. **Fill.**
+   The executor sees the approval, refuses any intent the venue could not trade, places the order, and records the fill onchain with `recordResult`.
+   On Gemini, the order is sized so its cost and Gemini's fee fit the approved amount.
+   [docs/order-lifecycle.md](docs/order-lifecycle.md#2-fill), [docs/gemini-venue.md](docs/gemini-venue.md#what-the-executor-does-with-an-approved-intent)
+9. **Settlement.**
+   When the ladder expires, the executor waits for Gemini to publish the outcome, then signs a settlement (cost, fee, payout, net) and stores it in the console.
+   The console wakes the routine once for the settled ladder, and the Bot reports what it cost and paid, then plans on the next ladder.
+   [docs/order-lifecycle.md](docs/order-lifecycle.md#4-settlement)
 
-If the owner wants a rule changed, the agent can only file a request (`request_policy_change`).
-The owner sees it in the console as a diff and applies it with their own wallet, or does not.
+![An intent in the console](dashboard/docs/screenshots/intent-1440-light.png)
 
-## Safety limits
+## What is real and what is simulated
 
-Enforced by the contract, for every proposal, whatever the agent says or is told:
-
-| Rule | Demo value |
+| Piece | State today |
 | --- | --- |
-| Total budget across all open and filled orders | $200 |
-| Maximum size of one trade | $25 |
-| Trades above this amount wait for the owner | $20 |
-| Daily loss limit, after which trading stops for the day | $40 |
-| Allowed market categories | Crypto only |
-| Pause switch: one transaction stops all new trades | off |
+| Policy contract | The real contract from `contracts/`, on a local anvil chain that uses Arc testnet's chain id (5042002), both locally and on the hosted demo. No Arc testnet deployment is recorded yet ([docs/contract-interface.md](docs/contract-interface.md), section 4); moving to one is configuration only ([docs/configuration.md](docs/configuration.md#chain)). |
+| Order placement | Simulated by default: the executor checks each approved intent against Gemini's listing, records a fill marked "Simulated fill", and places no order. With `EXECUTOR_VENUE=gemini` it places orders on Gemini's sandbox, with test funds. |
+| Gemini sandbox run | Measured on 17 November 2026 ([docs/gemini-venue.md](docs/gemini-venue.md#what-a-sandbox-demo-can-show)): $9.73 approved at 97c, 10 contracts placed and filled at 0.97, a fee of $0.03 equal to the estimate, and at expiry a payout of $10.00, net +$0.27 after fees, matching the sandbox balance to the cent. |
+| Gemini market data | Gemini's public endpoints, read only. |
+| x402 signal payments | Arc testnet with testnet USDC through Circle Gateway. A paid run on 15 November 2026 bought one signal for 0.001 USDC, settled in batch transaction [`0xa99bcd21...41e5ec12b`](https://explorer.testnet.arc.io/tx/0xa99bcd21ab5a60c3749c1c9fcb743768e6cffb5513a3dd7d3ab87d541e5ec12b) ([docs/x402.md](docs/x402.md#a-paid-run-of-the-hedge-signal)). |
+| QuickNode Stream | The filter, configuration, management script and signed webhook receiver are in the repository and tested; no Stream has been created or activated yet ([docs/quicknode-streams.md](docs/quicknode-streams.md)). The console reads Policy events by RPC poll today, and a Stream cannot see the local chain. |
+| Grok Bot | A real Grok Bot plans and proposes through the connector ([docs/grok-bot.md](docs/grok-bot.md#verified-by-hand-issue-4)). |
+| Console sign-in | Passkeys (WebAuthn) for each workspace member ([docs/accounts.md](docs/accounts.md)). |
 
-Three roles, three keys: the **owner** sets rules and approves, the **agent** only proposes, the **executor** only places approved orders and records results.
-A stolen agent key gives an attacker nothing beyond what the mandate already allows.
-The red team (`npm run redteam`) attacks that claim and records what it finds in [redteam/REPORT.md](redteam/REPORT.md): with a stolen key the attacker cannot change a rule or role, but can keep selling once the budget is used, and can get intents approved that the contract does not check (a mislabelled category, any limit price, any market or outcome text).
-The executor refuses to trade those intents, the console flags them, and neither the console nor the MCP server acts on, or breaks on, the text or numbers they carry.
+## Safety model
 
-Enforced by the MCP server, as a second layer:
+- **Rules onchain.**
+  The Policy contract checks every proposal against a total budget, a maximum trade size, an approval threshold, a daily loss limit, the allowed categories and a pause switch.
+  The demo rules are a $200 budget, $25 per trade, approval above $20, a $40 daily loss limit and Crypto only (`DEMO_POLICY` in `devchain/src/deploy.ts`).
+- **Three keys.**
+  The owner sets rules and approves, the agent only proposes, and the executor only places approved orders and records results.
+  No MCP tool calls an owner or executor function, and `agent/test/no-owner-calls.test.ts` proves it from the source.
+- **The server computes cover.**
+  The MCP server counts the protection already held and re-checks it before each order, so repeated or overlapping runs do not buy the same protection twice ([docs/cover.md](docs/cover.md)).
+- **Held versus rejected.**
+  An order above the approval threshold is held until the owner decides; an order that breaks a rule is rejected, with the rule recorded onchain, and the agent is told never to work around it.
+- **Passkeys.**
+  Console members sign in with passkeys; owner actions on the contract are signed with the owner's wallet ([docs/accounts.md](docs/accounts.md)).
+  <!-- #95: when passkey approvals are merged, say here what a passkey signs. -->
+- **A token per agent.**
+  Each agent reaches the MCP server with its own bearer token, which acts on that agent's mandate only, is stored as a hash, and can be revoked in the console ([docs/accounts.md](docs/accounts.md#how-each-request-is-scoped)).
+  <!-- #95: several mandates per workspace, each with its own agent and tokens. -->
+- **A second layer in the MCP server.**
+  The market category comes from Gemini, never from the agent; a repeated proposal within 10 minutes returns the first result (`agent/src/state/ledger.ts`); a plan can be executed for 30 minutes (`agent/src/state/plans.ts`); signal spend is capped at 0.02 USDC a day and 0.005 USDC a purchase by default ([docs/configuration.md](docs/configuration.md#x402-signal-api-circle-nanopayments-on-arc-testnet)); third-party text is marked untrusted.
+- **The executor checks again.**
+  It refuses any approved intent the MCP server could not have sent (not a Gemini symbol, a limit outside 1 to 99, a category Gemini disagrees with), and places one order per intent at most ([docs/gemini-venue.md](docs/gemini-venue.md#safety-rules)).
+- **Red team.**
+  `npm run redteam` attacks the mandate through the MCP server and with a stolen agent key.
+  Against the `production` contract it ran 46 attacks: 39 held, 7 bounded, 0 breaches ([redteam/REPORT.md](redteam/REPORT.md)).
+  The bounded ones are listed there with their limits: for example, splitting an order gets past the per-order rules but not the budget.
 
-- The category of a market is taken from Gemini, never from the agent's input.
-- A repeated proposal within 10 minutes returns the first result instead of trading twice.
-- A plan can be executed for 30 minutes, then it must be planned again from fresh prices.
-- Before each order of a plan, the server re-reads the positions on that ladder; if other orders added protection since the plan was made, it stops, so repeated, overlapping or retried runs never buy the same protection twice.
-- Signal purchases have a daily budget ($0.02) and a maximum price per purchase ($0.005), both checked before anything is signed.
-- Market titles and other third-party text are marked untrusted, and the agent is told never to follow instructions found in them.
-- Bearer token on every request, rate limits, body size limits and a time budget per tool call.
-- No tool calls an owner or executor function; a test proves it from the source (`agent/test/no-owner-calls.test.ts`).
+## How the sponsor technologies are used
 
-Every proposal also carries a **sealed reason**: the request, the prices the agent saw, the signal it bought and the plan it followed, stored in the console under its keccak256 hash.
-The console recomputes the hash when it shows the reason, so a rewritten explanation is detected.
+**Arc.**
+The Policy contract is written for Arc, where gas is paid in USDC ([docs/contract-interface.md](docs/contract-interface.md)), and the local and hosted demo chains use Arc testnet's chain id, 5042002.
+The x402 payments for signals settle on Arc testnet, and the QuickNode Stream is configured for Arc testnet.
 
-## Grok Bot
+**Circle Gateway and x402.**
+The agent pays for each signal it uses: the signal API answers `402 Payment Required`, the MCP server signs a USDC transfer authorization offchain, and Circle Gateway verifies it and settles many payments later in one batch transaction on Arc testnet.
+The spend is capped by a daily budget and a price cap per purchase on the MCP server, a hard cap per request in the payment client, and the buyer's Gateway balance, which the server never tops up.
+Each payment's receipt id is part of the sealed reason of the orders it informed ([docs/x402.md](docs/x402.md)).
 
-Grok Bot is the agent.
-It connects to our remote MCP server as a custom connector and uses its tools to read the mandate, plan a hedge, pay for a signal and propose trades, in a normal chat with the owner or in a scheduled routine with nobody watching.
-It holds no keys and has no direct access to the exchange or the contract; the connector is its only way to act, and the contract judges every action.
-The instruction text, the skill and the routine are in `agent/grok/`, and everything we verified about Grok Bot's connector behaviour is in [docs/grok-bot.md](docs/grok-bot.md).
+**QuickNode Streams.**
+The Stream is designed as the console's source of Policy events on **Arc testnet** (network `arc-testnet`) with the **Logs** dataset.
+Its **filter**, [streams/filter.js](streams/filter.js), runs on QuickNode's side and keeps only the Policy contract's logs.
+Its **destination** is the console's webhook, `/api/webhooks/quicknode`, which verifies the `X-QN-Signature` HMAC, refuses stale deliveries, and stores each event once by transaction hash and log index.
+It is core because the activity feed, the approval queue, the audit trail, the scorecard and the Bot's wake-ups are all built from these events, and the Stream and the RPC poller end in the same function ([docs/event-wake.md](docs/event-wake.md)).
+No Stream is active yet; [streams/scripts/quicknode-stream.ts](streams/scripts/quicknode-stream.ts) creates, pauses and prices it, and [docs/quicknode-streams.md](docs/quicknode-streams.md) has the design and the credit budget.
 
-## QuickNode Streams
+**Gemini.**
+Gemini's public prediction-market data gives the ladders the planner sizes, each market's category, and the prices the signal rates.
+The executor places approved orders through Gemini's signed order API on the sandbox, never on production from the demo setup, and settles each position from the outcome Gemini publishes ([docs/gemini-venue.md](docs/gemini-venue.md)).
 
-The console's live feed is designed around a QuickNode Stream on **Arc Testnet** (`arc-testnet`, chain id 5042002) using the **Logs** dataset.
-A JavaScript **filter** ([streams/filter.js](streams/filter.js)) runs on QuickNode's side for every batch of blocks, keeps only the logs emitted by our Policy contract, and returns them as a compact envelope with the batch's block range.
-The **destination** is a webhook on the console (`/api/webhooks/quicknode`), which verifies each delivery's `X-QN-Signature` (HMAC-SHA256 over nonce, timestamp and body), rejects stale timestamps, decodes the Policy events, stores them idempotently by transaction hash and log index, and pushes them to the browser over server-sent events.
+**Grok.**
+Grok Bot is the agent: it connects to the MCP server as a custom connector and uses its tools to read the mandate, plan a hedge, pay for a signal and propose orders, in a chat with the owner or in a scheduled or webhook-started routine.
+It holds no keys and has no direct access to Gemini or the contract, so the contract judges everything it does.
+The instruction text, the skill and the routine are in `agent/grok/` ([docs/grok-bot.md](docs/grok-bot.md)).
 
-The Stream is core, not decoration: the activity feed, the approval queue, the audit trail and the scorecard are all built from these events alone, and a slow RPC poll only fills gaps.
-The Stream is created, paused and priced by [streams/scripts/quicknode-stream.ts](streams/scripts/quicknode-stream.ts) through the Streams REST API, with a credit budget check before it will activate.
-The full design is in [docs/quicknode-streams.md](docs/quicknode-streams.md).
-
-## x402 payments
-
-The agent pays for what it uses.
-`signals/` sells a hedge signal at `GET /v1/signal/hedge`: for one Gemini ladder it compares each strike's NO price with a fair value from realised volatility and rates it cheap, fair or expensive.
-The price is $0.001, paid in USDC over **x402** with **Circle Nanopayments on Arc**: the agent signs a transfer authorization offchain, Circle Gateway verifies it, and many payments settle later in one batch transaction, so neither side pays gas per request.
-
-The spend is capped three ways:
-
-- a daily budget and a maximum price per purchase on the MCP server, checked before the payment is signed and kept in an append-only ledger that survives restarts;
-- a hard cap passed to the payment client for each request;
-- the buyer wallet's Gateway balance, which the server never tops up.
-
-Requests the seller cannot serve are refused for free, before any payment.
-Each payment's receipt id is part of the sealed reason of the trades it informed.
-Details and a recorded paid run are in [docs/x402.md](docs/x402.md).
-
-## Run it
+## Run it locally
 
 You need Node.js 22 or newer and git.
 Foundry (anvil and forge) is installed from npm with the other dependencies.
@@ -177,32 +196,26 @@ cd UBC
 npm ci                 # use ci, not install: it keeps the lockfile's native bindings intact
 npm run mcp:token      # writes MCP_AUTH_TOKEN into .env without printing it
 npm run x402:keygen    # writes the signal buyer and seller keys into .env, prints only addresses
-npm run dev:stack      # chain, signal API, console, MCP server, simulated executor and landing page
+npm run dev:stack      # chain, signal API, console, MCP server, executor and landing page
 ```
 
-Open http://localhost:3000 for the console, or http://localhost:3001 for the landing page.
-The stack runs a local chain with Arc's chain id, deploys the Policy contract with the demo rules above, and wires every service to it.
-The owner signs with a built-in test wallet, so no browser wallet is needed.
-The console asks you to sign in: the stack prints a one-time claim code, so open http://localhost:3000/claim, enter it and your name, and make a passkey (your device asks for a fingerprint, face or PIN).
-Save the recovery code it shows; [docs/accounts.md](docs/accounts.md) says how workspaces and passkeys work.
+These commands were run on a clean clone on 17 November 2026 (macOS on Apple silicon, Node.js 26.13.1, npm 11.20.0).
+The stack uses ports 3000 (console), 3001 (landing page), 8545 (chain), 8787 (MCP server) and 8788 (signal API), and stops if one is taken.
+It deploys the Policy contract with the demo rules on a local chain with Arc's chain id, and the executor is simulated.
+When it is ready it prints a one-time claim code.
 
-Then:
+1. Open http://localhost:3000/claim, enter the code and your name, and make a passkey.
+   Save the recovery code it shows.
+   The owner signs contract transactions with a built-in test wallet, so no browser wallet is needed.
+2. In the console, open **Hedge** and enter a holding, for example 0.05 BTC.
+3. Optional: to let the agent buy signals, fund the buyer address that `x402:keygen` printed with Arc testnet USDC at https://faucet.circle.com, then, with the stack running, run `npm run x402:hello` once to deposit 1 USDC into Circle Gateway.
+   Without this step the agent plans without a signal.
+4. In a second terminal, run `npm run dev:tunnel`; it prints a public HTTPS address for the MCP server.
+5. In Grok Bot, open **Connect apps** and add a custom connector with that address ending in `/mcp` and an `Authorization` header of `Bearer ` followed by a token you create in the console under **Setup**, **Agents** ([agent/README.md](agent/README.md#connect-grok-bot)).
+6. Ask Grok Bot: "Protect my BTC below $60,000 for at most $50."
+   The first time, it gives you a pairing link to confirm in the console; then it plans, asks for your yes, and proposes the orders.
 
-1. In the console, open **Hedge** and enter a holding, for example 0.05 BTC.
-2. To let the agent buy signals, fund the buyer address that `x402:keygen` printed with Arc testnet USDC at https://faucet.circle.com, then, with the stack running, run `npm run x402:hello` once to deposit 1 USDC into Circle Gateway.
-   Without this step everything else works and the agent plans without a signal.
-3. In a second terminal run `npm run dev:tunnel`.
-   It prints a public HTTPS address for the MCP server.
-4. In Grok Bot, open **Connect apps**, add a custom connector with that address ending in `/mcp`, and an `Authorization` header of `Bearer ` followed by the token from `.env`, or by a token you create in the console under **Setup**, **Agents**.
-   The steps are in [agent/README.md](agent/README.md#connect-grok-bot).
-5. Ask Grok Bot: "Protect my BTC below $60,000 for at most $50."
-   The first time, it gives you a pairing link; open it and confirm in the console.
-   It then plans, asks for your yes, and proposes the orders.
-6. Watch the console: approved orders fill, an order above $20 waits for your approval, and an order above $25 is rejected with its rule.
-
-Without Grok Bot, `npm run mcp:e2e` drives the same tools end to end with a scripted client, and `npm run dev:propose -- --amount 30` proposes a single trade as the agent.
-
-### Checks
+Without Grok Bot, `npm run mcp:e2e` drives the same tools end to end with a scripted client, and `npm run dev:propose -- --amount 30` proposes one trade as the agent.
 
 ```sh
 npm run check     # lint, format, types and unit tests
@@ -211,21 +224,23 @@ npm run e2e       # the console against a real local chain, then the landing pag
 npm run redteam   # a scripted adversary attacks the mandate, both contract variants
 ```
 
-Configuration is described in [docs/configuration.md](docs/configuration.md).
-Every secret lives in `.env`, which is git-ignored.
+Every setting is in [docs/configuration.md](docs/configuration.md), and every secret lives in `.env`, which git ignores.
+[docs/hosting.md](docs/hosting.md) runs the whole product on one Linux VM with `docker compose up -d`.
 
-### Host it
+## Docs map
 
-[docs/hosting.md](docs/hosting.md) runs the whole product on one small Linux VM with `docker compose up -d`, behind Caddy with automatic HTTPS, with Grok Bot connecting to `https://<host>/mcp`.
-
-## What is real today
-
-| Piece | State |
+| Document | What it covers |
 | --- | --- |
-| Policy contract and rules | Real contract; runs on the local devchain in this setup, deployment on Arc testnet is in progress. |
-| Grok Bot through the MCP server | Live: a real Grok Bot plans and proposes through the connector. |
-| Gemini market data | Live, public endpoints, read only. |
-| x402 signal payments | Live on Arc testnet with testnet USDC through Circle Gateway. |
-| Console | Live against the chain; any view not yet backed by a real source is marked "Sample data" on screen. |
-| QuickNode Stream | Filter, configuration, management script and verified webhook receiver are in the repo; the Stream is switched on once the contract is on Arc testnet. |
-| Order placement on Gemini | Simulated: the local executor checks each approved intent against Gemini's listing, records a fill for the valid ones and marks it "Simulated fill", and records the rest as not filled. No real order is placed. |
+| [docs/accounts.md](docs/accounts.md) | Workspaces, members, passkey sign-in, sessions, agent tokens, and how each request is scoped to one mandate. |
+| [docs/configuration.md](docs/configuration.md) | Every environment variable, by service. |
+| [docs/contract-interface.md](docs/contract-interface.md) | What the offchain code uses from the Policy contract, the requested additions, and the red team's findings for the contract owner. |
+| [docs/cover.md](docs/cover.md) | How the server decides that a protection goal is already met, and plans only the missing part. |
+| [docs/event-wake.md](docs/event-wake.md) | Which events wake Grok Bot's routine, the event body, and the limits on wake-ups. |
+| [docs/gemini-venue.md](docs/gemini-venue.md) | Orders on Gemini's sandbox: safety rules, fees, settlement, the journal, and what was verified. |
+| [docs/grok-bot.md](docs/grok-bot.md) | How Grok Bot connects to the MCP server, its skills and routines, and what was verified by hand. |
+| [docs/hosting.md](docs/hosting.md) | Running the product on one VM with Docker Compose and Caddy, including the InstaBox gateway mode. |
+| [docs/order-lifecycle.md](docs/order-lifecycle.md) | One order from proposal to settlement, and who owns each step. |
+| [docs/quicknode-streams.md](docs/quicknode-streams.md) | The QuickNode Stream on Arc testnet: dataset, filter, webhook, lifecycle and credit budget. |
+| [docs/x402.md](docs/x402.md) | x402 with Circle Gateway on Arc testnet: the seller, the buyer, the hedge signal and a recorded paid run. |
+
+<!-- #95 and #96: add their docs here when they are merged. -->
