@@ -60,7 +60,11 @@ function fakeVenue(options: { downFor?: number } = {}): FakeVenue {
       }
       return Promise.resolve(LISTED[symbol] ?? null);
     },
-    placeOrder: (order) => Promise.resolve({ order, venueOrderId: `fake-${String(order.intentId)}` }),
+    placeOrder: (order) =>
+      Promise.resolve({
+        status: "placed",
+        placed: { order, venueOrderId: `fake-${String(order.intentId)}` },
+      }),
     readFill: (placed) =>
       Promise.resolve({ state: "closed", filledCents: placed.order.amountCents, detail: "fake full fill" }),
     positionOutcome() {

@@ -8,6 +8,8 @@ describe("executorSettings", () => {
       pollingIntervalMs: undefined,
       settleIntervalMs: 60_000,
       consoleUrl: "http://localhost:3000",
+      venue: "simulated",
+      orderTtlMs: 600_000,
     };
     expect(executorSettings({})).toEqual(defaults);
     expect(
@@ -16,6 +18,8 @@ describe("executorSettings", () => {
         SIM_EXECUTOR_POLL_MS: "",
         EXECUTOR_SETTLE_MS: "",
         CONSOLE_URL: " ",
+        EXECUTOR_VENUE: "",
+        EXECUTOR_ORDER_TTL_MS: "",
       }),
     ).toEqual(defaults);
   });
@@ -27,12 +31,16 @@ describe("executorSettings", () => {
         SIM_EXECUTOR_POLL_MS: "2000",
         EXECUTOR_SETTLE_MS: "30000",
         CONSOLE_URL: "http://console:3000",
+        EXECUTOR_VENUE: "Gemini",
+        EXECUTOR_ORDER_TTL_MS: "120000",
       }),
     ).toEqual({
       fillDelayMs: 0,
       pollingIntervalMs: 2_000,
       settleIntervalMs: 30_000,
       consoleUrl: "http://console:3000",
+      venue: "gemini",
+      orderTtlMs: 120_000,
     });
   });
 
@@ -42,5 +50,7 @@ describe("executorSettings", () => {
     expect(() => executorSettings({ SIM_EXECUTOR_DELAY_MS: "-1" })).toThrow(/SIM_EXECUTOR_DELAY_MS must be/);
     expect(() => executorSettings({ EXECUTOR_SETTLE_MS: "500" })).toThrow(/at least 1000/);
     expect(() => executorSettings({ CONSOLE_URL: "console" })).toThrow(/CONSOLE_URL must be a URL/);
+    expect(() => executorSettings({ EXECUTOR_VENUE: "kalshi" })).toThrow(/simulated or gemini/);
+    expect(() => executorSettings({ EXECUTOR_ORDER_TTL_MS: "500" })).toThrow(/at least 10000/);
   });
 });

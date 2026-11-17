@@ -3,9 +3,9 @@
  * executor's rules (check, place, follow, record, settle) are the same whatever fills the order.
  *
  * - `simulatedVenue` places nothing. It fills every order in full at once, and reads listings and
- *   outcomes from Gemini's public market data. It is the only venue today.
- * - A real Gemini venue (issue #93) plugs in here: it places a limit order, follows it until it is done,
- *   and reads the outcome from the account's settled positions.
+ *   outcomes from Gemini's public market data.
+ * - `geminiVenue` (gemini-venue.ts, issue #93) places a limit order on Gemini, follows it until it is
+ *   done, and reads the outcome from the account's settled positions, checked against the public one.
  */
 import { findInstrument, type GeminiClient } from "@mandate/gemini";
 import {
@@ -37,6 +37,20 @@ export interface PlacedOrder {
 }
 
 /**
+ * What came of asking the venue to place an order:
+ * - `placed`: the venue holds it (now, or from an earlier attempt); follow it with `readFill`.
+ * - `refused`: the venue refused this order itself (an invalid order, not enough money). Final: record it
+ *   as not filled, with the reason.
+ * - `held`: nothing to record yet. The venue could not take orders for a reason that is not the order's
+ *   (the key, the terms, the account), or it is finding out whether an earlier attempt reached it. Ask
+ *   again later; the venue never sends an order twice.
+ */
+export type Placement =
+  | { status: "placed"; placed: PlacedOrder }
+  | { status: "refused"; detail: string }
+  | { status: "held"; detail: string };
+
+/**
  * Where an order stands. `open`: it may still fill, ask again later. `closed`: it will not change again
  * (filled, partly filled and then cancelled or expired, or refused), with what filled and why it closed.
  */
@@ -58,7 +72,10 @@ export interface HeldPosition {
  * - `open`: it trades until `expiresAt`; nothing to settle before then.
  * - `awaiting`: it expired, but the venue has not published the outcome. Ask again later, never guess.
  * - `unlisted`: the venue lists no such market any more. Ask again later.
- * - `resolved`: the venue published the outcome, and this is what the position paid.
+ * - `resolved`: the venue published the outcome, and this is what the position paid. `venue` names the venue
+ *   that filled it when that is not this one (a fill from before the executor changed venue).
+ * - `disputed`: two of the venue's own sources disagree about the outcome or the position. Never settled
+ *   while they do; the venue reports it, and the executor asks again later.
  */
 export type PositionOutcome =
   | { status: "open"; expiresAt: string }
@@ -74,7 +91,9 @@ export type PositionOutcome =
       settlementValue: string | null;
       contractsHundredths: number;
       payoutCents: number;
-    };
+      venue?: SettlementVenue;
+    }
+  | { status: "disputed"; detail: string };
 
 export interface Venue {
   readonly kind: SettlementVenue;
@@ -83,8 +102,12 @@ export interface Venue {
    * instrument. Throws when the venue cannot be reached or answers with anything else.
    */
   categoryOf(instrumentSymbol: string): Promise<CategoryId | null>;
-  /** Places the order. Throws when the venue cannot be reached; a refusal is a `closed` fill instead. */
-  placeOrder(order: VenueOrder): Promise<PlacedOrder>;
+  /**
+   * Places the order, or finds the one an earlier attempt placed: calling it again for the same intent
+   * never places a second order. Throws when the venue (or the venue's journal) cannot be reached and
+   * nothing was sent.
+   */
+  placeOrder(order: VenueOrder): Promise<Placement>;
   /** Where the order stands now. Throws when the venue cannot be reached. */
   readFill(placed: PlacedOrder): Promise<FillState>;
   /** What became of a filled position's market. Throws when the venue cannot be reached. */
@@ -114,7 +137,10 @@ export function simulatedVenue(
       return found === null ? null : categoryFromGemini(found.event.category ?? "");
     },
     placeOrder(order) {
-      return Promise.resolve({ order, venueOrderId: `simulated-${String(order.intentId)}` });
+      return Promise.resolve({
+        status: "placed",
+        placed: { order, venueOrderId: `simulated-${String(order.intentId)}` },
+      });
     },
     readFill(placed) {
       return Promise.resolve({

@@ -1,0 +1,379 @@
+/**
+ * The Gemini venue against a fake of Gemini's private endpoints (`@mandate/gemini/testing`), which checks
+ * every signature and nonce the way Gemini does, and the recorded public ladders. The rule under test
+ * above all: one order per intent, whatever fails and whenever the executor restarts.
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { beforeEach, describe, expect, it } from "vitest";
+import { eventSchema, GeminiError, normalizeEvent, type MarketEvent } from "@mandate/gemini";
+import { createGeminiPrivateClient } from "@mandate/gemini/private";
+import { FakeGeminiPrivate, unpacedLimiter } from "@mandate/gemini/testing";
+import type { VenueOrderRecord } from "@mandate/shared";
+import {
+  geminiVenue,
+  memoryOrderJournal,
+  type FillState,
+  type HeldPosition,
+  type Placement,
+  type Venue,
+  type VenueOrder,
+} from "../src";
+
+const FIXTURES = fileURLToPath(new URL("../../gemini/test/fixtures/", import.meta.url));
+const KEY = "account-FAKEKEY000000000001";
+const SECRET = "fake-secret-for-tests";
+const POLICY = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+
+function recorded(file: string): MarketEvent {
+  return normalizeEvent(eventSchema.parse(JSON.parse(readFileSync(`${FIXTURES}${file}`, "utf8"))));
+}
+
+/** Open until 2026-11-20 22:00 UTC. */
+const OPEN = recorded("event-BTC2611202200.json");
+/** Settled 2026-11-13: $68,500 and up resolved NO, $68,000 and below YES. */
+const SETTLED = recorded("event-BTC2611132200-settled.json");
+const MARKET = "GEMI-BTC2611202200-HI65000";
+const SETTLED_NO = "GEMI-BTC2611132200-HI68500";
+const ORDER_ROUTE = "/v1/prediction-markets/order";
+
+let clock: { now: number };
+let fake: FakeGeminiPrivate;
+let journal: ReturnType<typeof memoryOrderJournal>;
+let events: MarketEvent[];
+let trading: ReturnType<typeof createGeminiPrivateClient>;
+
+function venue(options: { orderTtlMs?: number } = {}): Venue {
+  const now = () => clock.now;
+  return geminiVenue({
+    publicClient: {
+      getEvent: (ticker) => {
+        const event = events.find((candidate) => candidate.ticker === ticker);
+        return event
+          ? Promise.resolve(event)
+          : Promise.reject(new GeminiError("not_found", `no event ${ticker}`, { status: 404 }));
+      },
+    },
+    // One signed client for every venue in a test: a restarted process keeps the key's nonce rising.
+    trading,
+    journal,
+    deployment: { chainId: 5_042_002, policy: POLICY },
+    now,
+    ...options,
+  });
+}
+
+const order = (patch: Partial<VenueOrder> = {}): VenueOrder => ({
+  intentId: 7,
+  market: MARKET,
+  outcome: "NO",
+  isBuy: true,
+  amountCents: 1_240,
+  limitPrice: 31,
+  ...patch,
+});
+
+function placedOf(placement: Placement) {
+  if (placement.status !== "placed") throw new Error(`expected placed, got ${JSON.stringify(placement)}`);
+  return placement.placed;
+}
+
+const position = (patch: Partial<HeldPosition> = {}): HeldPosition => ({
+  intentId: 7,
+  market: SETTLED_NO,
+  outcome: "NO",
+  costCents: 1_240,
+  limitPrice: 31,
+  ...patch,
+});
+
+beforeEach(() => {
+  clock = { now: Date.parse("2026-11-17T08:00:00Z") };
+  fake = new FakeGeminiPrivate({ apiKey: KEY, apiSecret: SECRET, now: () => clock.now });
+  journal = memoryOrderJournal();
+  events = [OPEN, SETTLED];
+  trading = createGeminiPrivateClient({
+    environment: "sandbox",
+    credentials: { apiKey: KEY, apiSecret: SECRET },
+    fetch: fake.fetch,
+    now: () => clock.now,
+    limiter: unpacedLimiter(),
+  });
+});
+
+describe("placing an order", () => {
+  it("sends exactly the intent: market, side, outcome, limit price, and what the amount buys", async () => {
+    const placed = placedOf(await venue().placeOrder(order()));
+    const [sent] = fake.callsTo(ORDER_ROUTE);
+    // $12.40 at 31c buys 40 contracts (4,000 hundredths); nothing more.
+    expect(sent?.fields).toEqual({
+      symbol: MARKET,
+      orderType: "limit",
+      side: "buy",
+      quantity: "40",
+      price: "0.31",
+      outcome: "no",
+      timeInForce: "good-til-cancel",
+      clientOrderId: "mandate-5042002-5fbdb231-7",
+    });
+    expect(placed.venueOrderId).toBe(String(fake.order(placed.venueOrderId).orderId));
+    expect(journal.records.get(7)).toMatchObject({
+      state: "open",
+      environment: "sandbox",
+      quantityHundredths: 4_000,
+    });
+  });
+
+  it("writes the journal before sending, and sends nothing when the journal cannot be written", async () => {
+    const seen: number[] = [];
+    const put = journal.put.bind(journal);
+    journal.put = (record: VenueOrderRecord) => {
+      seen.push(fake.callsTo(ORDER_ROUTE).length);
+      return put(record);
+    };
+    await venue().placeOrder(order());
+    expect(journal.history[0]?.state).toBe("placing");
+    expect(seen[0]).toBe(0);
+
+    journal.failing = "the console did not answer";
+    await expect(venue().placeOrder(order({ intentId: 8 }))).rejects.toThrow("the console did not answer");
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+  });
+
+  it("rounds down to the contract's quantity grid and refuses a price off its price grid", async () => {
+    const coarse = structuredClone(OPEN);
+    for (const contract of coarse.contracts) {
+      contract.quantityIncrement = "1";
+      contract.quantityMinimum = "1";
+    }
+    events = [coarse];
+    // $12.40 at 33c buys 37.57 contracts: 37 whole ones on a grid of 1.
+    placedOf(await venue().placeOrder(order({ limitPrice: 33 })));
+    expect(fake.callsTo(ORDER_ROUTE)[0]?.fields.quantity).toBe("37");
+    // 20 cents at 33c buys less than one contract, the minimum.
+    expect(await venue().placeOrder(order({ intentId: 8, amountCents: 20, limitPrice: 33 }))).toMatchObject({
+      status: "refused",
+      detail: expect.stringMatching(/buys less than the 1 contracts/),
+    });
+
+    for (const contract of coarse.contracts) contract.priceIncrement = "0.05";
+    expect(await venue().placeOrder(order({ intentId: 9 }))).toMatchObject({
+      status: "refused",
+      detail: expect.stringMatching(/not on .* 5c price grid/),
+    });
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+  });
+
+  it("records an order Gemini refuses as refused, with Gemini's reason, and never sends it again", async () => {
+    fake.failNextPlacement({
+      kind: "refuse",
+      status: 422,
+      body: { error: "InsufficientFunds", message: "Insufficient funds" },
+    });
+    const first = await venue().placeOrder(order());
+    expect(first).toEqual({
+      status: "refused",
+      detail:
+        "Gemini's sandbox refused the order: InsufficientFunds (POST /v1/prediction-markets/order returned HTTP 422 (InsufficientFunds: Insufficient funds))",
+    });
+    expect(journal.records.get(7)?.state).toBe("rejected");
+    expect(await venue().placeOrder(order())).toEqual(first);
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+  });
+
+  it("holds the intent while the terms are not accepted, says so plainly, and places it once they are", async () => {
+    fake.termsAccepted = false;
+    const held = await venue().placeOrder(order());
+    expect(held).toEqual({
+      status: "held",
+      detail:
+        "the Gemini's sandbox account has not accepted the Prediction Markets terms; accept them on Gemini's site (never from code)",
+    });
+    expect(journal.records.get(7)?.state).toBe("not_placed");
+    expect(fake.orders.size).toBe(0);
+
+    fake.termsAccepted = true;
+    placedOf(await venue().placeOrder(order()));
+    expect(fake.orders.size).toBe(1);
+    expect(journal.records.get(7)).toMatchObject({ state: "open", revision: 4 });
+    // Never accepted from code: no request ever went to the accept route.
+    expect(fake.requests.some((request) => request.path.endsWith("/terms/accept"))).toBe(false);
+  });
+});
+
+describe("an attempt whose answer never came", () => {
+  it("finds the order Gemini made by its client order id, and never sends it again", async () => {
+    fake.failNextPlacement({ kind: "drop-after" });
+    expect(await venue().placeOrder(order())).toMatchObject({
+      status: "held",
+      detail: expect.stringMatching(/no answer from Gemini's sandbox when placing it/),
+    });
+    expect(journal.records.get(7)?.state).toBe("unknown");
+
+    // A new process (a restart) with the same journal.
+    const placed = placedOf(await venue().placeOrder(order()));
+    expect(fake.orders.size).toBe(1);
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+    expect(placed.venueOrderId).toBe(String([...fake.orders.keys()][0]));
+    expect(journal.records.get(7)?.state).toBe("open");
+  });
+
+  it("matches by the order's exact terms when Gemini does not return client order ids", async () => {
+    fake.echoClientOrderId = false;
+    fake.failNextPlacement({ kind: "drop-after" });
+    await venue().placeOrder(order());
+    clock.now += 30_000;
+    placedOf(await venue().placeOrder(order()));
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+  });
+
+  it("holds the intent, and still sends nothing, when no order or several orders match", async () => {
+    fake.failNextPlacement({ kind: "drop-before" });
+    await venue().placeOrder(order());
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      expect(await venue().placeOrder(order())).toMatchObject({
+        status: "held",
+        detail: expect.stringMatching(
+          /no order for 40 contracts at 31c on Gemini since the attempt; it is never sent again/,
+        ),
+      });
+    }
+    expect(fake.orders.size).toBe(0);
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+
+    // Two identical orders (the owner's own, say) and no client order ids: no guessing.
+    fake.echoClientOrderId = false;
+    for (let copy = 0; copy < 2; copy += 1) {
+      clock.now += 1_000;
+      await trading.placeOrder({ symbol: MARKET, side: "buy", outcome: "no", quantity: "40", price: "0.31" });
+    }
+    expect(await venue().placeOrder(order())).toMatchObject({
+      status: "held",
+      detail: expect.stringMatching(/2 orders for 40 contracts at 31c match; check Gemini/),
+    });
+  });
+});
+
+describe("following an order", () => {
+  it("reports partial fills while open and the cost of the fill, rounded up, once filled", async () => {
+    const gemini = venue();
+    const placed = placedOf(await gemini.placeOrder(order()));
+    expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 0 });
+
+    fake.fill(placed.venueOrderId, 1_000, 30);
+    expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 300 });
+    expect(journal.records.get(7)).toMatchObject({ state: "open", filledHundredths: 1_000 });
+
+    fake.fill(placed.venueOrderId);
+    const done = await gemini.readFill(placed);
+    // 10 at 30c and 30 at 31c: $3.00 + $9.30.
+    expect(done).toEqual({ state: "closed", filledCents: 1_230, detail: "filled on Gemini's sandbox" });
+    expect(journal.records.get(7)).toMatchObject({
+      state: "filled",
+      filledHundredths: 4_000,
+      filledCents: 1_230,
+    });
+  });
+
+  it("cancels what is left once the order's time is up, and records the part that filled", async () => {
+    const gemini = venue({ orderTtlMs: 60_000 });
+    const placed = placedOf(await gemini.placeOrder(order()));
+    fake.fill(placed.venueOrderId, 1_550);
+    clock.now += 30_000;
+    expect((await gemini.readFill(placed)).state).toBe("open");
+    expect(fake.callsTo("/v1/prediction-markets/order/cancel")).toHaveLength(0);
+
+    clock.now += 31_000;
+    expect((await gemini.readFill(placed)).state).toBe("open");
+    expect(fake.callsTo("/v1/prediction-markets/order/cancel")).toHaveLength(1);
+    const closed: FillState = await gemini.readFill(placed);
+    expect(closed).toEqual({
+      state: "closed",
+      filledCents: 481,
+      detail: "15.50 of 40 contracts filled on Gemini's sandbox, the rest cancelled",
+    });
+    expect(journal.records.get(7)?.state).toBe("partly_filled");
+  });
+
+  it("cancels a minute before the market stops trading, even before the order's time is up", async () => {
+    clock.now = Date.parse("2026-11-20T21:58:00Z");
+    const gemini = venue();
+    const placed = placedOf(await gemini.placeOrder(order()));
+    clock.now = Date.parse("2026-11-20T21:59:00Z");
+    await gemini.readFill(placed);
+    expect(fake.callsTo("/v1/prediction-markets/order/cancel")).toHaveLength(1);
+    expect(await gemini.readFill(placed)).toMatchObject({ state: "closed", filledCents: 0 });
+    expect(journal.records.get(7)?.state).toBe("cancelled");
+  });
+});
+
+describe("settling a position", () => {
+  async function filledOn(market: string, outcome: "YES" | "NO" = "NO") {
+    const gemini = venue();
+    const placed = placedOf(await gemini.placeOrder(order({ market, outcome })));
+    fake.fill(placed.venueOrderId);
+    await gemini.readFill(placed);
+    return gemini;
+  }
+
+  it("asks nothing private while the public market trades", async () => {
+    const gemini = venue();
+    const before = fake.requests.length;
+    expect(await gemini.positionOutcome(position({ market: MARKET }))).toMatchObject({ status: "open" });
+    expect(fake.requests.length).toBe(before);
+  });
+
+  it("settles from the account's settled position when it agrees with the public outcome", async () => {
+    const gemini = await filledOn(SETTLED_NO);
+    // Published publicly, not settled on the account yet: wait.
+    expect(await gemini.positionOutcome(position())).toEqual({
+      status: "awaiting",
+      expiresAt: "2026-11-13T22:00:00.000Z",
+    });
+
+    fake.settle(SETTLED_NO, "no", "BTC2611132200");
+    expect(await gemini.positionOutcome(position())).toMatchObject({
+      status: "resolved",
+      resolution: "no",
+      contractsHundredths: 4_000,
+      payoutCents: 4_000,
+    });
+  });
+
+  it("never settles when the account's settled position disagrees with the public outcome", async () => {
+    const gemini = await filledOn(SETTLED_NO);
+    fake.settle(SETTLED_NO, "yes", "BTC2611132200");
+    const outcome = await gemini.positionOutcome(position());
+    expect(outcome).toEqual({
+      status: "disputed",
+      detail:
+        "settlement disagreement: the public event says NO won GEMI-BTC2611132200-HI68500, the account's settled position says YES; not settled until they agree",
+    });
+    // Reported where the owner sees the order.
+    expect(journal.records.get(7)?.detail).toMatch(/settlement disagreement/);
+  });
+
+  it("never settles when Gemini settled fewer contracts than the order filled", async () => {
+    const gemini = await filledOn(SETTLED_NO);
+    fake.addSettledPosition({
+      symbol: SETTLED_NO,
+      outcome: "no",
+      quantity: 1_000,
+      resolutionSide: "no",
+      eventTicker: "BTC2611132200",
+    });
+    expect(await gemini.positionOutcome(position())).toMatchObject({
+      status: "disputed",
+      detail: expect.stringMatching(/Gemini settled 10 contracts on .*, our order filled 40/),
+    });
+  });
+
+  it("settles a fill from before the executor traded on Gemini on the public outcome, as simulated", async () => {
+    expect(await venue().positionOutcome(position())).toMatchObject({
+      status: "resolved",
+      venue: "simulated",
+      contractsHundredths: 4_000,
+    });
+    expect(fake.requests).toHaveLength(0);
+  });
+});

@@ -1,7 +1,8 @@
 /**
  * The executor: the last offchain step before an order exists, and the one that records what happened.
- * Every venue goes through the seam in `venue.ts`; today the only one is the SIMULATED venue, which never
- * places an order. The contract stores any market, outcome and limit price the agent key sends, and
+ * Every venue goes through the seam in `venue.ts`: the SIMULATED venue, which never places an order, or
+ * Gemini (issue #93), which places it for real. The contract stores any market, outcome and limit price
+ * the agent key sends, and
  * trusts the category it is given; only the amount rules are enforced onchain, so the executor refuses
  * anything the venue could not trade, the way a real executor must.
  *
@@ -13,6 +14,9 @@
  * - when the venue cannot be reached, does nothing and tries again later: an order that cannot be checked
  *   is never placed, and a venue outage is not the intent's fault, so it is not failed either;
  * - otherwise places the order, follows it until it is closed, and records the fill with `recordResult`.
+ *   An order the venue refuses is recorded as not filled. When the venue holds the intent instead (its
+ *   account cannot trade now, or it is finding out whether an earlier attempt reached it), nothing is
+ *   recorded and it is asked again later, with growing waits; the venue never places an order twice.
  *
  * Settlement (issue #92): every filled buy is checked again once its market has expired. When the venue
  * has published the outcome, the executor records what the position paid. The contract cannot hold that
@@ -189,20 +193,29 @@ export function startExecutor(options: ExecutorOptions): Executor {
     });
   const inFlight = new Set<number>();
   const retries = new Map<number, ReturnType<typeof setTimeout>>();
+  /** How many times in a row each intent was held by the venue, for growing waits. */
+  const holds = new Map<number, number>();
   let stopped = false;
   // Read through a function so the compiler does not narrow `stopped` across awaits.
   const isStopped = (): boolean => stopped;
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  function retryLater(intentId: number): void {
+  function retryLater(intentId: number, delayMs = venueRetryMs): void {
     if (isStopped() || retries.has(intentId)) return;
     retries.set(
       intentId,
       setTimeout(() => {
         retries.delete(intentId);
         void handle(intentId);
-      }, venueRetryMs),
+      }, delayMs),
     );
+  }
+
+  /** Waits while the venue holds an intent: `venueRetryMs`, doubling each time, at most 10 minutes. */
+  function holdDelay(intentId: number): number {
+    const count = holds.get(intentId) ?? 0;
+    holds.set(intentId, count + 1);
+    return Math.min(venueRetryMs * 2 ** count, Math.max(venueRetryMs, 10 * MINUTE_MS));
   }
 
   async function handle(intentId: number): Promise<void> {
@@ -249,7 +262,29 @@ export function startExecutor(options: ExecutorOptions): Executor {
       };
       let fill;
       try {
-        const placed = await venue.placeOrder(order);
+        const placement = await venue.placeOrder(order);
+        if (placement.status === "refused") {
+          holds.delete(intentId);
+          const { txHash } = await client.recordResult({
+            intentId,
+            filled: false,
+            filledCents: 0,
+            pnlCents: 0,
+          });
+          log(
+            `${tag} intent #${intentId} REFUSED by the venue: ${placement.detail}; recorded as not filled (${txHash})`,
+          );
+          return;
+        }
+        if (placement.status === "held") {
+          const delayMs = holdDelay(intentId);
+          // Said once while the reason stays the same; the waits grow up to 10 minutes.
+          note(intentId, `held by the venue, not recorded: ${placement.detail}`);
+          retryLater(intentId, delayMs);
+          return;
+        }
+        holds.delete(intentId);
+        const { placed } = placement;
         fill = await venue.readFill(placed);
         while (fill.state === "open") {
           await wait(fillPollMs);
@@ -379,6 +414,10 @@ export function startExecutor(options: ExecutorOptions): Executor {
         note(intentId, `Gemini no longer lists ${held.market}; asking again later, never guessing`);
         backOff(intentId);
         return;
+      case "disputed":
+        note(intentId, `NOT SETTLED, ${outcome.detail}`);
+        backOff(intentId);
+        return;
       case "resolved":
         break;
     }
@@ -402,7 +441,7 @@ export function startExecutor(options: ExecutorOptions): Executor {
       pnlCents: outcome.payoutCents - held.costCents,
       settlementValue: outcome.settlementValue,
       resolvedAt: outcome.resolvedAt,
-      venue: venue.kind,
+      venue: outcome.venue ?? venue.kind,
     };
     const hash = hashSettlement(document);
     const signature = await wallet.signMessage({ account: wallet.account, message: settlementMessage(hash) });
