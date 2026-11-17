@@ -32,6 +32,8 @@ import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { describeMarket } from "@/lib/markets";
 import { paymentHref } from "@/lib/payments/links";
+import { ladderSettlement, settledLadders } from "@/lib/settlement/settlement";
+import { useNow } from "@/lib/useNow";
 
 import { CoverNowCard } from "./CoverNow";
 import styles from "./hedge.module.css";
@@ -39,6 +41,7 @@ import { HoldingsEditor } from "./HoldingsEditor";
 import { LiveLadder, ladderCaption } from "./LiveLadder";
 import { PayoffChart } from "./PayoffChart";
 import { PlanDetails } from "./PlanDetails";
+import { ExpiredLadderCard, LastSettledCard } from "./Settled";
 import { type HedgeMarketState, useHedgeMarket } from "./useHedgeMarket";
 
 const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
@@ -371,10 +374,20 @@ function AssetHedge({
   const previewPlan = preview?.status === "ready" ? preview.plan : null;
   const shown = agentPlan?.plan ?? previewPlan;
   const quotes = market.status === "ready" ? market.data.quotes : null;
+  const now = useNow();
+  const expiry = agentPlan
+    ? ladderSettlement(snapshot.chain, agentPlan.plan, now)
+    : { state: "open" as const };
+  // The latest settled ladder of this asset, unless the expired-ladder card already shows it.
+  const lastSettled = settledLadders(snapshot.chain, asset).find(
+    (ladder) => expiry.state === "open" || ladder.eventTicker !== agentPlan?.plan.eventTicker,
+  );
 
   return (
     <div className={styles.asset}>
-      {agentPlan ? (
+      {agentPlan && expiry.state !== "open" ? (
+        <ExpiredLadderCard state={expiry} agentName={agentName} />
+      ) : agentPlan ? (
         <CoverNowCard
           view={agentPlan}
           holdingQuantity={holding}
@@ -387,6 +400,7 @@ function AssetHedge({
       ) : (
         <NoPlanCard asset={asset} holding={holding} preview={preview} agentName={agentName} />
       )}
+      {lastSettled ? <LastSettledCard ladder={lastSettled} /> : null}
       <Disclosure
         title={shown ? "Payoff and live ladder" : "Live ladder"}
         summary={insideSummary(shown, market)}

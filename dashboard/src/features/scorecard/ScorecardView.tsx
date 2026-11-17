@@ -156,7 +156,7 @@ function CountRow({
  * from the Policy contract's events, matches the owner's audit trail, and lists the transactions behind it.
  */
 export function ScorecardView({ agent, owner, contract, network, card }: ScorecardData) {
-  const { atProposal, owner: decisions, fills, mandate } = card;
+  const { atProposal, owner: decisions, fills, mandate, settled } = card;
   const proposed = card.proposed.count;
   const inside = atProposal.approved.count + atProposal.held.count;
   const rules = mandate.rules;
@@ -171,7 +171,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
     <div className={styles.view}>
       <PageHeader
         title={agent.name}
-        description={`An AI agent trading prediction markets under onchain rules${agent.pairedAt ? ` since ${formatDateUtc(agent.pairedAt)}` : ""}. Its owner sets the limits; a contract on ${network.name} enforces them, and every number below is read from that contract's events.`}
+        description={`An AI agent trading prediction markets under onchain rules${agent.pairedAt ? ` since ${formatDateUtc(agent.pairedAt)}` : ""}. Its owner sets the limits; a contract on ${network.name} enforces them, and every number below is read from that contract's events, except what positions paid at expiry, which the executor signs offchain.`}
         meta={
           <>
             <HexValue label="Agent" value={agent.address} kind="address" />
@@ -267,7 +267,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
 
         <Card
           title="Fills and hedge outcome"
-          description="What the executor recorded on the contract for approved intents."
+          description="What the executor recorded on the contract for approved intents, and what they paid at expiry."
           headingLevel={2}
         >
           <ul className={styles.rows}>
@@ -289,7 +289,27 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
               value={formatUsdCentsDelta(fills.realizedPnlCents)}
               testId="realized"
             />
+            <li className={styles.row} data-testid="count-settled" data-count={settled.positions}>
+              <div className={styles.rowHead}>
+                <span className={styles.rowLabel}>Settled at expiry</span>
+                <span className={`num ${styles.rowValue}`}>
+                  {formatCount(settled.positions)}
+                  <span className={styles.rowSub}>
+                    {settled.positions === 0
+                      ? "none yet"
+                      : `paid ${formatUsdCents(settled.payoutCents)}, net ${formatUsdCentsDelta(settled.pnlCents)}`}
+                  </span>
+                </span>
+              </div>
+            </li>
           </ul>
+          <p className={styles.note} data-testid="settled-note">
+            {settled.positions === 0
+              ? "No filled position has reached its market's expiry and settled yet."
+              : `${formatCount(settled.paidOut)} of ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"} paid out. `}
+            Settlements are recorded offchain by the console, each signed by the contract&rsquo;s executor,
+            because the contract cannot record a payout.
+          </p>
           <p className={styles.note}>
             {fills.open === 0
               ? "No approved intent is waiting for a result."

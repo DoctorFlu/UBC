@@ -2,8 +2,10 @@
  * The public scorecard of the contract's agent (issue #38): every number read from the Policy
  * contract's events, each with the transactions behind it so anyone can check it onchain.
  *
- * It is built from the chain only. Nothing offchain (holdings, plans, sealed reasons, payments) goes in,
- * so the public page cannot leak it, whatever the console stores. Lists are capped, so the page is the
+ * It is built from the chain, plus one offchain record: what filled positions paid when their markets
+ * resolved (issue #92), which the contract cannot hold. Those come only as totals of records signed by the
+ * contract's executor and still matching their hash, and the page labels them as offchain. Nothing else
+ * offchain (holdings, plans, sealed reasons, payments) goes in, so the public page cannot leak it. Lists are capped, so the page is the
  * same size however long the history grows. The numbers agree with the audit trail by construction of
  * the same rules, and a test holds them to it.
  */
@@ -11,8 +13,10 @@ import {
   type IntentStatus,
   type PolicyEvent,
   type PolicyRules,
+  type SettlementTotals,
   describeReason,
   intentAnomalies,
+  settlementTotals,
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
 
@@ -95,6 +99,11 @@ export interface PublicScorecard {
     /** Approved intents the executor has not reported on yet. */
     open: number;
   };
+  /**
+   * Filled positions whose market resolved, as the executor signed them: offchain, because the contract
+   * cannot record a payout. `paidOut` counts the positions that paid anything.
+   */
+  settled: SettlementTotals & { paidOut: number };
   recent: RecentIntent[];
 }
 
@@ -125,7 +134,7 @@ function proof(event: PolicyEvent): Proof {
 }
 
 export function buildScorecard(
-  chain: Pick<ChainView, "events" | "intents" | "head" | "rules" | "paused">,
+  chain: Pick<ChainView, "events" | "intents" | "head" | "rules" | "paused" | "settlements">,
 ): PublicScorecard {
   const firstTx = new Map<number, string>();
   const proposed = new Tally();
@@ -237,8 +246,16 @@ export function buildScorecard(
       outOfRange: fillsOutOfRange,
       open: chain.intents.filter((intent) => intent.status === "approved").length,
     },
+    settled: settledOutcomes(chain.settlements),
     recent,
   };
+}
+
+function settledOutcomes(settlements: ChainView["settlements"]): PublicScorecard["settled"] {
+  const docs = Object.values(settlements).flatMap((view) =>
+    view.status === "verified" ? [view.document] : [],
+  );
+  return { ...settlementTotals(docs), paidOut: docs.filter((doc) => doc.payoutCents > 0).length };
 }
 
 /** The agent's name as it announced itself, clipped: it is the agent's own string. */
