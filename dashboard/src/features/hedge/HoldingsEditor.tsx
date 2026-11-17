@@ -206,12 +206,21 @@ export function HoldingsEditor({
           Sign and save
         </Button>
       </div>
-      <p className={styles.muted}>
+      {/* What the agent reads now, against what is only on this screen: edits count once signed and saved. */}
+      <p className={styles.muted} data-testid="holdings-status" aria-live="polite">
         {blocked && access.kind !== "loading" && dirty ? (
           blocked
+        ) : dirty ? (
+          updatedAt ? (
+            <>
+              Not saved yet. The agent still reads the list saved <When inSentence at={updatedAt} date />.
+            </>
+          ) : (
+            "Not saved yet."
+          )
         ) : updatedAt ? (
           <>
-            Saved <When inSentence at={updatedAt} date />.
+            Saved <When inSentence at={updatedAt} date />. The agent reads this list.
           </>
         ) : (
           "Never saved."
