@@ -369,6 +369,22 @@ describe("ladderSettledWake", () => {
     );
   });
 
+  it("carries Gemini's estimated fees next to cost and payout, and the net after them", () => {
+    const gemini = (id: number) => doc(id, { venue: "gemini", feeCents: 60, pnlCents: -1_300 });
+    const wake = ladderSettledWake(input([1, 2], [gemini(1), gemini(2)]));
+    expect(wake?.kind === "ladder_settled" && wake.detail.ladders[0]).toMatchObject({
+      costCents: 2_480,
+      feeCents: 120,
+      payoutCents: 0,
+      pnlCents: -2_600,
+    });
+    if (!wake) throw new Error("no wake-up");
+    expect(wakeSummary(wake, 1)).toBe(
+      "The BTC ladder BTC2611202200 settled at $65,210.00: 2 positions cost $24.80, fees $1.20 (estimated), " +
+        "paid $0, net after fees -$26. Plan on the next ladder.",
+    );
+  });
+
   it("treats a ladder that expired more than a day before as history, not news", () => {
     const expiry = Date.parse("2026-11-20T22:00:00.000Z");
     const at = (now: number) => ladderSettledWake({ ...input([1], [doc(1)]), now });

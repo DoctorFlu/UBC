@@ -459,7 +459,9 @@ describe("get_intent", () => {
     h.policy.intents[0] = { ...intent, status: "executed", filledCents: 990, pnlCents: -990 };
     const { structured, summary } = await getIntent.run({ intentId: 0 }, h.ctx);
     expect(structured).toMatchObject({ intent: { status: "executed", filledCents: 990, pnlCents: -990 } });
-    expect(summary).toContain("Filled $9.90, profit -$9.90.");
+    // The contract's recorded result is not the position's: it is open until its market expires.
+    expect(summary).toContain("Filled $9.90. No result yet: the position is open until its market expires");
+    expect(summary).not.toContain("profit");
   });
 });
 

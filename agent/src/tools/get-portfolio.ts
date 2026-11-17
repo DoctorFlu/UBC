@@ -1,6 +1,5 @@
 import * as z from "zod";
 import { formatUsd, HOLDING_SCALE, parseHoldingUnits } from "@mandate/planner";
-import { settlementTotals } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
@@ -13,6 +12,7 @@ import {
   readSettlements,
   settledLadders,
   SettlementTotalsSchema,
+  totalsRow,
 } from "../support/settlements";
 
 const MAX_HOLDINGS = 20;
@@ -84,7 +84,7 @@ export const getPortfolio = defineTool({
       stored === null
         ? null
         : {
-            ...settlementTotals(stored.map((settlement) => settlement.document)),
+            ...totalsRow(stored.map((settlement) => settlement.document)),
             lastLadder: settledLadders(stored)[0] ?? null,
           };
     const settledText =

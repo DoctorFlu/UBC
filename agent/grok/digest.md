@@ -52,7 +52,8 @@ Send the digest as a phone notification, in this shape and order, plain text, no
 - First line, about 100 characters or fewer, standing alone: the single most important thing. In order of priority: flagged intents, a paused mandate, anything waiting for the owner, a settlement, a cover that is not `met`, otherwise "all covered, quiet day".
 - `Protected:` each goal's asset, floor and ladder expiry, and its cover as step 3 says; add how much of it waits for the owner's approval when `heldByState.awaitingOwnerCents` is above 0.
 - `Spent:` `last24h.filledCents` and the number of orders filled, the signals bought and their USDC, and the budget left from `get_policy`.
-- `Settled:` each ladder in `last24h.settled.ladders` with its cost, paid and net. Leave this line out when nothing settled.
+- `Settled:` each ladder in `last24h.settled.ladders` with its cost, its fees when `feeCents` is present, what it paid and the net (`pnlCents`, already after fees).
+  When any fee is shown, say "fees estimated" once in this line, not per ladder. Leave this line out when nothing settled.
 - `Blocked:` the rejections by reason, and any failed orders. Leave this line out when there were none.
 - `Waiting for you:` each intent in `waitingForOwner.intents` with its amount, each change request with its `changes`, how many more, then `waitingForOwner.link`; or "nothing" when both lists are empty and `complete` is true.
 

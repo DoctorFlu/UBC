@@ -96,7 +96,7 @@ Its text is [agent/grok/digest.md](../agent/grok/digest.md).
 The model adds nothing up.
 The server sums the day and the console measures the cover, in fields the existing tools now return; no tool name or input schema changed:
 
-- `get_activity` returns `last24h`: the intents proposed in the last 24 hours by status, what they filled, the rejections by the contract's reason, flagged intents, the signals bought and what settled, with cost, payout and net.
+- `get_activity` returns `last24h`: the intents proposed in the last 24 hours by status, what they filled, the rejections by the contract's reason, flagged intents, the signals bought and what settled, with cost, the estimated fees when there are any (`feeCents`), payout and the net after fees.
   It reads back through the whole day, whatever `limit` asks for, so the routine calls it with `limit` 1 to keep the result small.
 - `get_activity` returns `waitingForOwner`: the intents waiting for approval and the rule change requests still pending, with a link to the console's Approvals page.
   A request's reason was written by the agent, so it is marked untrusted, cut to its start and kept out of the summary.
@@ -131,13 +131,14 @@ Spent: nothing filled, no signals bought. Budget left $179.00.
 Waiting for you: nothing.
 ```
 
-A day with a settlement: last week's ladder expired and settled, and the routine protected the next one.
+A day with a settlement: last week's ladder expired and settled on Gemini, and the routine protected the next one.
+The fee is estimated from Gemini's schedule, so the digest says so once; a simulated fill has no fee and no fee in the line.
 
 ```text
-Mandate: last week's BTC ladder settled, net +$11.00. BTC is covered again.
+Mandate: last week's BTC ladder settled, net +$10.70 after fees. BTC is covered again.
 Protected: BTC below $63,000 to Nov 27 (BTC2611272200): covered.
 Spent: $42.00 on 6 orders, 2 signals for 0.02 USDC. Budget left $158.00.
-Settled: BTC2611202200, 3 positions: cost $21.00, paid $32.00, net +$11.00.
+Settled: BTC2611202200, 3 positions: cost $21.00, fees $0.30, paid $32.00, net +$10.70 (fees estimated).
 Waiting for you: nothing.
 ```
 

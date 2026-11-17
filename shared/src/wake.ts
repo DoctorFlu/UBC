@@ -174,8 +174,10 @@ export const wakeDetailSchema = z.discriminatedUnion("kind", [
             /** Filled positions on the ladder, every one of them settled. */
             positions: z.int().min(1),
             costCents: centsSchema,
+            /** Gemini's fees on these fills, estimated from its schedule; absent when none (simulated fills). */
+            feeCents: centsSchema.optional(),
             payoutCents: centsSchema,
-            /** Payout minus cost: negative when the protection expired unused. */
+            /** The net after fees, payout minus cost and fees: negative when the protection expired unused. */
             pnlCents: z.int(),
           }),
         )
@@ -286,17 +288,21 @@ export function wakeSummary(detail: WakeDetail, count: number): string {
       if (only) {
         const what = only.positions === 1 ? "1 position" : `${String(only.positions)} positions`;
         const name = only.asset ? `${only.asset} ladder` : "ladder";
+        const fee = only.feeCents === undefined ? "" : `, fees ${usd(only.feeCents)} (estimated)`;
+        const net = only.feeCents === undefined ? "net" : "net after fees";
         return (
           `The ${name} ${only.eventTicker} settled${settledAt(only.settlementValue)}: ` +
-          `${what} cost ${usd(only.costCents)}, paid ${usd(only.payoutCents)}, net ${signedUsd(only.pnlCents)}. ` +
+          `${what} cost ${usd(only.costCents)}${fee}, paid ${usd(only.payoutCents)}, ${net} ${signedUsd(only.pnlCents)}. ` +
           "Plan on the next ladder."
         );
       }
-      const sum = (key: "costCents" | "payoutCents" | "pnlCents") =>
-        ladders.reduce((total, ladder) => total + ladder[key], 0);
+      const sum = (key: "costCents" | "feeCents" | "payoutCents" | "pnlCents") =>
+        ladders.reduce((total, ladder) => total + (ladder[key] ?? 0), 0);
+      const anyFee = ladders.some((ladder) => ladder.feeCents !== undefined);
       return (
         `${String(ladders.length)} ladders settled (${ladders.map((l) => l.eventTicker).join(", ")})${more(count, ladders.length)}: ` +
-        `cost ${usd(sum("costCents"))}, paid ${usd(sum("payoutCents"))}, net ${signedUsd(sum("pnlCents"))} in all. ` +
+        `cost ${usd(sum("costCents"))}${anyFee ? `, fees ${usd(sum("feeCents"))} (estimated)` : ""}, ` +
+        `paid ${usd(sum("payoutCents"))}, ${anyFee ? "net after fees" : "net"} ${signedUsd(sum("pnlCents"))} in all. ` +
         "Plan on the next ladders."
       );
     }
@@ -644,6 +650,7 @@ export function ladderSettledWake(input: LadderSettlementInput): WakeCandidate |
           settlementValue: first.settlementValue?.slice(0, 32) ?? null,
           positions: totals.positions,
           costCents: totals.costCents,
+          ...(totals.feesEstimated ? { feeCents: totals.feeCents } : {}),
           payoutCents: totals.payoutCents,
           pnlCents: totals.pnlCents,
         },

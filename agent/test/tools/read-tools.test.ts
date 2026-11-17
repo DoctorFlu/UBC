@@ -590,7 +590,14 @@ describe("get_activity", () => {
 
 describe("settlements in get_activity, get_intent and get_portfolio (issue #92)", () => {
   /** A filled buy of NO on the fake ladder, and the settlement the executor recorded for it. */
-  function settled(h: Harness, strike: number, costCents: number, limitPrice: number, paid: boolean): void {
+  function settled(
+    h: Harness,
+    strike: number,
+    costCents: number,
+    limitPrice: number,
+    paid: boolean,
+    feeCents?: number,
+  ): void {
     const id = h.policy.intents.length;
     h.policy.intents.push({
       id,
@@ -621,10 +628,12 @@ describe("settlements in get_activity, get_intent and get_portfolio (issue #92)"
       contractsHundredths: contracts,
       resolution: paid ? "no" : "yes",
       payoutCents: paid ? contracts : 0,
-      pnlCents: (paid ? contracts : 0) - costCents,
+      // A Gemini fill carries the fee the journal estimated; the net is after it.
+      ...(feeCents === undefined ? {} : { feeCents }),
+      pnlCents: (paid ? contracts : 0) - costCents - (feeCents ?? 0),
       settlementValue: "64992.864",
       resolvedAt: "2026-11-20T22:00:08.232Z",
-      venue: "simulated",
+      venue: feeCents === undefined ? "simulated" : "gemini",
     };
     h.console.state.settlements.set(id, {
       intentId: id,
@@ -696,6 +705,35 @@ describe("settlements in get_activity, get_intent and get_portfolio (issue #92)"
     const offline = await getActivity.run({}, harness({ console: false }).ctx);
     expect(offline.structured["settlements"]).toBeNull();
     expect(offline.summary).not.toContain("Settlements");
+  });
+
+  it("reports a Gemini fill's estimated fee next to cost and payout, and the net after it, saying once it is estimated", async () => {
+    const h = harness();
+    // The sandbox fill: 1 contract of NO at 97c, a 1c fee, paid $1.00.
+    settled(h, 65_000, 97, 97, true, 1);
+    const intent = await getIntent.run({ intentId: 0 }, h.ctx);
+    expect((intent.structured["intent"] as Row)["settlement"]).toMatchObject({
+      costCents: 97,
+      feeCents: 1,
+      payoutCents: 100,
+      pnlCents: 2,
+    });
+    expect(intent.summary).toContain("cost $0.97, fees $0.01 (estimated), paid $1.00, net after fees +$0.02");
+    expect(intent.summary).not.toContain("No result yet");
+
+    const activity = await getActivity.run({}, h.ctx);
+    const total = { positions: 1, costCents: 97, feeCents: 1, payoutCents: 100, pnlCents: 2 };
+    expect(activity.structured["settlements"]).toMatchObject(total);
+    expect((activity.structured["last24h"] as Row)["settled"]).toMatchObject(total);
+    expect(activity.summary.match(/\(estimated\)/g)).toHaveLength(1);
+    expect((await getPortfolio.run({}, h.ctx)).structured["settled"]).toMatchObject(total);
+
+    // A simulated fill has no fee: the field is absent and the line says nothing of fees.
+    const simulated = harness();
+    settled(simulated, 65_000, 1_240, 31, true);
+    const plain = await getActivity.run({}, simulated.ctx);
+    expect(plain.structured["settlements"]).not.toHaveProperty("feeCents");
+    expect(plain.summary).not.toContain("fee");
   });
 
   it("counts in last24h only what the console stored in the last 24 hours", async () => {

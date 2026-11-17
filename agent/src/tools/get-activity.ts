@@ -3,7 +3,6 @@ import { formatUnits } from "viem";
 import {
   ARC_TESTNET,
   formatCents,
-  settlementTotals,
   type Intent,
   type IntentView,
   type StoredSettlement,
@@ -24,6 +23,7 @@ import {
   readSettlements,
   settledLadders,
   SettlementTotalsSchema,
+  totalsRow,
 } from "../support/settlements";
 import { consoleLink, readSummary } from "../support/summary";
 
@@ -206,7 +206,7 @@ function summedDay(
       settledNow === null
         ? null
         : {
-            ...settlementTotals(settledNow.map((settlement) => settlement.document)),
+            ...totalsRow(settledNow.map((settlement) => settlement.document)),
             ladders: settledLadders(settledNow).slice(0, MAX_DAY_LADDERS),
           },
   };
@@ -389,7 +389,7 @@ export const getActivity = defineTool({
       stored === null || ladders === null
         ? null
         : {
-            ...settlementTotals(stored.map((settlement) => settlement.document)),
+            ...totalsRow(stored.map((settlement) => settlement.document)),
             ladders: ladders.slice(0, 5),
           };
 
