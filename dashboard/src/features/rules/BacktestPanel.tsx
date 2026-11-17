@@ -141,8 +141,8 @@ export function BacktestPanel({
             it might have proposed other intents altogether.
           </li>
           <li>
-            The kill switch: each intent is replayed with the pause state it met, since signing rules never
-            pauses or resumes the agent.
+            Pauses: each intent is replayed with the pause state it met, since signing rules never pauses or
+            resumes the agent.
           </li>
         </ul>
       </details>

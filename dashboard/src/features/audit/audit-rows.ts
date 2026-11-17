@@ -23,7 +23,7 @@ import { describeMarket } from "@/lib/markets";
 /**
  * What kind of decision a row records:
  * - `mandate`: the owner set or changed the rules (`PolicyUpdated`).
- * - `pause`: the kill switch (`Paused`).
+ * - `pause`: pausing and resuming trading (`Paused`).
  * - `verdict`: the contract's answer to a proposal, in the proposal's own transaction.
  * - `owner`: the owner approving or rejecting a held intent (`approveIntent`, `rejectIntent`).
  * - `result`: what the executor recorded (`ResultRecorded`).
@@ -63,7 +63,7 @@ export interface AuditRow {
 
 export const GROUP_LABELS: Record<AuditGroup, string> = {
   mandate: "Rule changes",
-  pause: "Kill switch",
+  pause: "Pauses",
   verdict: "Proposal verdicts",
   owner: "Owner decisions",
   result: "Executor results",
@@ -118,9 +118,7 @@ function describe(event: PolicyEvent, held: boolean, version: number): Described
       return {
         group: "pause",
         label: event.paused ? "Paused" : "Resumed",
-        summary: event.paused
-          ? "Kill switch on: every new intent is rejected"
-          : "Kill switch off: new intents are checked again",
+        summary: event.paused ? "Every new intent is rejected" : "New intents are checked again",
         status: event.paused ? "paused" : null,
         reason: null,
         intentId: null,

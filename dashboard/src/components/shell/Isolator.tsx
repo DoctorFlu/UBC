@@ -44,7 +44,7 @@ export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
             description: "The Policy contract now rejects every new intent.",
             tone: "danger",
           }
-        : { title: "Agent resumed", description: "New intents are checked against the mandate again." },
+        : { title: "Agent resumed", description: "New intents are checked against the rules again." },
     );
   };
 

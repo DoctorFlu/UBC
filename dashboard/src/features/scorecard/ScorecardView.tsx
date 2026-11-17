@@ -48,9 +48,7 @@ const columns: readonly Column<RecentIntent>[] = [
   {
     key: "time",
     header: "Time",
-    cell: (intent) => (
-      <When at={intent.proposedAt} className={styles.when} dateClassName={styles.date} />
-    ),
+    cell: (intent) => <When at={intent.proposedAt} className={styles.when} dateClassName={styles.date} />,
     nowrap: true,
   },
   {
@@ -173,7 +171,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
     <div className={styles.view}>
       <PageHeader
         title={agent.name}
-        description={`An AI agent trading prediction markets under an onchain mandate${agent.pairedAt ? ` since ${formatDateUtc(agent.pairedAt)}` : ""}. Its owner sets the limits; a contract on ${network.name} enforces them, and every number below is read from that contract's events.`}
+        description={`An AI agent trading prediction markets under onchain rules${agent.pairedAt ? ` since ${formatDateUtc(agent.pairedAt)}` : ""}. Its owner sets the limits; a contract on ${network.name} enforces them, and every number below is read from that contract's events.`}
         meta={
           <>
             <HexValue label="Agent" value={agent.address} kind="address" />
@@ -187,7 +185,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
         <StatGroup>
           <Stat label="Intents proposed" value={formatCount(proposed)} />
           <Stat
-            label="Inside the mandate"
+            label="Inside the rules"
             value={
               proposed > 0 ? formatPercentBps(shareBps(inside, proposed), { fractionDigits: 0 }) : "None yet"
             }
@@ -227,7 +225,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
           headingLevel={2}
         >
           {card.blocked.length === 0 ? (
-            <p className={styles.none}>Nothing blocked. Every intent so far was inside the mandate.</p>
+            <p className={styles.none}>Nothing blocked. Every intent so far was inside the rules.</p>
           ) : (
             <ul className={styles.rows} data-testid="blocked-by-rule">
               {card.blocked.map((rule) => (
@@ -306,11 +304,11 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
       </div>
 
       <Card
-        title="The mandate"
+        title="Rules"
         description={
           rules
             ? `Version ${mandate.version.toString()}${mandate.paused ? ", paused: the contract rejects every new intent" : ""}.`
-            : "The owner has not signed a mandate yet, so the contract rejects every intent."
+            : "The owner has not set rules yet, so the contract rejects every intent."
         }
         actions={
           mandate.setBy ? <HexValue label="Set in" value={mandate.setBy.txHash} kind="tx" /> : undefined
@@ -345,7 +343,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
           rowKey={(intent) => intent.id.toString()}
           empty={
             <EmptyState plain title="No intents yet">
-              This agent has not sent an intent under its mandate.
+              This agent has not sent an intent yet.
             </EmptyState>
           }
         />
