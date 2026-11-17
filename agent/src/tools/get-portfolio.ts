@@ -6,6 +6,7 @@ import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { capList } from "../support/format";
+import { coverNowRow, CoverNowSchema, coverSentence, readSummary } from "../support/summary";
 import {
   LadderSettlementSchema,
   ladderSentence,
@@ -49,10 +50,16 @@ export const getPortfolio = defineTool({
       .describe(
         "Protection that already settled: every position whose market resolved, as the executor signed it and the console stored it. An expired ladder is over; new protection goes on the next ladder. null when the console cannot say.",
       ),
+    cover: z
+      .array(CoverNowSchema)
+      .nullable()
+      .describe(
+        "The cover held now against each current goal (the latest plan per asset, on a ladder not expired yet), measured by the console as its Hedge page shows it. Empty when there is no current goal; null when the console cannot say.",
+      ),
   }),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   handler: async (_input, ctx) => {
-    const empty = { holdings: null, updatedAt: null, truncated: false, settled: null };
+    const empty = { holdings: null, updatedAt: null, truncated: false, settled: null, cover: null };
     if (ctx.console === undefined) {
       const v = unavailableFor(notConfigured.console());
       return { structured: { ...v, ...empty }, summary: summarizeVerdict(v) };
@@ -65,7 +72,14 @@ export const getPortfolio = defineTool({
       return { structured: { ...v, ...empty }, summary: summarizeVerdict(v) };
     }
 
-    const stored = await readSettlements(ctx);
+    const [stored, summary] = await Promise.all([readSettlements(ctx), readSummary(ctx)]);
+    const cover = summary === null ? null : summary.cover.map((goal) => coverNowRow(goal, summary));
+    const coverText =
+      cover === null
+        ? " Cover now: the console cannot say right now, so do not report the cover."
+        : cover.length === 0
+          ? ""
+          : ` Cover now: ${cover.map((goal) => coverSentence(goal)).join(" ")}`;
     const settled =
       stored === null
         ? null
@@ -107,8 +121,8 @@ export const getPortfolio = defineTool({
         hint: "Enter the holdings to protect (asset and quantity) in the console.",
       });
       return {
-        structured: { ...v, holdings, updatedAt: response.updatedAt, truncated, settled },
-        summary: `${summarizeVerdict(v)}${settledText}`,
+        structured: { ...v, holdings, updatedAt: response.updatedAt, truncated, settled, cover },
+        summary: `${summarizeVerdict(v)}${coverText}${settledText}`,
       };
     }
     const v = ok([], { actor: "agent", hint: "Call get_ladder for the asset to protect, then plan_hedge." });
@@ -116,8 +130,8 @@ export const getPortfolio = defineTool({
       (h) => `${h.quantity} ${h.asset}${h.valueCents === null ? "" : ` (about ${formatUsd(h.valueCents)})`}`,
     );
     return {
-      structured: { ...v, holdings, updatedAt: response.updatedAt, truncated, settled },
-      summary: `Holdings: ${lines.join(", ")}${truncated ? `, and ${response.holdings.length - items.length} more` : ""}.${settledText}`,
+      structured: { ...v, holdings, updatedAt: response.updatedAt, truncated, settled, cover },
+      summary: `Holdings: ${lines.join(", ")}${truncated ? `, and ${response.holdings.length - items.length} more` : ""}.${coverText}${settledText}`,
     };
   },
 });

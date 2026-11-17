@@ -1,16 +1,10 @@
 import * as z from "zod";
-import {
-  categoriesFromMask,
-  categoryLabel,
-  categoryMask,
-  formatCents,
-  type PolicyRules,
-  type ProposedRules,
-} from "@mandate/shared";
+import { categoryMask, type PolicyRules, type ProposedRules } from "@mandate/shared";
 import { held, reason, rejected, summarizeVerdict, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { CategoryNameSchema, categoryIdOf } from "../support/format";
+import { PROPOSED_RULE_TEXT, proposedRuleValue } from "../support/rules";
 
 const cents = (what: string) =>
   z.int().min(0).max(1_000_000_000_000).optional().describe(`${what}, in integer cents`);
@@ -20,23 +14,6 @@ const ChangeSchema = z.object({
   from: z.string().nullable().describe("Current value, or null if the policy could not be read"),
   to: z.string(),
 });
-
-const RULE_TEXT: Record<keyof ProposedRules, string> = {
-  budgetCents: "budget",
-  maxTradeCents: "max trade size",
-  allowedCategories: "allowed categories",
-  approvalAboveCents: "approval threshold",
-  dailyLossCents: "daily loss limit",
-};
-
-function show(rule: keyof ProposedRules, value: number): string {
-  if (rule === "allowedCategories") {
-    const names = categoriesFromMask(value).map(categoryLabel);
-    return names.length === 0 ? "none" : names.join(", ");
-  }
-  if (value === 0 && (rule === "approvalAboveCents" || rule === "dailyLossCents")) return "off";
-  return formatCents(value);
-}
 
 export const requestPolicyChange = defineTool({
   name: "request_policy_change",
@@ -127,9 +104,9 @@ export const requestPolicyChange = defineTool({
     }
 
     const changes = rules.map((rule) => ({
-      rule: RULE_TEXT[rule],
-      from: current === undefined ? null : show(rule, current[rule]),
-      to: show(rule, proposed[rule] ?? 0),
+      rule: PROPOSED_RULE_TEXT[rule],
+      from: current === undefined ? null : proposedRuleValue(rule, current[rule]),
+      to: proposedRuleValue(rule, proposed[rule] ?? 0),
     }));
     const v = held([reason("OWNER_DECIDES", "The request waits for the owner; nothing changed yet.")], {
       actor: "owner",

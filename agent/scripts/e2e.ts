@@ -28,16 +28,19 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { createPublicClient, http } from "viem";
 import {
   buildContracts,
+  devPolicyClient,
   devPrivateKey,
   isPolicyContractKind,
   startDevchain,
   type PolicyContractKind,
 } from "@mandate/devchain";
-import { devchain, policyAbi, verifyContext } from "@mandate/shared";
+import { CONSOLE_AGENT_API_BASE, devchain, policyAbi, verifyContext, type Intent } from "@mandate/shared";
 import { DEFAULT_LIMITS, ENV_KEYS } from "../src/config";
 import { COMMIT_GRACE_MS } from "../src/mcp/deadline";
 import { UNWIND_GRACE_MS } from "../src/mcp/tool";
+import { createGeminiMarkets } from "../src/markets/gemini";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
+import { coverFromPlans } from "../testing/fake-cover";
 
 const AGENT_DIR = fileURLToPath(new URL("..", import.meta.url));
 const RESERVED_PORTS = new Set([8787, 8788, 3000]);
@@ -232,7 +235,19 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
   });
   const consoleToken = randomBytes(24).toString("base64url");
   const consolePort = await freePort();
+  const reader = devPolicyClient(chain.rpcUrl, chain.deployment.address, "outsider");
+  const chainIntents = async (): Promise<Intent[]> => {
+    const count = await reader.getIntentCount();
+    const read = await Promise.all(Array.from({ length: count }, (_, id) => reader.getIntent(id)));
+    return read.filter((intent): intent is Intent => intent !== null);
+  };
+  // The console measures cover on Gemini's public quotes and the chain's intents (issue #97).
+  const quotes = createGeminiMarkets();
   const fake: FakeConsole = createFakeConsole({
+    cover: coverFromPlans({
+      ladder: (asset, eventTicker) => quotes.getLadder({ asset, eventTicker }),
+      intents: chainIntents,
+    }),
     token: consoleToken,
     publicUrl: `http://127.0.0.1:${consolePort}`,
     holdings: [{ asset: "BTC", quantity: "0.05", note: "Long-term holding" }],
@@ -491,6 +506,57 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
     );
     const unpause = await run("request_policy_change", { paused: false, reason: "Resume." });
     check(unpause.isError === true, "a request to change the pause switch is refused");
+
+    process.stdout.write("\n-- daily digest (agent/grok/digest.md)\n");
+    const intentsBefore = await chainIntents();
+    const requestsBefore = fake.state.requests.length;
+    for (const name of ["get_setup_state", "get_policy"]) await run(name);
+    const portfolio = await run("get_portfolio");
+    const activity = await run("get_activity", { limit: 1 });
+    const consoleUrl = `http://127.0.0.1:${consolePort}`;
+    const cover = (field(portfolio.structuredContent, "cover") ?? []) as Record<string, unknown>[];
+    check(
+      cover.some(
+        (goal) =>
+          goal["asset"] === "BTC" &&
+          goal["eventTicker"] === eventTicker &&
+          typeof goal["state"] === "string" &&
+          goal["link"] === `${consoleUrl}/hedge`,
+      ),
+      `get_portfolio gives the cover now of the BTC goal, as the console measured it (${String(cover[0]?.["state"])})`,
+    );
+    const day = field(activity.structuredContent, "last24h") as Record<string, unknown> | undefined;
+    const filled = intentsBefore.reduce((sum, intent) => sum + (intent.filledCents ?? 0), 0);
+    check(
+      day?.["complete"] === true &&
+        day["proposed"] === intentsBefore.length &&
+        day["needsApproval"] === intentsBefore.filter((i) => i.status === "needs_approval").length &&
+        day["rejected"] === intentsBefore.filter((i) => i.status === "rejected").length &&
+        day["filledCents"] === filled,
+      `get_activity sums the last 24 hours on the server (${String(intentsBefore.length)} intents)`,
+    );
+    const waiting = field(activity.structuredContent, "waitingForOwner") as
+      Record<string, unknown> | undefined;
+    const heldId = Number(field(held.structuredContent, "proposal", "intentId"));
+    const waitingIntents = (waiting?.["intents"] ?? []) as Record<string, unknown>[];
+    const requests = (waiting?.["changeRequests"] ?? []) as Record<string, unknown>[];
+    check(
+      waiting?.["link"] === `${consoleUrl}/approvals` &&
+        waitingIntents.some((i) => i["id"] === heldId) &&
+        requests.length === 1 &&
+        requests[0]?.["changes"] === "max trade size to $50.00" &&
+        field(requests[0], "reason", "untrusted") === true,
+      "get_activity lists what waits for the owner, with links, the agent's reason marked untrusted",
+    );
+    const writes = fake.state.requests
+      .slice(requestsBefore)
+      .filter(
+        (request) => !request.startsWith("GET ") && request !== `POST ${CONSOLE_AGENT_API_BASE}/auth/resolve`,
+      );
+    check(
+      writes.length === 0 && (await chainIntents()).length === intentsBefore.length,
+      "the digest's calls write nothing to the chain or the console",
+    );
 
     const logs = server.logs.join("\n");
     check(

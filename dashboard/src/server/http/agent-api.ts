@@ -22,15 +22,23 @@ import {
   signalBudgetResponseSchema,
   signalPaymentResponseSchema,
   agentIdSchema,
+  summaryResponseSchema,
   verifyContext,
+  type ConsoleHolding,
+  type CoverNowView,
+  type IntentView,
 } from "@mandate/shared";
 import { type Address, type Hex, isAddressEqual } from "viem";
 
+import { coverNow } from "@/features/hedge/cover-now";
 import { hedgePlanSchema } from "@/lib/hedge/plan-schema";
+import type { AgentPlanView } from "@/lib/hedge/types";
 
 import type { Agent, Mandate } from "../accounts/store";
 import type { ConsoleService } from "../console-service";
+import { ladderQuotes } from "../market/quotes";
 import type { StoredPairing } from "../store/offchain";
+import { currentGoals, type LadderSource } from "../wake";
 import { apiError, checkServiceToken, describeIssues, json, readBody } from "./responses";
 import { describe } from "./session";
 
@@ -350,3 +358,86 @@ export const getSettlements = agentRoute((_request, service, { mandate }) =>
     json(settlementsResponseSchema.parse({ settlements: service.verifiedSettlements(mandate) })),
   ),
 );
+
+// ------------------------------------------------------------------ the owner's view (#97)
+
+/**
+ * GET /api/agent/v1/summary: what the owner sees in the console that the agent reads nowhere else, for
+ * the routine's daily digest. The cover of each current goal is the Hedge page's "Cover now", measured
+ * the same way (`coverNow`) on the same cached quotes. A goal whose quotes do not answer, or a console
+ * that cannot read the chain, is `unavailable`, never a guess.
+ */
+export function getSummary(
+  request: Request,
+  service: ConsoleService,
+  ladder: LadderSource,
+): Promise<Response> {
+  return agentRoute(async (_request, service, { mandate }) => {
+    const snapshot = service.snapshot(mandate);
+    const now = Date.now();
+    // Without the chain the console cannot count what is held: unavailable, never "not covered".
+    const intents = snapshot.chain?.intents ?? null;
+    const cover = await Promise.all(
+      currentGoals(snapshot.offchain.plans, now).map((view) =>
+        coverOfGoal(view, snapshot.offchain.holdings, intents, ladder),
+      ),
+    );
+    return json(
+      summaryResponseSchema.parse({
+        consoleUrl: service.config.publicUrl,
+        changeRequests: snapshot.offchain.changeRequests.filter((request) => request.status === "pending"),
+        cover,
+        asOf: new Date(now).toISOString(),
+      }),
+    );
+  })(request, service);
+}
+
+async function coverOfGoal(
+  view: AgentPlanView,
+  holdings: readonly ConsoleHolding[],
+  intents: readonly IntentView[] | null,
+  ladder: LadderSource,
+): Promise<CoverNowView> {
+  const { plan } = view;
+  const goal = {
+    asset: plan.asset,
+    eventTicker: plan.eventTicker,
+    expiresAt: plan.expiry,
+    planId: view.planId,
+    floorCents: plan.floorCents,
+  };
+  const unavailable: CoverNowView = {
+    ...goal,
+    state: "unavailable",
+    spotCents: null,
+    measuredBelowCents: null,
+    targetPayoutCents: null,
+    heldPayoutCents: null,
+    heldByState: null,
+    coverBps: null,
+    missingPayoutCents: null,
+  };
+  if (intents === null) return unavailable;
+  const lookup = await ladder(plan.asset, plan.eventTicker).catch(() => ({ ok: false as const }));
+  if (!lookup.ok) return unavailable;
+  const holding = holdings.find((candidate) => candidate.asset === plan.asset)?.quantity ?? null;
+  const cover = coverNow({ plan, holdingQuantity: holding, quotes: ladderQuotes(lookup.ladder), intents });
+  if (!cover) return unavailable;
+  const { assessment } = cover;
+  return {
+    ...goal,
+    state: assessment.state,
+    spotCents: assessment.spotCents,
+    measuredBelowCents: assessment.measuredBelowCents,
+    targetPayoutCents: assessment.targetPayoutCents,
+    heldPayoutCents: assessment.heldPayoutCents,
+    heldByState: {
+      filledCents: assessment.heldByState.filled,
+      awaitingFillCents: assessment.heldByState.awaiting_fill,
+      awaitingOwnerCents: assessment.heldByState.awaiting_owner,
+    },
+    coverBps: assessment.coverBps,
+    missingPayoutCents: assessment.missingPayoutCents,
+  };
+}

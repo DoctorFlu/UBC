@@ -264,3 +264,50 @@ export function assessCover(input: CoverInput): CoverAssessment {
     held: input.held,
   });
 }
+
+/** The goal a stored plan was made for: its holding, ladder, floor, ceiling and the spot it read. */
+export interface PlanGoal {
+  asset: string;
+  eventTicker: string;
+  floorCents: number | null;
+  ceilingCents: number | null;
+  spotCents: number;
+  holdingQuantity: string;
+}
+
+/**
+ * The cover held now against the goal of a plan (issue #97): positions from the intents on the plan's
+ * ladder, the holding as saved now (or as the plan read it), today's spot, the plan's floor, and its
+ * ceiling when the plan set one. A ceiling equal to the plan's spot is the default, which moves with
+ * spot. The console's "Cover now" and the agent's daily digest both read it from here. Null when the
+ * plan has no floor, the ladder is another one, or the planner refuses the holding.
+ */
+export function coverOfPlan(input: {
+  plan: PlanGoal;
+  /** The holding as saved now, or null to use the plan's. */
+  holdingQuantity: string | null;
+  ladder: Pick<CoverLadder, "asset" | "eventTicker" | "rungs">;
+  spotCents: number;
+  intents: Iterable<RecordedIntent>;
+}): { assessment: CoverAssessment; positions: IntentPosition[] } | null {
+  const { plan, ladder } = input;
+  if (plan.floorCents === null || ladder.eventTicker !== plan.eventTicker) return null;
+  const goal: ProtectionGoal =
+    plan.ceilingCents !== null && plan.ceilingCents !== plan.spotCents
+      ? { floorCents: plan.floorCents, ceilingCents: plan.ceilingCents }
+      : { floorCents: plan.floorCents };
+  const positions = positionsFromIntents(input.intents, ladder);
+  try {
+    const assessment = assessCover({
+      holding: { asset: plan.asset, quantity: input.holdingQuantity ?? plan.holdingQuantity },
+      ladder,
+      spotCents: input.spotCents,
+      goal,
+      held: positions,
+    });
+    return { assessment, positions };
+  } catch {
+    // A holding or goal the planner refuses (for example a quantity edited to nonsense) has no cover.
+    return null;
+  }
+}
