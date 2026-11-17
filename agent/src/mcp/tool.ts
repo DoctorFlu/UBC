@@ -79,7 +79,12 @@ export function defineTool<I extends z.ZodObject, O extends z.ZodObject>(spec: T
     timeoutMs: spec.timeoutMs,
     async run(input, ctx) {
       const parsedInput = spec.inputSchema.safeParse(input ?? {});
-      if (!parsedInput.success) throw new ToolError("INVALID_INPUT", describeIssues(parsedInput.error));
+      if (!parsedInput.success) {
+        throw new ToolError(
+          "INVALID_INPUT",
+          describeIssues(parsedInput.error, { input, schema: spec.inputSchema }),
+        );
+      }
       const output = await spec.handler(parsedInput.data, ctx);
       const parsedOutput = spec.outputSchema.safeParse(output.structured);
       if (!parsedOutput.success) {
@@ -92,14 +97,40 @@ export function defineTool<I extends z.ZodObject, O extends z.ZodObject>(spec: T
   };
 }
 
-/** Field paths and rule messages only: never the offending values, which may be secrets. */
-export function describeIssues(error: z.ZodError): string {
+/**
+ * Field paths and rule messages only: never the offending values, which may be secrets. Given the call's
+ * arguments and the tool's input schema, a missing argument says what to send, from its own description
+ * (for example "requestText is required: the owner's request in their own words").
+ */
+export function describeIssues(error: z.ZodError, call?: { input: unknown; schema: z.ZodObject }): string {
   const parts = error.issues.slice(0, 5).map((issue) => {
     const path = issue.path.length === 0 ? "(arguments)" : issue.path.join(".");
-    return `${path}: ${issue.message}`;
+    const wanted = call ? missingArgument(call, issue.path) : undefined;
+    return wanted === undefined ? `${path}: ${issue.message}` : `${path} is required: ${wanted}`;
   });
   const more = error.issues.length > 5 ? ` (and ${error.issues.length - 5} more)` : "";
   return `Invalid arguments. ${parts.join("; ")}${more}.`;
+}
+
+/**
+ * What a top-level argument the call left out is for, from the schema's description, with its first letter
+ * lowercased to read on after "is required:". Undefined when the argument was given, or has no description.
+ */
+function missingArgument(
+  call: { input: unknown; schema: z.ZodObject },
+  path: readonly PropertyKey[],
+): string | undefined {
+  if (path.length !== 1 || typeof path[0] !== "string") return undefined;
+  const key = path[0];
+  const given =
+    typeof call.input === "object" && call.input !== null ? (call.input as Record<string, unknown>) : {};
+  if (given[key] !== undefined) return undefined;
+  const fields = call.schema.shape as Record<string, { readonly description?: string } | undefined>;
+  const description = fields[key]?.description;
+  if (description === undefined || description.length === 0) return undefined;
+  return /^[A-Z][a-z]/.test(description)
+    ? `${description.charAt(0).toLowerCase()}${description.slice(1)}`
+    : description;
 }
 
 /** Result for a real error: a stable code and a short message, never a stack trace. */
