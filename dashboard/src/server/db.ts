@@ -30,9 +30,13 @@ export type Database = DatabaseSync;
 
 /**
  * Each entry upgrades the schema by one version, as SQL or as a function for steps that need values made
- * in code. Never edit a shipped entry; append a new one.
+ * in code. A step that rebuilds a table other tables reference runs with foreign keys off, as SQLite's
+ * procedure for changing a table requires, and must leave no broken reference (checked before it commits).
+ * Never edit a shipped entry; append a new one.
  */
-export const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
+export type Migration = string | ((db: Database) => void) | { withoutForeignKeys: (db: Database) => void };
+
+export const MIGRATIONS: readonly Migration[] = [
   `
   CREATE TABLE policy_events (
     deployment_id   TEXT    NOT NULL,
@@ -218,7 +222,63 @@ export const MIGRATIONS: readonly (string | ((db: Database) => void))[] = [
   // first workspace's mandate. Settlements and venue orders stay keyed by deployment (see above).
   // Every migration above is applied on the hosted database: never reorder them.
   migrateToAccounts,
+  // 9: several mandates per workspace (#95). A mandate may now follow a contract of its own, deployed by
+  // the console on the demo chain (with an owner key the console seals) or by the owner's wallet on Arc;
+  // owner actions the console signs are recorded with the member and passkey that authorised them.
+  { withoutForeignKeys: migrateToMandates },
 ];
+
+/**
+ * Version 9. Rebuilds `mandates` with its own contract: where it is (chain, address, deploy block), which
+ * contract it is, the executor it names, who deployed it, and for a contract the console deployed, the
+ * owner key it holds (sealed, like the agents' keys). Every mandate keeps its id, so every row that names
+ * one still does. Adds `owner_actions`, the audit of the owner calls the console signed.
+ */
+function migrateToMandates(db: Database): void {
+  db.exec(`
+  CREATE TABLE mandates_v9 (
+    id               TEXT    NOT NULL PRIMARY KEY,
+    workspace_id     TEXT    NOT NULL REFERENCES workspaces (id),
+    name             TEXT    NOT NULL,
+    deployment       TEXT    CHECK (deployment IN ('env', 'server', 'wallet')),
+    chain_id         INTEGER,
+    policy_address   TEXT    CHECK (policy_address IS NULL OR policy_address GLOB '0x[0-9a-f]*'),
+    deploy_block     INTEGER,
+    contract_kind    TEXT    CHECK (contract_kind IN ('production', 'reference')),
+    executor_address TEXT,
+    owner_address    TEXT,
+    sealed_owner_key TEXT,
+    created_at       TEXT    NOT NULL,
+    CHECK (COALESCE(deployment, '') NOT IN ('server', 'wallet')
+      OR (chain_id IS NOT NULL AND policy_address IS NOT NULL AND deploy_block IS NOT NULL
+          AND contract_kind IS NOT NULL AND executor_address IS NOT NULL AND owner_address IS NOT NULL)),
+    CHECK (sealed_owner_key IS NULL OR COALESCE(deployment, 'server') = 'server'),
+    CHECK (COALESCE(deployment, '') <> 'server' OR sealed_owner_key IS NOT NULL)
+  ) STRICT;
+  INSERT INTO mandates_v9 (id, workspace_id, name, deployment, chain_id, policy_address, deploy_block, created_at)
+    SELECT id, workspace_id, name, deployment, chain_id, policy_address, deploy_block, created_at
+    FROM mandates ORDER BY rowid;
+  DROP TABLE mandates;
+  ALTER TABLE mandates_v9 RENAME TO mandates;
+  CREATE INDEX mandates_workspace ON mandates (workspace_id);
+  CREATE UNIQUE INDEX mandates_env ON mandates (deployment) WHERE deployment = 'env';
+  CREATE UNIQUE INDEX mandates_contract ON mandates (chain_id, policy_address) WHERE policy_address IS NOT NULL;
+
+  CREATE TABLE owner_actions (
+    id            TEXT NOT NULL PRIMARY KEY,
+    mandate_id    TEXT NOT NULL REFERENCES mandates (id),
+    member_id     TEXT NOT NULL REFERENCES members (id),
+    credential_id TEXT,
+    function_name TEXT NOT NULL,
+    calldata      TEXT NOT NULL,
+    status        TEXT NOT NULL CHECK (status IN ('sent', 'failed')),
+    tx_hash       TEXT,
+    detail        TEXT,
+    created_at    TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX owner_actions_mandate ON owner_actions (mandate_id, created_at);
+  `);
+}
 
 /**
  * Version 8. Creates the account tables, then the first workspace (unclaimed: no member yet), its mandate
@@ -503,15 +563,41 @@ export function openDatabase(dataDir: string): Database {
   return db;
 }
 
-/** Upgrades the schema to `target` (the latest by default; tests build older versions with it). */
-export function migrate(db: Database, target = MIGRATIONS.length): void {
+/**
+ * Upgrades the schema to `target` (the latest by default; tests build older versions with it, and check a
+ * failing step with a list of their own).
+ */
+export function migrate(
+  db: Database,
+  target = MIGRATIONS.length,
+  migrations: readonly Migration[] = MIGRATIONS,
+): void {
   const row = db.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
   const current = row?.user_version ?? 0;
   for (let version = current; version < target; version += 1) {
-    const step = MIGRATIONS[version];
+    const step = migrations[version];
+    if (step === undefined) throw new Error(`no migration to version ${String(version + 1)}`);
+    if (typeof step === "object") {
+      // Foreign keys cannot be switched inside a transaction, so this happens around it.
+      const enforced = (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys;
+      db.exec("PRAGMA foreign_keys = OFF");
+      try {
+        transaction(db, () => {
+          step.withoutForeignKeys(db);
+          const broken = db.prepare("PRAGMA foreign_key_check").all();
+          if (broken.length > 0) {
+            throw new Error(`migration ${String(version + 1)} broke ${String(broken.length)} references`);
+          }
+          db.exec(`PRAGMA user_version = ${String(version + 1)}`);
+        });
+      } finally {
+        db.exec(`PRAGMA foreign_keys = ${enforced ? "ON" : "OFF"}`);
+      }
+      continue;
+    }
     transaction(db, () => {
       if (typeof step === "function") step(db);
-      else db.exec(step ?? "");
+      else db.exec(step);
       db.exec(`PRAGMA user_version = ${String(version + 1)}`);
     });
   }
