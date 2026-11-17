@@ -50,6 +50,7 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
     } catch (error) {
       throw new Error(
         `the console at ${base} did not answer (${error instanceof Error ? error.message : String(error)})`,
+        { cause: error },
       );
     }
   };
@@ -58,9 +59,19 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
       const response = await request(CONSOLE_EXECUTOR_ROUTES.order(intentId), {
         headers: { accept: "application/json" },
       });
-      if (response.status === 404) return null;
+      // Only the console's own "no record" counts as none: any other 404 (a proxy, an older console
+      // without this route) is an outage, or a restart would send an order that may already exist.
+      if (response.status === 404) {
+        const answer = consoleErrorSchema.safeParse(await response.json().catch(() => undefined));
+        if (answer.success && answer.data.error.code === "not_found") return null;
+        throw new Error("the console has no order journal at this address (HTTP 404)");
+      }
       if (!response.ok) throw new Error(`the console answered ${await answerText(response)}`);
-      return storedVenueOrderSchema.parse(await response.json()).document;
+      const stored = storedVenueOrderSchema.parse(await response.json());
+      if (hashExecutorRecord(stored.document).toLowerCase() !== stored.hash.toLowerCase()) {
+        throw new Error(`the console's record of intent ${String(intentId)} no longer matches its hash`);
+      }
+      return stored.document;
     },
     async put(record) {
       const signature = await options.sign(hashExecutorRecord(record));

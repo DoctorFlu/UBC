@@ -24,6 +24,7 @@ import {
   GEMINI_HOSTS,
   geminiTradingSettings,
   isGeminiPrivateError,
+  isLoopbackTestUrl,
   type GeminiPrivateClient,
 } from "@mandate/gemini/private";
 import type { ExecutorVenue } from "@mandate/shared";
@@ -88,9 +89,18 @@ if (settings.venue === "gemini") {
       fail("EXECUTOR_VENUE=gemini needs GEMINI_API_KEY and GEMINI_API_SECRET. Run npm run gemini:doctor.");
     }
     trading = createGeminiPrivateClient({ environment: gemini.environment, credentials: gemini.credentials });
-    // The sandbox lists other strikes than production: the checks and outcomes read the same environment.
-    const publicUrl = process.env.GEMINI_API_URL?.trim() || GEMINI_HOSTS[gemini.environment];
-    publicClient = createGeminiClient({ maxRetries: 1, timeoutMs: 8_000, baseUrl: publicUrl });
+    // The sandbox lists other strikes than production, so the checks and outcomes read the environment
+    // the orders go to. GEMINI_API_URL may name that same host, or a loopback fake in tests; any other
+    // host would check orders against one exchange and place them on another.
+    const override = process.env.GEMINI_API_URL?.trim().replace(/\/+$/, "") ?? "";
+    const publicUrl = GEMINI_HOSTS[gemini.environment];
+    if (override !== "" && override !== publicUrl && !isLoopbackTestUrl(override)) {
+      fail(
+        `GEMINI_API_URL is ${override}, but orders go to Gemini's ${gemini.environment} (${publicUrl}). ` +
+          "Unset it, or set it to that same host.",
+      );
+    }
+    publicClient = createGeminiClient({ maxRetries: 1, timeoutMs: 8_000, baseUrl: override || publicUrl });
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }

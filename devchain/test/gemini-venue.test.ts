@@ -54,13 +54,29 @@ function venue(options: { orderTtlMs?: number } = {}): Venue {
           : Promise.reject(new GeminiError("not_found", `no event ${ticker}`, { status: 404 }));
       },
     },
-    // One signed client for every venue in a test: a restarted process keeps the key's nonce rising.
     trading,
     journal,
     deployment: { chainId: 5_042_002, policy: POLICY },
     now,
     ...options,
   });
+}
+
+function signedClient() {
+  return createGeminiPrivateClient({
+    environment: "sandbox",
+    credentials: { apiKey: KEY, apiSecret: SECRET },
+    fetch: fake.fetch,
+    now: () => clock.now,
+    limiter: unpacedLimiter(),
+  });
+}
+
+/** The venue of a new executor process: a few seconds later, with a new signed client (nonce from 0). */
+function restarted(): Venue {
+  clock.now += 5_000;
+  trading = signedClient();
+  return venue();
 }
 
 const order = (patch: Partial<VenueOrder> = {}): VenueOrder => ({
@@ -92,13 +108,7 @@ beforeEach(() => {
   fake = new FakeGeminiPrivate({ apiKey: KEY, apiSecret: SECRET, now: () => clock.now });
   journal = memoryOrderJournal();
   events = [OPEN, SETTLED];
-  trading = createGeminiPrivateClient({
-    environment: "sandbox",
-    credentials: { apiKey: KEY, apiSecret: SECRET },
-    fetch: fake.fetch,
-    now: () => clock.now,
-    limiter: unpacedLimiter(),
-  });
+  trading = signedClient();
 });
 
 describe("placing an order", () => {
@@ -153,13 +163,13 @@ describe("placing an order", () => {
     // 20 cents at 33c buys less than one contract, the minimum.
     expect(await venue().placeOrder(order({ intentId: 8, amountCents: 20, limitPrice: 33 }))).toMatchObject({
       status: "refused",
-      detail: expect.stringMatching(/buys less than the 1 contracts/),
+      detail: expect.stringMatching(/buys less than the 1 contracts/) as unknown,
     });
 
     for (const contract of coarse.contracts) contract.priceIncrement = "0.05";
     expect(await venue().placeOrder(order({ intentId: 9 }))).toMatchObject({
       status: "refused",
-      detail: expect.stringMatching(/not on .* 5c price grid/),
+      detail: expect.stringMatching(/not on .* 5c price grid/) as unknown,
     });
     expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
   });
@@ -206,12 +216,11 @@ describe("an attempt whose answer never came", () => {
     fake.failNextPlacement({ kind: "drop-after" });
     expect(await venue().placeOrder(order())).toMatchObject({
       status: "held",
-      detail: expect.stringMatching(/no answer from Gemini's sandbox when placing it/),
+      detail: expect.stringMatching(/no answer from Gemini's sandbox when placing it/) as unknown,
     });
     expect(journal.records.get(7)?.state).toBe("unknown");
 
-    // A new process (a restart) with the same journal.
-    const placed = placedOf(await venue().placeOrder(order()));
+    const placed = placedOf(await restarted().placeOrder(order()));
     expect(fake.orders.size).toBe(1);
     expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
     expect(placed.venueOrderId).toBe(String([...fake.orders.keys()][0]));
@@ -222,8 +231,7 @@ describe("an attempt whose answer never came", () => {
     fake.echoClientOrderId = false;
     fake.failNextPlacement({ kind: "drop-after" });
     await venue().placeOrder(order());
-    clock.now += 30_000;
-    placedOf(await venue().placeOrder(order()));
+    placedOf(await restarted().placeOrder(order()));
     expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
   });
 
@@ -231,11 +239,11 @@ describe("an attempt whose answer never came", () => {
     fake.failNextPlacement({ kind: "drop-before" });
     await venue().placeOrder(order());
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(await venue().placeOrder(order())).toMatchObject({
+      expect(await restarted().placeOrder(order())).toMatchObject({
         status: "held",
         detail: expect.stringMatching(
           /no order for 40 contracts at 31c on Gemini since the attempt; it is never sent again/,
-        ),
+        ) as unknown,
       });
     }
     expect(fake.orders.size).toBe(0);
@@ -249,8 +257,27 @@ describe("an attempt whose answer never came", () => {
     }
     expect(await venue().placeOrder(order())).toMatchObject({
       status: "held",
-      detail: expect.stringMatching(/2 orders for 40 contracts at 31c match; check Gemini/),
+      detail: expect.stringMatching(/2 orders for 40 contracts at 31c match; check Gemini/) as unknown,
     });
+  });
+});
+
+describe("a request Gemini refused before reading it", () => {
+  it("treats a refused nonce as not placed, never as unknown, and places the order next time", async () => {
+    // A process started in the same second as the last one signs with a nonce Gemini already saw.
+    await trading.roles();
+    await trading.roles();
+    trading = signedClient();
+    expect(await venue().placeOrder(order())).toEqual({
+      status: "held",
+      detail:
+        "Gemini's sandbox refused the request's nonce (InvalidNonce); is another process using this key?",
+    });
+    expect(journal.records.get(7)?.state).toBe("not_placed");
+    expect(fake.orders.size).toBe(0);
+
+    placedOf(await restarted().placeOrder(order()));
+    expect(fake.orders.size).toBe(1);
   });
 });
 
@@ -364,7 +391,7 @@ describe("settling a position", () => {
     });
     expect(await gemini.positionOutcome(position())).toMatchObject({
       status: "disputed",
-      detail: expect.stringMatching(/Gemini settled 10 contracts on .*, our order filled 40/),
+      detail: expect.stringMatching(/Gemini settled 10 contracts on .*, our order filled 40/) as unknown,
     });
   });
 
