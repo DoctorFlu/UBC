@@ -125,7 +125,7 @@ describe("placing an order", () => {
       price: "0.31",
       outcome: "no",
       timeInForce: "good-til-cancel",
-      clientOrderId: "mandate-5042002-5fbdb231-3820591c5217-7",
+      clientOrderId: "m-3820591c52173a5992cf-7",
     });
     expect(placed.venueOrderId).toBe(fake.order(placed.venueOrderId).orderId);
     expect(journal.records.get(7)).toMatchObject({
@@ -278,10 +278,62 @@ describe("placing an order", () => {
     fake.termsAccepted = true;
     placedOf(await venue().placeOrder(order()));
     expect(fake.callsTo(ORDER_ROUTE).map((call) => call.fields.clientOrderId)).toEqual([
-      "mandate-5042002-5fbdb231-3820591c5217-7",
+      "m-3820591c52173a5992cf-7",
       "mandate-5042002-5fbdb231-7",
     ]);
     expect(journal.records.get(7)?.clientOrderId).toBe("mandate-5042002-5fbdb231-7");
+  });
+
+  it("sends a retry under an id journalled in main's form from #120 too", async () => {
+    const journalled = "mandate-5042002-5fbdb231-a1b2c3d4-7";
+    fake.termsAccepted = false;
+    await venue().placeOrder(order());
+    const record = journal.records.get(7);
+    if (!record) throw new Error("no record");
+    journal.records.set(7, { ...record, clientOrderId: journalled });
+
+    fake.termsAccepted = true;
+    placedOf(await venue().placeOrder(order()));
+    expect(fake.callsTo(ORDER_ROUTE).at(-1)?.fields.clientOrderId).toBe(journalled);
+    expect(journal.records.get(7)?.clientOrderId).toBe(journalled);
+  });
+
+  it("sends an id of Gemini's full 36 characters at the largest intent id it carries", async () => {
+    const intentId = 9_999_999_999_999;
+    placedOf(await venue().placeOrder(order({ intentId })));
+    const sent = fake.callsTo(ORDER_ROUTE).at(-1)?.fields.clientOrderId;
+    expect(sent).toBe("m-3820591c52173a5992cf-9999999999999");
+    expect(String(sent)).toHaveLength(36);
+  });
+
+  it("refuses an intent whose id does not fit Gemini's 36 characters, before journalling or sending it", async () => {
+    const intentId = 10_000_000_000_000;
+    expect(await venue().placeOrder(order({ intentId }))).toEqual({
+      status: "refused",
+      detail:
+        "intent 10000000000000 does not fit Gemini's 36-character client order id (the largest intent id it can carry is 9999999999999)",
+    });
+    expect(journal.records.has(intentId)).toBe(false);
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(0);
+  });
+
+  it("is refused by Gemini, as the sandbox does, when a journalled id is longer than 36 characters", async () => {
+    // The form #118 first used: 38 characters before the intent id. Gemini made no order.
+    const tooLong = "mandate-5042002-5fbdb231-3820591c5217-7";
+    fake.termsAccepted = false;
+    await venue().placeOrder(order());
+    const record = journal.records.get(7);
+    if (!record) throw new Error("no record");
+    journal.records.set(7, { ...record, clientOrderId: tooLong });
+
+    fake.termsAccepted = true;
+    expect(await venue().placeOrder(order())).toEqual({
+      status: "refused",
+      detail:
+        "Gemini's sandbox refused the order: InvalidInput (POST /v1/prediction-markets/order returned HTTP 400 (InvalidInput: client_order_id must be at most 36 characters))",
+    });
+    expect(journal.records.get(7)?.state).toBe("rejected");
+    expect(fake.orders.size).toBe(0);
   });
 });
 

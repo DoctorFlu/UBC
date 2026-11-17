@@ -27,6 +27,6 @@ describe("client order ids across deployments (#117)", () => {
     expect(second.ids.policy).toBe(first.ids.policy);
     expect(second.ids.deployBlockHash).not.toBe(first.ids.deployBlockHash);
     expect(clientOrderIdFor(second.ids, 0)).not.toBe(clientOrderIdFor(first.ids, 0));
-    expect(clientOrderIdFor(first.ids, 0)).toMatch(/^mandate-5042002-[0-9a-f]{8}-[0-9a-f]{12}-0$/);
+    expect(clientOrderIdFor(first.ids, 0)).toMatch(/^m-[0-9a-f]{20}-0$/);
   });
 });

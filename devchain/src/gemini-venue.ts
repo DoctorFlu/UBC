@@ -42,6 +42,7 @@ import {
   type SettledPosition,
 } from "@mandate/gemini/private";
 import {
+  ClientOrderIdError,
   clientOrderIdFor,
   formatCents,
   isFinalVenueOrderState,
@@ -367,6 +368,17 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       };
     }
 
+    // A retry keeps the id its first attempt was sent with, in whichever form it was written: the record
+    // does not allow another, and Gemini knows that one. A new id that cannot fit Gemini's limit is refused
+    // here, before anything is journalled or sent.
+    let clientOrderId: string;
+    try {
+      clientOrderId = previous?.clientOrderId ?? clientOrderIdFor({ ...deployment, policy }, order.intentId);
+    } catch (error) {
+      if (!(error instanceof ClientOrderIdError)) throw error;
+      return { status: "refused", detail: error.message };
+    }
+
     const sentAt = iso();
     const record: VenueOrderRecord = {
       kind: "venue-order",
@@ -377,9 +389,7 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       revision: (previous?.revision ?? 0) + 1,
       venue: "gemini",
       environment: trading.environment,
-      // A retry keeps the id its first attempt was sent with, in whichever form it was written: the record
-      // does not allow another, and Gemini knows that one.
-      clientOrderId: previous?.clientOrderId ?? clientOrderIdFor({ ...deployment, policy }, order.intentId),
+      clientOrderId,
       market: order.market,
       side: order.isBuy ? "buy" : "sell",
       outcome: order.outcome,
