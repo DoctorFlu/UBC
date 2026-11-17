@@ -29,6 +29,7 @@ import {
   devchain,
   policyAbi,
   revertErrorName,
+  type PolicyClient,
 } from "@mandate/shared";
 
 /** Enough for every Policy call here, including a proposal with a 4 KiB market string. */
@@ -275,4 +276,29 @@ function shortError(error: unknown): string {
     return details.split("\n")[0] ?? details;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Whether the contract is the production contract's v2 (issue #23), which checks a proposal's market,
+ * outcome and limit price before any rule. Detected the way `PolicyClient` detects the extensions: a
+ * `setUser` call from an address that is not the user reverts with `NotUser` on v2, and with no reason on
+ * a contract without the function (the first production version and the reference contract).
+ */
+export async function checksProposalFormat(reader: PolicyClient): Promise<boolean> {
+  const probe: Address = "0x000000000000000000000000000000000000dEaD";
+  const args = [probe] as const;
+  const data = encodeFunctionData({ abi: policyAbi, functionName: "setUser", args });
+  try {
+    await reader.publicClient.call({ account: probe, to: reader.address, data });
+    return true;
+  } catch (error) {
+    if (!(error instanceof BaseError)) return false;
+    const decoded = getContractError(error, {
+      abi: policyAbi,
+      address: reader.address,
+      args,
+      functionName: "setUser",
+    });
+    return revertErrorName(decoded) === "NotUser";
+  }
 }

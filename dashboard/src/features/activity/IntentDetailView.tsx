@@ -83,14 +83,15 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
     txHash: event.transactionHash,
   });
   if (intent && !events.some((event) => event.type === "IntentProposed")) {
-    // The production contract emits no proposal event: the verdict's transaction is the proposal.
+    // Contracts before Policy v2 emit no proposal event: the verdict's transaction is the proposal.
     const first = events[0];
     if (first) {
       out.push({
         ...meta(first),
         key: `${first.transactionHash}:proposed`,
         title: "Proposed by the agent",
-        detail: "This contract emits no proposal event; the verdict below came in the same transaction.",
+        detail:
+          "This contract is older than Policy v2 and emits no proposal event; the verdict below came in the same transaction.",
         tone: "neutral",
       });
     }
@@ -119,7 +120,9 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
         out.push({
           ...meta(event),
           title: waited ? "Approved by you" : "Approved by the contract",
-          detail: waited ? "The contract re-checked the budget and approved it." : "Inside every rule.",
+          detail: waited
+            ? "The contract checked it again when you approved it, and it still passed."
+            : "Inside every rule.",
           tone: "good",
         });
         break;
@@ -127,8 +130,15 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
         const byOwner = event.reason === "rejected by user";
         out.push({
           ...meta(event),
-          title: byOwner ? "Rejected by you" : `Rejected by the contract: ${event.reason}`,
-          detail: describeReason(event.reason).explanation,
+          title: byOwner
+            ? "Rejected by you"
+            : waited
+              ? `Refused when you approved it: ${event.reason}`
+              : `Rejected by the contract: ${event.reason}`,
+          detail:
+            waited && !byOwner
+              ? `The contract checks every rule again on approval, and this one no longer passed. ${describeReason(event.reason).explanation}`
+              : describeReason(event.reason).explanation,
           tone: "bad",
         });
         break;
