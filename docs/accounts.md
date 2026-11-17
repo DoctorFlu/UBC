@@ -27,6 +27,10 @@ erDiagram
   A token is what an MCP client presents as `Authorization: Bearer <token>`; it decides which agent, and so which mandate, a call acts on.
 - **Records** the console keeps (holdings, decision contexts, hedge plans, intent-to-context links, pairing, change requests, signal payments and budget, and event wake-ups) carry the mandate they belong to.
   The Policy event cache stays keyed by deployment, because events are public chain data; a mandate names the deployment it follows.
+- **The executor's records** stay keyed by deployment too: what each filled position paid at settlement, the journal of each intent's venue order, and the venue the executor announced.
+  They describe one Policy contract and the executor that fills its orders, not a mandate, and a contract has one executor whichever mandate follows it.
+  The executor signs each of them, and the console reads them only for the mandate that follows that deployment, so a mandate without a contract sees none: no venue badge, no order fields in Advanced view, no settlements.
+  When phase 2 gives other mandates their own contracts, each one's executor records come with its deployment, with no new key.
 
 ### Event wake-ups
 
@@ -130,13 +134,16 @@ A new id is issued at every sign-in, sign-up, claim and recovery, and a ceremony
 | `/api/auth/*` | anyone | ceremonies, rate limited per client and in total |
 | `/mcp` | an agent token | the token's agent and mandate; an unknown or revoked token gets 401, and every token gets 503 while the console cannot be asked |
 | `/api/agent/v1/*` (private network) | the MCP server | `CONSOLE_SERVICE_TOKEN`, plus the agent id in `X-Mandate-Agent`; every record read or written belongs to that agent's mandate |
-| `/api/executor/v1/*` (private network) | the contract's executor | no session and no token: a settlement is stored only when its signature recovers to the `executor()` of the server's contract, so it belongs to that deployment and only the mandate that follows it (the first workspace's) sees it, in its snapshot, its event stream and its agent's `GET /api/agent/v1/settlements` |
+| `/api/executor/v1/*` (private network) | the contract's executor | no session and no token: a settlement, a venue order version or a venue announcement is stored only when its signature recovers to the `executor()` of the server's contract, so it belongs to that deployment and only the mandate that follows it (the first workspace's) sees it, in its snapshot, its event stream and its agent's `GET /api/agent/v1/settlements`; `GET /api/executor/v1/orders/<intent>` returns that deployment's signed journal entry to the executor after a restart |
 | `/agent/<address>` | anyone | onchain data of the mandate whose agent is that address, nothing offchain |
 | `/rpc` (demo chain) | a signed-in member of the workspace that holds the demo chain's mandate | Caddy asks the console (`forward_auth`) before it forwards to anvil |
 
 The MCP server resolves the token of every request by asking the console (`POST /api/agent/v1/auth/resolve` with the token's SHA-256, never the token).
 It caches nothing, so a revoked token stops on its next call; the lookup is one indexed read on the private network.
 When the console cannot be asked, the MCP server refuses the call (503 with `Retry-After`) rather than guess, and it keeps no local copy of `MCP_AUTH_TOKEN` to fall back on.
+The lookup has its own bound of 5 seconds, headers and body, before the tool call's deadline (`MCP_TOOL_DEADLINE_MS`) starts: a console that does not answer in time gets the request a 503 that says so and one `http.auth_unavailable` log line, so a slow console cannot hold MCP requests open.
+A request then takes at most that bound, the tool deadline and its 3-second unwind, 48 seconds at the largest deadline, under the 60 seconds MCP clients wait.
+A workspace agent's proposal is signed by the console inside the call, so the call's deadline stops the signing request as it stops the call's other requests.
 Each agent gets its own policy client, plan store and proposal ledger in the MCP server, so a plan id or a retried proposal of one agent means nothing to another.
 `whoami` names the agent and mandate a token reaches.
 Signal purchases spend the operator's wallet, so in phase 1 only the agent of the mandate that follows the server's contract may buy signals; phase 2 gives each mandate its own budget.

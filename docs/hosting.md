@@ -710,11 +710,14 @@ It is an update that changes the console's database, run exactly as in [Updates 
 
   Keep a copy of `/data/mandate/mandate.env` off the machine from now on: the master key in it is the only way to open the agents' keys the console will hold.
   The old login's settings (`CONSOLE_USER`, `CONSOLE_PASSWORD_HASH`) are no longer read and can stay where they are.
-- **The rehearsal** goes from the current version to 7 (`6 -> 7`, or `5 -> 7` on a machine that skipped the settlements update, then `7 -> 7`), and its `diff` shows more than new empty tables, because the upgrade gives every record to the first workspace:
+- **The rehearsal** goes from the current version to 8, then `8 -> 8`.
+  The machine is at 7 once the Gemini venue update (#108, the venue order journal) has run, so `7 -> 8`; a machine that skipped it goes `6 -> 8`, and one that also skipped the settlements update `5 -> 8`, and their `diff` also shows those updates' new tables, empty.
+  The `diff` shows more than new empty tables, because the upgrade gives every record to the first workspace:
   - the version line;
   - new tables `workspaces`, `mandates` and `agents` with 1 row each, and `members`, `passkeys`, `sessions`, `recovery_codes`, `ceremonies`, `access_codes` and `agent_tokens` with 0;
   - `holdings`, `decision_contexts`, `hedge_plans`, `policy_change_requests`, `pairings`, `intent_context_links`, `signal_payments`, `signal_budget`, `wake_deliveries`, `wake_sources` and `wake_price_memory` with the same number of rows as before and a new hash, because each row gains the first mandate's id.
 
+  `policy_events`, `ingest_cursors`, `intent_details`, `market_listings`, `settlements`, `venue_orders` and `executor_venues` keep their rows and their hash: they stay keyed by deployment ([accounts.md](accounts.md#the-model)).
   Any other change, a different row count above all, means stop.
   The comparison after the swap may also show rows in `access_codes`, `agent_tokens` and `sessions`, from a claim code, Grok Bot's first call with the env file's token, and a sign-in.
   `dashboard/src/server/db.test.ts` upgrades a database of the hosted schema with rows in every table, checks every count, and reads the records back through the console's stores.
