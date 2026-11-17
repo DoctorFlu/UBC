@@ -120,8 +120,8 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
         {attention.total === 0 ? (
           <EmptyState title="You're all caught up" className={styles.caughtUp}>
             {threshold > 0
-              ? `Intents above ${formatUsdCents(threshold)} wait here for your signature.`
-              : "Intents above the approval threshold wait here for your signature."}
+              ? `Intents above ${formatUsdCents(threshold)} wait here for your approval.`
+              : "Intents above the approval threshold wait here for your approval."}
           </EmptyState>
         ) : (
           <NeedsYou snapshot={snapshot} attention={attention} />

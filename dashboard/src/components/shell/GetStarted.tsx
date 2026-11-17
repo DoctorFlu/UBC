@@ -9,7 +9,7 @@ import { useState, useSyncExternalStore } from "react";
 
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { isActive } from "@/lib/nav";
-import { useOwnerAccess } from "@/lib/owner/access";
+import { useOwnerAccess, useOwnerMode } from "@/lib/owner/access";
 import { setupSteps } from "@/lib/setup";
 
 import styles from "./GetStarted.module.css";
@@ -48,6 +48,7 @@ function subscribe(listener: () => void) {
 export function GetStarted() {
   const snapshot = useSnapshot();
   const access = useOwnerAccess();
+  const mode = useOwnerMode();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const hidden = useSyncExternalStore(
@@ -55,7 +56,7 @@ export function GetStarted() {
     () => hiddenThisPage || readHidden(),
     () => true,
   );
-  const steps = setupSteps(snapshot, access.kind === "owner");
+  const steps = setupSteps(snapshot, access.kind === "owner", mode);
   const done = steps.filter((step) => step.done).length;
   if (hidden || access.kind === "loading" || done === steps.length || isActive(pathname, "/setup")) {
     return null;

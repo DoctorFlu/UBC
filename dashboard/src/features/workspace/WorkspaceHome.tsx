@@ -13,7 +13,7 @@ import type { MandateSummary, WorkspaceHomeData } from "./types";
 function signerText(summary: MandateSummary): string {
   switch (summary.mandate.ownerSigner) {
     case "console":
-      return "The console signs; your passkey confirms each owner action";
+      return "The console holds this mandate's owner key; your passkey confirms each owner action";
     case "wallet":
       return "The owner's wallet signs";
     default:

@@ -78,7 +78,7 @@ export function BacktestPanel({
   if (chain.intents.length === 0) {
     return (
       <EmptyState plain icon={<FlaskConical strokeWidth={1.75} />} title="Nothing to replay yet">
-        Once the agent has proposed intents, this replays them through {subject} before you sign it.
+        Once the agent has proposed intents, this replays them through {subject} before you confirm it.
       </EmptyState>
     );
   }

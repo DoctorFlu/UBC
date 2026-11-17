@@ -35,7 +35,7 @@ export function RulesView({ tab, preview }: { tab?: RulesTab | undefined; previe
     <div>
       <PageHeader
         title="Rules"
-        description="The Policy contract checks every intent against these rules. Nothing here changes until you sign it."
+        description="The Policy contract checks every intent against these rules. Nothing here changes until you confirm it."
         meta={
           setBy ? (
             <>

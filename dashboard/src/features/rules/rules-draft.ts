@@ -14,7 +14,7 @@ import { AMOUNT_LABELS, type AmountKey } from "./rules-diff";
 export const amountHints: Record<AmountKey, string> = {
   budgetCents: "All the agent may ever commit to buys. It is a lifetime cap and does not reset.",
   maxTradeCents: "Larger intents are rejected as “over max trade size”.",
-  approvalAboveCents: "Intents above this wait for your signature. 0 means never ask.",
+  approvalAboveCents: "Intents above this wait for your approval. 0 means never ask.",
   dailyLossCents:
     "New intents stop once today’s losses recorded onchain reach it; it cannot yet see a loss at expiry. 0 turns it off.",
 };

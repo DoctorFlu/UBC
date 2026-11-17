@@ -215,7 +215,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
     <div className={styles.view}>
       <PageHeader
         title="Activity"
-        description={`Every intent ${agentName(snapshot, true)} sent, what the Policy contract decided, and what still needs your signature.`}
+        description={`Every intent ${agentName(snapshot, true)} sent, what the Policy contract decided, and what still needs your approval.`}
       />
 
       <StatGroup className={styles.stats}>

@@ -34,6 +34,7 @@ import type { ConsoleSnapshot } from "@/lib/live/types";
 import { describeMarket } from "@/lib/markets";
 import { paymentHref } from "@/lib/payments/links";
 import { ladderSettlement, settledLadders } from "@/lib/settlement/settlement";
+import { useOwnerMode } from "@/lib/owner/access";
 import { useNow } from "@/lib/useNow";
 
 import { CoverNowCard } from "./CoverNow";
@@ -477,6 +478,7 @@ export function HedgeView({
 }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
+  const mode = useOwnerMode();
   const { holdings, holdingsUpdatedAt, plans } = snapshot.offchain;
   const assets = [
     ...new Set([...plans.map((plan) => plan.asset), ...holdings.map((holding) => holding.asset)]),
@@ -494,7 +496,11 @@ export function HedgeView({
 
       <Card
         title="What you hold"
-        description="The agent reads this to size a hedge. Saving it needs the owner wallet's signature."
+        description={
+          mode === "passkey"
+            ? "The agent reads this to size a hedge. Saving it takes your passkey's confirmation."
+            : "The agent reads this to size a hedge. Saving it needs the owner wallet's signature."
+        }
         headingLevel={2}
       >
         <HoldingsEditor holdings={holdings} updatedAt={holdingsUpdatedAt} />

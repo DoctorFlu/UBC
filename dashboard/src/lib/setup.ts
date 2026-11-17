@@ -1,4 +1,5 @@
 import type { ConsoleSnapshot } from "@/lib/live/types";
+import type { OwnerMode } from "@/lib/owner/access";
 
 export interface SetupStep {
   id: string;
@@ -7,8 +8,11 @@ export interface SetupStep {
   done: boolean;
 }
 
-/** Every step is read from somewhere real: the wallet, the contract, or what the agent told the console. */
-export function setupSteps(snapshot: ConsoleSnapshot, ownerConnected: boolean): SetupStep[] {
+/**
+ * Every step is read from somewhere real: the owner's access, the contract, or what the agent told the
+ * console. `mode` says how the owner acts on this mandate, so no step asks a passkey owner for a wallet.
+ */
+export function setupSteps(snapshot: ConsoleSnapshot, ownerConnected: boolean, mode: OwnerMode): SetupStep[] {
   const pairing = snapshot.offchain.pairing;
   return [
     {
@@ -17,12 +21,19 @@ export function setupSteps(snapshot: ConsoleSnapshot, ownerConnected: boolean): 
       hint: "Locally, npm run dev:chain deploys one. On Arc testnet, set POLICY_ADDRESS.",
       done: snapshot.contract !== null,
     },
-    {
-      id: "connect-wallet",
-      title: "Connect the owner wallet",
-      hint: "The wallet the contract names as its owner: it signs the rules, approvals and pauses.",
-      done: ownerConnected,
-    },
+    mode === "passkey"
+      ? {
+          id: "owner-passkey",
+          title: "Act as the owner with your passkey",
+          hint: "The console holds this mandate's owner key; your passkey confirms each owner action, such as the rules and approvals.",
+          done: ownerConnected,
+        }
+      : {
+          id: "connect-wallet",
+          title: "Connect the owner wallet",
+          hint: "The wallet the contract names as its owner: it signs the rules, approvals and pauses.",
+          done: ownerConnected,
+        },
     {
       id: "set-mandate",
       title: "Set the first rules",
@@ -38,7 +49,10 @@ export function setupSteps(snapshot: ConsoleSnapshot, ownerConnected: boolean): 
     {
       id: "confirm-agent",
       title: "Confirm the agent",
-      hint: "Check the agent's name and address, then sign to confirm it.",
+      hint:
+        mode === "passkey"
+          ? "Check the agent's name and address, then confirm it with your passkey."
+          : "Check the agent's name and address, then sign to confirm it.",
       done: pairing?.status === "confirmed",
     },
     {
