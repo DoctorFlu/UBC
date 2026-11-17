@@ -244,6 +244,9 @@ test.describe("seeded demo", () => {
     const card = page.getByTestId("agent-plan");
     await expect(card).toHaveAttribute("data-plan-id", plan.planId);
     await expect(card).toContainText(stored.requestText);
+    // The demo request fits in its three lines, so it has no "Show more".
+    await expect(card.getByTestId("request-text")).toHaveText(stored.requestText);
+    await expect(card.getByTestId("request-text").getByRole("button")).toHaveCount(0);
     await expect(card).toContainText(formatUsdCents(plan.totals.costCents));
     await expect(card).toContainText(formatUsdCents(plan.totals.maxPayoutCents));
     await expect(card).toContainText(formatContractsHundredths(plan.totals.contractsHundredths));

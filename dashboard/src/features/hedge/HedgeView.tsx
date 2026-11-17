@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { IntentLink } from "@/components/domain/Intent";
+import { RequestText } from "@/components/domain/RequestText";
 import { Advanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
@@ -242,7 +243,7 @@ function AgentPlanCard({
           {view.requestText ? (
             <blockquote className={styles.request}>
               <MessageSquareText aria-hidden />
-              <p>{view.requestText}</p>
+              <RequestText text={view.requestText} />
             </blockquote>
           ) : null}
           <p className={styles.execution} data-testid="plan-execution" role="status">

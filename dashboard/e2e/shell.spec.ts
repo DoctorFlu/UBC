@@ -316,6 +316,66 @@ test.describe("keyboard", () => {
     await expect(order).toBeFocused();
   });
 
+  test("a long request shows three lines, and Show more appears only when the text does not fit", async ({
+    page,
+    browser,
+  }) => {
+    const specimen = (label: string) =>
+      page.locator(`[data-specimen="${label}"]`).getByTestId("request-text");
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/dev/components");
+      const short = specimen("short");
+      const long = specimen("long");
+      await expect(long.getByRole("button", { name: "Show more" })).toBeVisible();
+      await expect(short.getByRole("button")).toHaveCount(0);
+      // At most three lines until the reader asks for the rest.
+      const lineHeight = await long.locator("p").evaluate((p) => parseFloat(getComputedStyle(p).lineHeight));
+      const collapsed = (await long.boundingBox())?.height ?? 0;
+      expect(collapsed).toBeLessThanOrEqual(lineHeight * 3 + 1);
+
+      // From the keyboard: Enter opens it, focus stays on the toggle, Space closes it again.
+      const more = long.getByRole("button", { name: "Show more" });
+      await expect(more).toHaveAttribute("aria-expanded", "false");
+      await expect(more).toHaveAttribute("aria-controls", (await long.locator("p").getAttribute("id")) ?? "");
+      await more.focus();
+      await page.keyboard.press("Enter");
+      const less = long.getByRole("button", { name: "Show less" });
+      await expect(less).toHaveAttribute("aria-expanded", "true");
+      await expect(less).toBeFocused();
+      expect((await long.boundingBox())?.height ?? 0).toBeGreaterThan(collapsed + lineHeight);
+      await page.keyboard.press("Space");
+      await expect(long.getByRole("button", { name: "Show more" })).toBeFocused();
+      expect((await long.boundingBox())?.height ?? 0).toBeCloseTo(collapsed, 0);
+
+      // One 600-character word wraps inside the card instead of widening the page.
+      const unbroken = specimen("unbroken");
+      await expect(unbroken.getByRole("button", { name: "Show more" })).toBeVisible();
+      await unbroken.getByRole("button", { name: "Show more" }).click();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+    }
+
+    // Nothing moves when the page hydrates and the toggle appears: the server's page is the same height.
+    const plain = await browser.newContext({
+      javaScriptEnabled: false,
+      viewport: { width: 390, height: 900 },
+    });
+    const before = await plain.newPage();
+    await before.goto(new URL("/dev/components", page.url()).toString());
+    const unhydrated = await before.locator('[data-specimen="long"]').boundingBox();
+    await plain.close();
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto("/dev/components");
+    await expect(specimen("long").getByRole("button", { name: "Show more" })).toBeVisible();
+    const hydrated = await page.locator('[data-specimen="long"]').boundingBox();
+    expect(hydrated?.height).toBe(unhydrated?.height);
+    expect(hydrated?.y).toBe(unhydrated?.y);
+  });
+
   test("a toast is announced in the notifications region and dismisses from the keyboard", async ({
     page,
   }) => {
