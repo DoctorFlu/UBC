@@ -7,6 +7,8 @@ import {
   policyBaseAbi,
   policyEventSchema,
   policyExtensionsAbi,
+  policyReferenceAbi,
+  policyV2Abi,
   rulesFromChain,
   rulesFromTuple,
   rulesToChain,
@@ -57,7 +59,17 @@ describe("ABI", () => {
     ]);
     const base = new Set(signatures(policyBaseAbi));
     for (const extension of signatures(policyExtensionsAbi)) expect(base.has(extension)).toBe(false);
-    expect(policyAbi).toHaveLength(policyBaseAbi.length + policyExtensionsAbi.length);
+    expect(policyReferenceAbi).toHaveLength(policyBaseAbi.length + policyExtensionsAbi.length);
+  });
+
+  it("adds only v2's role handover, role events and zero-address error on top, in policyAbi", () => {
+    expect(signatures(policyV2Abi)).toEqual([
+      "setUser(address)",
+      "UserChanged(address,address)",
+      "AgentChanged(address,address)",
+      "ExecutorChanged(address,address)",
+    ]);
+    expect(policyAbi).toHaveLength(policyBaseAbi.length + policyExtensionsAbi.length + policyV2Abi.length);
   });
 
   it("encodes both proposeTrade overloads", () => {
@@ -161,6 +173,21 @@ describe("decodePolicyLogs", () => {
     for (const event of events) {
       expect(policyEventSchema.parse(JSON.parse(JSON.stringify(event)))).toEqual(event);
     }
+  });
+
+  it("decodes the role events of Policy v2 under the contract's own names", () => {
+    const zero = "0x0000000000000000000000000000000000000000";
+    const logs = (["UserChanged", "AgentChanged", "ExecutorChanged"] as const).map((name, i) =>
+      makeLog(name, { previous: zero, current: AGENT }, { blockNumber: 1, logIndex: i, blockTimestamp: 1 }),
+    );
+    const decoded = decodePolicyLogs(logs).map((e) => policyEventSchema.parse(e));
+    expect(
+      decoded.map((e) => [e.type, "previous" in e ? e.previous : null, "current" in e ? e.current : null]),
+    ).toEqual([
+      ["UserChanged", zero, AGENT],
+      ["AgentChanged", zero, AGENT],
+      ["ExecutorChanged", zero, AGENT],
+    ]);
   });
 
   it("skips logs from other contracts and unrelated events", () => {

@@ -6,7 +6,13 @@
 import { describe, expect, it } from "vitest";
 import { passed, runRedTeam, startSelf, type RunReport, type Verdict } from "../src";
 
-const EXPECTED: Record<string, Verdict> = {
+/** The production contract (v2, issue #23) rejects malformed limit prices, markets and outcomes itself. */
+const FORMAT_CHECKED: Record<"production" | "reference", Verdict> = {
+  production: "held",
+  reference: "bounded",
+};
+
+const EXPECTED_ON_BOTH: Record<string, Verdict> = {
   "mcp.over-max-trade": "held",
   "mcp.retry-after-rejection": "held",
   "mcp.split-order": "bounded",
@@ -38,8 +44,6 @@ const EXPECTED: Record<string, Verdict> = {
   "chain.self-approve": "held",
   "chain.record-result": "held",
   "chain.amount-edges": "held",
-  "chain.limit-price-edges": "bounded",
-  "chain.market-strings": "bounded",
   "mcp.chain-text-relay": "held",
   "chain.replay": "held",
   "chain.hidden-entry-points": "held",
@@ -70,7 +74,12 @@ describe.each(["production", "reference"] as const)("red team against the %s con
     const report = await run(contract);
     const unexpected = report.attacks.filter((r) => !r.asExpected);
     expect(unexpected.map((r) => `${r.id}: ${r.verdict} (${r.actual})`)).toEqual([]);
-    expect(Object.fromEntries(report.attacks.map((r) => [r.id, r.verdict]))).toEqual(EXPECTED);
+    const verdicts = Object.fromEntries(report.attacks.map((r) => [r.id, r.verdict]));
+    expect(verdicts).toEqual({
+      ...EXPECTED_ON_BOTH,
+      "chain.limit-price-edges": FORMAT_CHECKED[contract],
+      "chain.market-strings": FORMAT_CHECKED[contract],
+    });
     expect(report.attacks.filter((r) => r.verdict === "BREACH").map((r) => r.id)).toEqual([]);
     expect(report.aborted).toBeNull();
     // `npm run redteam` exits zero only when every attack got its expected verdict and none breached.

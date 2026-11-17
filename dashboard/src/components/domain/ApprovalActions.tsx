@@ -1,6 +1,6 @@
 "use client";
 
-import { type IntentView, intentAnomalies } from "@mandate/shared";
+import { type IntentView, describeReason, intentAnomalies } from "@mandate/shared";
 import { Check, X } from "lucide-react";
 
 import { HoldButton } from "@/components/ui/HoldButton";
@@ -16,7 +16,8 @@ import { OwnerTxStatus } from "./OwnerTxStatus";
 /**
  * Approve or reject an intent waiting for the owner, each by holding or pressing twice. Each is an owner-signed
  * `approveIntent` or `rejectIntent`; the row changes when the console reads the resulting event.
- * `approveIntent` re-checks only the budget, so an approval can still end as "over budget".
+ * `approveIntent` checks every rule again (Policy v2), so an approval can still end as a rejection with that
+ * rule's reason, for example "agent paused" or "over budget"; the toast then says which rule and why.
  *
  * `warn` (the default in `block` mode) says beside the buttons why a flagged intent could not come from the
  * MCP server, for example "Gemini lists this market as Sports, the intent says Crypto". A table row leaves
@@ -50,9 +51,10 @@ export function ApprovalActions({
     if (!result.ok) return;
     const after = result.snapshot?.chain?.intents.find((candidate) => candidate.id === intent.id);
     if (after?.status === "rejected") {
+      const reason = describeReason(after.reason ?? "");
       toast({
-        title: "Rejected: over budget",
-        description: `${subject} no longer fits the budget, so the contract rejected it.`,
+        title: `Refused by the contract: ${reason.label}`,
+        description: `The contract checked ${subject} again and rejected it. ${reason.explanation}`,
         tone: "danger",
       });
     } else {

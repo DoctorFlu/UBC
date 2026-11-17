@@ -260,9 +260,14 @@ export function wakeSummary(detail: WakeDetail, count: number): string {
       return `The contract rejected intent ${ids}${more(count, detail.detail.intents.length)}: ${latest?.reason ?? "no reason"}.`;
     }
     case "owner_decision": {
-      const parts = detail.detail.intents.map(
-        (i) =>
-          `${i.decision} #${String(i.id)}${i.decision === "rejected" && i.reason ? ` (${i.reason})` : ""}`,
+      // A rejection for any reason but "rejected by user" is the contract refusing the owner's approval:
+      // Policy v2 checks every rule again on approval.
+      const parts = detail.detail.intents.map((i) =>
+        i.decision === "approved"
+          ? `approved #${String(i.id)}`
+          : i.reason !== null && i.reason !== "rejected by user"
+            ? `approved #${String(i.id)} but the contract refused it (${i.reason})`
+            : `rejected #${String(i.id)}`,
       );
       return `The owner ${parts.join(", ")}${more(count, parts.length)}.`;
     }

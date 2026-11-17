@@ -104,12 +104,13 @@ describe("ConsoleService against the production contract", () => {
     expect(view.policyVersion).toBe(1);
     expect(snapshot.contract?.roles?.user).toBe(chain.user.account?.address);
     expect(snapshot.contract?.kind).toBe("production");
-    expect(snapshot.contract?.recordsContextHash).toBe(false);
+    // The production contract has the contextHash overload since v2 (issue #23).
+    expect(snapshot.contract?.recordsContextHash).toBe(true);
 
     const byId = new Map(view.intents.map((intent) => [intent.id, intent]));
     expect(byId.get(approved.intentId)).toMatchObject({ status: "executed", filledCents: 1_000 });
     expect(byId.get(held.intentId)).toMatchObject({ status: "failed", amountCents: 2_200 });
-    // No event carries a rejected proposal's details on the production contract: getIntent filled them.
+    // IntentProposed carries a rejected proposal's details on the production contract since v2.
     expect(byId.get(tooBig.intentId)).toMatchObject({
       status: "rejected",
       reason: "over max trade size",
@@ -208,7 +209,8 @@ describe("ConsoleService with onchain values offchain code cannot hold", () => {
     };
     try {
       await caughtUp(service, chain);
-      // With a stolen agent key: a sell at limit 2^256 - 1 (approved) and a buy of 2^256 - 1 cents (rejected).
+      // With a stolen agent key: a sell at limit 2^256 - 1 and a buy of 2^256 - 1 cents. The production
+      // contract (v2) rejects the sell for its format; the limit is only in its IntentProposed event.
       const sellId = await chain.agent.getIntentCount();
       await write(chain.agent, {
         functionName: "proposeTrade",
@@ -220,7 +222,8 @@ describe("ConsoleService with onchain values offchain code cannot hold", () => {
       });
       const flagged = await caughtUp(service, chain);
       expect(flagged.chain?.intents.find((intent) => intent.id === sellId)).toMatchObject({
-        status: "approved",
+        status: "rejected",
+        reason: "invalid limit price",
         limitPrice: null,
         outOfRange: { limitPrice: max.toString() },
       });

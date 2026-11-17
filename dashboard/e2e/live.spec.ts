@@ -1481,6 +1481,34 @@ test("the kill switch pauses the agent and the contract refuses its next proposa
   await expect(row(page, refused.intentId)).toContainText("agent paused");
 });
 
+test("an approval the contract refuses says which rule, in plain words, and the intent ends rejected", async ({
+  page,
+}) => {
+  // Policy v2 checks every rule again on approval. Held while trading was on, approved while paused.
+  await chain.user.setPaused(false);
+  const held = await chain.agent.proposeTrade(noBuy(BTC_65K, 2_200, 31));
+  expect(held.verdict).toBe("needs_approval");
+  await chain.user.setPaused(true);
+
+  await open(page, "/activity");
+  await expect(row(page, held.intentId)).toContainText("Waiting");
+  const approve = row(page, held.intentId).getByRole("button", { name: /^Approve \$22\.00/ });
+  await approve.click();
+  await approve.click();
+  await expect(toast(page)).toContainText("Refused by the contract: Paused");
+  await expect(toast(page)).toContainText("The user has paused the agent");
+  await expect(row(page, held.intentId)).toContainText("agent paused");
+  expect(
+    (await snapshot(baseURL)).chain?.intents.find((intent) => intent.id === held.intentId),
+  ).toMatchObject({
+    status: "rejected",
+    reason: "agent paused",
+  });
+
+  await open(page, `/activity/${held.intentId.toString()}`);
+  await expect(page.getByText("Refused when you approved it: agent paused")).toBeVisible();
+});
+
 test("the agent's reason, linked offchain, is checked against the intent", async ({ page }) => {
   const first = (await snapshot(baseURL)).chain?.intents[0];
   expect(first).toBeDefined();

@@ -2,14 +2,15 @@
 
 This document is for whoever owns `contracts/src/Policy.sol`.
 It says what the offchain code (agent, console, executor) uses from that contract today, which small additions would help, and what looked surprising.
-Line numbers refer to `contracts/src/Policy.sol` as merged on main.
+Line numbers refer to `contracts/src/Policy.sol` before Policy v2 (`b469382`, issue #23).
+Policy v2 adds the requests 2.1 to 2.3 below, role events, `setUser`, format checks on proposals, and a full re-check on approval; section 3 says which observations it changes.
 
 The production contract is the source of truth.
 `@mandate/shared` mirrors it exactly, and the devchain tests enforce that:
 
-- `policyBaseAbi` in `shared/src/abi.ts` must equal the ABI forge produces from `contracts/src/Policy.sol` (constructor and `internalType` aside).
+- `policyAbi` in `shared/src/abi.ts` must equal the ABI forge produces from `contracts/src/Policy.sol` (constructor and `internalType` aside): the v1 base (`policyBaseAbi`), the three extensions (`policyExtensionsAbi`) and the v2-only items (`policyV2Abi`).
 - The rule tests and a 600-case fuzz test run against `contracts/src/Policy.sol` compiled as is, comparing the TypeScript evaluator with the verdict each real `proposeTrade` transaction emits.
-- The same tests run against `devchain/contracts/PolicyReference.sol`, which is `Policy.sol` plus the three additions below, so the additions are proven to change nothing else.
+- The same tests run against `devchain/contracts/PolicyReference.sol`, which is the v1 `Policy.sol` plus the three additions below, so the additions are proven to change nothing else.
 
 Nothing under `/contracts` is modified by this work.
 
@@ -36,6 +37,7 @@ Previews run the TypeScript evaluator on a fresh snapshot, and intent details mi
 
 Each one is small, independent and purely additive: existing selectors, events and storage stay as they are.
 `PolicyClient` detects each one with a read-only probe and uses it only when present.
+Policy v2 has 2.1 to 2.3 with these exact signatures, so the probes find them and the agent records its context hash onchain; 2.4 is still open.
 The exact Solidity is in `devchain/contracts/PolicyReference.sol`, marked `EXTENSION`.
 
 ### 2.1 `IntentProposed` event
@@ -110,8 +112,9 @@ Each is pinned by a test that runs against `Policy.sol`, so a deliberate change 
 
 1. Rejected intents keep no reason in storage (L163-167, `Intent` at L30-41).
    The reason exists only in the `IntentRejected` event.
-2. `approveIntent` re-checks only the budget (L116-121).
+2. Before v2, `approveIntent` re-checks only the budget (L116-121).
    A held intent can be approved while the agent is paused, after the daily loss limit is hit, or after its category or the max trade size was tightened.
+   Policy v2 re-runs every rule on approval, so an approval can end as a rejection with any rule's reason; the console says which.
 3. The daily loss check runs before the max trade size and category checks (L231-233).
    Once the limit is hit, every proposal reports `"daily loss limit reached"`, even one that would also break another rule.
 4. Daily loss counts only negative results (L192-199).
@@ -120,12 +123,14 @@ Each is pinned by a test that runs against `Policy.sol`, so a deliberate change 
    Budget is released only for the unfilled part of a buy; executed buys stay committed forever.
 6. `recordResult` with `filled = false` and a non-zero `filledCents` succeeds and stores a zero fill (L189), but it still reverts with `FillExceedsIntent` if `filledCents` exceeds the amount (L187).
 7. `setPolicy` always emits `Paused` after `PolicyUpdated`, even when the pause flag did not change (L95).
-8. `setAgent` and `setExecutor` emit no event and accept the zero address (L103-109).
+8. Before v2, `setAgent` and `setExecutor` emit no event and accept the zero address (L103-109).
    Role changes are invisible in the log, so the dashboard must read `agent()` and `executor()`.
+   Policy v2 emits `UserChanged`, `AgentChanged` and `ExecutorChanged`, refuses the zero address with `ZeroAddress`, and adds `setUser`; Audit shows the role events.
 9. `getIntent` with an id that does not exist reverts with a panic (L214); ids start at 0 (L146).
    `PolicyClient.getIntent` checks `intentCount()` first and returns null.
-10. There is no validation of `market`, `outcome` or `limitPrice` (L136-160).
+10. Before v2, there is no validation of `market`, `outcome` or `limitPrice` (L136-160).
     The offchain schema enforces a non-blank market, `YES` or `NO`, and a price from 1 to 99 cents before sending.
+    Policy v2 records a malformed proposal and rejects it before any rule: `invalid market` (empty or over 128 bytes), `invalid outcome` (not exactly `YES` or `NO`) or `invalid limit price` (0 or over 99); `malformedReason` in `@mandate/shared` mirrors it.
 11. `committedCents + amountCents` (L117, L234) reverts with an overflow panic instead of returning `"over budget"` when the sum exceeds `2^256 - 1`.
     Only reachable if `maxTradeCents` is set near `2^256`; offchain code refuses anything above `2^53 - 1` anyway.
 12. A zero amount is a recorded rejection (`"zero amount"`, L230), not a revert, so it uses an intent id.

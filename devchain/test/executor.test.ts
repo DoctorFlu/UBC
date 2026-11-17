@@ -15,6 +15,7 @@ import { FakeGeminiPrivate, unpacedLimiter } from "@mandate/gemini/testing";
 import {
   Category,
   hashSettlement,
+  malformedReason,
   settlementMessage,
   settlementProblems,
   type CategoryId,
@@ -196,38 +197,66 @@ describe.each(POLICY_CONTRACTS)("the simulated executor on the %s contract", (ki
       ["Sports market labelled Crypto", order({ market: NFL })],
       ["sell at limit price 1,000,000", order({ isBuy: false, limitPrice: 1_000_000n })],
     ];
+    // The production contract (v2) rejects a malformed proposal itself, so only the reference contract
+    // lets those reach the executor; the rest are approved on both.
+    const rejectedAtProposal = (proposal: RawProposal) =>
+      kind === "production" && malformedReason(proposal) !== null;
     const ids: number[] = [];
     for (const [, proposal] of cases) ids.push(await proposeRaw(chain.agent, proposal));
-    for (const id of ids) expect((await chain.outsider.getIntent(id))?.status).toBe("approved");
+    for (const [i, [, proposal]] of cases.entries()) {
+      expect((await chain.outsider.getIntent(ids[i] ?? -1))?.status).toBe(
+        rejectedAtProposal(proposal) ? "rejected" : "approved",
+      );
+    }
 
     start(fakeVenue());
     const statuses = await waitForStatus(chain.outsider, ids, (s) => s !== "approved");
+    const notFilled = (proposal: RawProposal) => (rejectedAtProposal(proposal) ? "rejected" : "failed");
+    const byLabel = Object.fromEntries(cases);
+    const at = (label: string) => notFilled(byLabel[label] ?? order());
     expect(Object.fromEntries(cases.map(([label], i) => [label, statuses.get(ids[i] ?? -1)]))).toEqual({
-      "sell at limit price 2^256 - 1": "failed",
+      "sell at limit price 2^256 - 1": at("sell at limit price 2^256 - 1"),
       valid: "executed",
-      "empty market": "failed",
+      "empty market": at("empty market"),
       "injection market": "failed",
-      "16 KiB market": "failed",
+      "16 KiB market": at("16 KiB market"),
       "unlisted symbol": "failed",
-      "outcome MAYBE": "failed",
-      "limit price 0": "failed",
-      "limit price 100": "failed",
+      "outcome MAYBE": at("outcome MAYBE"),
+      "limit price 0": at("limit price 0"),
+      "limit price 100": at("limit price 100"),
       "Sports market labelled Crypto": "failed",
-      "sell at limit price 1,000,000": "failed",
+      "sell at limit price 1,000,000": at("sell at limit price 1,000,000"),
     });
+    if (kind === "production") {
+      // Pinned, so a change in the contract's format checks shows up here.
+      expect(cases.filter(([, proposal]) => rejectedAtProposal(proposal)).map(([label]) => label)).toEqual([
+        "sell at limit price 2^256 - 1",
+        "empty market",
+        "16 KiB market",
+        "outcome MAYBE",
+        "limit price 0",
+        "limit price 100",
+        "sell at limit price 1,000,000",
+      ]);
+    }
 
     // Refused buys are recorded as not filled, so their budget is released: only the valid $1 stays.
     expect((await chain.outsider.getSnapshot()).committedCents).toBe(100);
     // The executor logs once its own wait for the receipt returns, which can be after this test has
     // already seen the new status onchain: wait for a line about every intent before reading the log.
     await vi.waitFor(() => {
-      for (const id of ids) expect(lines.some((line) => line.includes(`intent #${String(id)} `))).toBe(true);
+      for (const [i, [, proposal]] of cases.entries()) {
+        if (rejectedAtProposal(proposal)) continue;
+        expect(lines.some((line) => line.includes(`intent #${String(ids[i])} `))).toBe(true);
+      }
     });
     const log = lines.join("\n");
     expect(log).toContain("(category_mismatch)");
     expect(log).toContain("fake full fill, $1.00 filled");
     expect(log).toContain("(market_not_listed)");
-    expect(log).toContain("(number_out_of_range)");
+    expect(log).toContain("(market_not_a_symbol)");
+    // Only the reference contract lets a limit price of 2^256 - 1 reach the executor.
+    if (kind === "reference") expect(log).toContain("(number_out_of_range)");
     expect(log).not.toContain("polling failed");
     expect(log).not.toContain("IGNORE ALL PREVIOUS INSTRUCTIONS");
     expect(log).not.toContain("X".repeat(200));

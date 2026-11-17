@@ -50,7 +50,7 @@ export type ProposeResult = ChainVerdict &
     contextHashRecorded: boolean;
   };
 
-/** Outcome of `approveIntent`: approved, or rejected with "over budget" when the intent no longer fits. */
+/** Outcome of `approveIntent`: approved, or rejected with the reason of the rule it no longer passes (any rule on the production contract, only "over budget" on the reference contract). */
 export type ApproveResult = Extract<ChainVerdict, { verdict: "approved" | "rejected" }> &
   TxResult & { intentId: number };
 
@@ -169,7 +169,7 @@ const PROBE_SENDER: Address = "0x000000000000000000000000000000000000dEaD";
  * reference contract with extensions. One method per role action:
  * - anyone: reads, `previewTrade`, `getEvents`, `watchEvents`
  * - agent: `proposeTrade`
- * - user: `setPolicy`, `setPaused`, `approveIntent`, `rejectIntent`, `setAgent`, `setExecutor`
+ * - user: `setPolicy`, `setPaused`, `approveIntent`, `rejectIntent`, `setUser` (v2 only), `setAgent`, `setExecutor`
  * - executor: `recordResult`
  *
  * Every write is simulated first (so a revert surfaces with the contract's error name), sent with EIP-1559
@@ -458,6 +458,13 @@ export class PolicyClient {
   async setPaused(paused: boolean): Promise<TxResult> {
     return txResult(
       await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setPaused", args: [paused] })),
+    );
+  }
+
+  /** Hands the user role to another address. Only the production contract (v2) has it. */
+  async setUser(user: Address): Promise<TxResult> {
+    return txResult(
+      await this.send(encodeFunctionData({ abi: policyAbi, functionName: "setUser", args: [user] })),
     );
   }
 

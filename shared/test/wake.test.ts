@@ -133,6 +133,19 @@ describe("chainWakes", () => {
     ]);
   });
 
+  it("says when the contract refused the owner's approval, apart from the owner's own rejection (Policy v2)", () => {
+    const decision = (id: number, d: "approved" | "rejected", reason: string | null) => ({
+      kind: "owner_decision" as const,
+      detail: { intents: [{ id, market: MARKET, decision: d, reason }] },
+    });
+    expect(wakeSummary(decision(1, "approved", null), 1)).toBe("The owner approved #1.");
+    expect(wakeSummary(decision(2, "rejected", "rejected by user"), 1)).toBe("The owner rejected #2.");
+    // approveIntent checks every rule again: approved while paused, the contract rejects it.
+    expect(wakeSummary(decision(3, "rejected", "agent paused"), 1)).toBe(
+      "The owner approved #3 but the contract refused it (agent paused).",
+    );
+  });
+
   it("drops what the run in progress caused, but never the owner's decisions", () => {
     const h = history();
     h.add("IntentNeedsApproval", { intentId: 0, amountCents: 2_200 });
