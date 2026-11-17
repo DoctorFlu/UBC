@@ -449,7 +449,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             <StatusChip status={intent.status} reason={intent.reason} />
             <FlaggedBadge flags={flags} />
             <span>
-              Proposed <When at={intent.proposedAt} date />
+              Proposed <When inSentence at={intent.proposedAt} date />
             </span>
           </>
         }

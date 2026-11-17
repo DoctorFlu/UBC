@@ -217,10 +217,10 @@ function AgentPlanCard({
         title={`${agentName}'s plan`}
         description={
           <>
-            Planned <When at={view.createdAt} date />
+            Planned <When inSentence at={view.createdAt} date />
             {at(view.createdAt) === at(view.storedAt) ? null : (
               <>
-                , stored <When at={view.storedAt} date />
+                , stored <When inSentence at={view.storedAt} date />
               </>
             )}
             .

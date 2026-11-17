@@ -166,7 +166,7 @@ function RequestLink({ view }: { view: AgentPlanView }) {
         <p className={styles.muted}>The agent stored the plan without the request that led to it.</p>
       )}
       <p className={styles.note}>
-        As the agent reported it with the plan, <When at={view.createdAt} date />.
+        As the agent reported it with the plan, <When inSentence at={view.createdAt} date />.
       </p>
     </ChainLink>
   );
@@ -473,7 +473,7 @@ export function EvidenceView({ view, preview }: { view: AgentPlanView; preview?:
               {status.label}
             </Lamp>
             <span>
-              Planned <When at={view.createdAt} date />
+              Planned <When inSentence at={view.createdAt} date />
             </span>
           </>
         }

@@ -86,11 +86,11 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
                     <dd>
                       {pairing.status === "confirmed" && pairing.confirmedAt ? (
                         <>
-                          Confirmed <When at={pairing.confirmedAt} date />
+                          Confirmed <When inSentence at={pairing.confirmedAt} date />
                         </>
                       ) : (
                         <>
-                          Waiting for you since <When at={pairing.announcedAt} />
+                          Waiting for you since <When inSentence at={pairing.announcedAt} />
                         </>
                       )}
                     </dd>

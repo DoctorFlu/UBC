@@ -132,7 +132,7 @@ function RequestCard({
             text={request.reason}
             footer={
               <>
-                {agentName}, <When at={request.createdAt} date />
+                {agentName}, <When inSentence at={request.createdAt} date />
               </>
             }
           />
@@ -169,7 +169,7 @@ function RequestCard({
               {request.resolvedAt ? (
                 <>
                   {" "}
-                  <When at={request.resolvedAt} date />
+                  <When inSentence at={request.resolvedAt} date />
                 </>
               ) : (
                 ""

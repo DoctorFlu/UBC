@@ -157,13 +157,13 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
         <p className={styles.note} data-testid="budget-note">
           {reading.reset ? (
             <>
-              A new day started <When at={budget.resetsAt} date />; nothing is counted until the agent reports
-              today&apos;s spend.
+              A new day started <When inSentence at={budget.resetsAt} date />; nothing is counted until the
+              agent reports today&apos;s spend.
             </>
           ) : (
             <>
-              Resets <When at={budget.resetsAt} date />. At most {formatUsdc(reading.maxPerPurchase)} per
-              purchase.
+              Resets <When inSentence at={budget.resetsAt} date />. At most{" "}
+              {formatUsdc(reading.maxPerPurchase)} per purchase.
             </>
           )}
         </p>
@@ -184,7 +184,7 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
                 "The agent could not read it"
               ) : (
                 <>
-                  As of <When at={budget.asOf} date />
+                  As of <When inSentence at={budget.asOf} date />
                 </>
               )
             }

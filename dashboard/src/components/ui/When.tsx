@@ -37,13 +37,28 @@ export interface WhenProps {
   /** In the exact form, put the date on a second line with this class (for table cells). */
   dateClassName?: string;
   className?: string;
+  /** After other words ("Saved just now"): starts in lower case, where a cell starts with a capital. */
+  inSentence?: boolean;
+}
+
+/** "Today, 4:00 PM" reads "today, 4:00 PM" after other words; month names keep their capital. */
+const SENTENCE_START = /^(Just now|Today|Yesterday|Tomorrow)/;
+
+function toSentence(text: string): string {
+  return SENTENCE_START.test(text) ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : text;
 }
 
 /**
  * A moment as the owner reads it: "2 min ago" or "Today, 6:20 PM" on their own clock, with the exact UTC
  * time on hover and in the markup. Advanced view shows the exact UTC time itself.
  */
-export function When({ at, date: withDate = false, dateClassName, className }: WhenProps) {
+export function When({
+  at,
+  date: withDate = false,
+  dateClassName,
+  className,
+  inSentence = false,
+}: WhenProps) {
   const { advanced } = useAdvanced();
   const tick = useSyncExternalStore(subscribe, currentTick, serverTick);
   const date = typeof at === "number" ? new Date(at * 1000) : new Date(at);
@@ -51,7 +66,9 @@ export function When({ at, date: withDate = false, dateClassName, className }: W
   if (!advanced && tick !== null) {
     return (
       <time dateTime={iso} title={exactUtc(date)} className={className}>
-        {relativeTime(date, { now: new Date(tick * TICK_MS) })}
+        {inSentence
+          ? toSentence(relativeTime(date, { now: new Date(tick * TICK_MS) }))
+          : relativeTime(date, { now: new Date(tick * TICK_MS) })}
       </time>
     );
   }

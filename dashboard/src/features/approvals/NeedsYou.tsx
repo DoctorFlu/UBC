@@ -84,7 +84,7 @@ export function NeedsYou({ snapshot, attention }: { snapshot: ConsoleSnapshot; a
                     {name} asks to change {count.toString()} {count === 1 ? "rule" : "rules"}
                   </span>
                   <span className={styles.taskMeta}>
-                    Sent <When at={request.createdAt} />
+                    Sent <When inSentence at={request.createdAt} />
                   </span>
                 </span>
                 <ButtonLink href="/rules?tab=requests" size="sm" variant="secondary">
@@ -101,7 +101,7 @@ export function NeedsYou({ snapshot, attention }: { snapshot: ConsoleSnapshot; a
                   {attention.pairing.agentName} wants to pair with this console
                 </span>
                 <span className={styles.taskMeta}>
-                  Announced <When at={attention.pairing.announcedAt} />
+                  Announced <When inSentence at={attention.pairing.announcedAt} />
                 </span>
               </span>
               <ButtonLink

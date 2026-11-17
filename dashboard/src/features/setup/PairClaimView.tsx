@@ -99,7 +99,7 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
               <dd>
                 {pairing.status === "confirmed" && pairing.confirmedAt ? (
                   <>
-                    Confirmed <When at={pairing.confirmedAt} date />
+                    Confirmed <When inSentence at={pairing.confirmedAt} date />
                   </>
                 ) : (
                   "Waiting for you"

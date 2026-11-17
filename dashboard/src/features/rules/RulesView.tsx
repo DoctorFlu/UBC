@@ -40,7 +40,7 @@ export function RulesView({ tab, preview }: { tab?: RulesTab | undefined; previe
           setBy ? (
             <>
               <span>
-                Version {chain.policyVersion}, set <When at={setBy.timestamp} date />
+                Version {chain.policyVersion}, set <When inSentence at={setBy.timestamp} date />
               </span>
               {advanced ? <HexValue label="Signed in" value={setBy.txHash} kind="tx" /> : null}
             </>

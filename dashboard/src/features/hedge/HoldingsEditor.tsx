@@ -211,7 +211,7 @@ export function HoldingsEditor({
           blocked
         ) : updatedAt ? (
           <>
-            Saved <When at={updatedAt} date />.
+            Saved <When inSentence at={updatedAt} date />.
           </>
         ) : (
           "Never saved."
