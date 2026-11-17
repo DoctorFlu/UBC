@@ -274,6 +274,34 @@
   height: 0.875rem;
 }
 
+/* Where orders are placed (issue #93): Gemini's sandbox in the fill hue, real money in the danger hue. */
+.venueBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-height: 2rem;
+  padding: 0 var(--space-2-5);
+  border: 1px solid var(--color-filled-text);
+  border-radius: var(--radius-xs);
+  background: var(--color-filled-soft);
+  color: var(--color-filled-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+.venueBadgeLive {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.venueBadge svg {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
 /* Paused banner: the isolator is off. */
 .paused {
   display: flex;

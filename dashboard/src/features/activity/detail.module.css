@@ -249,6 +249,13 @@
   overflow-wrap: anywhere;
 }
 
+.venueDetail {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
 .facts dd.filled {
   display: flex;
   flex-wrap: wrap;

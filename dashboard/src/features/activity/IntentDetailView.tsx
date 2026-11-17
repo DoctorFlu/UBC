@@ -35,7 +35,13 @@ import {
 } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents } from "@/lib/live/derive";
-import type { ChainView, ConsoleSnapshot, SealedReason, SettlementView } from "@/lib/live/types";
+import type {
+  ChainView,
+  ConsoleSnapshot,
+  SealedReason,
+  SettlementView,
+  VenueOrderView,
+} from "@/lib/live/types";
 import { formatSettlementValue, totalsSentence } from "@/lib/settlement/settlement";
 import { categoryName, describeMarket, namingCategory } from "@/lib/markets";
 import { evidenceHref } from "@/lib/evidence/chain";
@@ -415,6 +421,52 @@ function SettlementCard({ settlement }: { settlement: SettlementView }) {
   );
 }
 
+const VENUE_ORDER_STATES: Record<VenueOrderView["state"], string> = {
+  placing: "Being placed",
+  not_placed: "Not placed yet",
+  unknown: "Being looked up",
+  open: "Open",
+  filled: "Filled",
+  partly_filled: "Partly filled, rest cancelled",
+  cancelled: "Cancelled unfilled",
+  rejected: "Refused by Gemini",
+};
+
+/**
+ * The order the executor placed on Gemini for this intent (issue #93), from its signed journal in the
+ * console. Advanced only: the Order card already says what filled.
+ */
+function VenueOrderFacts({ order }: { order: VenueOrderView }) {
+  const where = order.environment === "production" ? "Gemini" : "Gemini sandbox";
+  return (
+    <Advanced>
+      <dt>Venue order</dt>
+      <dd data-testid="intent-venue-order">
+        {order.venueOrderId === null ? (
+          <span>No id from {where} yet</span>
+        ) : (
+          <span className="num">
+            {where} #{order.venueOrderId}
+          </span>
+        )}
+      </dd>
+      <dt>Venue state</dt>
+      <dd data-testid="intent-venue-state">
+        {VENUE_ORDER_STATES[order.state]}
+        {order.filledHundredths > 0 && order.state !== "filled" ? (
+          <span className="num">
+            , {formatContractsHundredths(order.filledHundredths)} of{" "}
+            {formatContractsHundredths(order.quantityHundredths)} contracts filled
+          </span>
+        ) : null}
+        {order.detail ? <span className={styles.venueDetail}>{order.detail}</span> : null}
+      </dd>
+      <dt>Client order id</dt>
+      <dd className="num">{order.clientOrderId}</dd>
+    </Advanced>
+  );
+}
+
 const FIELD_LABELS: Record<string, string> = {
   amountCents: "Amount (cents)",
   limitPrice: "Limit price",
@@ -519,7 +571,8 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
     );
   }
   const market = intent.market ? describeMarket(intent.market, namingCategory(intent)) : null;
-  const simulated = fillsAreSimulated(snapshot.network);
+  const venueOrder: VenueOrderView | undefined = chain.venueOrders[intent.id];
+  const simulated = venueOrder === undefined && fillsAreSimulated(snapshot.network, chain.venue);
   const timeline = steps(chain, intent.id, simulated);
   const flags = intentFlags(intent);
   const settlement: SettlementView | undefined = chain.settlements[intent.id];
@@ -589,6 +642,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                   </dd>
                 </>
               ) : null}
+              {venueOrder ? <VenueOrderFacts order={venueOrder} /> : null}
               {intent.agent ? (
                 <Advanced>
                   <dt>Agent</dt>
