@@ -10,7 +10,7 @@ import {
   type GeminiPrivateClient,
 } from "../src/private-index";
 import { FakeGeminiPrivate, unpacedLimiter } from "../testing/fake-private";
-import { json } from "./helpers";
+import { json, redirectingPair } from "./helpers";
 
 const KEY = "account-TESTKEYTESTKEY0001";
 const SECRET = "TestSecretThatMustNeverAppearAnywhere";
@@ -262,7 +262,7 @@ describe("what a failure says", () => {
     expect(error).toMatchObject({ kind: "invalid_response", outcomeUnknown: true });
   });
 
-  it("refuses an order id too large to keep exactly", async () => {
+  it("refuses an order id longer than 64 bits", async () => {
     const { fetch } = recording(
       () =>
         new Response(
@@ -271,6 +271,140 @@ describe("what a failure says", () => {
     );
     const error = await failure(client(fetch), (g) => g.activeOrders("S"));
     expect(error.kind).toBe("invalid_response");
+  });
+});
+
+describe("order ids", () => {
+  // The id the sandbox gave the first real order: above 2^53, so a JavaScript number would round it to
+  // 145853902320696850 and a cancel would name another order.
+  const REAL_ID = "145853902320696849";
+
+  it("keeps every digit of an id larger than a JavaScript number holds", async () => {
+    const { fetch } = recording(
+      () =>
+        new Response(
+          `{"orderId":${REAL_ID},"hashOrderId":"2vmozdOZvvbb","clientOrderId":"c-1","globalOrderId":"cba9","status":"open","symbol":"GEMI-BTC2611171500-HI64600","side":"buy","outcome":"yes","orderType":"limit","timeInForce":"good-til-cancel","quantity":"1","filledQuantity":"0","remainingQuantity":"1","price":"0.01","createdAt":"2026-11-17T14:28:13.301Z","updatedAt":"2026-11-17T14:28:13.301Z"}`,
+          { status: 201 },
+        ),
+    );
+    const order = await client(fetch).placeOrder({
+      symbol: "GEMI-BTC2611171500-HI64600",
+      side: "buy",
+      outcome: "yes",
+      quantity: "1",
+      price: "0.01",
+    });
+    expect(order.orderId).toBe(REAL_ID);
+
+    const listed = recording(
+      () =>
+        new Response(
+          `{"orders":[{"orderId": ${REAL_ID} ,"status":"open","symbol":"S","side":"buy","outcome":"yes","quantity":"1","price":"0.5"}]}`,
+        ),
+    );
+    expect((await client(listed.fetch).activeOrders())[0]?.orderId).toBe(REAL_ID);
+  });
+
+  it("sends an id back as the same digits, never through a rounded number", async () => {
+    const { sent, fetch } = recording(() => json({ result: "ok", message: "cancelled" }));
+    await client(fetch).cancelOrder(REAL_ID);
+    const text = Buffer.from(sent[0]?.headers["x-gemini-payload"] ?? "", "base64").toString("utf8");
+    expect(text).toContain(`"orderId":${REAL_ID}`);
+    expect(text).not.toContain('"orderId":"');
+  });
+
+  it("refuses to cancel an id that is not a 64-bit whole number, sending nothing", async () => {
+    const { sent, fetch } = recording(() => json({ result: "ok" }));
+    for (const id of ["18446744073709551616", "1.5", "-1", ""]) {
+      await expect(client(fetch).cancelOrder(id)).rejects.toMatchObject({ kind: "invalid_argument" });
+    }
+    expect(sent).toHaveLength(0);
+  });
+
+  it("asks for every contract's orders when no symbol is given", async () => {
+    const { sent, fetch } = recording(() => json({ orders: [] }));
+    await client(fetch).activeOrders();
+    await client(fetch, () => NOW + 1_000).orderHistory();
+    expect(sent.map((request) => decodePayload(request.headers["x-gemini-payload"]))).toEqual([
+      expect.not.objectContaining({ symbol: expect.anything() as unknown }),
+      expect.not.objectContaining({ symbol: expect.anything() as unknown }),
+    ]);
+  });
+});
+
+describe("a redirect", () => {
+  async function redirected(call: (g: GeminiPrivateClient) => Promise<unknown>, status: number) {
+    const servers = await redirectingPair(status);
+    try {
+      // The real fetch, as in production: only the host is swapped for a loopback server.
+      const gemini = createGeminiPrivateClient({
+        environment: "sandbox",
+        credentials: { apiKey: KEY, apiSecret: SECRET },
+        testBaseUrl: servers.redirecting.url,
+        limiter: unpacedLimiter(),
+      });
+      let caught: unknown;
+      try {
+        await call(gemini);
+      } catch (error) {
+        caught = error;
+      }
+      return { caught, servers };
+    } finally {
+      await servers.close();
+    }
+  }
+
+  it("would carry the signed headers to the host it names if fetch followed it (why it never does)", async () => {
+    const servers = await redirectingPair(302);
+    try {
+      await fetch(`${servers.redirecting.url}/v1/roles`, {
+        method: "POST",
+        headers: { "X-GEMINI-APIKEY": KEY },
+      });
+      expect(servers.target.received.map((request) => request.headers["x-gemini-apikey"])).toEqual([KEY]);
+    } finally {
+      await servers.close();
+    }
+  });
+
+  it.each([301, 302, 303, 307, 308])(
+    "is never followed (HTTP %i): nothing reaches the host it names, and a placement's outcome is unknown",
+    async (status) => {
+      const { caught, servers } = await redirected(
+        (g) =>
+          g.placeOrder({ symbol: "GEMI-X-Y", side: "buy", outcome: "yes", quantity: "1", price: "0.50" }),
+        status,
+      );
+      expect(servers.redirecting.received).toHaveLength(1);
+      expect(servers.target.received).toEqual([]);
+      expect(isGeminiPrivateError(caught, "redirected")).toBe(true);
+      expect(caught).toMatchObject({ status, outcomeUnknown: true, path: "/v1/prediction-markets/order" });
+      const message = caught instanceof Error ? caught.message : "";
+      expect(message).toContain(`redirect (HTTP ${String(status)} to ${servers.target.host})`);
+      expect(message).not.toContain(KEY);
+      expect(message).not.toContain(SECRET);
+    },
+  );
+
+  it("is never followed by any signed call: roles, terms, balances, orders, cancel, positions", async () => {
+    const calls: [string, (g: GeminiPrivateClient) => Promise<unknown>][] = [
+      ["roles", (g) => g.roles()],
+      ["terms", (g) => g.termsStatus()],
+      ["balances", (g) => g.balances()],
+      ["active orders", (g) => g.activeOrders("S")],
+      ["history", (g) => g.orderHistory("S")],
+      ["cancel", (g) => g.cancelOrder("7310000001")],
+      ["settled positions", (g) => g.settledPositions()],
+    ];
+    for (const [name, call] of calls) {
+      const { caught, servers } = await redirected(call, 307);
+      expect({ name, kind: isGeminiPrivateError(caught) ? caught.kind : caught }).toEqual({
+        name,
+        kind: "redirected",
+      });
+      expect(servers.target.received).toEqual([]);
+    }
   });
 });
 

@@ -11,7 +11,9 @@
  *
  * Safety rules this client keeps whatever its caller does:
  * - A signed request goes only to Gemini's own host for the chosen environment, or to a loopback test
- *   server. A configurable URL is never trusted with a key.
+ *   server. A configurable URL is never trusted with a key, and a redirect is never followed: fetch keeps
+ *   custom headers across origins, so following one would hand the key, payload and signature to whatever
+ *   host the answer names. A redirect is reported as `redirected`, an unknown outcome.
  * - Production needs `allowProduction: true` on top of `environment: "production"`.
  * - Nothing is retried. A failed order may or may not exist (see `GeminiPrivateError.outcomeUnknown`); the
  *   caller looks it up instead of sending it again.
@@ -61,11 +63,37 @@ export interface GeminiPrivateClientOptions {
 
 // ------------------------------------------------------------------------------------------- answers
 
-/** Gemini's order ids are 64-bit integers; this client keeps them as decimal strings. */
+/**
+ * Gemini's order ids are 64-bit integers, and real ones are larger than a JavaScript number holds exactly
+ * (the sandbox answered 145853902320696849, above 2^53). `exactOrderIds` turns them into strings before
+ * `JSON.parse` can round them; this client keeps them as decimal strings throughout and sends them back
+ * as the same digits. A number that still reaches the schema was small enough to be exact.
+ */
 const orderIdSchema = z
   .union([z.number().int().nonnegative(), z.string().regex(/^\d{1,20}$/)])
   .refine((value) => typeof value === "string" || Number.isSafeInteger(value), "order id too large")
   .transform(String);
+
+/** Quotes every integer `orderId` in a JSON text, so that parsing it loses no digit. */
+export function exactOrderIds(text: string): string {
+  return text.replace(/("orderId"\s*:\s*)(\d+)(?=\s*[,}\]])/g, '$1"$2"');
+}
+
+/** A whole number written into a signed payload digit for digit, however large. */
+class RawInteger {
+  constructor(readonly digits: string) {}
+}
+
+/** `JSON.stringify`, but a `RawInteger` is written as its digits, unquoted and unrounded. */
+function stringifyPayload(value: Record<string, unknown>): string {
+  const raws: string[] = [];
+  const text = JSON.stringify(value, (_key, field: unknown) => {
+    if (!(field instanceof RawInteger)) return field;
+    raws.push(field.digits);
+    return `\u0000raw${String(raws.length - 1)}`;
+  });
+  return text.replace(/"\\u0000raw(\d+)"/g, (_match, index: string) => raws[Number(index)] ?? "");
+}
 
 const decimal = z.union([z.string(), z.number()]).transform(String);
 
@@ -151,9 +179,9 @@ export interface LimitOrderRequest {
   /** Dollars per contract, 0 to 1, for example "0.42". */
   price: string;
   /**
-   * Our own id for the order. Gemini's REST reference does not list it as a request field (its WebSocket
-   * `order.place` takes one, and REST answers carry a `clientOrderId`), so whether REST keeps it is
-   * unverified; the opt-in sandbox test checks. Nothing in this client depends on Gemini keeping it.
+   * Our own id for the order. Gemini's REST reference does not list it as a request field, but the sandbox
+   * takes it and returns it in the place answer, the active list and the history (checked with a key on
+   * 17 November 2026). Nothing in this client depends on Gemini keeping it.
    */
   clientOrderId?: string;
 }
@@ -170,10 +198,10 @@ export interface GeminiPrivateClient {
   placeOrder(order: LimitOrderRequest): Promise<PrivateOrder>;
   /** Asks Gemini to cancel an order. Cancelling twice is harmless. */
   cancelOrder(orderId: string): Promise<void>;
-  /** Open orders on one contract, newest first (at most 100). */
-  activeOrders(symbol: string): Promise<PrivateOrder[]>;
-  /** Filled and cancelled orders on one contract (at most 100). */
-  orderHistory(symbol: string): Promise<PrivateOrder[]>;
+  /** Open orders on one contract, or on every contract when no symbol is given, newest first (at most 100). */
+  activeOrders(symbol?: string): Promise<PrivateOrder[]>;
+  /** Filled and cancelled orders on one contract, or on every contract (at most 100). */
+  orderHistory(symbol?: string): Promise<PrivateOrder[]>;
   /** The account's settled positions, most recent first (at most 1000). */
   settledPositions(): Promise<SettledPosition[]>;
 }
@@ -191,6 +219,12 @@ export function isLoopbackTestUrl(value: string): boolean {
     url.search === "" &&
     url.hash === ""
   );
+}
+
+/** The host a redirect names, for the error message only; never requested. */
+function redirectHost(location: string | null, base: string): string | undefined {
+  if (location === null || !URL.canParse(location, base)) return undefined;
+  return new URL(location, base).host.slice(0, 100);
 }
 
 function invalid(message: string): GeminiPrivateError {
@@ -241,7 +275,7 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
   ): Promise<z.output<S>> {
     await limiter.acquire();
     lastNonce = Math.max(Math.floor(now() / 1000), lastNonce + 1);
-    const payload = Buffer.from(JSON.stringify({ request: path, nonce: lastNonce, ...fields })).toString(
+    const payload = Buffer.from(stringifyPayload({ request: path, nonce: lastNonce, ...fields })).toString(
       "base64",
     );
     const signature = createHmac("sha384", apiSecret).update(payload).digest("hex");
@@ -257,6 +291,8 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
           "X-GEMINI-PAYLOAD": payload,
           "X-GEMINI-SIGNATURE": signature,
         },
+        // Never "follow": the signed headers would go to the redirect's host. See `redirected` below.
+        redirect: "manual",
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (cause) {
@@ -270,6 +306,16 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
         { path, cause },
       );
     }
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+      // Not followed. Gemini's API never redirects, so whatever answered may or may not have acted.
+      await response.body?.cancel().catch(() => undefined);
+      const target = redirectHost(response.headers.get("location"), baseUrl);
+      throw new GeminiPrivateError(
+        "redirected",
+        `${method} ${path} answered with a redirect (HTTP ${String(response.status)}${target ? ` to ${target}` : ""}); it was not followed, so nothing signed went there`,
+        { status: response.status, path },
+      );
+    }
     let text: string;
     try {
       text = await response.text();
@@ -278,7 +324,7 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
     }
     let body: unknown;
     try {
-      body = text === "" ? undefined : JSON.parse(text);
+      body = text === "" ? undefined : JSON.parse(exactOrderIds(text));
     } catch {
       body = undefined;
     }
@@ -345,17 +391,22 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
       );
     },
     async cancelOrder(orderId) {
-      const id = Number(orderId);
-      if (!/^\d{1,20}$/.test(orderId) || !Number.isSafeInteger(id)) {
-        throw invalid("an order id is a whole number");
+      if (!/^\d{1,20}$/.test(orderId) || BigInt(orderId) > 2n ** 64n - 1n) {
+        throw invalid("an order id is a whole number of at most 64 bits");
       }
-      await serial("POST", "/v1/prediction-markets/order/cancel", { orderId: id }, cancelSchema);
+      // Sent as the same digits Gemini gave, never through a JavaScript number that would round it.
+      await serial(
+        "POST",
+        "/v1/prediction-markets/order/cancel",
+        { orderId: new RawInteger(orderId) },
+        cancelSchema,
+      );
     },
     async activeOrders(symbol) {
       const answer = await serial(
         "POST",
         "/v1/prediction-markets/orders/active",
-        { symbol, limit: 100 },
+        { ...(symbol === undefined ? {} : { symbol }), limit: 100 },
         ordersSchema,
       );
       return answer.orders;
@@ -364,7 +415,7 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
       const answer = await serial(
         "POST",
         "/v1/prediction-markets/orders/history",
-        { symbol, limit: 100 },
+        { ...(symbol === undefined ? {} : { symbol }), limit: 100 },
         ordersSchema,
       );
       return answer.orders;

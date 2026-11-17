@@ -45,6 +45,7 @@
     "dev:executor": "tsx devchain/scripts/executor.ts",
     "dev:settle-proof": "tsx devchain/scripts/settle-proof.ts",
     "gemini:doctor": "tsx gemini/scripts/doctor.ts",
+    "gemini:sandbox-orders": "tsx gemini/scripts/sandbox-orders.ts",
     "dev:propose": "tsx devchain/scripts/propose.ts",
     "redteam": "tsx redteam/src/cli.ts",
     "e2e": "npm run e2e -w @mandate/dashboard && npm run e2e -w @mandate/site",

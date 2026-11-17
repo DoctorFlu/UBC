@@ -586,7 +586,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
     expect(statuses.get(id)).toBe("executed");
     expect((await chain.outsider.getIntent(id))?.filledCents).toBe(1_240);
     expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
-    expect(journal.records.get(id)).toMatchObject({ state: "filled", venueOrderId: String(placed.orderId) });
+    expect(journal.records.get(id)).toMatchObject({ state: "filled", venueOrderId: placed.orderId });
   });
 
   it("records an order Gemini refuses as not filled, so its budget is released", async () => {

@@ -126,7 +126,7 @@ describe("placing an order", () => {
       timeInForce: "good-til-cancel",
       clientOrderId: "mandate-5042002-5fbdb231-7",
     });
-    expect(placed.venueOrderId).toBe(String(fake.order(placed.venueOrderId).orderId));
+    expect(placed.venueOrderId).toBe(fake.order(placed.venueOrderId).orderId);
     expect(journal.records.get(7)).toMatchObject({
       state: "open",
       environment: "sandbox",
@@ -225,6 +225,22 @@ describe("an attempt whose answer never came", () => {
     expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
     expect(placed.venueOrderId).toBe(String([...fake.orders.keys()][0]));
     expect(journal.records.get(7)?.state).toBe("open");
+  });
+
+  it("treats a redirect as an unknown outcome, never a refusal: held, looked up, never sent again", async () => {
+    fake.failNextPlacement({ kind: "redirect", status: 302, location: "https://elsewhere.example/order" });
+    expect(await venue().placeOrder(order())).toMatchObject({
+      status: "held",
+      detail: expect.stringMatching(
+        /no answer from Gemini's sandbox when placing it \(.*redirect \(HTTP 302 to elsewhere\.example\); it was not followed/,
+      ) as unknown,
+    });
+    expect(journal.records.get(7)).toMatchObject({ state: "unknown" });
+    expect(journal.records.get(7)?.detail).toMatch(/\(redirected\); looking the order up/);
+
+    expect(await restarted().placeOrder(order())).toMatchObject({ status: "held" });
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+    expect(journal.records.get(7)?.state).toBe("unknown");
   });
 
   it("matches by the order's exact terms when Gemini does not return client order ids", async () => {

@@ -4,8 +4,9 @@
  * The kinds that matter most are the ones that say whether Gemini acted on the request:
  * - Gemini answered with a refusal (`auth`, `nonce`, `terms`, `account`, `rate_limited`, `rejected`): it
  *   did not act on it. An order sent and refused this way was not placed.
- * - No usable answer (`unavailable`, `timeout`, `network`, `invalid_response`): it may or may not have
- *   acted. An order sent and failed this way may exist; it must be looked up, never sent again blindly.
+ * - No usable answer (`unavailable`, `timeout`, `network`, `invalid_response`, `redirected`): it may or
+ *   may not have acted. An order sent and failed this way may exist; it must be looked up, never sent
+ *   again blindly.
  */
 export type GeminiPrivateErrorKind =
   /** The key, its signature or its role was refused (unknown key, wrong secret, missing role). */
@@ -28,6 +29,11 @@ export type GeminiPrivateErrorKind =
   | "network"
   /** A success status, but a body that is not JSON or not the documented shape. */
   | "invalid_response"
+  /**
+   * The answer was a redirect (HTTP 3xx). It is never followed, because the signed headers would travel to
+   * whatever host it names. Gemini's API does not redirect, so its meaning is unknown: an order may exist.
+   */
+  | "redirected"
   /** The caller passed something the client refuses to send. Nothing was sent. */
   | "invalid_argument";
 
@@ -37,6 +43,7 @@ const UNKNOWN_OUTCOME: ReadonlySet<GeminiPrivateErrorKind> = new Set([
   "timeout",
   "network",
   "invalid_response",
+  "redirected",
 ]);
 
 export class GeminiPrivateError extends Error {
