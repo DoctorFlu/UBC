@@ -54,12 +54,22 @@ export async function readOwnerRequest<T>(
       return fail(422, "step_up_required", "Confirm this with your passkey.");
     }
     const ownerRequest = ownerRequestSchema.parse({ action, payload });
-    await service.stepUp.finish(scope.access, body.data.stepUp, {
+    const { credentialId } = await service.stepUp.finish(scope.access, body.data.stepUp, {
       action: { kind: "owner-request", mandateId: mandate.id, request: ownerRequest },
       target: {
         workspaceId: mandate.workspaceId,
         contract: { chainId: mandate.contract.chainId, address: mandate.contract.address },
       },
+    });
+    service.accounts.store.recordOwnerAction({
+      mandateId: mandate.id,
+      memberId: scope.access.member.id,
+      credentialId,
+      functionName: action,
+      calldata: null,
+      status: "sent",
+      txHash: null,
+      detail: null,
     });
     return { ok: true, data: payload };
   }

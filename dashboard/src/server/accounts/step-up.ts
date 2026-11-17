@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
 
-import { canonicalJson, policyRulesSchema } from "@mandate/shared";
+import { AGENT_TOKEN_PREFIX, canonicalJson, policyRulesSchema } from "@mandate/shared";
 import {
   type AuthenticationResponseJSON,
   type PublicKeyCredentialRequestOptionsJSON,
@@ -20,12 +20,13 @@ import { hashSecret, newOpaqueId } from "./secrets";
 import type { AccountStore } from "./store";
 
 /**
- * Passkey step-up (#95): on a mandate whose owner key the console holds (a contract it deployed on the
- * demo chain), a session alone never authorises an owner action. The member asks for a challenge bound to
- * the exact action (the mandate, its contract and chain, the function and its arguments, a nonce, a short
- * expiry), answers it with a passkey of their own with user verification, and only then does the console
- * act. One challenge authorises one action, once. Pausing is the one exception (the kill switch: fast, and
- * only ever stops trading), see `needsPasskey`.
+ * Passkey step-up (#95). A session alone never authorises an action that grants power: an owner action on
+ * a mandate whose owner key the console holds (a contract it deployed on the demo chain), creating a
+ * mandate, and creating an agent token (a credential) on any mandate. The member asks for a challenge
+ * bound to the exact action (the mandate, its contract and chain, the function and its arguments, or the
+ * agent and the token's name; a nonce; a short expiry), answers it with a passkey of their own with user
+ * verification, and only then does the console act. One challenge authorises one action, once. The safe
+ * direction stays a session's: pausing (the kill switch, see `needsPasskey`) and revoking a token.
  */
 
 /** A challenge is answered within this, or asked for again. */
@@ -38,6 +39,19 @@ export const mandateNameSchema = z
   .min(1, "Name the mandate, for example after what it protects.")
   .max(60, "Use at most 60 characters.")
   .refine(isPlainText, "Use letters, digits and punctuation only.");
+
+/** An agent token's name, shown in the Agents list for as long as the token exists. */
+export const tokenNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Name the token, for example after the app that will use it.")
+  .max(60, "Use at most 60 characters.")
+  .refine(isPlainText, "Use letters, digits and punctuation only.")
+  // A token pasted into the name would be shown in the Agents list for as long as the token exists.
+  .refine(
+    (name) => !name.includes(AGENT_TOKEN_PREFIX),
+    "That looks like a token. Name it after the app that will use it.",
+  );
 
 /** What a step-up authorises. Stored server side with its challenge; never trusted from the answer. */
 export const stepUpActionSchema = z.discriminatedUnion("kind", [
@@ -54,7 +68,13 @@ export const stepUpActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("create-mandate"),
     name: mandateNameSchema,
-    rules: policyRulesSchema.strict(),
+    /** The first rules, when the console deploys the contract; null when the owner's wallet will. */
+    rules: policyRulesSchema.strict().nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal("create-token"),
+    agentId: z.string().min(1).max(64),
+    name: tokenNameSchema,
   }),
 ]);
 export type StepUpAction = z.infer<typeof stepUpActionSchema>;

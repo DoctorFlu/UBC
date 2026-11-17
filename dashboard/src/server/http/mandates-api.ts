@@ -86,8 +86,9 @@ const createSchema = z.strictObject({
 
 /**
  * POST /api/console/mandates: a new mandate, its agent and the agent's first token (in this answer only).
- * On the demo chain the console deploys its contract with the first rules, which a passkey must confirm;
- * on Arc the owner's wallet deploys it next (`deployment` below).
+ * A passkey confirms the name and the first rules, as one prompt: the token is a credential, and on the
+ * demo chain the console deploys the contract with those rules. On Arc the owner's wallet deploys it next
+ * and sets the rules itself (`deployment` below), so `rules` is null there.
  */
 export const createMandate = consoleRoute(async (request, service, scope) => {
   const denied = adminOnly(scope);
@@ -107,24 +108,23 @@ export const createMandate = consoleRoute(async (request, service, scope) => {
   );
   if (wait > 0) return limited(wait, "Too many new mandates.");
   const { name, rules, stepUp } = body.data;
-  let credentialId: string | null = null;
-  if (deployer === "server") {
-    // The first rules decide what the agent may spend from the first block: a passkey confirms them.
-    if (rules === null || stepUp === null) {
-      return apiError(422, "step_up_required", "Confirm the new mandate and its rules with your passkey.");
-    }
-    const confirmed = await service.stepUp.finish(scope.access, stepUp, {
-      action: { kind: "create-mandate", name, rules },
-      target: { workspaceId: scope.access.workspace.id, contract: null },
-    });
-    credentialId = confirmed.credentialId;
-  } else if (rules !== null) {
+  if (deployer === "server" && rules === null) {
+    return apiError(422, "invalid_body", "Set the new mandate's first rules.");
+  }
+  if (deployer === "wallet" && rules !== null) {
     return apiError(
       422,
       "invalid_body",
       "Your wallet sets this mandate's rules once it has deployed the contract.",
     );
   }
+  if (stepUp === null) {
+    return apiError(422, "step_up_required", "Confirm the new mandate with your passkey.");
+  }
+  const { credentialId } = await service.stepUp.finish(scope.access, stepUp, {
+    action: { kind: "create-mandate", name, rules },
+    target: { workspaceId: scope.access.workspace.id, contract: null },
+  });
   const created = await service.mandates.create(scope.access, { name, rules, credentialId });
   const answer: CreatedMandateResponse = {
     mandate: mandateView(service, created.mandate),
@@ -202,9 +202,10 @@ function targetOf(mandate: Mandate): StepUpTarget | null {
 }
 
 /**
- * POST /api/console/step-up: a passkey challenge for one owner action. Creating a mandate is the
- * workspace's; every other action names its mandate, which must be one of the session's workspace (404
- * otherwise, as for a mandate that does not exist) whose owner key the console holds.
+ * POST /api/console/step-up: a passkey challenge for one action. Creating a mandate is the workspace's;
+ * creating a token names one of the workspace's agents; an owner action names one of the workspace's
+ * mandates whose owner key the console holds. Another workspace's agent or mandate is a 404, as one that
+ * does not exist.
  */
 export const startStepUp = consoleRoute(async (request, service, scope) => {
   const denied = adminOnly(scope);
@@ -218,6 +219,11 @@ export const startStepUp = consoleRoute(async (request, service, scope) => {
   const action: StepUpAction = body.data.action;
   let target: StepUpTarget | null;
   if (action.kind === "create-mandate") {
+    target = { workspaceId: scope.access.workspace.id, contract: null };
+  } else if (action.kind === "create-token") {
+    const agent = service.accounts.store.agent(action.agentId);
+    const mandate = agent ? pathMandate(service, scope, agent.mandateId) : null;
+    if (!mandate) return apiError(404, "not_found", "This workspace has no such agent.");
     target = { workspaceId: scope.access.workspace.id, contract: null };
   } else {
     const mandate = pathMandate(service, scope, action.mandateId);

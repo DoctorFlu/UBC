@@ -157,27 +157,20 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
       name: "A member of another workspace reaches for this one through the console",
       surface: "console",
       tried:
-        "Signed in to his own workspace, Bob asks the console for Alice's mandate by id (snapshot, live events, hedge quotes), lists agents, creates and revokes tokens on Alice's agent, dismisses and marks applied Alice's change request, saves holdings and confirms a pairing on her mandate, and presents his own agent token where the MCP server's service token belongs. Every write carries the console's own Origin, so only the tenancy check stands in the way.",
+        "Signed in to his own workspace, Bob asks the console for Alice's mandate by id (snapshot, live events, hedge quotes), lists agents, creates and revokes tokens on Alice's agent, asks for passkey challenges for a token on her agent and an owner call on her mandate, sends an owner call to her mandate on his session alone, dismisses and marks applied Alice's change request, saves holdings and confirms a pairing on her mandate, mints a token on his own agent without a passkey, and presents his own agent token where the MCP server's service token belongs. Every write carries the console's own Origin, so only the tenancy and step-up checks stand in the way.",
       expected:
-        "404 for every one of Alice's ids and the agent API refuses his token (401); Bob's own snapshot, stream and agent list carry nothing of Alice's, and no chain view, so none of the contract's venue orders, venue or settlements; Alice's token, change request and holdings are as they were, and her token still resolves to her agent.",
+        "404 for every one of Alice's ids, 422 for a token without a passkey, and the agent API refuses his token (401); Bob's own snapshot, stream and agent list carry nothing of Alice's, and no chain view, so none of the contract's venue orders, venue or settlements; Alice's token, change request and holdings are as they were, and her token still resolves to her agent.",
       expectedVerdict: "held",
       selfOnly: SELF_ONLY,
       async run(ctx) {
         const api = needConsole(ctx);
         const { alice, bob } = api;
         const marker = `red team ${ctx.runId}`;
-        const tokenName = `Grok (${marker})`;
 
         // Alice's side, with her own session and her agent's MCP server: the records Bob will reach for.
-        const aliceToken = await api.as("alice", "POST", `/api/console/agents/${alice.agentId}/tokens`, {
-          name: tokenName,
-        });
-        const created = json(aliceToken);
-        const token = field(created, "token");
-        const tokenId = field(created, "view", "id");
-        if (aliceToken.status !== 201 || typeof token !== "string" || typeof tokenId !== "string") {
-          throw new Error(`Alice could not create a token (HTTP ${String(aliceToken.status)})`);
-        }
+        // Her token was made with the console seeded, as her passkey would have confirmed it.
+        const token = api.agentToken("alice");
+        const tokenId = alice.tokenId;
         const filed = await api.asServer(alice.agentId, "POST", "/api/agent/v1/policy-change-requests", {
           agentAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
           proposed: { maxTradeCents: 3_000 },
@@ -187,11 +180,7 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
         if (filed.status !== 201 || typeof requestId !== "string") {
           throw new Error(`Alice's agent could not file a change request (HTTP ${String(filed.status)})`);
         }
-        const bobToken = json(
-          await api.as("bob", "POST", `/api/console/agents/${bob.agentId}/tokens`, { name: "Bob's Grok" }),
-        );
-        const bobAgentToken = field(bobToken, "token");
-        if (typeof bobAgentToken !== "string") throw new Error("Bob could not create his own token");
+        const bobAgentToken = api.agentToken("bob");
 
         const resolve = async (agentToken: string) =>
           field(
@@ -241,6 +230,41 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
             "a token on her agent",
             await api.as("bob", "POST", `/api/console/agents/${alice.agentId}/tokens`, { name: "mine now" }),
             404,
+          ],
+          [
+            "a passkey challenge for a token on her agent",
+            await api.as("bob", "POST", "/api/console/step-up", {
+              action: { kind: "create-token", agentId: alice.agentId, name: "mine now" },
+            }),
+            404,
+          ],
+          [
+            "a passkey challenge for an owner call on her mandate",
+            await api.as("bob", "POST", "/api/console/step-up", {
+              action: {
+                kind: "owner-call",
+                mandateId: alice.mandateId,
+                call: { functionName: "approveIntent", intentId: 0 },
+              },
+            }),
+            404,
+          ],
+          [
+            "an owner call on her mandate, on his session alone",
+            await api.as("bob", "POST", `/api/console/owner-calls${foreign}`, {
+              call: { functionName: "setPaused", paused: true },
+              stepUp: null,
+            }),
+            404,
+          ],
+          // A session alone (a stolen one, say) never mints a credential, even on its own agent.
+          [
+            "a token on his own agent, with his session and no passkey",
+            await api.as("bob", "POST", `/api/console/agents/${bob.agentId}/tokens`, {
+              name: "No passkey",
+              stepUp: null,
+            }),
+            422,
           ],
           [
             "revoke her token",

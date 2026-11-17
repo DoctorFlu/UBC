@@ -132,6 +132,16 @@ export class MandateManager {
       );
     }
     const token = this.service.accounts.store.createToken(created.agent.id, FIRST_TOKEN_NAME);
+    this.service.accounts.store.recordOwnerAction({
+      mandateId: created.mandate.id,
+      memberId: access.member.id,
+      credentialId: input.credentialId,
+      functionName: "mandate.create",
+      calldata: null,
+      status: "sent",
+      txHash: null,
+      detail: `${input.name}, with its agent's first token (${token.view.id})`,
+    });
     let deployProblem: string | null = null;
     let mandate = created.mandate;
     if (deployer === "server") {

@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   claimFirstWorkspace,
+  addSoftPasskey,
+  confirmWithPasskey,
   consoleHeaders,
   signUpWorkspace,
   workspaceAgent,
@@ -160,11 +162,17 @@ describe("the env file's token", () => {
     const service = newService();
     const bob = signUpWorkspace(service, "Bob");
     const bobAgent = workspaceAgent(service, bob).agent.id;
+    const headers = consoleHeaders(service, bob);
+    const stepUp = await confirmWithPasskey(service, headers.cookie ?? "", addSoftPasskey(service, bob), {
+      kind: "create-token",
+      agentId: bobAgent,
+      name: "Grok",
+    });
     const created = await createToken(
       new Request(`${ORIGIN}/api/console/agents/${bobAgent}/tokens`, {
         method: "POST",
-        headers: consoleHeaders(service, bob),
-        body: JSON.stringify({ name: "Grok" }),
+        headers,
+        body: JSON.stringify({ name: "Grok", stepUp }),
       }),
       service,
       { agentId: bobAgent },

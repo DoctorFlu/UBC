@@ -1,11 +1,10 @@
 import "server-only";
 
-import { AGENT_TOKEN_PREFIX } from "@mandate/shared";
 import { z } from "zod";
 
 import type { AgentsResponse, CreatedToken } from "@/lib/accounts/types";
 
-import { isPlainText } from "../accounts/accounts";
+import { stepUpAnswerSchema, tokenNameSchema } from "../accounts/step-up";
 import type { Agent, Mandate } from "../accounts/store";
 import { clientKey } from "../accounts/rate-limit";
 import type { ConsoleService } from "../console-service";
@@ -51,20 +50,15 @@ export const listAgents = consoleRoute((_request, service, scope) => {
 }, WORKSPACE);
 
 const createTokenSchema = z.strictObject({
-  name: z
-    .string()
-    .trim()
-    .min(1, "Name the token, for example after the app that will use it.")
-    .max(60, "Use at most 60 characters.")
-    .refine(isPlainText, "Use letters, digits and punctuation only.")
-    // A token pasted into the name would be shown in the Agents list for as long as the token exists.
-    .refine(
-      (name) => !name.includes(AGENT_TOKEN_PREFIX),
-      "That looks like a token. Name it after the app that will use it.",
-    ),
+  name: tokenNameSchema,
+  /** A passkey's confirmation of this agent and this name: a token is a credential (#95). */
+  stepUp: stepUpAnswerSchema.nullable(),
 });
 
-/** POST /api/console/agents/:agentId/tokens: a new token, returned this once. */
+/**
+ * POST /api/console/agents/:agentId/tokens: a new token, returned this once. A member's passkey confirms
+ * the agent and the token's name; the session alone is not enough. Revoking (below) is a session's.
+ */
 export const createToken = consoleRoute(async (request, service, scope, params) => {
   const denied = adminOnly(scope);
   if (denied) return denied;
@@ -80,7 +74,25 @@ export const createToken = consoleRoute(async (request, service, scope, params) 
   }
   const body = await readBody(request, createTokenSchema);
   if (!body.ok) return body.response;
-  const { token, view } = service.accounts.store.createToken(own.agent.id, body.data.name);
+  const { name, stepUp } = body.data;
+  if (stepUp === null) {
+    return apiError(422, "step_up_required", "Confirm the new token with your passkey.");
+  }
+  const { credentialId } = await service.stepUp.finish(scope.access, stepUp, {
+    action: { kind: "create-token", agentId: own.agent.id, name },
+    target: { workspaceId: scope.access.workspace.id, contract: null },
+  });
+  const { token, view } = service.accounts.store.createToken(own.agent.id, name);
+  service.accounts.store.recordOwnerAction({
+    mandateId: own.mandate.id,
+    memberId: scope.access.member.id,
+    credentialId,
+    functionName: "token.create",
+    calldata: null,
+    status: "sent",
+    txHash: null,
+    detail: `${name} (${view.id})`,
+  });
   const created: CreatedToken = { token, view };
   return json(created, 201);
 }, WORKSPACE);

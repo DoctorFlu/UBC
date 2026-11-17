@@ -67,7 +67,11 @@ export interface Mandate {
   createdAt: string;
 }
 
-/** An owner call the console signed for a member, as the audit trail shows it. */
+/**
+ * An action a member took as the owner, as the audit trail shows it: an owner call the console signed
+ * (`functionName` is the contract function, with its calldata), or an offchain action a passkey confirmed
+ * (`mandate.create`, `token.create`, or an owner request such as `holdings.save`; no calldata).
+ */
 export interface OwnerActionRecord {
   id: string;
   mandateId: string;
@@ -76,7 +80,7 @@ export interface OwnerActionRecord {
   /** The passkey that authorised it; null for a pause, which a session alone may do. */
   credentialId: string | null;
   functionName: string;
-  calldata: Hex;
+  calldata: Hex | null;
   status: "sent" | "failed";
   txHash: Hex | null;
   detail: string | null;
@@ -327,7 +331,7 @@ export class AccountStore {
     memberId: string;
     credentialId: string | null;
     functionName: string;
-    calldata: Hex;
+    calldata: Hex | null;
     status: "sent" | "failed";
     txHash: Hex | null;
     detail: string | null;
@@ -371,7 +375,7 @@ export class AccountStore {
       memberName: row.member_name,
       credentialId: row.credential_id,
       functionName: row.function_name,
-      calldata: row.calldata as Hex,
+      calldata: row.calldata === null ? null : (row.calldata as Hex),
       status: row.status,
       txHash: row.tx_hash as Hex | null,
       detail: row.detail,
@@ -831,7 +835,7 @@ interface OwnerActionRow {
   member_name: string | null;
   credential_id: string | null;
   function_name: string;
-  calldata: string;
+  calldata: string | null;
   status: "sent" | "failed";
   tx_hash: string | null;
   detail: string | null;

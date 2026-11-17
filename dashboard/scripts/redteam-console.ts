@@ -9,8 +9,10 @@
  *
  * with CONSOLE_URL=http://127.0.0.1:<port>, CONSOLE_DATA_DIR (a new, empty folder) and
  * CONSOLE_SERVICE_TOKEN. Alice claims the first workspace (the server's own mandate, with 0.4242 BTC of
- * holdings) and Bob signs up for his own. When it listens, it prints one JSON line to stdout:
- * `{"ready":true,"alice":{"cookie","workspaceId","mandateId","agentId"},"bob":{...}}`. Logs go to stderr.
+ * holdings) and Bob signs up for his own; each gets a first agent token. When it listens, it prints one
+ * JSON line to stdout:
+ * `{"ready":true,"alice":{"cookie","workspaceId","mandateId","agentId","token","tokenId"},"bob":{...}}`.
+ * Logs go to stderr.
  */
 import { readdirSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
@@ -138,14 +140,21 @@ function json(res: ServerResponse, status: number, code: string, message: string
   res.end(JSON.stringify({ error: { code, message } }));
 }
 
+/**
+ * A member's ids, session and first agent token. The token is made here, as the member's passkey would
+ * have confirmed it (#95: creating a token takes a passkey, which the red team's HTTP client has none of).
+ */
 function seeded(member: Member) {
   const service = getConsoleService();
   const { agent, mandate } = workspaceAgent(service, member);
+  const { token, view } = service.accounts.store.createToken(agent.id, "Grok (red team)");
   return {
     cookie: sessionHeader(service, member),
     workspaceId: member.workspaceId,
     mandateId: mandate.id,
     agentId: agent.id,
+    token,
+    tokenId: view.id,
   };
 }
 

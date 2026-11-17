@@ -39,6 +39,7 @@ import {
   postOwnerCall,
   startStepUp,
 } from "./mandates-api";
+import { createToken, revokeToken } from "./agents-api";
 import { saveHoldings } from "./owner-api";
 
 const silent = { info: () => undefined, warn: () => undefined };
@@ -225,9 +226,11 @@ describe("mandates on the demo chain", () => {
     await until(() => snapshotOf(created.mandate.id).chain?.rules !== null, "the new mandate's rules");
     expect(snapshotOf(created.mandate.id).chain?.rules).toEqual(RULES);
     // The first rules are an owner action like any other: recorded with the passkey that confirmed them.
-    const [first] = service.accounts.store.ownerActions(created.mandate.id, 10);
-    expect(first).toMatchObject({ functionName: "setPolicy", status: "sent", memberName: "Bob" });
-    expect(first?.credentialId).toBe(keys.get(bob.id)?.id);
+    const recorded = service.accounts.store.ownerActions(created.mandate.id, 10);
+    expect(recorded.map((a) => a.functionName).sort()).toEqual(["mandate.create", "setPolicy"]);
+    for (const action of recorded) {
+      expect(action).toMatchObject({ status: "sent", memberName: "Bob", credentialId: keys.get(bob.id)?.id });
+    }
   });
 
   it("deploys a sign-up's first mandate on a session alone, with no rules: it allows nothing yet", async () => {
@@ -313,8 +316,17 @@ describe("mandates on the demo chain", () => {
       actions: { functionName: string; memberName: string; credentialId: string | null; status: string }[];
     };
     const sent = audit.actions.filter((a) => a.status === "sent");
-    expect(sent.map((a) => a.functionName).sort()).toEqual(["approveIntent", "setPaused", "setPaused", "setPolicy"]);
-    expect(sent.find((a) => a.functionName === "approveIntent")?.credentialId).toBe(keys.get(bob.id)?.id);
+    expect(sent.map((a) => a.functionName).sort()).toEqual([
+      "approveIntent",
+      "mandate.create",
+      "setPaused",
+      "setPaused",
+      "setPolicy",
+    ]);
+    const passkey = keys.get(bob.id)?.id;
+    // Every action but the pause was confirmed with Bob's passkey; the pause was the session's alone.
+    expect(sent.filter((a) => a.credentialId === null).map((a) => a.functionName)).toEqual(["setPaused"]);
+    expect(sent.filter((a) => a.credentialId !== null).every((a) => a.credentialId === passkey)).toBe(true);
     expect(sent.every((a) => a.memberName === "Bob")).toBe(true);
   });
 
@@ -436,6 +448,48 @@ describe("mandates on the demo chain", () => {
     await expect(
       crossed.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 100 }),
     ).rejects.toThrow();
+  });
+
+  it("creates an agent token only with a passkey confirming that agent and that name; revokes on a session", async () => {
+    const agentId = service.accounts.store.agentOf(mandateOf(service, bob)).id;
+    const path = `agents/${agentId}/tokens`;
+    const create = (body: unknown) => createToken(post(bob, path, body), service, { agentId });
+
+    const bare = await create({ name: "Laptop", stepUp: null });
+    expect(await errorCode(bare)).toBe("step_up_required");
+    const renamed = await confirm(bob, { kind: "create-token", agentId, name: "Something else" });
+    expect(await errorCode(await create({ name: "Laptop", stepUp: renamed }))).toBe("step_up_refused");
+    const otherAgent = service.accounts.store.agentOf(
+      service.accounts.store.mandates(bob.workspaceId).find((m) => m.name === "Hedge")?.id ?? "",
+    ).id;
+    const elsewhere = await confirm(bob, { kind: "create-token", agentId: otherAgent, name: "Laptop" });
+    expect(await errorCode(await create({ name: "Laptop", stepUp: elsewhere }))).toBe("step_up_refused");
+
+    // Another workspace's agent: no challenge, and no token, the same as an agent that does not exist.
+    const foreign = await startStepUp(
+      post(carol, "step-up", { action: { kind: "create-token", agentId, name: "Laptop" } }),
+      service,
+    );
+    expect(foreign.status).toBe(404);
+
+    const created = await create({
+      name: "Laptop",
+      stepUp: await confirm(bob, { kind: "create-token", agentId, name: "Laptop" }),
+    });
+    expect(created.status).toBe(201);
+    const { view } = (await created.json()) as { view: { id: string } };
+    const audit = service.accounts.store.ownerActions(mandateOf(service, bob), 10);
+    expect(audit[0]).toMatchObject({ functionName: "token.create", credentialId: keys.get(bob.id)?.id });
+
+    const revoked = await revokeToken(
+      new Request(`${ORIGIN}/api/console/${path}/${view.id}`, {
+        method: "DELETE",
+        headers: consoleHeaders(service, bob),
+      }),
+      service,
+      { agentId, tokenId: view.id },
+    );
+    expect(revoked.status).toBe(200);
   });
 
   it("refuses a mandate past the workspace's cap, with what to do about it", async () => {

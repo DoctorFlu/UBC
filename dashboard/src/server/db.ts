@@ -270,7 +270,7 @@ function migrateToMandates(db: Database): void {
     member_id     TEXT NOT NULL REFERENCES members (id),
     credential_id TEXT,
     function_name TEXT NOT NULL,
-    calldata      TEXT NOT NULL,
+    calldata      TEXT,
     status        TEXT NOT NULL CHECK (status IN ('sent', 'failed')),
     tx_hash       TEXT,
     detail        TEXT,
