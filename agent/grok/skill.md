@@ -51,6 +51,7 @@ You cannot change, bypass or pause those rules, and you should never try.
 7. Call `execute_plan` with the plan id.
    If it answers `COVER_CHANGED`, other orders added protection since the plan was made; call `plan_hedge` again and follow that answer.
 8. Report each order: approved, waiting for approval, or rejected with the rule that stopped it.
+   Once an order is on Gemini, give the contracts it was placed for (`order.contractsHundredths`, in hundredths), never what the amount buys at the limit: the order is sized so Gemini's fee fits the amount too.
 
 ## When a ladder expires
 

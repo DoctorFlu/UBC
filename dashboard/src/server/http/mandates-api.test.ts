@@ -10,6 +10,7 @@ import {
   WriteLane,
   type PolicyRules,
   type Settlement,
+  type OrderIdDeployment,
   type VenueOrderRecord,
   type WakeEvent,
   WakeTarget,
@@ -21,6 +22,7 @@ import {
   policyAbi,
   resolveTokenResponseSchema,
   settlementMessage,
+  ordersResponseSchema,
   settlementsResponseSchema,
   signerAccount,
   summaryResponseSchema,
@@ -32,6 +34,7 @@ import {
   consoleSettlementSink,
   startExecutor,
   startExecutorFleet,
+  venueDeployment,
 } from "@mandate/devchain";
 import { type Address, createWalletClient, http } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -57,7 +60,7 @@ import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import type { LadderSource } from "../wake";
 import { workspaceHome } from "../workspace-home";
-import { getSettlements, getSummary, postPlan, postPolicyChangeRequest } from "./agent-api";
+import { getOrders, getSettlements, getSummary, postPlan, postPolicyChangeRequest } from "./agent-api";
 import { resolveToken } from "./agent-auth";
 import { putSettlement } from "./executor-api";
 import {
@@ -785,6 +788,21 @@ describe("mandates on the demo chain", () => {
       });
     const policyA = contractA.address.toLowerCase() as `0x${string}`;
     const policyB = contractB.address.toLowerCase() as `0x${string}`;
+    // Each id is made from its own contract and real deploy block, as the executor's fleet makes it.
+    const deploymentOf = async (mandateId: string) => {
+      const contract = service.accounts.store.mandate(mandateId)?.contract;
+      if (!contract) throw new Error("no contract");
+      return venueDeployment(
+        { address: contract.address, publicClient: chain.executor.publicClient },
+        BigInt(contract.deployBlock),
+      );
+    };
+    const [deploymentA, deploymentB] = [
+      await deploymentOf(twinA.mandate.id),
+      await deploymentOf(twinB.mandate.id),
+    ];
+    const deploymentFor = (policy: `0x${string}`): OrderIdDeployment =>
+      policy === policyA ? deploymentA : deploymentB;
     const recordFor = (policy: `0x${string}`, cents: number): VenueOrderRecord => ({
       kind: "venue-order",
       version: 1,
@@ -794,7 +812,7 @@ describe("mandates on the demo chain", () => {
       revision: 1,
       venue: "gemini",
       environment: "sandbox",
-      clientOrderId: clientOrderIdFor(chainId, policy, 0),
+      clientOrderId: clientOrderIdFor(deploymentFor(policy), 0),
       market: BTC_ABOVE_65K,
       side: "buy",
       outcome: "YES",
@@ -890,6 +908,18 @@ describe("mandates on the demo chain", () => {
     };
     expect((await settlementsOf(resolvedA.agentId)).map((s) => s.document.costCents)).toEqual([1_300]);
     expect((await settlementsOf(resolvedB.agentId)).map((s) => s.document.costCents)).toEqual([1_400]);
+    // Each agent's orders (#117) are its own mandate's: intent 0 on both, each at its own size.
+    const ordersOf = async (agentId: string) => {
+      const response = await getOrders(asAgent(agentId, "GET", CONSOLE_AGENT_ROUTES.orders), service);
+      expect(response.status).toBe(200);
+      return ordersResponseSchema.parse(await response.json()).orders;
+    };
+    expect((await ordersOf(resolvedA.agentId)).map((o) => [o.intentId, o.quantityHundredths])).toEqual([
+      [0, contractsBought(1_300, trade.limitPrice)],
+    ]);
+    expect((await ordersOf(resolvedB.agentId)).map((o) => [o.intentId, o.quantityHundredths])).toEqual([
+      [0, contractsBought(1_400, trade.limitPrice)],
+    ]);
     expect((await settlementsOf(resolvedA.agentId)).map((s) => s.document.feeCents)).toEqual([12]);
     expect((await settlementsOf(resolvedB.agentId)).map((s) => s.document.feeCents)).toEqual([undefined]);
     // The owner's views sum one result per position, each mandate's own: A's net is after its fee.

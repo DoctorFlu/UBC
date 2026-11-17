@@ -108,7 +108,8 @@ Real funds belong on a `wallet` contract, or on a console key held in an HSM or 
 One executor key serves every mandate's contract, and each contract names it as its `executor()` (`CONSOLE_MANDATE_EXECUTOR`, by default the executor of the server's own contract).
 The executor asks the console which contracts name it (`GET /api/executor/v1/contracts`, signed by its key and fresh within 5 minutes), checks each contract's `executor()` onchain before serving it, and looks again every `EXECUTOR_DISCOVERY_MS`.
 For each contract it keeps a separate order journal and venue announcement, and it signs each settlement for that contract alone; one transaction lane orders its transactions, so two approvals on two contracts at the same moment never race for a nonce.
-A Gemini client order id names the chain, the contract and the intent (`mandate-` and 24 hex digits of a hash of the chain and contract, then the intent id), so intent 0 on two contracts gets two ids.
+A Gemini client order id names the chain, the contract, its deployment and the intent (`mandate-<chain id>-<first 8 hex digits of the contract>-<12 hex digits of a hash of the chain, the whole address and the deploy block's hash>-<intent id>`, see [gemini-venue.md](gemini-venue.md#safety-rules)), so intent 0 on two contracts gets two ids, even when one contract's address was ground to share the other's first digits.
+The executor reads each contract's deploy block hash when it starts serving it, from the deploy block the console lists for that contract.
 Because one Gemini account places every mandate's orders, the executor never matches an order by its terms when Gemini returns no client order id; it asks the owner to check Gemini instead.
 On Arc the shared executor is the default but **not yet proven on the testnet**: it is an open point until a two-mandate run there.
 

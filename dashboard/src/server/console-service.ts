@@ -11,6 +11,7 @@ import {
   hashExecutorRecord,
   hashSettlement,
   settlementSchema,
+  type AgentOrder,
   type StoredSettlement,
   venueOrderRecordSchema,
   verifyContext,
@@ -576,6 +577,28 @@ export class ConsoleService {
       if (view) views[row.intentId] = view;
     }
     return views;
+  }
+
+  /**
+   * The orders the executor placed for the contract `mandate` follows, as the agent API serves them
+   * (issue #117): the latest verified version of each, by intent id, without order ids. None for a
+   * mandate without a contract, and never another mandate's: the deployment is this mandate's own.
+   */
+  verifiedVenueOrders(mandate: MandateScope): AgentOrder[] {
+    const session = this.followerOf(mandate)?.current ?? null;
+    if (!session) return [];
+    return Object.entries(this.venueOrderViews(session.id))
+      .map(([intentId, view]) => ({
+        intentId: Number(intentId),
+        venue: view.venue,
+        environment: view.environment,
+        state: view.state,
+        quantityHundredths: view.quantityHundredths,
+        filledHundredths: view.filledHundredths,
+        filledCents: view.filledCents,
+        feeCents: view.feeCents,
+      }))
+      .sort((a, b) => a.intentId - b.intentId);
   }
 
   /** The venue the executor last announced for one deployment, when it still verifies. */

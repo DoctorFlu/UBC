@@ -19,6 +19,7 @@ import {
   putSignalBudgetRequestSchema,
   putSignalPaymentRequestSchema,
   settlementsResponseSchema,
+  ordersResponseSchema,
   signalBudgetResponseSchema,
   signalPaymentResponseSchema,
   agentIdSchema,
@@ -353,6 +354,11 @@ export const getSettlements = agentRoute((_request, service, { mandate }) =>
   Promise.resolve(
     json(settlementsResponseSchema.parse({ settlements: service.verifiedSettlements(mandate) })),
   ),
+);
+
+/** The orders the executor placed for the agent's mandate (issue #117); only versions that still verify. */
+export const getOrders = agentRoute((_request, service, { mandate }) =>
+  Promise.resolve(json(ordersResponseSchema.parse({ orders: service.verifiedVenueOrders(mandate) }))),
 );
 
 // ------------------------------------------------------------------ the owner's view (#97)

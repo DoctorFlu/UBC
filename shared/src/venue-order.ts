@@ -128,18 +128,39 @@ export const executorVenueSchema = z.strictObject({
 });
 export type ExecutorVenue = z.infer<typeof executorVenueSchema>;
 
+/** What a client order id is made of, besides the intent: the contract and the block it was deployed in. */
+export interface OrderIdDeployment {
+  chainId: number;
+  policy: string;
+  /** Hash of the block the contract was deployed in. */
+  deployBlockHash: string;
+}
+
 /**
- * Our id for an intent's order: 24 hex digits (96 bits) of keccak256 of the chain and the contract, then
- * the intent id. It is the same on every attempt and restart, and differs between contracts. One venue
- * account serves every mandate's contract (#95), so ids of two contracts must never meet: a prefix of the
- * address alone could, since anyone deploying a contract on Arc can grind an address to match another's
- * first digits; 96 bits of a hash cannot be ground to. At most 49 characters.
+ * Our id for an intent's order: `mandate-<chain id>-<contract>-<deployment>-<intent id>`, where `<contract>`
+ * is the first 8 hex digits of the contract's address, for people reading it, and `<deployment>` is 12 hex
+ * digits (48 bits) of keccak256 of the chain id, the whole address and the whole hash of the block the
+ * contract was deployed in. It is the same on every attempt and restart, and at most 63 characters, inside
+ * the journal's 64, at the largest chain id and intent id.
  *
- * An order journaled before this form keeps the id it was placed with (`gemini-venue.ts`).
+ * - Two deployments at the same address get different ids (issue #117): a fresh local dev chain deploys
+ *   the contract at the address the last one had, but its deploy block has another hash unless both chains
+ *   were started and deployed within the same second.
+ * - Two contracts never share one (#95): one venue account serves every mandate's contract, and on Arc
+ *   anyone deploying a contract can grind its address to match another's first 8 hex digits and land it
+ *   in the same block, so printed prefixes alone could be made to meet. The digest covers the whole
+ *   address, so a lookalike must match the 32-bit prefix and the 48-bit digest together: 80 bits of
+ *   grinding, about 4 x 10^7 years at a billion addresses a second.
+ *
+ * Ids already journalled keep the form they were written in; a retry reuses its record's id, so nothing
+ * is ever looked up under an id it was not sent with.
  */
-export function clientOrderIdFor(chainId: number, policy: string, intentId: number): string {
-  const contract = keccak256(stringToBytes(`${String(chainId)}:${policy.toLowerCase()}`)).slice(2, 26);
-  return `mandate-${contract}-${String(intentId)}`;
+export function clientOrderIdFor(deployment: OrderIdDeployment, intentId: number): string {
+  const policy = deployment.policy.toLowerCase();
+  const digest = keccak256(
+    stringToBytes(`${String(deployment.chainId)}:${policy}:${deployment.deployBlockHash.toLowerCase()}`),
+  ).slice(2, 14);
+  return `mandate-${String(deployment.chainId)}-${policy.slice(2, 10)}-${digest}-${String(intentId)}`;
 }
 
 /** Validates a venue order record or announcement and returns keccak256 of its canonical JSON. */

@@ -33,7 +33,10 @@ export interface PolicyArtifact {
   bytecode: Hex;
   /** Runtime code with every immutable left as zeros. */
   runtime: Hex;
-  /** Where the runtime code holds immutables; the Policy contracts have one, `user`. */
+  /**
+   * Where the runtime code holds immutables. The production contract has none (its `user` is storage,
+   * since `setUser` can hand the role on); the devchain reference has one, `user`.
+   */
   immutables: { start: number; length: number }[];
 }
 
@@ -80,14 +83,15 @@ export function loadPolicyArtifact(dir: string | null, kind: ContractKind): Poli
 }
 
 /**
- * Whether `code` (read from the chain) is this contract with `user` as its only immutable: every byte
- * equal to the compiled runtime code outside the immutables, and each immutable slot holding `user`.
- * A contract compiled from other source, with other settings, or with another immutable fails.
+ * Whether `code` (read from the chain) is this contract: every byte equal to the compiled runtime code
+ * outside the immutables, and each immutable slot, if it has any, holding `user`. Without immutables
+ * the code must equal the compiled runtime exactly. A contract compiled from other source or with other
+ * settings fails; its roles are read from storage and checked by the caller.
  */
 export function isPolicyRuntime(artifact: PolicyArtifact, code: Hex, user: Address): boolean {
   const onchain = Buffer.from(code.slice(2), "hex");
   const compiled = Buffer.from(artifact.runtime.slice(2), "hex");
-  if (onchain.length !== compiled.length || artifact.immutables.length === 0) return false;
+  if (onchain.length !== compiled.length || compiled.length === 0) return false;
   const slot = Buffer.from(padHex(user.toLowerCase() as Hex, { size: 32 }).slice(2), "hex");
   const masked = Buffer.from(onchain);
   for (const { start, length } of artifact.immutables) {

@@ -46,6 +46,7 @@ import {
   simulatedVenue,
   startExecutor,
   startExecutorFleet,
+  venueDeployment,
   type Executor,
   type RecordSigner,
   type Venue,
@@ -90,7 +91,10 @@ const chainId = client.publicClient.chain.id;
 const lane = new WriteLane();
 
 /** The venue for one contract: its own journal and announcement, the account the same for all. */
-let venueFor: (policy: `0x${string}`) => { venue: Venue; announcement: ExecutorVenue };
+let venueFor: (
+  policyClient: PolicyClient,
+  deployBlock: bigint,
+) => Promise<{ venue: Venue; announcement: ExecutorVenue }>;
 let describeVenue: string;
 if (settings.venue === "gemini") {
   let trading: GeminiPrivateClient;
@@ -133,43 +137,51 @@ if (settings.venue === "gemini") {
     );
   }
   const environment = trading.environment;
-  venueFor = (policy) => ({
-    venue: geminiVenue({
-      publicClient,
-      trading,
-      journal: consoleOrderJournal({ consoleUrl, sign, deployment: { chainId, policy } }),
-      deployment: { chainId, policy },
-      orderTtlMs,
-      // One Gemini account serves every mandate's contract, so another's order could share the terms.
-      matchByTerms: false,
-    }),
-    announcement: {
-      kind: "executor-venue",
-      version: 1,
-      chainId,
-      policy,
-      venue: "gemini",
-      environment,
-      announcedAt: new Date().toISOString(),
-    },
-  });
+  venueFor = async (policyClient, deployBlock) => {
+    // The deploy block's hash is part of every client order id, so a later chain that deploys a contract
+    // at the same address never reuses the ids of this one's orders on the same Gemini account (#117). A
+    // block that cannot be read yet throws: the fleet tries the contract again on its next look.
+    const venueAt = await venueDeployment(policyClient, deployBlock);
+    return {
+      venue: geminiVenue({
+        publicClient,
+        trading,
+        journal: consoleOrderJournal({ consoleUrl, sign, deployment: { chainId, policy: venueAt.policy } }),
+        deployment: venueAt,
+        orderTtlMs,
+        // One Gemini account serves every mandate's contract, so another's order could share the terms.
+        matchByTerms: false,
+      }),
+      announcement: {
+        kind: "executor-venue",
+        version: 1,
+        chainId,
+        policy: venueAt.policy,
+        venue: "gemini",
+        environment,
+        announcedAt: new Date().toISOString(),
+      },
+    };
+  };
   describeVenue =
     `GEMINI ${environment.toUpperCase()} executor: places approved orders on Gemini's sandbox (test funds), ` +
     `cancels what is unfilled after ${String(Math.round(orderTtlMs / 60_000))} min`;
 } else {
   const gemini = devGeminiClient();
-  venueFor = (policy) => ({
-    venue: simulatedVenue(gemini),
-    announcement: {
-      kind: "executor-venue",
-      version: 1,
-      chainId,
-      policy,
-      venue: "simulated",
-      environment: null,
-      announcedAt: new Date().toISOString(),
-    },
-  });
+  // The simulated venue places nothing, so it needs no client order id and no deploy block.
+  venueFor = (policyClient) =>
+    Promise.resolve({
+      venue: simulatedVenue(gemini),
+      announcement: {
+        kind: "executor-venue",
+        version: 1,
+        chainId,
+        policy: policyClient.address.toLowerCase() as `0x${string}`,
+        venue: "simulated",
+        environment: null,
+        announcedAt: new Date().toISOString(),
+      },
+    });
   describeVenue = `SIMULATED executor (dev only): places nothing, fills after ${String(fillDelayMs)} ms`;
 }
 
@@ -214,7 +226,7 @@ async function serve(contract: ExecutorContract): Promise<Executor | { refused: 
   if (named.toLowerCase() !== executorAddress.toLowerCase()) {
     return { refused: `its executor is ${named}, not this one` };
   }
-  const { venue, announcement } = venueFor(policy);
+  const { venue, announcement } = await venueFor(policyClient, BigInt(contract.deployBlock));
   const announced = announce(announcement);
   // On Gemini, nothing is traded for a contract before the console has agreed to its venue.
   if (settings.venue === "gemini") await announced;

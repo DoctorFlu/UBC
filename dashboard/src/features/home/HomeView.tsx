@@ -19,7 +19,7 @@ import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
 import { needsOwner } from "@/lib/live/attention";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, isoFromUnix, newestFirst, todayUsage } from "@/lib/live/derive";
-import type { ConsoleSnapshot } from "@/lib/live/types";
+import type { ConsoleSnapshot, VenueOrderView } from "@/lib/live/types";
 
 import styles from "./home.module.css";
 
@@ -50,12 +50,17 @@ const recentColumns: readonly Column<IntentView>[] = [
   timeColumn,
 ];
 
-const orderColumn: Column<IntentView> = {
-  key: "order",
-  header: "Order",
-  cell: (intent) => <OrderSummary intent={intent} />,
-  nowrap: true,
-};
+/** The order: the contracts the executor placed on the venue when it placed one (issue #117). */
+function orderColumn(venueOrders: Readonly<Record<number, VenueOrderView>>): Column<IntentView> {
+  return {
+    key: "order",
+    header: "Order",
+    cell: (intent) => (
+      <OrderSummary intent={intent} placedHundredths={venueOrders[intent.id]?.quantityHundredths ?? null} />
+    ),
+    nowrap: true,
+  };
+}
 
 function summary(snapshot: ConsoleSnapshot, waiting: number): string {
   const name = agentName(snapshot);
@@ -179,7 +184,7 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
             captionHidden
             columns={
               advanced
-                ? [...recentColumns.slice(0, 3), orderColumn, ...recentColumns.slice(3)]
+                ? [...recentColumns.slice(0, 3), orderColumn(chain.venueOrders), ...recentColumns.slice(3)]
                 : recentColumns
             }
             rows={recent}

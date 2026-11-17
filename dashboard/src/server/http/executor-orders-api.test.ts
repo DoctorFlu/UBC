@@ -19,8 +19,12 @@ import { eventSchema, normalizeEvent } from "@mandate/gemini";
 import { createGeminiPrivateClient } from "@mandate/gemini/private";
 import { FakeGeminiPrivate, unpacedLimiter } from "@mandate/gemini/testing";
 import {
+  AGENT_ID_HEADER,
+  CONSOLE_AGENT_ROUTES,
   CONSOLE_EXECUTOR_ROUTES,
   Category,
+  ENV_AGENT_ID,
+  ordersResponseSchema,
   type ExecutorVenue,
   type VenueOrderRecord,
   clientOrderIdFor,
@@ -46,7 +50,10 @@ import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { eventStream } from "./event-stream";
+import { getOrders } from "./agent-api";
 import { getVenueOrder, putExecutorVenue, putVenueOrder } from "./executor-orders-api";
+
+const SERVICE_TOKEN = "console-service-token-for-tests-0123456789";
 
 const silent = { info: () => undefined, warn: () => undefined };
 const FIXTURES = fileURLToPath(new URL("../../../../gemini/test/fixtures/", import.meta.url));
@@ -109,7 +116,7 @@ function record(intentId: number, patch: Partial<VenueOrderRecord> = {}): VenueO
     revision: 1,
     venue: "gemini",
     environment: "sandbox",
-    clientOrderId: clientOrderIdFor(chainId, policy, intentId),
+    clientOrderId: clientOrderIdFor({ chainId, policy, deployBlockHash: `0x${"ab".repeat(32)}` }, intentId),
     market: BTC_ABOVE_65K,
     side: "buy",
     outcome: "NO",
@@ -163,7 +170,7 @@ beforeAll(async () => {
   journalId = (await chain.agent.proposeTrade(buy)).intentId;
   const config = testConsoleConfig(mkdtempSync(join(tmpdir(), "mandate-console-")), {
     pollIntervalMs: 50,
-    serviceToken: "console-service-token-for-tests-0123456789",
+    serviceToken: SERVICE_TOKEN,
     wake: readWakeConfig({}),
   });
   service = new ConsoleService(config, openDatabase(config.dataDir), { env: chain.env, logger: silent });
@@ -273,6 +280,7 @@ describe("the executor's order journal in the console", () => {
       deployment: {
         chainId: chain.executor.publicClient.chain.id,
         policy: chain.address.toLowerCase() as `0x${string}`,
+        deployBlockHash: `0x${"ab".repeat(32)}`,
       },
     });
     const order = {
@@ -299,6 +307,31 @@ describe("the executor's order journal in the console", () => {
       venueOrderId: placement.placed.venueOrderId,
       filledHundredths: 4_000,
     });
+
+    // The agent reads the order's size from the journal (#117), never its ids; another workspace's
+    // agent sees none, because the orders belong to the contract only the first mandate follows.
+    const asAgent = (agentId: string) =>
+      getOrders(
+        new Request(`http://console.test${CONSOLE_AGENT_ROUTES.orders}`, {
+          headers: { authorization: `Bearer ${SERVICE_TOKEN}`, [AGENT_ID_HEADER]: agentId },
+        }),
+        service,
+      );
+    const mine = await asAgent(ENV_AGENT_ID);
+    expect(mine.status).toBe(200);
+    const { orders } = ordersResponseSchema.parse(await mine.json());
+    expect(orders.find((listed) => listed.intentId === placedId)).toEqual({
+      intentId: placedId,
+      venue: "gemini",
+      environment: "sandbox",
+      state: "filled",
+      quantityHundredths: 4_000,
+      filledHundredths: 4_000,
+      filledCents: 1_240,
+      feeCents: 60,
+    });
+    const bob = workspaceAgent(service, signUpWorkspace(service, "Bob"));
+    expect(ordersResponseSchema.parse(await (await asAgent(bob.agent.id)).json()).orders).toEqual([]);
   });
 
   it("shows the venue the executor announced, signed by it, and never an older announcement", async () => {

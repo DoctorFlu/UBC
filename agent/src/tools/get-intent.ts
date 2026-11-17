@@ -5,6 +5,7 @@ import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { amountText, intentRow, IntentRowSchema, limitPriceText, type IntentRow } from "../support/intents";
 import { AFTER_REJECTION } from "../support/rules";
+import { orderSentence, readOrders } from "../support/orders";
 import { moneyLine, readSettlements } from "../support/settlements";
 
 const ContextCheckSchema = z.object({
@@ -71,11 +72,18 @@ export const getIntent = defineTool({
         return undefined;
       });
     const record = ctx.ledger.lookup(input.intentId);
-    const settled =
+    const [settled, order] = await Promise.all([
       intent.status === "executed"
-        ? (await readSettlements(ctx))?.find((stored) => stored.intentId === input.intentId)?.document
-        : undefined;
-    const row = intentRow(intent, view, record, settled);
+        ? readSettlements(ctx).then(
+            (stored) => stored?.find((entry) => entry.intentId === input.intentId)?.document,
+          )
+        : undefined,
+      // An approved intent may have an order resting on Gemini; a pending or rejected one never has.
+      intent.status === "approved" || intent.status === "executed" || intent.status === "failed"
+        ? readOrders(ctx).then((orders) => orders?.get(input.intentId))
+        : undefined,
+    ]);
+    const row = intentRow(intent, view, record, settled, order);
 
     let context: z.infer<typeof ContextCheckSchema> | null = null;
     if (row.contextHash !== null) {
@@ -110,6 +118,7 @@ export const getIntent = defineTool({
       row.settlement === null
         ? ""
         : ` At expiry it resolved ${row.settlement.resolution.toUpperCase()}: ${moneyLine(row.settlement)}.`;
+    const placed = row.order === null ? "" : orderSentence(row.order, row.amountCents, row.limitPrice);
     const why = row.reason === null ? "" : ` Reason: ${row.reason}.`;
     const flagged =
       row.flags.length === 0
@@ -117,7 +126,7 @@ export const getIntent = defineTool({
         : ` FLAGGED, this server could not have sent it (${row.flags.join("; ")}): the agent key was used around this server, so tell the owner and do not act on it.`;
     return {
       structured: { ...v, intent: { ...row, context } },
-      summary: `Intent #${row.id}: ${row.statusLabel}, ${row.side} ${row.outcome} ${row.market} for ${amountText(row.amountCents)} at ${limitPriceText(row.limitPrice)}.${why}${result}${atExpiry}${flagged}`,
+      summary: `Intent #${row.id}: ${row.statusLabel}, ${row.side} ${row.outcome} ${row.market} for ${amountText(row.amountCents)} at ${limitPriceText(row.limitPrice)}.${why}${placed}${result}${atExpiry}${flagged}`,
     };
   },
 });

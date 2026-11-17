@@ -724,7 +724,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               <dd>{categoryName(intent.category)}</dd>
               <dt>Order</dt>
               <dd>
-                <OrderSummary intent={intent} />
+                <OrderSummary intent={intent} placedHundredths={venueOrder?.quantityHundredths ?? null} />
               </dd>
               <dt>Amount</dt>
               <dd>

@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { decisionContextSchema } from "./context";
 import { settlementSchema, signatureSchema } from "./settlement";
-import { executorVenueSchema, venueOrderRecordSchema } from "./venue-order";
+import {
+  executorVenueSchema,
+  VENUE_ENVIRONMENTS,
+  VENUE_ORDER_STATES,
+  venueOrderRecordSchema,
+} from "./venue-order";
 import { addressSchema, bytes32Schema, intentIdSchema, policyRulesSchema, txHashSchema } from "./types";
 
 /**
@@ -56,6 +61,11 @@ export const CONSOLE_AGENT_ROUTES = {
   signTransaction: `${CONSOLE_AGENT_API_BASE}/signer/transactions`,
   /** GET: the settlements the executor recorded for the agent's mandate, newest first. Issue #92. */
   settlements: `${CONSOLE_AGENT_API_BASE}/settlements`,
+  /**
+   * GET: the orders the executor placed on a real venue for the agent's mandate, from its signed journal:
+   * how many contracts each order was for, and how much filled. Issue #117.
+   */
+  orders: `${CONSOLE_AGENT_API_BASE}/orders`,
   /**
    * GET: what the owner sees in the console that the agent reads nowhere else: the console's public
    * address for links, the agent's change requests still waiting for the owner, and the cover held now
@@ -398,6 +408,33 @@ export const settlementsResponseSchema = z.strictObject({
   settlements: z.array(storedSettlementSchema),
 });
 export type SettlementsResponse = z.infer<typeof settlementsResponseSchema>;
+
+/**
+ * One order the executor placed on a venue, as the agent API serves it (issue #117): the latest version of
+ * its journal record that still verifies, without the venue's or our order ids.
+ */
+export const agentOrderSchema = z.strictObject({
+  intentId: intentIdSchema,
+  venue: z.literal("gemini"),
+  environment: z.enum(VENUE_ENVIRONMENTS),
+  state: z.enum(VENUE_ORDER_STATES),
+  /**
+   * Contracts the order was placed for, in hundredths: the most whose cost at the limit plus Gemini's fee
+   * fit the approved amount, so it can be fewer than the amount buys at the limit alone.
+   */
+  quantityHundredths: z.int().positive(),
+  filledHundredths: z.int().nonnegative(),
+  filledCents: z.int().nonnegative(),
+  /** Gemini's fee on the fills, estimated from its schedule; null until something fills. */
+  feeCents: z.int().nonnegative().nullable(),
+});
+export type AgentOrder = z.infer<typeof agentOrderSchema>;
+
+export const ordersResponseSchema = z.strictObject({
+  /** By intent id. Intents filled by the simulated venue have none. */
+  orders: z.array(agentOrderSchema),
+});
+export type OrdersResponse = z.infer<typeof ordersResponseSchema>;
 
 // The owner's view (#97)
 

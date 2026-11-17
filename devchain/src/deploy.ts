@@ -80,7 +80,7 @@ export interface Deployment {
   blockNumber: bigint;
 }
 
-/** Deploys a Policy contract from `user` (the deployer becomes the contract's immutable `user`). */
+/** Deploys a Policy contract from `user` (the deployer becomes the contract's `user`). */
 export async function deployPolicy(options: {
   rpcUrl: string;
   contract: PolicyContractKind;

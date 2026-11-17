@@ -46,6 +46,7 @@ import {
   formatCents,
   isFinalVenueOrderState,
   payoutFor,
+  type PolicyClient,
   type VenueOrderRecord,
   type VenueOrderState,
 } from "@mandate/shared";
@@ -67,8 +68,11 @@ export interface GeminiVenueOptions {
   /** The signed client; its environment is the venue's. */
   trading: GeminiPrivateClient;
   journal: OrderJournal;
-  /** The contract the orders are for: part of every client order id. */
-  deployment: { chainId: number; policy: `0x${string}` };
+  /**
+   * The contract the orders are for, and the hash of the block it was deployed in: both are part of every
+   * client order id, so a later deployment at the same address never reuses one (issue #117).
+   */
+  deployment: { chainId: number; policy: `0x${string}`; deployBlockHash: `0x${string}` };
   /** How long an order rests unfilled before the rest is cancelled. Default 10 minutes. */
   orderTtlMs?: number;
   /**
@@ -78,6 +82,25 @@ export interface GeminiVenueOptions {
    */
   matchByTerms?: boolean;
   now?: () => number;
+}
+
+/** What `GeminiVenueOptions.deployment` holds. */
+export type VenueDeployment = GeminiVenueOptions["deployment"];
+
+/**
+ * The deployment as the client order ids name it: the chain, the contract (lower case) and the hash of the
+ * block it was deployed in, read from the chain.
+ */
+export async function venueDeployment(
+  client: Pick<PolicyClient, "address" | "publicClient">,
+  deployBlock: bigint,
+): Promise<VenueDeployment> {
+  const block = await client.publicClient.getBlock({ blockNumber: deployBlock });
+  return {
+    chainId: client.publicClient.chain.id,
+    policy: client.address.toLowerCase() as `0x${string}`,
+    deployBlockHash: block.hash,
+  };
 }
 
 /** Orders sent this long before an attempt's recorded time still match it (clock skew between hosts). */
@@ -354,8 +377,9 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       revision: (previous?.revision ?? 0) + 1,
       venue: "gemini",
       environment: trading.environment,
-      // An earlier attempt's id stands: the record does not allow another, and Gemini knows that one.
-      clientOrderId: previous?.clientOrderId ?? clientOrderIdFor(deployment.chainId, policy, order.intentId),
+      // A retry keeps the id its first attempt was sent with, in whichever form it was written: the record
+      // does not allow another, and Gemini knows that one.
+      clientOrderId: previous?.clientOrderId ?? clientOrderIdFor({ ...deployment, policy }, order.intentId),
       market: order.market,
       side: order.isBuy ? "buy" : "sell",
       outcome: order.outcome,

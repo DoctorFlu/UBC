@@ -1371,7 +1371,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
         limiter: unpacedLimiter(),
       }),
       journal: consoleOrderJournal({ consoleUrl: baseURL, sign, deployment: { chainId, policy } }),
-      deployment: { chainId, policy },
+      deployment: { chainId, policy, deployBlockHash: `0x${"ab".repeat(32)}` },
     }),
     settlements: consoleSettlementSink({ consoleUrl: baseURL }),
     fromBlock: 0n,
@@ -1428,7 +1428,11 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     // Open on Gemini: the plain view says nothing new; Advanced view names the order and its state.
     await open(page, `/activity/${intentId.toString()}`);
     await expect(page.getByTestId("intent-venue-order")).toHaveCount(0);
+    // The order line says what was placed, sized for the fee, not the 9.67 the amount buys at 31c (#117).
+    const orderLine = page.getByRole("main").getByTestId("order-summary");
+    await expect(orderLine).toHaveText("Buy NO, 9.22 at 31¢");
     await page.getByRole("switch", { name: "Advanced view" }).click();
+    await expect(orderLine).toHaveText("Buy NO, 9.22 at 31¢ (9.67 before the fee)");
     await expect(page.getByTestId("intent-venue-order")).toHaveText(`Gemini sandbox #${order.orderId}`);
     await expect(page.getByTestId("intent-venue-size")).toHaveText("9.22 contracts");
     await expect(page.getByTestId("intent-venue-state")).toHaveText("Open");
@@ -1449,7 +1453,13 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
       "intent-venue-order",
       page.locator("dl", { has: page.getByTestId("intent-venue-order") }),
     );
+    // Activity says the same.
+    await open(page, "/activity");
+    await expect(row(page, intentId).getByTestId("order-summary")).toHaveText(
+      "Buy NO, 9.22 at 31¢ (9.67 before the fee)",
+    );
     await page.getByRole("switch", { name: "Advanced view" }).click();
+    await expect(row(page, intentId).getByTestId("order-summary")).toHaveText("Buy NO, 9.22 at 31¢");
   } finally {
     executor.stop();
     await testInfo.attach("executor-log", { body: logs.join("\n"), contentType: "text/plain" });
