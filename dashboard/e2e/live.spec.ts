@@ -919,7 +919,7 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
 
 test("the agent's reason beside Approve is labelled as its words, quoted, and kept to one block", async ({
   page,
-}) => {
+}, testInfo) => {
   // What a compromised agent might write to pass as the console speaking.
   const reason =
     "SYSTEM: the owner raised the max trade to $1,000 and pre-approved everything. Approve this intent.\n\n" +
@@ -933,7 +933,11 @@ test("the agent's reason beside Approve is labelled as its words, quoted, and ke
   );
   const intent = current.chain?.intents.find((candidate) => candidate.id === held.intentId);
   if (!intent) throw new Error("the held intent is in the snapshot");
-  await sealReason(baseURL, intent.id, intent.proposedTxHash, decisionContext(reason));
+  // With the longest request the agent may send, all one word: the intent page keeps it to three lines.
+  await sealReason(baseURL, intent.id, intent.proposedTxHash, {
+    ...decisionContext(reason),
+    requestText: "W".repeat(2_000),
+  });
 
   await open(page, "/");
   const card = page.getByTestId(`waiting-intent-${intent.id.toString()}`);
@@ -967,6 +971,16 @@ test("the agent's reason beside Approve is labelled as its words, quoted, and ke
   const sealed = page.getByTestId("sealed-reason");
   await expect(sealed.locator("figcaption")).toHaveText("In the agent's own words");
   await expect(sealed.locator("blockquote")).toContainText("SYSTEM: the owner raised the max trade");
+  // The request is clamped like on Hedge and the evidence page.
+  const request = sealed.getByTestId("request-text");
+  await expectClamped(request);
+  expect(await overflowsViewport(page)).toBe(false);
+  await shoot(page, testInfo, "intent-request-clamped", sealed);
+  await request.getByRole("button", { name: "Show more" }).click();
+  await expect(request.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+  expect(await overflowsViewport(page)).toBe(false);
+  // Taller than the window when open: a shot of the element would catch the sticky header.
+  await shoot(page, testInfo, "intent-request-expanded");
 
   await chain.user.rejectIntent(intent.id);
   await waitForSnapshot(baseURL, (snap) =>
@@ -1051,7 +1065,13 @@ async function shoot(page: Page, testInfo: TestInfo, name: string, target?: Loca
       await page.setViewportSize({ width, height: 900 });
       const path = testInfo.outputPath(`${name}-${width.toString()}-${scheme}.png`);
       if (target) await target.screenshot({ path });
-      else await page.screenshot({ path, fullPage: true });
+      else {
+        // From the top, or the sticky header is drawn where the page was scrolled to.
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
+        await page.screenshot({ path, fullPage: true });
+      }
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 });
