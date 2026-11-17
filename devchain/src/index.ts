@@ -9,6 +9,7 @@ export * from "./deploy";
 export * from "./devchain";
 export * from "./ensure";
 export * from "./executor";
+export * from "./executor-fleet";
 export * from "./foundry";
 export * from "./gemini";
 export * from "./gemini-venue";

@@ -29,6 +29,11 @@ export type RecordSigner = (hash: Hex) => Promise<Hex>;
 export interface ConsoleJournalOptions {
   consoleUrl: string;
   sign: RecordSigner;
+  /**
+   * The contract whose orders this journal holds. Reads name it (#95: one executor serves every mandate's
+   * contract, and the same intent id exists on each); writes carry it in the signed record.
+   */
+  deployment: { chainId: number; policy: string };
   fetch?: (input: string, init: RequestInit) => Promise<Response>;
   timeoutMs?: number;
   /**
@@ -65,6 +70,10 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
   const base = options.consoleUrl.replace(/\/+$/, "");
   const send = options.fetch ?? ((input: string, init: RequestInit) => fetch(input, init));
   const timeoutMs = options.timeoutMs ?? 8_000;
+  const deploymentQuery = new URLSearchParams({
+    chainId: String(options.deployment.chainId),
+    policy: options.deployment.policy.toLowerCase(),
+  }).toString();
   const delays = options.retryDelaysMs ?? RETRY_DELAYS_MS;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const request = async (path: string, init: RequestInit): Promise<Response> => {
@@ -95,7 +104,7 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
   return {
     get: (intentId) =>
       retrying(async () => {
-        const response = await request(CONSOLE_EXECUTOR_ROUTES.order(intentId), {
+        const response = await request(`${CONSOLE_EXECUTOR_ROUTES.order(intentId)}?${deploymentQuery}`, {
           headers: { accept: "application/json" },
         });
         // Only the console's own "no record" counts as none: any other 404 (a proxy, an older console
@@ -116,6 +125,12 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
         return stored.document;
       }),
     async put(record) {
+      if (
+        record.chainId !== options.deployment.chainId ||
+        record.policy.toLowerCase() !== options.deployment.policy.toLowerCase()
+      ) {
+        throw new Error("this journal holds another contract's orders");
+      }
       const signature = await options.sign(hashExecutorRecord(record));
       const body = JSON.stringify(putVenueOrderRequestSchema.parse({ document: record, signature }));
       await retrying(async () => {
@@ -141,7 +156,7 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
  * is down or not following the contract yet): the caller tries again later.
  */
 export async function announceVenue(
-  options: ConsoleJournalOptions,
+  options: Pick<ConsoleJournalOptions, "consoleUrl" | "sign" | "fetch" | "timeoutMs">,
   document: ExecutorVenue,
 ): Promise<VenueAnnouncementProblem | null> {
   const base = options.consoleUrl.replace(/\/+$/, "");

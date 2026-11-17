@@ -115,6 +115,10 @@ services:
       GROK_WEBHOOK_KEY: ${GROK_WEBHOOK_KEY:-}
       GROK_WAKE_DAILY_CAP: ${GROK_WAKE_DAILY_CAP:-}
       GROK_WAKE_PRICE_CHECK_MS: ${GROK_WAKE_PRICE_CHECK_MS:-}
+      # Several mandates per workspace (docs/accounts.md). Empty: the defaults.
+      CONSOLE_MANDATES_PER_WORKSPACE: ${CONSOLE_MANDATES_PER_WORKSPACE:-}
+      CONSOLE_MANDATE_DEPLOYER: ${CONSOLE_MANDATE_DEPLOYER:-}
+      CONSOLE_MANDATE_EXECUTOR: ${CONSOLE_MANDATE_EXECUTOR:-}
       NODE_OPTIONS: --max-old-space-size=384
     volumes:
       - console-data:/data/console

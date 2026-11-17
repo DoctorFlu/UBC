@@ -5,7 +5,6 @@ import { type SyntheticEvent, useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { CopyButton } from "@/components/ui/CopyButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, Input } from "@/components/ui/Field";
 import { HexValue } from "@/components/ui/HexValue";
@@ -15,8 +14,11 @@ import { useToast } from "@/components/ui/Toast";
 import { When } from "@/components/ui/When";
 import { AuthFailure, registerPasskey } from "@/features/auth/passkey";
 import type { AgentTokenView, AgentView, AgentsResponse, CreatedToken } from "@/lib/accounts/types";
+import { useMandateScope } from "@/lib/mandate/MandateContext";
+import { PasskeyFailure, confirmWithPasskey } from "@/lib/owner/passkey";
 
 import styles from "./setup.module.css";
+import { TokenReveal } from "./TokenReveal";
 
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -29,6 +31,7 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
 
 /** The workspace's agents, their tokens, and how to connect Grok Bot with one. */
 export function AgentsSection() {
+  const mandateId = useMandateScope()?.mandate.id ?? null;
   const [data, setData] = useState<AgentsResponse | null>(null);
   const [failed, setFailed] = useState(false);
   // Bumped to load the list again after a change or a failed load.
@@ -80,9 +83,10 @@ export function AgentsSection() {
           <SkeletonText lines={3} />
         </Card>
       ) : (
-        data.agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} mcpUrl={data.mcpUrl} onChange={load} />
-        ))
+        // This mandate's agent only (#95): each mandate has its own, with its own tokens.
+        data.agents
+          .filter((agent) => mandateId === null || agent.mandate.id === mandateId)
+          .map((agent) => <AgentCard key={agent.id} agent={agent} mcpUrl={data.mcpUrl} onChange={load} />)
       )}
       <PasskeyCard />
     </section>
@@ -112,17 +116,23 @@ function AgentCard({
     setCreating(true);
     setError(undefined);
     try {
+      // A token is a credential (#95): one passkey prompt confirms this agent and this name.
+      const stepUp = await confirmWithPasskey({ kind: "create-token", agentId: agent.id, name });
       setCreated(
         await request<CreatedToken>(`/api/console/agents/${agent.id}/tokens`, {
           method: "POST",
-          body: JSON.stringify({ name }),
+          body: JSON.stringify({ name, stepUp }),
         }),
       );
       // The next token is for another app: start it with an empty name.
       setName("");
       onChange();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      if (failure instanceof PasskeyFailure && failure.cancelled) {
+        toast({ title: "No token created", description: failure.message });
+      } else {
+        setError(failure instanceof Error ? failure.message : String(failure));
+      }
     } finally {
       setCreating(false);
     }
@@ -214,7 +224,7 @@ function AgentCard({
                 maxLength={60}
               />
               <Button type="submit" variant="secondary" icon={<Plus aria-hidden />} loading={creating}>
-                Create token
+                Create token with passkey
               </Button>
             </div>
           </Field>
@@ -232,17 +242,7 @@ function AgentCard({
           </Button>
         }
       >
-        {created ? (
-          <div className={styles.tokenReveal}>
-            <div className={styles.copyRow}>
-              <code className={styles.endpoint} translate="no" data-testid="new-token">
-                {created.token}
-              </code>
-              <CopyButton value={created.token} what="token" />
-            </div>
-            <ConnectSteps mcpUrl={mcpUrl} />
-          </div>
-        ) : null}
+        {created ? <TokenReveal token={created.token} mcpUrl={mcpUrl} /> : null}
       </Dialog>
 
       <Dialog
@@ -268,29 +268,6 @@ function AgentCard({
         }
       />
     </Card>
-  );
-}
-
-function ConnectSteps({ mcpUrl }: { mcpUrl: string | null }) {
-  return (
-    <div className={styles.connect}>
-      <h3 className={styles.connectTitle}>Connect Grok Bot</h3>
-      <ol className={styles.connectSteps}>
-        <li>In Grok, open Settings, then Connectors, and add a custom MCP connector.</li>
-        <li>
-          Server URL:{" "}
-          {mcpUrl ? (
-            <code translate="no">{mcpUrl}</code>
-          ) : (
-            <>
-              the MCP server&apos;s public address (set <code>MCP_PUBLIC_URL</code> to show it here)
-            </>
-          )}
-        </li>
-        <li>Authentication: bearer token. Paste the token above.</li>
-        <li>Ask Grok to run whoami: it answers with this agent and its mandate.</li>
-      </ol>
-    </div>
   );
 }
 

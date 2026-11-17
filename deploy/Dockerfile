@@ -83,6 +83,23 @@ RUN npm run build -w @mandate/dashboard \
       echo "The dev signer's key is in a build made without NEXT_PUBLIC_DEV_SIGNER=1." >&2; exit 1; \
     fi
 
+# The Policy contracts, compiled once here: the demo chain deploys them without forge, and the console
+# deploys and checks each new mandate's contract against them (#95).
+FROM build-deps AS contracts
+# forge fetches solc over HTTPS, and the slim image has no CA certificates.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY shared shared
+COPY gemini gemini
+COPY devchain devchain
+COPY contracts/src contracts/src
+COPY contracts/foundry.toml contracts/
+# forge downloads the solc version foundry.toml pins; the cache keeps it between builds.
+RUN --mount=type=cache,target=/root/.svm \
+    node --import tsx --input-type=module \
+      -e 'import { buildContracts } from "@mandate/devchain"; buildContracts();'
+
 FROM base AS console
 ARG NEXT_PUBLIC_DEV_SIGNER=0
 LABEL org.opencontainers.image.title="mandate-console" \
@@ -96,6 +113,12 @@ ENV NODE_ENV=production \
 # The application files stay owned by root, so the server cannot rewrite its own code.
 COPY --from=console-build /app/dashboard/.next/standalone ./
 COPY --from=console-build /app/dashboard/.next/static ./dashboard/.next/static
+# The compiled Policy contracts, from the contracts stage below (never a copy kept in git): the console
+# deploys a new mandate's contract from them on the demo chain, serves the owner's wallet the same bytecode
+# on Arc, and follows only contracts whose code matches them (#95).
+COPY --from=contracts /app/devchain/out/production/Policy.sol/Policy.json policy-artifacts/production/Policy.sol/
+COPY --from=contracts /app/devchain/out/PolicyReference.sol/PolicyReference.json policy-artifacts/PolicyReference.sol/
+ENV CONSOLE_POLICY_ARTIFACTS_DIR=/app/policy-artifacts
 RUN mkdir -p /data/console dashboard/.next/cache \
  && chown node:node /data/console dashboard/.next/cache
 USER node
@@ -126,22 +149,6 @@ FROM scratch AS site
 COPY --from=site-build /app/site/out /
 
 # ----------------------------------------------------------------------------------------------- services
-# The Policy contracts, compiled once here so the demo chain can deploy them without forge.
-FROM build-deps AS contracts
-# forge fetches solc over HTTPS, and the slim image has no CA certificates.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/*
-COPY shared shared
-COPY gemini gemini
-COPY devchain devchain
-COPY contracts/src contracts/src
-COPY contracts/foundry.toml contracts/
-# forge downloads the solc version foundry.toml pins; the cache keeps it between builds.
-RUN --mount=type=cache,target=/root/.svm \
-    node --import tsx --input-type=module \
-      -e 'import { buildContracts } from "@mandate/devchain"; buildContracts();'
-
 FROM base AS services
 LABEL org.opencontainers.image.title="mandate-services" \
       org.opencontainers.image.source="https://github.com/DoctorFlu/UBC"

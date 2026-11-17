@@ -57,3 +57,8 @@
     rotate: 360deg;
   }
 }
+
+/* Closed the prompt: nothing was sent, which is not an error. */
+.cancelled {
+  color: var(--color-text-muted);
+}

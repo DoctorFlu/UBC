@@ -101,9 +101,10 @@ The owner has entered a holding in the console, for example 0.05 BTC, and saved 
    The contract answers each proposal with a verdict: approved, held for the owner, or rejected with its rule.
    [docs/order-lifecycle.md](docs/order-lifecycle.md#1-proposal-and-verdict), [docs/contract-interface.md](docs/contract-interface.md)
 6. **The owner decides what is held.**
-   An order above the approval threshold waits in the console's Approvals page until the owner approves or rejects it with their wallet.
-   <!-- #95 (several mandates with passkey approvals): when it is merged, say here how an approval is signed. -->
-   [docs/order-lifecycle.md](docs/order-lifecycle.md#1-proposal-and-verdict)
+   An order above the approval threshold waits in the mandate's Approvals page until the owner approves or rejects it.
+   On a mandate whose contract the console deployed, the console holds that contract's owner key: one passkey prompt confirms the decision, and the console signs and sends the call.
+   On the first mandate, and on a contract deployed from a wallet, the owner's wallet signs it.
+   [docs/order-lifecycle.md](docs/order-lifecycle.md#1-proposal-and-verdict), [docs/accounts.md](docs/accounts.md#owner-actions-and-the-passkey)
 7. **The console follows the chain.**
    The console stores every Policy event and builds the activity feed, approvals and audit trail from them.
    [docs/quicknode-streams.md](docs/quicknode-streams.md)
@@ -144,18 +145,21 @@ The owner has entered a holding in the console, for example 0.05 BTC, and saved 
 - **Held versus rejected.**
   An order above the approval threshold is held until the owner decides; an order that breaks a rule is rejected, with the rule recorded onchain, and the agent is told never to work around it.
 - **Passkeys.**
-  Console members sign in with passkeys; owner actions on the contract are signed with the owner's wallet ([docs/accounts.md](docs/accounts.md)).
-  <!-- #95: when passkey approvals are merged, say here what a passkey signs. -->
+  Console members sign in with passkeys ([docs/accounts.md](docs/accounts.md)).
+  On a contract the console deployed, every owner action (approving or rejecting an intent, setting rules, resuming the agent) and every new agent token needs a fresh passkey confirmation, never the session alone.
+  The passkey signs a single-use, 2-minute challenge that the server binds to the member, the workspace, the mandate's contract and chain, and the exact call with its arguments, so it confirms that one action and no other; a pause needs only the session, so stopping the agent never waits on a device.
+  On the first mandate and on a contract deployed from a wallet, the owner's wallet signs owner calls itself ([docs/accounts.md](docs/accounts.md#owner-actions-and-the-passkey)).
 - **A token per agent.**
   Each agent reaches the MCP server with its own bearer token, which acts on that agent's mandate only, is stored as a hash, and can be revoked in the console ([docs/accounts.md](docs/accounts.md#how-each-request-is-scoped)).
-  <!-- #95: several mandates per workspace, each with its own agent and tokens. -->
+  A workspace runs up to 5 mandates by default (`CONSOLE_MANDATES_PER_WORKSPACE`), each with its own contract, agent, agent key and tokens, rules, approvals and records, under its own address (`/m/<mandate id>/...`).
+  A token reaches only its own agent's mandate, and one executor key serves every mandate's contract, each with its own order journal ([docs/accounts.md](docs/accounts.md#the-model)).
 - **A second layer in the MCP server.**
   The market category comes from Gemini, never from the agent; a repeated proposal within 10 minutes returns the first result (`agent/src/state/ledger.ts`); a plan can be executed for 30 minutes (`agent/src/state/plans.ts`); signal spend is capped at 0.02 USDC a day and 0.005 USDC a purchase by default ([docs/configuration.md](docs/configuration.md#x402-signal-api-circle-nanopayments-on-arc-testnet)); third-party text is marked untrusted.
 - **The executor checks again.**
   It refuses any approved intent the MCP server could not have sent (not a Gemini symbol, a limit outside 1 to 99, a category Gemini disagrees with), and places one order per intent at most ([docs/gemini-venue.md](docs/gemini-venue.md#safety-rules)).
 - **Red team.**
   `npm run redteam` attacks the mandate through the MCP server and with a stolen agent key.
-  Against the `production` contract it ran 46 attacks: 39 held, 7 bounded, 0 breaches ([redteam/REPORT.md](redteam/REPORT.md)).
+  Against the `production` contract it ran 47 attacks: 40 held, 7 bounded, 0 breaches ([redteam/REPORT.md](redteam/REPORT.md)).
   The bounded ones are listed there with their limits: for example, splitting an order gets past the per-order rules but not the budget.
 
 ## How the sponsor technologies are used
@@ -231,7 +235,7 @@ Every setting is in [docs/configuration.md](docs/configuration.md), and every se
 
 | Document | What it covers |
 | --- | --- |
-| [docs/accounts.md](docs/accounts.md) | Workspaces, members, passkey sign-in, sessions, agent tokens, and how each request is scoped to one mandate. |
+| [docs/accounts.md](docs/accounts.md) | Workspaces, members, passkey sign-in, sessions, agent tokens, and how each request is scoped to one mandate; several mandates per workspace, where each contract comes from, the passkey on owner actions, the shared executor, and the blockers before real funds. |
 | [docs/configuration.md](docs/configuration.md) | Every environment variable, by service. |
 | [docs/contract-interface.md](docs/contract-interface.md) | What the offchain code uses from the Policy contract, the requested additions, and the red team's findings for the contract owner. |
 | [docs/cover.md](docs/cover.md) | How the server decides that a protection goal is already met, and plans only the missing part. |
@@ -243,4 +247,4 @@ Every setting is in [docs/configuration.md](docs/configuration.md), and every se
 | [docs/quicknode-streams.md](docs/quicknode-streams.md) | The QuickNode Stream on Arc testnet: dataset, filter, webhook, lifecycle and credit budget. |
 | [docs/x402.md](docs/x402.md) | x402 with Circle Gateway on Arc testnet: the seller, the buyer, the hedge signal and a recorded paid run. |
 
-<!-- #95 and #96: add their docs here when they are merged. -->
+<!-- #96: add its docs here when it is merged. -->

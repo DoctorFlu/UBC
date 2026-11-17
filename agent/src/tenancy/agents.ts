@@ -5,11 +5,17 @@
  * - The first mandate's agent (`env`) uses the server's own services: its key, its contract, the signal
  *   buyer and the payment outbox.
  * - Any other agent gets its own plan store and proposal ledger, a console client that names it, and a
- *   policy client only when its mandate has a contract, signing through the console (`ConsoleSigner`).
- *   It never gets the signal buyer: signals spend the operator's wallet, which phase 1 keeps for the
- *   first mandate.
+ *   policy client only when its mandate has a contract, signing through the console (`ConsoleSigner`):
+ *   the server's contract for an agent of the first mandate, otherwise its mandate's own contract (#95),
+ *   on the chain the server reads. It never gets the signal buyer: signals spend the operator's wallet,
+ *   which is kept for the first mandate.
  */
-import { ENV_AGENT_ID, type SignerKind } from "@mandate/shared";
+import {
+  ARC_TESTNET_CHAIN_ID,
+  ENV_AGENT_ID,
+  type MandateDeploymentKind,
+  type SignerKind,
+} from "@mandate/shared";
 import { createAgentPolicy } from "../chain/agent-policy";
 import type { Config } from "../config";
 import type { AppContext } from "../context";
@@ -25,8 +31,13 @@ export interface AgentIdentity {
   readonly mandateId: string | null;
   readonly workspaceId: string | null;
   readonly signer: SignerKind;
-  /** The contract the mandate follows: `env` is the server's own, null is none yet. */
-  readonly deployment: "env" | null;
+  /** The mandate's name; null for the server's own context before any call. */
+  readonly mandateName: string | null;
+  /**
+   * The contract the mandate follows: `env` is the server's own, `server` and `wallet` are the mandate's
+   * own (deployed by the console, or by the owner's wallet), null is none yet.
+   */
+  readonly deployment: MandateDeploymentKind | null;
 }
 
 /** The server's own agent before any token has named its mandate. */
@@ -35,6 +46,7 @@ export const SERVER_AGENT: AgentIdentity = {
   mandateId: null,
   workspaceId: null,
   signer: "env",
+  mandateName: null,
   deployment: "env",
 };
 
@@ -44,6 +56,7 @@ export function identityOf(resolved: ResolvedAgent): AgentIdentity {
     mandateId: resolved.mandateId,
     workspaceId: resolved.workspaceId,
     signer: resolved.agent.signer,
+    mandateName: resolved.mandate.name,
     deployment: resolved.mandate.deployment,
   };
 }
@@ -53,7 +66,9 @@ function fingerprint(resolved: ResolvedAgent): string {
   return JSON.stringify([
     resolved.mandateId,
     resolved.workspaceId,
+    resolved.mandate.name,
     resolved.mandate.deployment,
+    resolved.mandate.contract,
     resolved.agent.signer,
     resolved.agent.address,
   ]);
@@ -116,9 +131,10 @@ export class AgentContexts {
     };
     this.#state.set(resolved.agentId, state);
     const address = resolved.agent.address ?? undefined;
-    const hasContract = resolved.mandate.deployment === "env";
+    const contractConfig = configFor(base.config, resolved);
+    const hasContract = contractConfig.policyAddress !== undefined;
     const config: Config = {
-      ...(hasContract ? base.config : withoutContract(base.config)),
+      ...contractConfig,
       // The console holds this agent's key: the server never has one for it.
       agentPrivateKey: undefined,
       agentAddress: address,
@@ -150,4 +166,16 @@ export class AgentContexts {
 
 function withoutContract(config: Config): Config {
   return { ...config, policyAddress: undefined, policyDeployBlock: undefined };
+}
+
+/**
+ * The server's settings with the contract this agent's mandate follows: the server's own for `env`, the
+ * mandate's own for `server` and `wallet` when it is on the chain the server reads (one RPC serves every
+ * contract), and none otherwise.
+ */
+function configFor(config: Config, resolved: ResolvedAgent): Config {
+  const { deployment, contract } = resolved.mandate;
+  if (deployment === "env") return config;
+  if (contract === null || contract.chainId !== ARC_TESTNET_CHAIN_ID) return withoutContract(config);
+  return { ...config, policyAddress: contract.address, policyDeployBlock: BigInt(contract.deployBlock) };
 }

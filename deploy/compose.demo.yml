@@ -111,6 +111,8 @@ services:
       CONSOLE_URL: http://console:3000
       # How often it checks positions on expired markets for Gemini's published outcome.
       EXECUTOR_SETTLE_MS: ${EXECUTOR_SETTLE_MS:-60000}
+      # How often it asks the console for mandate contracts that name it as their executor (#95).
+      EXECUTOR_DISCOVERY_MS: ${EXECUTOR_DISCOVERY_MS:-15000}
       # What fills approved orders: simulated (default, places nothing) or gemini (Gemini's sandbox, with the
       # key below; run npm run gemini:doctor first). Live trading is refused on the demo chain, so no
       # GEMINI_LIVE_TRADING is passed here.

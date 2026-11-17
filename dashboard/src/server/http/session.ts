@@ -118,15 +118,34 @@ export type ConsoleHandler = (
 ) => Promise<Response> | Response;
 
 /**
- * The scope of a console request, or the error to answer with: 401 without a live session, 404 when the
- * `mandate` query names a mandate outside the session's workspace (the same answer as one that does not
- * exist, so a guess learns nothing).
+ * What a console route acts on: one `mandate` (the default), named by the `mandate` query, which a write
+ * must name (a page open on one mandate must never change another by leaving it out); or the `workspace`,
+ * whose routes take no mandate (agents, passkeys, mandates themselves).
  */
-export function scopeOf(request: Request, service: ConsoleService): ConsoleScope | Response {
+export interface ConsoleRouteOptions {
+  scope?: "mandate" | "workspace";
+}
+
+/** The options of a workspace route. */
+export const WORKSPACE: ConsoleRouteOptions = { scope: "workspace" };
+
+/**
+ * The scope of a console request, or the error to answer with: 401 without a live session; 400 for a
+ * write to a mandate route that names no mandate; 404 when the `mandate` query names a mandate outside
+ * the session's workspace (the same answer as one that does not exist, so a guess learns nothing).
+ */
+export function scopeOf(
+  request: Request,
+  service: ConsoleService,
+  options: ConsoleRouteOptions = {},
+): ConsoleScope | Response {
   const access = service.accounts.access(sessionIdOf(request, service.config.accounts));
   if (!access) return apiError(401, "unauthenticated", "Sign in to use the console.");
   const requested = new URL(request.url).searchParams.get("mandate");
-  const mandate = service.accounts.mandateFor(access, requested);
+  if (options.scope !== "workspace" && !SAFE_METHODS.has(request.method.toUpperCase()) && !requested) {
+    return apiError(400, "mandate_required", "Name the mandate this change is for (?mandate=).");
+  }
+  const mandate = service.accounts.mandateFor(access, options.scope === "workspace" ? null : requested);
   if (!mandate) return apiError(404, "not_found", "This workspace has no such mandate.");
   return { access, mandate };
 }
@@ -136,7 +155,7 @@ export function scopeOf(request: Request, service: ConsoleService): ConsoleScope
  * and a uniform 500 that says nothing about the failure. Every route under /api/console goes through it
  * (a test checks).
  */
-export function consoleRoute(handler: ConsoleHandler) {
+export function consoleRoute(handler: ConsoleHandler, options: ConsoleRouteOptions = {}) {
   return async (
     request: Request,
     service: ConsoleService,
@@ -144,7 +163,7 @@ export function consoleRoute(handler: ConsoleHandler) {
   ): Promise<Response> => {
     const crossSite = checkOrigin(request, service.config.accounts);
     if (crossSite) return crossSite;
-    const scope = scopeOf(request, service);
+    const scope = scopeOf(request, service, options);
     if (scope instanceof Response) return privateHeaders(scope);
     try {
       return privateHeaders(await handler(request, service, scope, params));

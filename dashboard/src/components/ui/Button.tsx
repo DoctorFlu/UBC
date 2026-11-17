@@ -5,6 +5,7 @@ import type { ButtonHTMLAttributes, ComponentProps, ReactNode } from "react";
 import { cx } from "@/lib/cx";
 
 import styles from "./Button.module.css";
+import { ViewLink } from "./ViewLink";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "dangerOutline";
 export type ButtonSize = "sm" | "md" | "lg";
@@ -66,6 +67,8 @@ export function Button({
 
 export interface ButtonLinkProps extends ComponentProps<typeof Link>, StyleProps {
   icon?: ReactNode;
+  /** `href` is a view of the page's mandate (`/rules`), not a path of the site. */
+  view?: boolean;
 }
 
 export function ButtonLink({
@@ -76,10 +79,21 @@ export function ButtonLink({
   icon,
   className,
   children,
+  view = false,
+  href,
   ...rest
 }: ButtonLinkProps) {
+  const classes = buttonClass({ variant, size, block, iconOnly }, className);
+  if (view && typeof href === "string") {
+    return (
+      <ViewLink className={classes} href={href} {...rest}>
+        {icon}
+        {children}
+      </ViewLink>
+    );
+  }
   return (
-    <Link className={buttonClass({ variant, size, block, iconOnly }, className)} {...rest}>
+    <Link className={classes} href={href} {...rest}>
       {icon}
       {children}
     </Link>

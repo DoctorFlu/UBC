@@ -10,6 +10,7 @@ export default function NotFound() {
     <main className={styles.page}>
       <EmptyState
         title="Nothing at this address"
+        titleAs="h1"
         action={
           <ButtonLink href="/" variant="primary" icon={<ArrowLeft aria-hidden />}>
             Back to Home

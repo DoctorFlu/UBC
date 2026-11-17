@@ -27,10 +27,13 @@ export interface WorkspaceIds {
   workspaceId: string;
   mandateId: string;
   agentId: string;
+  /** The id of the member's first agent token (not the token). */
+  tokenId: string;
 }
 
 interface Seeded extends WorkspaceIds {
   cookie: string;
+  token: string;
 }
 
 export interface ApiResponse {
@@ -47,19 +50,23 @@ export class ConsoleApi {
   readonly alice: WorkspaceIds;
   readonly bob: WorkspaceIds;
   readonly #cookies: Record<Member, string>;
+  /** Each member's first agent token, made when the console was seeded (a token takes a passkey). */
+  readonly #tokens: Record<Member, string>;
   readonly #serviceToken: string;
   readonly #child: ChildProcess;
 
   constructor(base: string, seeded: Record<Member, Seeded>, serviceToken: string, child: ChildProcess) {
     this.base = base;
-    const ids = ({ workspaceId, mandateId, agentId }: Seeded): WorkspaceIds => ({
+    const ids = ({ workspaceId, mandateId, agentId, tokenId }: Seeded): WorkspaceIds => ({
       workspaceId,
       mandateId,
       agentId,
+      tokenId,
     });
     this.alice = ids(seeded.alice);
     this.bob = ids(seeded.bob);
     this.#cookies = { alice: seeded.alice.cookie, bob: seeded.bob.cookie };
+    this.#tokens = { alice: seeded.alice.token, bob: seeded.bob.token };
     this.#serviceToken = serviceToken;
     this.#child = child;
   }
@@ -115,9 +122,20 @@ export class ConsoleApi {
     return { status: response.status, text };
   }
 
+  /** A member's own agent token, for the requests their agent's MCP server would make. */
+  agentToken(member: Member): string {
+    return this.#tokens[member];
+  }
+
   /** Whether a text holds one of the secrets this class keeps. */
   leaks(text: string): boolean {
-    return [this.#cookies.alice, this.#cookies.bob, this.#serviceToken].some((secret) => {
+    return [
+      this.#cookies.alice,
+      this.#cookies.bob,
+      this.#tokens.alice,
+      this.#tokens.bob,
+      this.#serviceToken,
+    ].some((secret) => {
       const value = secret.slice(secret.indexOf("=") + 1);
       return value.length > 0 && text.includes(value);
     });

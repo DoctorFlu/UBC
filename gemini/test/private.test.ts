@@ -457,6 +457,27 @@ describe("against the fake Gemini", () => {
       reason: "InvalidSignature",
     });
   });
+
+  it("takes a 36-character client order id and refuses a 37-character one, as the sandbox did on 2026-11-17", async () => {
+    const fake = new FakeGeminiPrivate({ apiKey: KEY, apiSecret: SECRET, now: () => NOW });
+    const gemini = client(fake.fetch, () => NOW);
+    const terms = {
+      symbol: "GEMI-BTC2611202200-HI67000",
+      side: "buy",
+      outcome: "no",
+      quantity: "10",
+      price: "0.40",
+    } as const;
+    const fits = `m-${"a".repeat(20)}-${"9".repeat(13)}`;
+    expect(fits).toHaveLength(36);
+    expect(await gemini.placeOrder({ ...terms, clientOrderId: fits })).toMatchObject({ clientOrderId: fits });
+    await expect(gemini.placeOrder({ ...terms, clientOrderId: `${fits}0` })).rejects.toMatchObject({
+      kind: "rejected",
+      reason: "InvalidInput",
+      message: expect.stringContaining("client_order_id must be at most 36 characters") as unknown,
+    });
+    expect(fake.orders.size).toBe(1);
+  });
 });
 
 describe("the trading settings", () => {

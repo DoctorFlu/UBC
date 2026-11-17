@@ -113,7 +113,11 @@ export function HoldingsEditor({
             description: "The agent sizes its next hedge to these.",
             tone: "success",
           }
-        : { title: "Not saved", description: result.message, tone: "danger" },
+        : {
+            title: "Not saved",
+            description: result.message,
+            ...(result.cancelled ? {} : { tone: "danger" as const }),
+          },
     );
   };
 
@@ -203,7 +207,7 @@ export function HoldingsEditor({
           loading={pending}
           disabled={!hydrated || !dirty || blocked !== null}
         >
-          Sign and save
+          {access.kind === "owner" && access.signer === "passkey" ? "Save with passkey" : "Sign and save"}
         </Button>
       </div>
       {/* What the agent reads now, against what is only on this screen: edits count once signed and saved. */}

@@ -202,6 +202,90 @@ export function openAgentKey(master: MasterKey, agentId: string, sealedText: str
   }
 }
 
+/**
+ * Owner keys (#95): the key a `server` mandate's Policy contract names as its `user()`, which only the
+ * console holds on the demo chain. Sealed like an agent key, but bound to the mandate under other labels,
+ * so neither kind of sealed key opens as the other.
+ */
+export function sealOwnerKey(master: MasterKey, mandateId: string, privateKey: Hex): string {
+  const dataKey = randomBytes(KEY_BYTES);
+  try {
+    const sealed: z.infer<typeof sealedSchema> = {
+      v: 1,
+      kek: master.id,
+      dek: seal(master.bytes(), dataKey, `mandate.owner-dek.v1:${mandateId}`),
+      key: seal(dataKey, Buffer.from(privateKey.slice(2), "hex"), `mandate.owner-key.v1:${mandateId}`),
+    };
+    return JSON.stringify(sealed);
+  } finally {
+    dataKey.fill(0);
+  }
+}
+
+/** Decrypts a sealed owner key. Throws, without detail, when the master key or the mandate id is wrong. */
+export function openOwnerKey(master: MasterKey, mandateId: string, sealedText: string): Hex {
+  const sealed = sealedSchema.parse(JSON.parse(sealedText));
+  if (sealed.kek !== master.id) {
+    throw new MasterKeyError(
+      `This owner key was sealed with master key ${sealed.kek}, but the console has ${master.id}.`,
+    );
+  }
+  let dataKey: Buffer | null = null;
+  try {
+    dataKey = open(master.bytes(), sealed.dek, `mandate.owner-dek.v1:${mandateId}`);
+    const key = open(dataKey, sealed.key, `mandate.owner-key.v1:${mandateId}`);
+    const hex: Hex = `0x${key.toString("hex")}`;
+    key.fill(0);
+    return hex;
+  } catch (error) {
+    if (error instanceof MasterKeyError) throw error;
+    throw new MasterKeyError("The owner key could not be decrypted.");
+  } finally {
+    dataKey?.fill(0);
+  }
+}
+
+/** A new owner key, sealed, with its public address. */
+export function createSealedOwnerKey(
+  master: MasterKey,
+  mandateId: string,
+): { address: Address; sealed: string } {
+  const key = generatePrivateKey();
+  return { address: privateKeyToAccount(key).address, sealed: sealOwnerKey(master, mandateId, key) };
+}
+
+/**
+ * The account of a mandate's owner key, for one signature or one transaction, checked against the address
+ * stored with it. Callers decide what may be signed (the owner call route and the server deployer).
+ */
+export function ownerAccount(
+  master: MasterKey,
+  mandateId: string,
+  key: { address: Address; sealed: string },
+) {
+  const account = privateKeyToAccount(openOwnerKey(master, mandateId, key.sealed));
+  if (account.address !== key.address) {
+    throw new MasterKeyError("The decrypted key does not belong to this mandate's owner.");
+  }
+  return account;
+}
+
+/**
+ * A mandate's owner key as a signer that decrypts it for each transaction and keeps it no longer. Callers
+ * decide what may be signed (the owner call route, after a passkey; the server deployer).
+ */
+export function localOwnerSigner(
+  master: MasterKey,
+  mandateId: string,
+  key: { address: Address; sealed: string },
+): AgentSigner {
+  return {
+    address: key.address,
+    signTransaction: (transaction: TransactionSerializable) =>
+      ownerAccount(master, mandateId, key).signTransaction(transaction),
+  };
+}
+
 /** A new agent key, sealed, with its public address. The key itself is gone when this returns. */
 export function createSealedAgentKey(
   master: MasterKey,

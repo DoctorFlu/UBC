@@ -6,7 +6,7 @@ import {
   quantityHundredthsFromAmount,
 } from "@mandate/shared";
 import { ShieldAlert } from "lucide-react";
-import Link from "next/link";
+import { ViewLink } from "@/components/ui/ViewLink";
 
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Advanced } from "@/lib/advanced/Advanced";
@@ -205,8 +205,8 @@ export function IntentVerdict({ intent }: { intent: IntentView }) {
 /** "Intent 3", linking to its detail page with every onchain step. */
 export function IntentLink({ id }: { id: number }) {
   return (
-    <Link href={`/activity/${id.toString()}`} className={styles.intentLink}>
+    <ViewLink href={`/activity/${id.toString()}`} className={styles.intentLink}>
       <span className="visually-hidden">Intent </span>#{id}
-    </Link>
+    </ViewLink>
   );
 }

@@ -25,21 +25,17 @@ import {
   agentIdSchema,
   summaryResponseSchema,
   verifyContext,
-  type ConsoleHolding,
-  type CoverNowView,
-  type IntentView,
 } from "@mandate/shared";
 import { type Address, type Hex, isAddressEqual } from "viem";
 
-import { coverNow } from "@/features/hedge/cover-now";
 import { hedgePlanSchema } from "@/lib/hedge/plan-schema";
-import type { AgentPlanView } from "@/lib/hedge/types";
+import { mandatePath } from "@/lib/mandate-path";
 
 import type { Agent, Mandate } from "../accounts/store";
 import type { ConsoleService } from "../console-service";
-import { ladderQuotes } from "../market/quotes";
 import type { StoredPairing } from "../store/offchain";
-import { currentGoals, type LadderSource } from "../wake";
+import { coverOfSnapshot } from "../cover-summary";
+import type { LadderSource } from "../wake";
 import { apiError, checkServiceToken, describeIssues, json, readBody } from "./responses";
 import { describe } from "./session";
 
@@ -335,9 +331,9 @@ export const getPairing = agentRoute(async (_request, service, { mandate }) => {
   return json(await pairingResponse(service, mandate, pairing));
 });
 
-/** The owner's page for confirming an agent. */
-export function claimUrl(service: ConsoleService, agentAddress: Address): string {
-  return `${service.config.publicUrl}/setup/pair/${agentAddress}`;
+/** The owner's page for confirming an agent, under the mandate it acts for (#95). */
+export function claimUrl(service: ConsoleService, mandate: Mandate, agentAddress: Address): string {
+  return `${service.config.publicUrl}${mandatePath(mandate.id, `/setup/pair/${agentAddress}`)}`;
 }
 
 async function pairingResponse(service: ConsoleService, mandate: Mandate, pairing: StoredPairing) {
@@ -346,7 +342,7 @@ async function pairingResponse(service: ConsoleService, mandate: Mandate, pairin
     agentAddress: pairing.agentAddress,
     agentName: pairing.agentName,
     status: pairing.status,
-    claimUrl: claimUrl(service, pairing.agentAddress),
+    claimUrl: claimUrl(service, mandate, pairing.agentAddress),
     isContractAgent: roles ? isAddressEqual(roles.agent, pairing.agentAddress) : false,
   });
 }
@@ -381,69 +377,15 @@ export function getSummary(
   return agentRoute(async (_request, service, { mandate }) => {
     const snapshot = service.snapshot(mandate);
     const now = Date.now();
-    // Without the chain the console cannot count what is held: unavailable, never "not covered".
-    const intents = snapshot.chain?.intents ?? null;
-    const cover = await Promise.all(
-      currentGoals(snapshot.offchain.plans, now).map((view) =>
-        coverOfGoal(view, snapshot.offchain.holdings, intents, ladder),
-      ),
-    );
+    const cover = await coverOfSnapshot(snapshot, ladder, now);
     return json(
       summaryResponseSchema.parse({
-        consoleUrl: service.config.publicUrl,
+        // The mandate's own pages (#95): the agent's links (`/approvals`, `/hedge`) open this mandate.
+        consoleUrl: `${service.config.publicUrl}${mandatePath(mandate.id)}`,
         changeRequests: snapshot.offchain.changeRequests.filter((request) => request.status === "pending"),
         cover,
         asOf: new Date(now).toISOString(),
       }),
     );
   })(request, service);
-}
-
-async function coverOfGoal(
-  view: AgentPlanView,
-  holdings: readonly ConsoleHolding[],
-  intents: readonly IntentView[] | null,
-  ladder: LadderSource,
-): Promise<CoverNowView> {
-  const { plan } = view;
-  const goal = {
-    asset: plan.asset,
-    eventTicker: plan.eventTicker,
-    expiresAt: plan.expiry,
-    planId: view.planId,
-    floorCents: plan.floorCents,
-  };
-  const unavailable: CoverNowView = {
-    ...goal,
-    state: "unavailable",
-    spotCents: null,
-    measuredBelowCents: null,
-    targetPayoutCents: null,
-    heldPayoutCents: null,
-    heldByState: null,
-    coverBps: null,
-    missingPayoutCents: null,
-  };
-  if (intents === null) return unavailable;
-  const lookup = await ladder(plan.asset, plan.eventTicker).catch(() => ({ ok: false as const }));
-  if (!lookup.ok) return unavailable;
-  const holding = holdings.find((candidate) => candidate.asset === plan.asset)?.quantity ?? null;
-  const cover = coverNow({ plan, holdingQuantity: holding, quotes: ladderQuotes(lookup.ladder), intents });
-  if (!cover) return unavailable;
-  const { assessment } = cover;
-  return {
-    ...goal,
-    state: assessment.state,
-    spotCents: assessment.spotCents,
-    measuredBelowCents: assessment.measuredBelowCents,
-    targetPayoutCents: assessment.targetPayoutCents,
-    heldPayoutCents: assessment.heldPayoutCents,
-    heldByState: {
-      filledCents: assessment.heldByState.filled,
-      awaitingFillCents: assessment.heldByState.awaiting_fill,
-      awaitingOwnerCents: assessment.heldByState.awaiting_owner,
-    },
-    coverBps: assessment.coverBps,
-    missingPayoutCents: assessment.missingPayoutCents,
-  };
 }

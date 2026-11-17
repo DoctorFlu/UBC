@@ -1,8 +1,10 @@
-import { snapshot } from "./support/console";
+import { firstMandatePath, snapshot } from "./support/console";
 
 /** Every page the dashboard serves, shared by the smoke test and the screenshot run. */
 /** Stands for the latest plan's evidence page until `routePath` resolves it. */
 const LATEST_PLAN = "/hedge/plans/{latest}";
+/** Stands for the first mandate's Overview (`/m/<id>`, #95) until `routePath` resolves it. */
+const OVERVIEW = "/m/{first}";
 
 export const AGENT_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 export const OWNER_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
@@ -11,12 +13,15 @@ export interface RouteCase {
   name: string;
   path: string;
   heading: string;
-  /** Console routes render the shell and the wallet; public ones do not. */
+  /** A mandate's pages render the shell and the wallet; the workspace's and public ones do not. */
   console: boolean;
 }
 
 export const routes: readonly RouteCase[] = [
-  { name: "home", path: "/", heading: "Home", console: true },
+  { name: "home", path: "/", heading: "Home", console: false },
+  { name: "new-mandate", path: "/mandates/new", heading: "New mandate", console: false },
+  // Old links (`/approvals`) open the first mandate's pages; its Overview has no old link: see `routePath`.
+  { name: "overview", path: OVERVIEW, heading: "Overview", console: true },
   { name: "approvals", path: "/approvals", heading: "Approvals", console: true },
   { name: "activity", path: "/activity", heading: "Activity", console: true },
   { name: "intent", path: "/activity/0", heading: "Intent #0", console: true },
@@ -32,8 +37,9 @@ export const routes: readonly RouteCase[] = [
   { name: "components", path: "/dev/components", heading: "Components", console: false },
 ];
 
-/** The path of a route, with the latest stored plan's id in place of `LATEST_PLAN`. */
+/** The path of a route, with the first mandate's id and the latest stored plan's id filled in. */
 export async function routePath(route: RouteCase, baseURL: string): Promise<string> {
+  if (route.path === OVERVIEW) return firstMandatePath(baseURL);
   if (route.path !== LATEST_PLAN) return route.path;
   const plan = (await snapshot(baseURL)).offchain.plans[0];
   if (!plan) throw new Error("the warm-up posted no plan");

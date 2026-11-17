@@ -1,12 +1,13 @@
 /**
  * Owner-signed requests for the console's offchain writes (holdings, pairing, change requests).
  *
- * The console has no accounts: the owner is whoever controls the Policy contract's `user()` wallet.
- * Offchain writes the agent relies on therefore carry a wallet signature over exactly what they change,
- * bound to this contract and chain, a time and a single-use nonce. The server recovers the signer and
- * accepts the request only from `user()`.
+ * The owner is whoever controls the Policy contract's `user()`. Offchain writes the agent relies on
+ * therefore carry that owner's approval of exactly what they change, bound to this contract and chain:
+ * a wallet signature with a time and a single-use nonce, which the server recovers and accepts only from
+ * `user()`; or, for a contract whose owner key the console holds (#95), a member's passkey confirmation
+ * of the same action and payload (`server/accounts/step-up.ts`).
  */
-import { canonicalJson } from "@mandate/shared";
+import { addressSchema, canonicalJson, holdingSchema } from "@mandate/shared";
 import { type Address, type Hex, keccak256, stringToBytes } from "viem";
 import { z } from "zod";
 
@@ -17,6 +18,27 @@ export const OWNER_ACTIONS = {
 } as const;
 
 export type OwnerAction = keyof typeof OWNER_ACTIONS;
+
+export const holdingsPayloadSchema = z.strictObject({
+  holdings: z
+    .array(holdingSchema)
+    .max(20)
+    .refine((holdings) => new Set(holdings.map((holding) => holding.asset)).size === holdings.length, {
+      message: "each asset can appear once",
+    }),
+});
+
+export const confirmPairingPayloadSchema = z.strictObject({ agentAddress: addressSchema });
+
+export const dismissPayloadSchema = z.strictObject({ id: z.string().min(1).max(64) });
+
+/** Each owner action with its payload, as one value. */
+export const ownerRequestSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("holdings.save"), payload: holdingsPayloadSchema }),
+  z.strictObject({ action: z.literal("pairing.confirm"), payload: confirmPairingPayloadSchema }),
+  z.strictObject({ action: z.literal("change-request.dismiss"), payload: dismissPayloadSchema }),
+]);
+export type OwnerRequest = z.infer<typeof ownerRequestSchema>;
 
 /** A signature older than this, or this far in the future, is refused. */
 export const OWNER_REQUEST_MAX_AGE_MS = 5 * 60 * 1000;

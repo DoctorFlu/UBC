@@ -40,7 +40,11 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
         <EmptyState
           icon={<Link2 strokeWidth={1.75} />}
           title="No agent with this address asked to pair"
-          action={<ButtonLink href="/setup">Back to setup</ButtonLink>}
+          action={
+            <ButtonLink view href="/setup">
+              Back to setup
+            </ButtonLink>
+          }
         >
           Start the agent&apos;s MCP server: it announces itself to this console and links you here.
         </EmptyState>
@@ -61,7 +65,11 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
             description: `${pairing.agentName} is paired with this console.`,
             tone: "success",
           }
-        : { title: "Not confirmed", description: result.message, tone: "danger" },
+        : {
+            title: "Not confirmed",
+            description: result.message,
+            ...(result.cancelled ? {} : { tone: "danger" as const }),
+          },
     );
   };
 
@@ -123,12 +131,14 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
                 loading={pending}
                 disabled={blocked !== null}
               >
-                Sign and confirm
+                {access.kind === "owner" && access.signer === "passkey"
+                  ? "Confirm agent with passkey"
+                  : "Sign and confirm"}
               </Button>
               {blocked && access.kind !== "loading" ? <span className={styles.muted}>{blocked}</span> : null}
             </div>
           ) : (
-            <ButtonLink href="/setup" variant="secondary">
+            <ButtonLink view href="/setup" variant="secondary">
               Back to setup
             </ButtonLink>
           )}

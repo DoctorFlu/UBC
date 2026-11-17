@@ -49,7 +49,7 @@ export function NoPolicyYet({ children }: { children?: ReactNode }) {
       icon={<FileSignature strokeWidth={1.75} />}
       title="No rules yet"
       action={
-        <ButtonLink href="/rules" variant="primary">
+        <ButtonLink view href="/rules" variant="primary">
           Set the rules
         </ButtonLink>
       }

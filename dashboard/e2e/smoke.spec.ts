@@ -12,6 +12,7 @@ import type { HedgeMarketResponse } from "../src/lib/hedge/types";
 import { describeMarket } from "../src/lib/markets";
 
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
+import { firstMandatePath } from "./support/console";
 import { suitePaths } from "./support/chain";
 import { DEMO_RECEIPT, ownerHeaders, reportSignalBudget, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
@@ -74,17 +75,25 @@ for (const scheme of schemes) {
             await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
             // The badge renders once for wide screens and once for phones; one of them shows.
             await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toHaveCount(1);
+            // The first mandate's agent is the one with a public scorecard; the sidebar links it.
+            if (viewport.name === "desktop") {
+              await expect(
+                page.getByRole("link", { name: "Public scorecard" }).filter({ visible: true }),
+              ).toHaveCount(1);
+            }
           } else {
             await expect(page.getByTestId("owner-address")).toHaveCount(0);
+            // Outside a mandate (Home, New mandate) the dev signer signs nothing, so it is not shown.
+            await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
           }
           await page.waitForLoadState("networkidle");
           expect(problems).toEqual([]);
         });
       }
 
-      test("the dev signer shows the connected owner", async ({ page }) => {
+      test("the dev signer shows the connected owner", async ({ page, baseURL }) => {
         const problems = watchConsole(page);
-        await page.goto("/");
+        await page.goto(await firstMandatePath(baseURL ?? ""));
         if (viewport.name === "phone") {
           await page.getByRole("button", { name: "Open menu" }).click();
         }
@@ -353,7 +362,7 @@ test.describe("seeded demo", () => {
         .getByRole("row")
         .filter({ has: page.getByRole("link", { name: "Intent #5", exact: true }) })
         .filter({ visible: true });
-    await page.goto("/");
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     await expect(sports()).toContainText("Sports market");
     await expect(sports()).not.toContainText("GEMI-");
     await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);

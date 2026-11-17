@@ -34,6 +34,7 @@ import {
 } from "./audit-rows";
 import styles from "./audit.module.css";
 import { ExportButtons } from "./ExportButtons";
+import { OwnerActions } from "./OwnerActions";
 
 const columns: readonly Column<AuditRow>[] = [
   {
@@ -262,6 +263,8 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
           ) : null}
         </Card>
       </div>
+
+      <OwnerActions />
     </div>
   );
 }

@@ -106,6 +106,24 @@ export interface PolicyClientOptions {
   receiptPollingMs?: number;
   /** Largest block range per `eth_getLogs` call. Defaults to 10,000. */
   maxLogBlockRange?: bigint;
+  /**
+   * Where this client's writes wait their turn. Clients that write with one key to several contracts
+   * (the executor, #95) share one lane, so their writes go one at a time and never race for a nonce.
+   * Defaults to a lane of this client's own.
+   */
+  lane?: WriteLane;
+}
+
+/** Writes that run one at a time, in the order they were asked for, whatever client asked. */
+export class WriteLane {
+  #tail: Promise<unknown> = Promise.resolve();
+
+  /** Runs `task` after every task already in the lane has settled. */
+  run<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.#tail.then(task, task);
+    this.#tail = result.catch(() => undefined);
+    return result;
+  }
 }
 
 export class PolicyClientError extends Error {
@@ -156,7 +174,7 @@ const PROBE_SENDER: Address = "0x000000000000000000000000000000000000dEaD";
  *
  * Every write is simulated first (so a revert surfaces with the contract's error name), sent with EIP-1559
  * fees no lower than `minMaxFeePerGas`, and awaited until its receipt. Writes from one client are
- * serialized so concurrent calls never race for the same nonce.
+ * serialized (on the client's `lane`) so concurrent calls never race for the same nonce.
  */
 export class PolicyClient {
   readonly address: Address;
@@ -168,13 +186,14 @@ export class PolicyClient {
   private readonly maxLogBlockRange: bigint;
   private readonly capabilityOverrides: Partial<Capabilities>;
   private capabilitiesPromise: Promise<Capabilities> | undefined;
-  private writeQueue: Promise<unknown> = Promise.resolve();
+  private readonly lane: WriteLane;
 
   constructor(options: PolicyClientOptions) {
     this.address = options.address;
     this.publicClient = options.publicClient;
     this.walletClient = options.walletClient;
     this.capabilityOverrides = options.capabilities ?? {};
+    this.lane = options.lane ?? new WriteLane();
     this.minMaxFeePerGas = options.minMaxFeePerGas ?? ARC_MIN_MAX_FEE_PER_GAS;
     this.receiptTimeoutMs = options.receiptTimeoutMs ?? 60_000;
     this.receiptPollingMs = options.receiptPollingMs ?? 1_000;
@@ -535,8 +554,7 @@ export class PolicyClient {
       }
       return receipt;
     };
-    const result = this.writeQueue.then(run, run);
-    this.writeQueue = result.catch(() => undefined);
+    const result = this.lane.run(run);
     if (signal === undefined) return result;
     return new Promise<TransactionReceipt>((resolve, reject) => {
       const onAbort = () => {

@@ -21,7 +21,9 @@ import { formatUsdCents } from "../../src/lib/format";
 
 import { newNonce, ownerRequestMessage } from "../../src/lib/owner-request";
 
+import type { MandatesResponse } from "../../src/lib/accounts/types";
 import type { ConsoleSnapshot } from "../../src/lib/live/types";
+import { mandatePath, withMandate } from "../../src/lib/mandate-path";
 import { ownerCookie } from "./session";
 
 /** A test-only token: the e2e servers are local and short-lived. Never a real secret. */
@@ -64,6 +66,24 @@ export async function snapshot(baseURL: string): Promise<ConsoleSnapshot> {
   const response = await fetch(new URL("/api/console/snapshot", baseURL), { headers: ownerHeaders(baseURL) });
   if (!response.ok) throw new Error(`snapshot answered ${response.status.toString()}`);
   return (await response.json()) as ConsoleSnapshot;
+}
+
+/**
+ * The first mandate's pages (`/m/<id>`, #95): the one on the server's contract, which the seeded demo
+ * fills. `path` is a view inside it, like `/approvals`, or empty for its Overview.
+ */
+export async function firstMandatePath(baseURL: string, path = ""): Promise<string> {
+  return mandatePath(await firstMandateId(baseURL), path);
+}
+
+/** The id of the first mandate, the one on the server's contract. */
+export async function firstMandateId(baseURL: string): Promise<string> {
+  const response = await fetch(new URL("/api/console/mandates", baseURL), { headers: ownerHeaders(baseURL) });
+  if (!response.ok) throw new Error(`the mandate list answered ${response.status.toString()}`);
+  const body = (await response.json()) as MandatesResponse;
+  const first = body.mandates.find((mandate) => mandate.deployment === "env") ?? body.mandates[0];
+  if (!first) throw new Error("the workspace has no mandate");
+  return first.id;
 }
 
 /** Polls the public health check until the console answers, before anyone has signed in. */
@@ -218,7 +238,8 @@ export async function saveHoldingsAsOwner(baseURL: string, holdings: ConsoleHold
       nonce,
     }),
   });
-  const response = await fetch(new URL("/api/console/holdings", baseURL), {
+  const path = withMandate("/api/console/holdings", await firstMandateId(baseURL));
+  const response = await fetch(new URL(path, baseURL), {
     method: "PUT",
     headers: {
       ...ownerHeaders(baseURL),

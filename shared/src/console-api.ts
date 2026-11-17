@@ -97,9 +97,39 @@ export const CONSOLE_EXECUTOR_ROUTES = {
   order: (intentId: number | string) => `${CONSOLE_EXECUTOR_API_BASE}/orders/${String(intentId)}`,
   /** PUT announces the venue the executor fills orders on (issue #93). The latest announcement wins. */
   venue: `${CONSOLE_EXECUTOR_API_BASE}/venue`,
+  /**
+   * GET lists the contracts whose `executor()` is the signer (#95: one executor serves every mandate's
+   * contract), with `?chainId=&issuedAt=&signature=`: the signature is the executor key's over
+   * `executorContractsMessage`, at most `EXECUTOR_CONTRACTS_MAX_AGE_MS` old.
+   */
+  contracts: `${CONSOLE_EXECUTOR_API_BASE}/contracts`,
 } as const;
 
 const isoDateTime = z.iso.datetime({ offset: true });
+
+/** A signed listing request older than this, or this far in the future, is refused. */
+export const EXECUTOR_CONTRACTS_MAX_AGE_MS = 5 * 60 * 1000;
+
+/** What the executor key signs (EIP-191) to ask which contracts it serves on a chain. */
+export function executorContractsMessage(input: { chainId: number; issuedAt: string }): string {
+  return [
+    "Mandate executor: list the contracts I serve.",
+    `Chain: ${String(input.chainId)}`,
+    `Issued at: ${input.issuedAt}`,
+  ].join("\n");
+}
+
+/** One contract the executor serves: where it is, and the block to read its events from. */
+export const executorContractSchema = z.strictObject({
+  chainId: z.int().positive(),
+  policy: z.string().regex(/^0x[0-9a-f]{40}$/),
+  deployBlock: z.int().nonnegative(),
+});
+export type ExecutorContract = z.infer<typeof executorContractSchema>;
+
+export const executorContractsResponseSchema = z.strictObject({
+  contracts: z.array(executorContractSchema).max(10_000),
+});
 
 export const consoleErrorSchema = z.strictObject({
   error: z.strictObject({
@@ -447,7 +477,10 @@ export const coverNowSchema = z.strictObject({
 export type CoverNowView = z.infer<typeof coverNowSchema>;
 
 export const summaryResponseSchema = z.strictObject({
-  /** The console's public address: links for the owner are built on it. */
+  /**
+   * The mandate's pages on the console (`<console>/m/<mandate id>`, #95): links for the owner are built on
+   * it (`/approvals`, `/hedge`), so each opens the mandate this agent acts for.
+   */
   consoleUrl: z.url(),
   /** The agent's change requests still waiting for the owner, newest first. */
   changeRequests: z.array(policyChangeRequestSchema),

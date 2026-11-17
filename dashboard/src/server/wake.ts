@@ -16,6 +16,7 @@ import {
 
 import { coverNow } from "@/features/hedge/cover-now";
 import type { AgentPlanView } from "@/lib/hedge/types";
+import { mandatePath } from "@/lib/mandate-path";
 import type { ConsoleWakeStatus } from "@/lib/live/types";
 
 import type { ConsoleConfig } from "./config";
@@ -81,7 +82,8 @@ export class ConsoleWake {
       target: config.wake.target,
       dailyCap: config.wake.dailyCap,
       store: this.store,
-      publicUrl: config.publicUrl,
+      // Links open this mandate's own pages (#95).
+      publicUrl: `${config.publicUrl}${mandatePath(mandateId)}`,
       logger: { info: (m) => options.logger.info(m), warn: (m) => options.logger.warn(m) },
       onChange: options.onChange,
       ...(options.fetch ? { fetch: options.fetch } : {}),

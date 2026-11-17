@@ -9,7 +9,7 @@ import type { ConsoleSnapshot } from "../src/lib/live/types";
 import { schemes, viewports } from "./routes";
 import { E2E_SERVICE_TOKEN, ownerHeaders, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
-import { addVirtualPasskey, registerOnPage } from "./support/session";
+import { type VirtualPasskey, addVirtualPasskey, registerOnPage } from "./support/session";
 
 /**
  * Workspaces and passkeys as a person meets them (docs/accounts.md), on the smoke suite's console, whose
@@ -138,11 +138,28 @@ test.describe("a second workspace", () => {
   let recoveryCode = "";
   let token = "";
   let agentId = "";
+  let passkey: VirtualPasskey;
+  /** Each chain RPC request Bob's pages made, by JSON-RPC method: there must be none. */
+  const chainReads: string[] = [];
 
   test.beforeAll(async ({ browser, baseURL }) => {
     const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });
+    // As Caddy does on the hosted demo chain, the browser's chain RPC is the first workspace's alone
+    // (docs/accounts.md): Bob's pages, his deploy and every passkey-confirmed owner call work without it,
+    // and never ask it (a 403 in the background would be a hosted bug the page hides).
+    const { network } = await snapshot(baseURL ?? "");
+    const rpc = new URL(network.rpcUrl);
+    await context.route(
+      (url) => url.origin === rpc.origin && url.pathname === rpc.pathname,
+      (route) => {
+        const body = route.request().postData() ?? "";
+        const methods = [...body.matchAll(/"method"\s*:\s*"([^"]+)"/g)].map((match) => match[1] ?? "?");
+        chainReads.push(...(methods.length > 0 ? methods : [route.request().method()]));
+        return route.fulfill({ status: 403, contentType: "text/plain", body: "Forbidden" });
+      },
+    );
     page = await context.newPage();
-    await addVirtualPasskey(page);
+    passkey = await addVirtualPasskey(page);
   });
 
   test.afterAll(async () => {
@@ -160,7 +177,9 @@ test.describe("a second workspace", () => {
   });
 
   test("sees his own empty mandate and nothing of the first workspace", async ({ baseURL }) => {
-    await expect(page.getByText("No Policy contract yet", { exact: true })).toBeVisible();
+    // Home lists his one mandate, with no contract yet (#95).
+    await expect(page.getByTestId("mandate-row")).toHaveCount(1);
+    await expect(page.getByTestId("mandate-row").getByText("No contract yet")).toBeVisible();
     const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
     expect(his.contract).toBeNull();
     expect(his.chain).toBeNull();
@@ -184,6 +203,12 @@ test.describe("a second workspace", () => {
         const response = await page.request.get(`${path}?mandate=${encodeURIComponent(id)}`);
         expect(response.status(), `${path} for ${id}`).toBe(404);
       }
+      // Its pages: the same not-found page as for a mandate that does not exist.
+      for (const view of ["", "/approvals", "/setup"]) {
+        const opened = await page.goto(`/m/${encodeURIComponent(id)}${view}`);
+        expect(opened?.status(), `/m/${id}${view}`).toBe(404);
+        await expect(page.getByRole("heading", { level: 1, name: "Nothing at this address" })).toBeVisible();
+      }
     }
     // Making a token for the first workspace's agent is refused, and its tokens stay as they were.
     const forged = await page.request.post(
@@ -200,6 +225,8 @@ test.describe("a second workspace", () => {
     await page.goto("/activity");
     await expect(page.getByRole("heading", { level: 1, name: "Activity" })).toBeVisible();
     await expect(page.getByText("No Policy contract yet", { exact: true })).toBeVisible();
+    // The console deploys his contract and holds its owner key: the dev signer never signs here.
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
   });
 
   test("makes an agent token in Setup, shown once, that reaches his agent only", async ({
@@ -216,7 +243,8 @@ test.describe("a second workspace", () => {
       (response) =>
         response.request().method() === "POST" && /\/tokens$/.test(new URL(response.url()).pathname),
     );
-    await agents.getByRole("button", { name: "Create token" }).click();
+    // A new token is a credential: his passkey confirms it, in one prompt the button names (#95).
+    await agents.getByRole("button", { name: "Create token with passkey" }).click();
     expect((await made).status()).toBe(201);
     const dialog = page.getByRole("dialog", { name: "Copy your token now" });
     await expect(dialog).toBeVisible();
@@ -263,6 +291,192 @@ test.describe("a second workspace", () => {
     expect(await resolveToken(baseURL ?? "", token)).toBeNull();
   });
 
+  test("deploys his mandate's contract from Setup, and its pages follow it", async ({
+    baseURL,
+  }, testInfo) => {
+    const problems = watchConsole(page);
+    await page.goto("/setup");
+    await hydrated(page);
+    const card = page.getByTestId("deploy-card");
+    await expect(card).toBeVisible();
+    await shotOf(
+      page.getByRole("region", { name: "Deploy this mandate's contract" }),
+      testInfo,
+      "deploy-1440-light",
+    );
+    const deployed = page.waitForResponse(
+      (response) => response.request().method() === "POST" && response.url().endsWith("/deployment"),
+    );
+    await card.getByRole("button", { name: "Deploy contract" }).click();
+    expect((await deployed).status()).toBe(200);
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Contract deployed");
+    await expect(card).toHaveCount(0);
+
+    // His own contract now: on his snapshot, his Activity and his Home row, and not the first workspace's.
+    const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(his.contract?.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(his.contract?.address.toLowerCase()).not.toBe(
+      (await snapshot(baseURL ?? "")).contract?.address.toLowerCase(),
+    );
+    await page.goto("/activity");
+    await expect(page.getByRole("heading", { level: 1, name: "Activity" })).toBeVisible();
+    await expect(page.getByText("No Policy contract yet", { exact: true })).toHaveCount(0);
+    await page.goto("/");
+    await expect(page.getByTestId("mandate-row").getByText("No contract yet")).toHaveCount(0);
+    expect(problems).toEqual([]);
+  });
+
+  test("a refused passkey prompt leaves his first rules unsigned and the page as it was", async () => {
+    const problems = watchConsole(page);
+    await page.goto("/rules");
+    await hydrated(page);
+    await expect(page.getByRole("heading", { name: "Set the first rules" })).toBeVisible();
+    await page.getByRole("button", { name: "Review and confirm" }).click();
+    const review = page.getByRole("dialog", { name: "Review the first rules" });
+    await passkey.setUserVerified(false);
+    try {
+      await review.getByRole("button", { name: "Confirm rules with passkey" }).click();
+      await expect(page.getByText("You closed the passkey prompt, so nothing was changed.")).toBeVisible();
+    } finally {
+      await passkey.setUserVerified(true);
+    }
+    // One prompt, refused: the dialog still offers the same confirmation, and nothing reached the chain.
+    await expect(review.getByRole("button", { name: "Confirm rules with passkey" })).toBeEnabled();
+    const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(his.chain?.rules ?? null).toBeNull();
+    expect(problems).toEqual([]);
+  });
+
+  test("sets his first rules with one passkey prompt, signed by the console with his mandate's owner key", async () => {
+    const testInfo = test.info();
+    await page.goto("/rules");
+    await hydrated(page);
+    // His passkey is the owner here, never the dev signer's public anvil key.
+    await expect(page.getByTestId("passkey-owner")).toBeVisible();
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
+    // Only the first mandate's agent has a public scorecard: no link to a page that would be a 404.
+    await expect(page.getByRole("link", { name: "Public scorecard" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Review and confirm" }).click();
+    const review = page.getByRole("dialog", { name: "Review the first rules" });
+    await shotOf(review, testInfo, "rules-passkey-1440-light");
+    // The console signs and sends the setPolicy call, then the toast says so: wait for the owner call's
+    // answer (on `next dev` its route also compiles on this first call), then check the toast it raises.
+    const sent = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/console/owner-calls",
+    );
+    await review.getByRole("button", { name: "Confirm rules with passkey" }).click();
+    expect((await sent).status()).toBe(201);
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Rules set");
+    await review.getByRole("button", { name: "Done" }).click();
+    await expect(page.getByText(/^Version 1, set /)).toBeVisible();
+    const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(his.chain?.rules).toMatchObject({ budgetCents: 20_000, maxTradeCents: 2_500 });
+    // The audit trail names him and the passkey that confirmed it.
+    await page.goto("/audit");
+    const actions = page.getByRole("region", { name: "Owner actions" });
+    await expect(actions.getByRole("row").filter({ hasText: "Set the rules" })).toContainText("Passkey");
+  });
+
+  test("creates a second mandate with one passkey prompt, sees its token once, and switches between the two", async ({
+    baseURL,
+  }, testInfo) => {
+    const problems = watchConsole(page);
+    await page.goto("/mandates/new");
+    await hydrated(page);
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
+    await page.getByLabel("Mandate name").fill("Hedge ETH");
+    const created = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && response.url().endsWith("/api/console/mandates"),
+    );
+    await page.getByRole("button", { name: "Create and deploy with passkey" }).click();
+    expect((await created).status()).toBe(201);
+    await expect(page.getByText("Hedge ETH is ready")).toBeVisible();
+    const newToken = (await page.getByTestId("new-token").first().textContent())?.trim() ?? "";
+    expect(newToken.length).toBeGreaterThan(20);
+    await shotOf(page.getByRole("main"), testInfo, "new-mandate-ready-1440-light");
+    // The token reaches the new mandate's own agent, not his first one.
+    const newAgent = await resolveToken(baseURL ?? "", newToken);
+    expect(newAgent).not.toBeNull();
+    expect(newAgent).not.toBe(agentId);
+    // Shown once: a reload of the page does not show it again.
+    await page.reload();
+    await expect(page.getByText(newToken)).toHaveCount(0);
+
+    // Home: two rows, each its own.
+    await page.goto("/");
+    await expect(page.getByTestId("mandate-row")).toHaveCount(2);
+    await expect(page.getByTestId("mandate-row").filter({ hasText: "Hedge ETH" })).toHaveCount(1);
+    await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
+    for (const width of [1440, 390]) {
+      for (const scheme of ["light", "dark"] as const) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ colorScheme: scheme });
+        await shot(page, testInfo, `home-two-${width.toString()}-${scheme}`);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ colorScheme: "light" });
+
+    // The switcher lists both, and takes him to the same view of the other mandate.
+    await page.goto("/rules");
+    await hydrated(page);
+    await page.getByTestId("mandate-switcher").filter({ visible: true }).click();
+    const menu = page.getByRole("menu");
+    await expect(menu.getByRole("menuitem", { name: "Hedge ETH" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Mandate", exact: true })).toBeVisible();
+    await shot(page, testInfo, "switcher-open-1440-light");
+    await menu.getByRole("menuitem", { name: "Hedge ETH" }).click();
+    await expect(page).toHaveURL(/\/m\/mnd_[a-z0-9]+\/rules$/);
+    await expect(page.getByTestId("mandate-switcher").filter({ visible: true })).toContainText("Hedge ETH");
+    // Its rules are the ones its passkey confirmed at creation, on its own contract.
+    const hedge = (await (
+      await page.request.get(
+        `/api/console/snapshot?mandate=${page.url().split("/m/")[1]?.split("/")[0] ?? ""}`,
+      )
+    ).json()) as ConsoleSnapshot;
+    const first = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(hedge.chain?.rules).toMatchObject({ budgetCents: 20_000 });
+    expect(hedge.contract?.address.toLowerCase()).not.toBe(first.contract?.address.toLowerCase());
+    expect(problems).toEqual([]);
+  });
+
+  test("renames his second mandate in Setup on his session, and Audit records it", async () => {
+    const problems = watchConsole(page);
+    const hedgeSetup = page.url().replace(/\/rules$/, "/setup");
+    await page.goto(hedgeSetup);
+    await hydrated(page);
+    const card = page.getByRole("region", { name: "Mandate name" });
+    const name = card.getByLabel("Name");
+    await expect(name).toHaveValue("Hedge ETH");
+    // Unchanged, there is nothing to save.
+    await expect(card.getByRole("button", { name: "Rename" })).toBeDisabled();
+    await name.fill(" ");
+    await card.getByRole("button", { name: "Rename" }).click();
+    await expect(card.getByText("Name the mandate, like “Hedge my BTC”.")).toBeVisible();
+    await name.fill("Hedge ETH weekly");
+    const renamed = page.waitForResponse((response) => response.request().method() === "PATCH");
+    await card.getByRole("button", { name: "Rename" }).click();
+    expect((await renamed).status()).toBe(200);
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Mandate renamed");
+    // The switcher reads the new name at once, with no reload.
+    await expect(page.getByTestId("mandate-switcher").filter({ visible: true })).toContainText(
+      "Hedge ETH weekly",
+    );
+    expect(await axe(page)).toEqual([]);
+    await shotOf(card, test.info(), "rename-1440-light");
+    await page.goto(hedgeSetup.replace(/\/setup$/, "/audit"));
+    const actions = page.getByRole("region", { name: "Owner actions" });
+    const row = actions.getByRole("row").filter({ hasText: "Renamed the mandate" });
+    await expect(row).toContainText('from "Hedge ETH" to "Hedge ETH weekly"');
+    await expect(row).toContainText("Session (a name needs no passkey)");
+    await page.goto("/");
+    await expect(page.getByTestId("mandate-row").filter({ hasText: "Hedge ETH weekly" })).toHaveCount(1);
+    expect(problems).toEqual([]);
+  });
+
   test("signs out, is kept out, and signs back in with the same passkey", async () => {
     // From a page of its own, hydrated, not whatever the last test left behind.
     await page.goto("/setup");
@@ -297,7 +511,8 @@ test.describe("a second workspace", () => {
     expect(out.status()).toBe(200);
     await elsewhere.close();
     // The stream's reconnect gets 401: the page asks the console once, and goes to sign in.
-    await page.waitForURL(/\/sign-in\?next=%2Factivity$/);
+    // Back to the page it was on: his mandate's Activity (#95).
+    await page.waitForURL(/\/sign-in\?next=%2Fm%2Fmnd_[a-z0-9]+%2Factivity$/);
     await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toBeVisible();
   });
 
@@ -338,5 +553,9 @@ test.describe("a second workspace", () => {
     } finally {
       await context.close();
     }
+  });
+
+  test("never asked the chain RPC, which is not his workspace's to read", () => {
+    expect(chainReads).toEqual([]);
   });
 });

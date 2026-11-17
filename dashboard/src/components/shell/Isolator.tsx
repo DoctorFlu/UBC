@@ -5,7 +5,8 @@ import { Play, Power } from "lucide-react";
 import { HoldButton } from "@/components/ui/HoldButton";
 import { useToast } from "@/components/ui/Toast";
 import { useSnapshot } from "@/lib/live/LiveConsole";
-import { ownerBlockedReason } from "@/lib/owner/access";
+import { signingText } from "@/components/domain/OwnerTxStatus";
+import { ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 
 import styles from "./Shell.module.css";
@@ -24,7 +25,7 @@ export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
   const disabled = working || blocked !== null;
   const title = working
     ? state.phase === "signing"
-      ? "Confirm it in your wallet."
+      ? signingText(state.via)
       : "Waiting for the chain."
     : (blocked ?? undefined);
 
@@ -34,7 +35,11 @@ export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
       paused: next,
     });
     if (!result.ok) {
-      toast({ title: next ? "Not paused" : "Not resumed", description: result.message, tone: "danger" });
+      toast({
+        title: next ? "Not paused" : "Not resumed",
+        description: result.message,
+        ...(result.cancelled ? {} : { tone: "danger" as const }),
+      });
       return;
     }
     toast(
@@ -56,11 +61,13 @@ export function Isolator({ size = "md" }: { size?: "sm" | "md" }) {
           size={size}
           icon={<Play aria-hidden />}
           confirmedLabel="Resuming"
-          armedLabel="Confirm resume"
+          armedLabel={ownerActionLabel(access, "Resume")}
           disabled={disabled}
           onConfirm={() => void toggle(false)}
         >
-          <span className={styles.longLabel}>{working ? "Resuming agent" : "Resume agent"}</span>
+          <span className={styles.longLabel}>
+            {working ? "Resuming agent" : ownerActionLabel(access, "Resume agent")}
+          </span>
           <span className={styles.shortLabel}>Resume</span>
         </HoldButton>
       </span>

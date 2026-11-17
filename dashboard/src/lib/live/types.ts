@@ -73,6 +73,12 @@ export interface ContractInfo {
   roles: Roles | null;
   /** Whether `proposeTrade` can record a decision context hash (requested extension 2). Null until probed. */
   recordsContextHash: boolean | null;
+  /**
+   * Who signs the owner's calls: `wallet`, the owner's own wallet (or the dev signer); `console`, the
+   * console, with the owner key it holds for a mandate it deployed on the demo chain, once a member's
+   * passkey authorises the call (#95).
+   */
+  ownerSigner: "wallet" | "console";
 }
 
 /**

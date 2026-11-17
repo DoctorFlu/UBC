@@ -7,11 +7,13 @@ import type { ReactNode } from "react";
 import type { AccountView } from "@/lib/accounts/types";
 import { needsOwner } from "@/lib/live/attention";
 import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useMandateScope } from "@/lib/mandate/MandateContext";
 
 import { AccountBlock } from "./AccountBlock";
 import { AdvancedToggle } from "./AdvancedToggle";
 import { Brand } from "./Brand";
 import { GetStarted } from "./GetStarted";
+import { MandateSwitcher } from "./MandateSwitcher";
 import { NavLinks } from "./NavLinks";
 import { FeedNotice, PausedBanner } from "./PausedBanner";
 import styles from "./Shell.module.css";
@@ -22,7 +24,11 @@ import { TopBar } from "./TopBar";
 export function AppShell({ account, children }: { account: AccountView; children: ReactNode }) {
   const snapshot = useSnapshot();
   const navCounts = { "/approvals": needsOwner(snapshot).total };
-  const agent = snapshot.contract?.roles?.agent ?? null;
+  const scope = useMandateScope();
+  // Only the first mandate's agent has a public scorecard (the server's own contract, docs/accounts.md):
+  // another mandate's link would be a 404.
+  const agent = scope?.mandate.deployment === "env" ? (snapshot.contract?.roles?.agent ?? null) : null;
+  const switcher = scope ? <MandateSwitcher mandates={scope.mandates} current={scope.mandate} /> : null;
   return (
     <div className={styles.shell}>
       <a href="#main" className={styles.skip}>
@@ -31,6 +37,7 @@ export function AppShell({ account, children }: { account: AccountView; children
       <aside className={styles.sidebar} aria-label="Console">
         <div className={styles.sidebarInner}>
           <Brand />
+          {switcher}
           <NavLinks counts={navCounts} />
           <SidebarFoot agent={agent} account={account} />
         </div>

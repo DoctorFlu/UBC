@@ -10,6 +10,7 @@ describe("executorSettings", () => {
       consoleUrl: "http://localhost:3000",
       venue: "simulated",
       orderTtlMs: 600_000,
+      discoveryIntervalMs: 15_000,
     };
     expect(executorSettings({})).toEqual(defaults);
     expect(
@@ -20,6 +21,7 @@ describe("executorSettings", () => {
         CONSOLE_URL: " ",
         EXECUTOR_VENUE: "",
         EXECUTOR_ORDER_TTL_MS: "",
+        EXECUTOR_DISCOVERY_MS: "",
       }),
     ).toEqual(defaults);
   });
@@ -33,6 +35,7 @@ describe("executorSettings", () => {
         CONSOLE_URL: "http://console:3000",
         EXECUTOR_VENUE: "Gemini",
         EXECUTOR_ORDER_TTL_MS: "120000",
+        EXECUTOR_DISCOVERY_MS: "5000",
       }),
     ).toEqual({
       fillDelayMs: 0,
@@ -41,6 +44,7 @@ describe("executorSettings", () => {
       consoleUrl: "http://console:3000",
       venue: "gemini",
       orderTtlMs: 120_000,
+      discoveryIntervalMs: 5_000,
     });
   });
 

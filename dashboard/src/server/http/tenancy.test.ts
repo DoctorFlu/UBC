@@ -112,7 +112,20 @@ describe("every console route", () => {
   const routeFiles = (readdirSync(appDir, { recursive: true }) as string[])
     .filter((file) => file.endsWith(`${sep}route.ts`) || file === "route.ts")
     .sort();
-  const params = Promise.resolve({ id: "x", agentId: "x", tokenId: "x" });
+  const params = Promise.resolve({ id: "x", agentId: "x", tokenId: "x", mandateId: "x" });
+  /** Routes of the whole workspace: they take no `mandate` query, and must not act on one. */
+  const WORKSPACE_ROUTES = new Set([
+    "GET agents/route.ts",
+    "POST agents/[agentId]/tokens/route.ts",
+    "DELETE agents/[agentId]/tokens/[tokenId]/route.ts",
+    "GET mandates/route.ts",
+    "POST mandates/route.ts",
+    "GET mandates/[mandateId]/deployment/route.ts",
+    "POST mandates/[mandateId]/deployment/route.ts",
+    "PATCH mandates/[mandateId]/route.ts",
+    "POST passkeys/route.ts",
+    "POST step-up/route.ts",
+  ]);
   type Handler = (request: Request, context: { params: typeof params }) => Promise<Response> | Response;
 
   async function handlers(): Promise<{ route: string; method: string; handler: Handler }[]> {
@@ -141,9 +154,17 @@ describe("every console route", () => {
         "GET events/route.ts",
         "GET hedge/market/route.ts",
         "PUT holdings/route.ts",
+        "GET mandates/route.ts",
+        "POST mandates/route.ts",
+        "GET mandates/[mandateId]/deployment/route.ts",
+        "POST mandates/[mandateId]/deployment/route.ts",
+        "PATCH mandates/[mandateId]/route.ts",
+        "GET owner-actions/route.ts",
+        "POST owner-calls/route.ts",
         "POST pairing/confirm/route.ts",
         "POST passkeys/route.ts",
         "GET snapshot/route.ts",
+        "POST step-up/route.ts",
       ].sort(),
     );
   });
@@ -151,7 +172,8 @@ describe("every console route", () => {
   it("answers 401 without a session, 403 to a write from another site, and 404 for another workspace's mandate", async () => {
     for (const { route, method, handler } of await handlers()) {
       const write = method !== "GET";
-      const url = `${ORIGIN}/api/console/${route}`;
+      const name = `${method} ${route.split(sep).join("/")}`;
+      const url = `${ORIGIN}/api/console/${route.split(sep).join("/")}`;
 
       const anonymous = await handler(
         new Request(url, { method, headers: write ? { origin: ORIGIN } : {} }),
@@ -174,6 +196,37 @@ describe("every console route", () => {
           { params },
         );
         expect(noOrigin.status, `${method} ${route} without an Origin`).toBe(403);
+      }
+
+      if (WORKSPACE_ROUTES.has(name)) {
+        // A workspace route never acts on a mandate the query names: the answer is the same without it.
+        const plain = await handler(
+          new Request(url, {
+            method,
+            headers: { cookie: sessionHeader(service, bob), ...(write ? { origin: ORIGIN } : {}) },
+          }),
+          { params },
+        );
+        const named = await handler(
+          new Request(`${url}?mandate=${aliceMandate}`, {
+            method,
+            headers: { cookie: sessionHeader(service, bob), ...(write ? { origin: ORIGIN } : {}) },
+          }),
+          { params },
+        );
+        expect(named.status, `${name} with another workspace's mandate named`).toBe(plain.status);
+        if (plain.status >= 400) expect(await errorOf(named), name).toEqual(await errorOf(plain));
+        continue;
+      }
+
+      if (write) {
+        // A write names its mandate: a page open on one mandate never changes another by leaving it out.
+        const unnamed = await handler(
+          new Request(url, { method, headers: { cookie: sessionHeader(service, bob), origin: ORIGIN } }),
+          { params },
+        );
+        expect(unnamed.status, `${name} without a mandate`).toBe(400);
+        expect((await errorOf(unnamed)).code, name).toBe("mandate_required");
       }
 
       const foreign = await handler(

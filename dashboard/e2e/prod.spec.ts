@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+import { firstMandatePath } from "./support/console";
 import { watchConsole } from "./support/problems";
 
 /**
@@ -16,9 +17,10 @@ test.beforeAll(() => {
 test.describe("route loading fallback", () => {
   test("shows while a page is on its way, keeps the shell usable, and gives way to the page", async ({
     page,
+    baseURL,
   }) => {
     const problems = watchConsole(page);
-    await page.goto("/");
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
     // Let the sidebar's links prefetch their routes' loading states, as they do for the owner.
     await page.waitForLoadState("networkidle");
@@ -28,8 +30,9 @@ test.describe("route loading fallback", () => {
       release = resolve;
     });
     // Only the navigation itself: the prefetch that brought loading.tsx along has already arrived.
+    const audit = await firstMandatePath(baseURL ?? "", "/audit");
     await page.route(
-      (url) => url.pathname === "/audit",
+      (url) => url.pathname === audit,
       async (route) => {
         const headers = route.request().headers();
         const prefetch = "next-router-prefetch" in headers || "next-router-segment-prefetch" in headers;

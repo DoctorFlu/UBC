@@ -41,6 +41,7 @@ import {
   sealReason,
   snapshot,
   waitForSnapshot,
+  firstMandatePath,
 } from "./support/console";
 import {
   type FakeGemini,
@@ -86,6 +87,8 @@ const LIVE_API_ROUTES = [
   "/api/console/holdings",
   "/api/console/pairing/confirm",
   "/api/console/hedge/market?asset=BTC",
+  "/api/console/owner-actions",
+  "/api/executor/v1/contracts",
   "/api/console/snapshot",
   `/api/agent/v1/contexts/0x${"0".repeat(64)}`,
   "/api/agent/v1/intents/0/context",
@@ -210,7 +213,8 @@ function row(page: Page, intentId: number) {
  * an owner action pressed earlier would hit server HTML that does nothing yet.
  */
 async function open(page: Page, path: string): Promise<void> {
-  await page.goto(path);
+  // `/` is the workspace Home (#95); the owner acts on the first mandate's Overview.
+  await page.goto(path === "/" ? await firstMandatePath(baseURL) : path);
   await expect(page.getByTestId("owner-address").filter({ visible: true })).toBeVisible();
 }
 
@@ -270,7 +274,7 @@ test("a rules change signed while the live stream is quiet still syncs, and ever
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/console/events", async (route) => {
+  await page.route("**/api/console/events?*", async (route) => {
     await held;
     await route.abort().catch(() => {});
   });
@@ -495,7 +499,7 @@ test("saved holdings show as saved, with their preview, even while the live stre
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/console/events", async (route) => {
+  await page.route("**/api/console/events?*", async (route) => {
     await held;
     await route.abort().catch(() => {});
   });
@@ -873,7 +877,7 @@ async function overflowsViewport(page: Page): Promise<false | string[]> {
  * phone, so this one is for pages read rather than acted on.
  */
 async function view(page: Page, path: string): Promise<void> {
-  await page.goto(path);
+  await page.goto(path === "/" ? await firstMandatePath(baseURL) : path);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 }
 
@@ -1366,7 +1370,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
         },
         limiter: unpacedLimiter(),
       }),
-      journal: consoleOrderJournal({ consoleUrl: baseURL, sign }),
+      journal: consoleOrderJournal({ consoleUrl: baseURL, sign, deployment: { chainId, policy } }),
       deployment: { chainId, policy, deployBlockHash: `0x${"ab".repeat(32)}` },
     }),
     settlements: consoleSettlementSink({ consoleUrl: baseURL }),

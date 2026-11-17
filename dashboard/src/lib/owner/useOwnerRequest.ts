@@ -6,11 +6,13 @@ import { useConfig } from "wagmi";
 import { signMessage } from "wagmi/actions";
 
 import { useLiveConsole } from "@/lib/live/LiveConsole";
+import { useMandateScope, useMandateUrls } from "@/lib/mandate/MandateContext";
 import { type OwnerAction, newNonce, ownerRequestMessage } from "@/lib/owner-request";
 
 import { useOwnerAccess } from "./access";
+import { PasskeyFailure, confirmWithPasskey } from "./passkey";
 
-export type OwnerRequestResult<T> = { ok: true; data: T } | { ok: false; message: string };
+export type OwnerRequestResult<T> = { ok: true; data: T } | { ok: false; message: string; cancelled?: true };
 
 async function errorMessage(response: Response): Promise<string> {
   try {
@@ -30,6 +32,8 @@ async function errorMessage(response: Response): Promise<string> {
 export function useOwnerRequest() {
   const config = useConfig();
   const access = useOwnerAccess();
+  const mandateId = useMandateScope()?.mandate.id ?? null;
+  const { api } = useMandateUrls();
   const { snapshot, refresh } = useLiveConsole();
   const [pending, setPending] = useState(false);
 
@@ -47,6 +51,24 @@ export function useOwnerRequest() {
       if (!policyAddress) return { ok: false, message: "No Policy contract is configured yet." };
       setPending(true);
       try {
+        if (access.signer === "passkey") {
+          // The console holds this mandate's owner key (#95): one passkey prompt confirms this very change.
+          if (mandateId === null) return { ok: false, message: "This page shows no mandate." };
+          const stepUp = await confirmWithPasskey({
+            kind: "owner-request",
+            mandateId,
+            request: { action, payload },
+          });
+          const response = await fetch(api(path), {
+            method,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ payload, stepUp }),
+          });
+          if (!response.ok) return { ok: false, message: await errorMessage(response) };
+          const data = (await response.json()) as T;
+          await refresh();
+          return { ok: true, data };
+        }
         const issuedAt = new Date().toISOString();
         const nonce = newNonce();
         const message = ownerRequestMessage({
@@ -58,7 +80,7 @@ export function useOwnerRequest() {
           nonce,
         });
         const signature = await signMessage(config, { account: access.address, message });
-        const response = await fetch(path, {
+        const response = await fetch(api(path), {
           method,
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ payload, auth: { issuedAt, nonce, signature } }),
@@ -68,6 +90,11 @@ export function useOwnerRequest() {
         await refresh();
         return { ok: true, data };
       } catch (error) {
+        if (error instanceof PasskeyFailure) {
+          return error.cancelled
+            ? { ok: false, message: error.message, cancelled: true }
+            : { ok: false, message: error.message };
+        }
         if (error instanceof BaseError && error.walk((cause) => cause instanceof UserRejectedRequestError)) {
           return { ok: false, message: "You declined the signature in your wallet. Nothing changed." };
         }
@@ -79,7 +106,7 @@ export function useOwnerRequest() {
         setPending(false);
       }
     },
-    [access, config, refresh, snapshot.contract?.address, snapshot.network.chainId],
+    [access, api, config, mandateId, refresh, snapshot.contract?.address, snapshot.network.chainId],
   );
 
   return { request, pending, access };

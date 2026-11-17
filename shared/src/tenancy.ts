@@ -68,6 +68,13 @@ export type ResolveTokenRequest = z.infer<typeof resolveTokenRequestSchema>;
 export const SIGNER_KINDS = ["env", "console"] as const;
 export type SignerKind = (typeof SIGNER_KINDS)[number];
 
+/**
+ * Where a mandate's Policy contract came from: `env`, the servers' configured contract; `server`, deployed
+ * by the console on the demo chain; `wallet`, deployed by the owner's wallet (docs/accounts.md).
+ */
+export const MANDATE_DEPLOYMENTS = ["env", "server", "wallet"] as const;
+export type MandateDeploymentKind = (typeof MANDATE_DEPLOYMENTS)[number];
+
 export const resolveTokenResponseSchema = z.strictObject({
   workspaceId: z.string().min(1),
   mandateId: z.string().min(1),
@@ -80,11 +87,22 @@ export const resolveTokenResponseSchema = z.strictObject({
     signer: z.enum(SIGNER_KINDS),
   }),
   mandate: z.strictObject({
+    /** The name its owners gave it, so the agent can say which mandate it acts for. */
+    name: z.string().min(1).max(60),
     /**
-     * The Policy contract the mandate follows: `env` is the one the servers are configured with; null is
-     * none yet. Phase 2 adds contracts recorded in the console.
+     * The Policy contract the mandate follows: `env` is the one the servers are configured with; `server`
+     * and `wallet` are the mandate's own (#95), deployed by the console on the demo chain or by the owner's
+     * wallet, and named in `contract`; null is none yet.
      */
-    deployment: z.literal("env").nullable(),
+    deployment: z.enum(MANDATE_DEPLOYMENTS).nullable(),
+    /** The mandate's own contract, for `server` and `wallet`; null otherwise. */
+    contract: z
+      .strictObject({
+        chainId: z.number().int().positive(),
+        address: addressSchema,
+        deployBlock: z.number().int().nonnegative(),
+      })
+      .nullable(),
   }),
 });
 export type ResolveTokenResponse = z.infer<typeof resolveTokenResponseSchema>;

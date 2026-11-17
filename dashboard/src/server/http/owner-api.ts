@@ -1,43 +1,41 @@
 import "server-only";
 
-import { addressSchema, decodePolicyLogs, holdingSchema, txHashSchema } from "@mandate/shared";
+import { decodePolicyLogs, txHashSchema } from "@mandate/shared";
 import { isAddressEqual } from "viem";
 import { z } from "zod";
+
+import {
+  confirmPairingPayloadSchema,
+  dismissPayloadSchema,
+  holdingsPayloadSchema,
+} from "@/lib/owner-request";
 
 import { readOwnerRequest } from "./owner-auth";
 import { apiError, json, readBody } from "./responses";
 import { consoleRoute } from "./session";
 
 /**
- * Routes the owner's browser calls for offchain changes. Each one needs a session, which picks the
- * mandate, and is signed by that mandate's Policy contract `user()` wallet (see lib/owner-request.ts),
- * except marking a change request applied, which is proven by the owner's own `setPolicy` transaction.
+ * Routes the owner's browser calls for offchain changes. Each one needs a session, and names its
+ * mandate. The owner approves each: signed by that mandate's Policy contract `user()` wallet, or, where
+ * the console holds the owner key, confirmed with a member's passkey (`readOwnerRequest`). Marking a
+ * change request applied is proven by the owner's own `setPolicy` transaction instead.
  */
 
-export const holdingsPayloadSchema = z.strictObject({
-  holdings: z
-    .array(holdingSchema)
-    .max(20)
-    .refine((holdings) => new Set(holdings.map((holding) => holding.asset)).size === holdings.length, {
-      message: "each asset can appear once",
-    }),
-});
-
-export const saveHoldings = consoleRoute(async (request, service, { mandate }) => {
-  const parsed = await readOwnerRequest(request, service, mandate, "holdings.save", holdingsPayloadSchema);
+export const saveHoldings = consoleRoute(async (request, service, scope) => {
+  const { mandate } = scope;
+  const parsed = await readOwnerRequest(request, service, scope, "holdings.save", holdingsPayloadSchema);
   if (!parsed.ok) return parsed.response;
   const saved = service.offchain.saveHoldings(mandate.id, parsed.data.holdings);
-  service.changed();
+  service.changed(mandate.id);
   return json(saved);
 });
 
-export const confirmPairingPayloadSchema = z.strictObject({ agentAddress: addressSchema });
-
-export const confirmPairing = consoleRoute(async (request, service, { mandate }) => {
+export const confirmPairing = consoleRoute(async (request, service, scope) => {
+  const { mandate } = scope;
   const parsed = await readOwnerRequest(
     request,
     service,
-    mandate,
+    scope,
     "pairing.confirm",
     confirmPairingPayloadSchema,
   );
@@ -49,18 +47,17 @@ export const confirmPairing = consoleRoute(async (request, service, { mandate })
   if (!pairing) {
     return apiError(404, "not_found", "That agent has not asked to pair with this console.");
   }
-  service.changed();
+  service.changed(mandate.id);
   return json(pairing);
 });
 
-export const dismissPayloadSchema = z.strictObject({ id: z.string().min(1) });
-
-export const dismissChangeRequest = consoleRoute(async (request, service, { mandate }, params) => {
+export const dismissChangeRequest = consoleRoute(async (request, service, scope, params) => {
+  const { mandate } = scope;
   const id = params.id ?? "";
   const parsed = await readOwnerRequest(
     request,
     service,
-    mandate,
+    scope,
     "change-request.dismiss",
     dismissPayloadSchema,
   );
@@ -68,7 +65,7 @@ export const dismissChangeRequest = consoleRoute(async (request, service, { mand
   if (parsed.data.id !== id) return apiError(422, "invalid_body", "The signed id does not match the path.");
   const updated = service.offchain.resolveChangeRequest(mandate.id, parsed.data.id, { status: "dismissed" });
   if (!updated) return apiError(404, "not_found", "No change request has that id.");
-  service.changed();
+  service.changed(mandate.id);
   return json(updated);
 });
 
@@ -77,7 +74,8 @@ export const dismissChangeRequest = consoleRoute(async (request, service, { mand
  * checks the receipt itself: a successful transaction from `user()` to the mandate's Policy contract whose
  * `PolicyUpdated` event carries every value the agent asked for.
  */
-export const markChangeRequestApplied = consoleRoute(async (request, service, { mandate }, params) => {
+export const markChangeRequestApplied = consoleRoute(async (request, service, scope, params) => {
+  const { mandate } = scope;
   const id = params.id ?? "";
   const body = await readBody(request, z.strictObject({ txHash: txHashSchema }));
   if (!body.ok) return body.response;
@@ -126,6 +124,6 @@ export const markChangeRequestApplied = consoleRoute(async (request, service, { 
     status: "applied",
     txHash: receipt.transactionHash,
   });
-  service.changed();
+  service.changed(mandate.id);
   return json(resolved);
 });

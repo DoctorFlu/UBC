@@ -2,7 +2,6 @@
 
 import {
   ARC_MIN_MAX_FEE_PER_GAS,
-  type PolicyRules,
   applyFeeFloor,
   policyAbi,
   revertErrorName,
@@ -23,32 +22,37 @@ import { sendTransaction } from "wagmi/actions";
 
 import { useLiveConsole } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
+import { useMandateScope, useMandateUrls } from "@/lib/mandate/MandateContext";
 import { viemChain } from "@/lib/network";
 
 import { useOwnerAccess } from "./access";
+import { type OwnerCall, needsPasskey } from "./calls";
+import { PasskeyFailure, confirmWithPasskey, refusal } from "./passkey";
 
-/** One owner write to the Policy contract. */
-export type OwnerCall =
-  | { functionName: "setPolicy"; rules: PolicyRules }
-  | { functionName: "setPaused"; paused: boolean }
-  | { functionName: "approveIntent"; intentId: number }
-  | { functionName: "rejectIntent"; intentId: number };
+export type { OwnerCall };
+
+const OWNER_CALLS_PATH = "/api/console/owner-calls";
 
 /**
- * - `checking`: simulating the call, so a refusal shows before the wallet opens.
- * - `signing`: the wallet prompt is open.
- * - `pending`: sent, waiting to be mined.
+ * - `checking`: simulating the call in the browser, so a refusal shows before the wallet prompt opens
+ *   (wallet only: the console simulates a passkey call itself).
+ * - `signing`: the wallet prompt, or the passkey prompt and the console's send (`via`), is open.
+ * - `pending`: sent, waiting to be mined (a passkey call answers once it is mined).
  * - `syncing`: mined; waiting for the console to read its event, so every view agrees.
+ * - `cancelled`: the person closed the prompt. Nothing was sent; the page is as it was, with a sentence.
  */
 export type OwnerTxState =
   | { phase: "idle" }
-  | { phase: "checking" | "signing"; label: string }
+  | { phase: "checking"; label: string }
+  | { phase: "signing"; label: string; via: "wallet" | "passkey" }
   | { phase: "pending" | "syncing"; label: string; hash: Hex }
   | { phase: "done"; label: string; hash: Hex; synced: boolean }
+  | { phase: "cancelled"; label: string; message: string }
   | { phase: "failed"; label: string; message: string; hash: Hex | null };
 
 export type OwnerTxResult =
-  { ok: false; message: string } | { ok: true; hash: Hex; snapshot: ConsoleSnapshot | null };
+  | { ok: false; message: string; cancelled?: true }
+  | { ok: true; hash: Hex; snapshot: ConsoleSnapshot | null };
 
 /** How long the console may take to show a mined transaction's event before the UI stops waiting. */
 const SYNC_TIMEOUT_MS = 30_000;
@@ -97,7 +101,30 @@ function firstLine(error: unknown): string {
   return String(error);
 }
 
+/**
+ * The console signs with the owner key it holds for this mandate (#95). One passkey prompt confirms
+ * exactly this call; a pause needs none, since stopping the agent must never wait on a device.
+ */
+async function sendThroughConsole(
+  call: OwnerCall,
+  mandateId: string | null,
+  api: (url: string) => string,
+): Promise<Hex> {
+  if (mandateId === null) throw new Error("This page shows no mandate.");
+  const stepUp = needsPasskey(call)
+    ? await confirmWithPasskey({ kind: "owner-call", mandateId, call })
+    : null;
+  const response = await fetch(api(OWNER_CALLS_PATH), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ call, stepUp }),
+  });
+  if (!response.ok) throw new Error(await refusal(response));
+  return ((await response.json()) as { hash: Hex }).hash;
+}
+
 function describeFailure(error: unknown): string {
+  if (error instanceof PasskeyFailure) return error.message;
   const declined =
     (error instanceof BaseError && error.walk((cause) => cause instanceof UserRejectedRequestError)) ||
     (typeof error === "object" && error !== null && "code" in error && error.code === 4001);
@@ -110,13 +137,19 @@ function describeFailure(error: unknown): string {
 }
 
 /**
- * Sends owner transactions with the connected wallet: simulate (so a refusal never opens the wallet),
- * apply Arc's fee floor, sign, wait for the receipt, then wait until the console's own event feed shows
- * the transaction. Views update from that feed, never from this hook.
+ * Sends owner transactions, then waits until the console's own event feed shows the transaction. Views
+ * update from that feed, never from this hook.
+ * - With the connected wallet: simulate (so a refusal never opens the wallet), apply Arc's fee floor,
+ *   sign, and wait for the receipt, all through the browser's chain RPC.
+ * - With a passkey (#95): one prompt, then the console simulates, signs with the mandate's owner key,
+ *   sends and waits for the receipt. The browser reads no chain, since its RPC may not be this
+ *   workspace's to read (on the hosted demo chain, /rpc is the first workspace's alone).
  */
 export function useOwnerTx() {
   const config = useConfig();
   const access = useOwnerAccess();
+  const mandateId = useMandateScope()?.mandate.id ?? null;
+  const { api } = useMandateUrls();
   const { snapshot, waitFor, refresh } = useLiveConsole();
   const network = snapshot.network;
   const policy = snapshot.contract?.address ?? null;
@@ -139,42 +172,53 @@ export function useOwnerTx() {
       busy.current = true;
       let hash: Hex | null = null;
       try {
-        setState({ phase: "checking", label });
-        const data = encode(call);
-        const estimate = await publicClient.estimateFeesPerGas({ type: "eip1559" });
-        const fees = applyFeeFloor(estimate, network.kind === "arc-testnet" ? ARC_MIN_MAX_FEE_PER_GAS : 0n);
-        try {
-          await publicClient.call({ account: access.address, to: policy, data, ...fees });
-        } catch (error) {
-          if (!(error instanceof BaseError)) throw error;
-          const refusal: BaseError = getContractError(error, {
-            abi: policyAbi,
-            address: policy,
-            functionName: call.functionName,
-            args: callArgs(call),
-            sender: access.address,
+        let sent: Hex;
+        if (access.signer === "passkey") {
+          // The console holds the owner key (#95): it simulates, signs, sends and waits for the receipt
+          // itself, and answers with a refusal's reason or a mined transaction. The browser never reads the
+          // chain here: on the hosted demo chain its RPC (/rpc) is the first workspace's alone.
+          setState({ phase: "signing", label, via: access.signer });
+          sent = await sendThroughConsole(call, mandateId, api);
+          hash = sent;
+          setState({ phase: "pending", label, hash: sent });
+        } else {
+          setState({ phase: "checking", label });
+          const data = encode(call);
+          const estimate = await publicClient.estimateFeesPerGas({ type: "eip1559" });
+          const fees = applyFeeFloor(estimate, network.kind === "arc-testnet" ? ARC_MIN_MAX_FEE_PER_GAS : 0n);
+          try {
+            await publicClient.call({ account: access.address, to: policy, data, ...fees });
+          } catch (error) {
+            if (!(error instanceof BaseError)) throw error;
+            const refusal: BaseError = getContractError(error, {
+              abi: policyAbi,
+              address: policy,
+              functionName: call.functionName,
+              args: callArgs(call),
+              sender: access.address,
+            });
+            throw refusal;
+          }
+
+          setState({ phase: "signing", label, via: access.signer });
+          sent = await sendTransaction(config, {
+            account: access.address,
+            chainId: network.chainId,
+            to: policy,
+            data,
+            ...fees,
           });
-          throw refusal;
-        }
+          hash = sent;
+          setState({ phase: "pending", label, hash: sent });
 
-        setState({ phase: "signing", label });
-        const sent = await sendTransaction(config, {
-          account: access.address,
-          chainId: network.chainId,
-          to: policy,
-          data,
-          ...fees,
-        });
-        hash = sent;
-        setState({ phase: "pending", label, hash: sent });
-
-        const receipt = await publicClient.waitForTransactionReceipt({
-          hash: sent,
-          pollingInterval: network.kind === "local" ? 100 : 500,
-          timeout: 120_000,
-        });
-        if (receipt.status !== "success") {
-          throw new Error("The transaction was mined but reverted. Nothing changed onchain.");
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash: sent,
+            pollingInterval: network.kind === "local" ? 100 : 500,
+            timeout: 120_000,
+          });
+          if (receipt.status !== "success") {
+            throw new Error("The transaction was mined but reverted. Nothing changed onchain.");
+          }
         }
 
         setState({ phase: "syncing", label, hash: sent });
@@ -188,13 +232,18 @@ export function useOwnerTx() {
         return { ok: true, hash: sent, snapshot: seen };
       } catch (error) {
         const message = describeFailure(error);
+        // A closed passkey prompt sent nothing: the page goes back to exactly how it was, with the sentence.
+        if (error instanceof PasskeyFailure && error.cancelled) {
+          setState({ phase: "cancelled", label, message });
+          return { ok: false, message, cancelled: true };
+        }
         setState({ phase: "failed", label, message, hash });
         return { ok: false, message };
       } finally {
         busy.current = false;
       }
     },
-    [access, config, network, policy, publicClient, refresh, waitFor],
+    [access, api, config, mandateId, network, policy, publicClient, refresh, waitFor],
   );
 
   const reset = useCallback(() => setState({ phase: "idle" }), []);

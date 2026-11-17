@@ -94,7 +94,7 @@ export function NeedsYou({ snapshot, attention }: { snapshot: ConsoleSnapshot; a
                     Sent <When inSentence at={request.createdAt} />
                   </span>
                 </span>
-                <ButtonLink href="/rules?tab=requests" size="sm" variant="secondary">
+                <ButtonLink view href="/rules?tab=requests" size="sm" variant="secondary">
                   Review
                 </ButtonLink>
               </li>
@@ -112,6 +112,7 @@ export function NeedsYou({ snapshot, attention }: { snapshot: ConsoleSnapshot; a
                 </span>
               </span>
               <ButtonLink
+                view
                 href={`/setup/pair/${attention.pairing.agentAddress}`}
                 size="sm"
                 variant="secondary"
