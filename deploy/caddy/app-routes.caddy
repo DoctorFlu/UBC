@@ -2,21 +2,32 @@
 # public name) and Caddyfile.gateway (plain HTTP behind a proxy that ends TLS). This file is the one place
 # the route split is decided.
 #
-# Anything not listed as public needs the owner's login, so a route added to the console later is private
+# Anything not listed as public needs a signed-in member, so a route added to the console later is private
 # until someone decides otherwise here.
 #
-#   public, with its own check   /mcp                      bearer token (MCP_AUTH_TOKEN), checked by the MCP server
+#   public, with its own check   /mcp                      bearer token, which the console resolves to one
+#                                                          agent (docs/accounts.md)
 #                                /api/webhooks/quicknode   HMAC signature, checked by the console
-#   public, nothing private      /agent/*                  the agent's public scorecard
+#                                /api/auth/*               passkey sign-up, claim, recovery, sign-in and
+#                                                          sign-out: the way to a session, rate limited by
+#                                                          the console
+#   public, nothing private      /sign-in, /sign-up,       the account pages
+#                                /claim, /recover
+#                                /agent/*                  the agent's public scorecard
 #                                /_next/static/*           the scripts, styles and fonts every page loads
 #                                /api/health, /mcp/health  liveness, no data
 #                                /favicon.ico, /icon.svg,  the browser's tab and home-screen icons
 #                                /apple-icon.png
 #   internal only (404 here)     /api/agent/*              the console's agent API: the MCP server calls it
 #                                                          on the private network, nobody else needs it
-#   owner (HTTP basic auth)      everything else           the console's pages, /api/console/* (snapshot,
-#                                                          live events, owner writes, hedge quotes), and on
-#                                                          the demo chain /rpc
+#   member (a session)           everything else           the console's pages, /api/console/* (snapshot,
+#                                                          live events, writes, agents and tokens), and on
+#                                                          the demo chain /rpc. The console checks the
+#                                                          session as well; asking it here first keeps a
+#                                                          route nobody listed from ever being public.
+#
+# Rate limits live in the console and the MCP server (the stock Caddy image has no limiter). Both key them
+# on the client address Caddy appends to X-Forwarded-For (CONSOLE_TRUST_PROXY and MCP_TRUST_PROXY).
 #
 # The signal API is not routed at all: only the MCP server calls it, on the private network.
 
@@ -54,34 +65,35 @@ handle /api/agent/* {
 	respond 404
 }
 
-@public path /agent/* /_next/static/* /api/health /favicon.ico /icon.svg /apple-icon.png
+# A page on another site must not be able to act with a member's session. Opening a console link from
+# elsewhere (the pairing link in Grok Bot's chat) is a navigation, and is allowed. The console also checks
+# the Origin of every write.
+@crossSite {
+	header Sec-Fetch-Site cross-site
+	header Sec-Fetch-Site same-site
+	not {
+		method GET HEAD
+		header Sec-Fetch-Mode navigate
+	}
+}
+
+@public path /sign-in /sign-up /claim /recover /api/auth/* /agent/* /_next/static/* /api/health /favicon.ico /icon.svg /apple-icon.png
 handle @public {
+	respond @crossSite "Cross-site request refused" 403
 	reverse_proxy console:3000
 }
 
 handle {
 	route {
-		# A page on another site must not be able to act with the owner's login. Opening a console
-		# link from elsewhere (the pairing link in Grok Bot's chat) is a navigation, and is allowed.
-		@crossSite {
-			header Sec-Fetch-Site cross-site
-			header Sec-Fetch-Site same-site
-			not {
-				method GET HEAD
-				header Sec-Fetch-Mode navigate
-			}
-		}
 		respond @crossSite "Cross-site request refused" 403
 
-		# Until the owner sets a password, CONSOLE_PASSWORD_HASH holds a hash of a random secret nobody
-		# knows (see compose.yml), so every owner route answers 401.
-		basic_auth {
-			{$CONSOLE_USER} {$CONSOLE_PASSWORD_HASH}
+		# The console says whether the session cookie belongs to a live session: 204 lets the request
+		# through, a page opened without one is sent to /sign-in, and anything else gets a 401.
+		forward_auth console:3000 {
+			uri /api/auth/forward
 		}
-		# The console has no use for the owner's password.
-		request_header -Authorization
 
-		# Owner routes that exist only in some setups (the demo chain's /rpc), see compose.demo.yml.
+		# Member routes that exist only in some setups (the demo chain's /rpc), see compose.demo.yml.
 		import /etc/caddy/owner/*.caddy
 
 		reverse_proxy console:3000

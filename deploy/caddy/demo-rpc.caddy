@@ -1,6 +1,10 @@
 # Demo chain only: the browser's route to anvil, so the console's dev signer can send the owner's
-# transactions. The Caddyfile imports this inside the owner's routes, behind the same login.
+# transactions. The Caddyfile imports this inside the member routes. The dev signer's key is public, so only
+# a member of the workspace that holds the server's own mandate may reach the chain.
 handle /rpc {
+	forward_auth console:3000 {
+		uri /api/auth/forward/rpc
+	}
 	rewrite * /
 	reverse_proxy anvil:8545
 }

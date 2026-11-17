@@ -70,13 +70,16 @@ RUN --mount=type=cache,target=/root/.npm \
 FROM deps AS console-build
 COPY . .
 # The dev signer signs as anvil account 0, a public test key. Only the demo chain builds with it, and its
-# console is behind the reverse proxy's owner login (see compose.demo.yml and docs/hosting.md).
+# /rpc route is open only to the first workspace's members (see compose.demo.yml and docs/hosting.md).
 ARG NEXT_PUBLIC_DEV_SIGNER=0
 ENV NEXT_OUTPUT=standalone \
     NEXT_PUBLIC_DEV_SIGNER=${NEXT_PUBLIC_DEV_SIGNER}
+# The operator's account commands (claim-code, invite, status), bundled into one file the standalone server's
+# folder can run with plain node: docker compose exec console node dashboard/admin.mjs claim-code
 RUN npm run build -w @mandate/dashboard \
+ && node dashboard/scripts/build-admin.mjs dashboard/.next/standalone/dashboard/admin.mjs \
  && if [ "$NEXT_PUBLIC_DEV_SIGNER" != "1" ] \
-      && grep -rl ac0974bec39a dashboard/.next/static dashboard/.next/standalone --include='*.js'; then \
+      && grep -rl ac0974bec39a dashboard/.next/static dashboard/.next/standalone --include='*.js' --include='*.mjs'; then \
       echo "The dev signer's key is in a build made without NEXT_PUBLIC_DEV_SIGNER=1." >&2; exit 1; \
     fi
 

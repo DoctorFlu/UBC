@@ -6,7 +6,8 @@
 # test keys: the chain holds nothing of value, and nothing on it can reach a shared network.
 #
 # The owner signs in the console with the built-in dev signer (anvil account 0). Its key is public, so the
-# console's owner routes, and the browser's /rpc route to anvil, stay behind the owner's login in Caddy.
+# browser's /rpc route to anvil is open only to members of the workspace that holds this chain's mandate
+# (Caddy asks the console, see caddy/demo-rpc.caddy), and every console route needs a signed-in member.
 
 x-logging: &logging
   driver: json-file
@@ -132,7 +133,7 @@ services:
         NEXT_PUBLIC_DEV_SIGNER: "1"
     environment:
       POLICY_DEPLOYMENT_FILE: /data/chain/deployment.json
-      # The browser reaches anvil through Caddy's /rpc, behind the owner's login.
+      # The browser reaches anvil through Caddy's /rpc, open only to the first workspace's members.
       CONSOLE_BROWSER_RPC_URL: ${MANDATE_PUBLIC_URL:-https://${MANDATE_HOST}}/rpc
       # The console's own default on the devchain is 250 ms, made for a laptop; once a second is enough for
       # a hosted demo and keeps the machine quieter.

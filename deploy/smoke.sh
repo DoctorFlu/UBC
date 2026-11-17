@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Checks a hosted Mandate from the outside, the way Grok Bot, QuickNode and the owner's browser reach it.
+# Checks a hosted Mandate from the outside, the way Grok Bot, QuickNode and a member's browser reach it.
 #
 #   deploy/smoke.sh https://<host>
 #
 # Reads its secrets from the environment, never from the command line, and never prints them:
-#   MCP_AUTH_TOKEN      the MCP server's bearer token. Without it, the checks that need it are skipped, so
-#                       the test can run from a machine that should not hold the token.
-#   CONSOLE_PASSWORD    the owner's console password. Without it, the test checks that every owner route
-#                       refuses everyone, as it must before the owner sets a password, and skips the checks
-#                       that need the login.
-#   CONSOLE_USER        the owner's user name (default owner)
+#   MCP_AUTH_TOKEN      an agent token (the env file's, or one made in the console's Agents section).
+#                       Without it, the checks that need it are skipped, so the test can run from a machine
+#                       that should not hold a token.
+#   CONSOLE_SESSION     a member's session: the value of the console's session cookie, copied from a signed-in
+#                       browser. Without it, the test checks that every member route refuses everyone, and
+#                       skips the checks that need a session.
 #   SMOKE_AGENT_ADDRESS the agent's address, for the public scorecard when MCP_AUTH_TOKEN is not given (it
 #                       is public: the scorecard's URL)
 #   SMOKE_CA_CERT       a CA certificate to trust, for a host with a private certificate (localhost)
@@ -24,18 +24,23 @@ if [ -z "$base" ]; then
 fi
 base="${base%/}"
 token="${MCP_AUTH_TOKEN:-}"
-password="${CONSOLE_PASSWORD:-}"
+session="${CONSOLE_SESSION:-}"
+# Over HTTPS the console's session cookie carries the __Host- prefix (docs/accounts.md).
+case "$base" in
+  https://*) cookie_name="__Host-mandate_session" ;;
+  *) cookie_name="mandate_session" ;;
+esac
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 chmod 700 "$work"
 
-basic() { printf 'Authorization: Basic %s\n' "$(printf '%s:%s' "${CONSOLE_USER:-owner}" "$1" | base64 | tr -d '\n')"; }
 # Credentials go to curl in header files (mode 600), so they never appear in the process list.
 [ -n "$token" ] && printf 'Authorization: Bearer %s\n' "$token" >"$work/mcp-auth"
-[ -n "$password" ] && basic "$password" >"$work/owner-auth"
+[ -n "$session" ] && printf 'Cookie: %s=%s\n' "$cookie_name" "$session" >"$work/member"
 : >"$work/none"
-basic not-the-password >"$work/wrong-auth"
+printf 'Authorization: Bearer %s\n' "mdt_not-a-token-of-this-host-0000000000000000000" >"$work/wrong-token"
+printf 'Cookie: %s=%s\n' "$cookie_name" "not-a-session-of-this-host" >"$work/wrong-session"
 
 # A paused InstaBox machine wakes on the first request, which then waits for the resume (up to 45 s).
 curl_opts=(--silent --show-error --max-time 60 --output "$work/body" --dump-header "$work/headers")
@@ -59,7 +64,9 @@ request() {
     "$base$path" 2>"$work/error")" || status="000"
 }
 
+# The old owner login (HTTP basic auth) is gone: nothing may ask a browser for it.
 has_basic_challenge() { grep -qi '^www-authenticate: *basic' "$work/headers"; }
+location() { sed -n 's/^[Ll]ocation: *\([^[:space:]]*\).*/\1/p' "$work/headers" | head -n 1; }
 
 # expect <label> <auth> <method> <path> <status> [curl args...]
 expect() {
@@ -88,15 +95,16 @@ check "console health body says ok" 'grep -q "\"status\":\"ok\"" "$work/body"'
 expect "MCP server health" none GET /mcp/health 200
 check "MCP health body says ok" 'grep -q "\"status\":\"ok\"" "$work/body"'
 
-echo "-- MCP server: its own bearer token"
+echo "-- MCP server: agent tokens, which the console resolves"
 initialize='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mandate-hosting-smoke","version":"0"}}}'
-expect "MCP refuses a request without the token" none POST /mcp 401 \
-  --header "Content-Type: application/json" --header "Accept: application/json, text/event-stream" \
+mcp_headers=(--header "Content-Type: application/json" --header "Accept: application/json, text/event-stream")
+expect "MCP refuses a request without a token" none POST /mcp 401 "${mcp_headers[@]}" --data-binary "$initialize"
+if has_basic_challenge; then fail "MCP's 401 comes from the MCP server, not a login prompt"; fi
+expect "MCP refuses a token the console does not know" wrong-token POST /mcp 401 "${mcp_headers[@]}" \
   --data-binary "$initialize"
-if has_basic_challenge; then fail "MCP's 401 comes from the MCP server, not the owner login"; fi
 agent="${SMOKE_AGENT_ADDRESS:-}"
 if [ -z "$token" ]; then
-  echo "   (no MCP_AUTH_TOKEN: the checks that need the token are skipped)"
+  echo "   (no MCP_AUTH_TOKEN: the checks that need a token are skipped)"
 else
   mcp "$initialize"
   check "MCP initialize with the token (POST /mcp -> $status)" '[ "$status" = 200 ] && grep -q "\"serverInfo\"" "$work/body"'
@@ -105,54 +113,68 @@ else
   check "MCP tools/list ($tools tools)" '[ "$status" = 200 ] && [ "$tools" -gt 5 ]'
   mcp '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}'
   agent="$(sed -n 's/.*"agentAddress":"\(0x[0-9a-fA-F]\{40\}\)".*/\1/p' "$work/body" | head -n 1)"
-  check "MCP tools/call whoami, read only (agent ${agent:-unknown})" '[ "$status" = 200 ] && [ -n "$agent" ]'
+  mandate="$(sed -n 's/.*"mandateId":"\([a-z0-9_]*\)".*/\1/p' "$work/body" | head -n 1)"
+  check "MCP tools/call whoami, read only (agent ${agent:-unknown}, mandate ${mandate:-unknown})" \
+    '[ "$status" = 200 ] && [ -n "$agent" ] && [ -n "$mandate" ]'
 fi
 
-echo "-- owner routes: the owner's login"
-for path in / /hedge /hedge/plans/smoke-test /setup /api/console/snapshot; do
-  expect "owner route refuses without the login" none GET "$path" 401
-  has_basic_challenge || fail "the 401 on $path asks for the owner login"
+echo "-- member routes: a session"
+for path in /api/console/snapshot /api/console/agents /api/console/events; do
+  expect "member API refuses without a session" none GET "$path" 401
+  if has_basic_challenge; then fail "the 401 on $path asks for no login prompt"; fi
 done
-expect "owner route refuses a wrong password" wrong-auth GET /api/console/snapshot 401
-expect "/rpc refuses without the login" none POST /rpc 401 \
+expect "member API refuses a session the console does not know" wrong-session GET /api/console/snapshot 401
+for path in / /hedge /hedge/plans/smoke-test /setup; do
+  expect "page sends a browser without a session to sign in" none GET "$path" 303 --header "Accept: text/html"
+  check "  ... to /sign-in (Location $(location))" '[ "$(location)" = "/sign-in" ] || location | grep -q "^/sign-in?next="'
+done
+expect "/rpc refuses without a session" none POST /rpc 401 \
   --header "Content-Type: application/json" --data-binary '{"jsonrpc":"2.0","id":1,"method":"eth_chainId"}'
-expect "a cross-site write is refused before any login" none PUT /api/console/holdings 403 \
+expect "a cross-site write is refused before any session check" none PUT /api/console/holdings 403 \
+  --header "Sec-Fetch-Site: cross-site" --header "Sec-Fetch-Mode: cors" \
+  --header "Content-Type: application/json" --data-binary '{}'
+expect "a cross-site sign-in is refused" none POST /api/auth/sign-in 403 \
   --header "Sec-Fetch-Site: cross-site" --header "Sec-Fetch-Mode: cors" \
   --header "Content-Type: application/json" --data-binary '{}'
 snapshot=""
-if [ -z "$password" ]; then
-  echo "   (no CONSOLE_PASSWORD: the checks that need the owner's login are skipped)"
+if [ -z "$session" ]; then
+  echo "   (no CONSOLE_SESSION: the checks that need a member's session are skipped)"
 else
-  expect "console home with the login" owner-auth GET / 200
-  expect "snapshot with the login" owner-auth GET /api/console/snapshot 200
+  expect "console home with the session" member GET / 200 --header "Accept: text/html"
+  expect "snapshot with the session" member GET /api/console/snapshot 200
   snapshot="$(cat "$work/body")"
+  expect "the Agents section's data with the session" member GET /api/console/agents 200
   # A stream never ends, so curl stops at --max-time; what matters is the status, the type and a first event.
-  curl "${curl_opts[@]}" --max-time 3 --header @"$work/owner-auth" "$base/api/console/events" >/dev/null 2>&1
-  check "live events stream through the proxy with the login (GET /api/console/events)" \
+  curl "${curl_opts[@]}" --max-time 3 --header @"$work/member" "$base/api/console/events" >/dev/null 2>&1
+  check "live events stream through the proxy with the session (GET /api/console/events)" \
     'grep -q "^HTTP/[0-9.]* 200" "$work/headers" && grep -qi "^content-type: *text/event-stream" "$work/headers" && grep -q "^data:" "$work/body"'
-  expect "a cross-site write is refused even with the login" owner-auth PUT /api/console/holdings 403 \
+  expect "a cross-site write is refused even with the session" member PUT /api/console/holdings 403 \
     --header "Sec-Fetch-Site: cross-site" --header "Sec-Fetch-Mode: cors" \
     --header "Content-Type: application/json" --data-binary '{}'
   if printf '%s' "$snapshot" | grep -q '"kind":"local"'; then
     rpc='{"jsonrpc":"2.0","id":1,"method":"eth_chainId"}'
-    expect "/rpc with the login (demo chain)" owner-auth POST /rpc 200 \
+    expect "/rpc with the session (demo chain, first workspace)" member POST /rpc 200 \
       --header "Content-Type: application/json" --data-binary "$rpc"
     check "/rpc reaches the demo chain (chain id 5042002)" 'grep -q "\"result\":\"0x4cef52\"" "$work/body"'
   fi
 fi
 
 echo "-- public routes"
+for path in /sign-in /sign-up /claim /recover; do
+  expect "account page without a session" none GET "$path" 200 --header "Accept: text/html"
+done
+expect "who is signed in, without a session" none GET /api/auth/session 401
 if [ -n "$agent" ]; then
-  expect "public scorecard without a login" none GET "/agent/$agent" 200
+  expect "public scorecard without a session" none GET "/agent/$agent" 200
   check "the scorecard page loads its assets" 'grep -q "/_next/static/" "$work/body"'
   asset="$(sed -n 's/.*\(\/_next\/static\/[^"]*\.js\)".*/\1/p' "$work/body" | head -n 1)"
-  [ -n "$asset" ] && expect "the scorecard's scripts without a login" none GET "$asset" 200
+  [ -n "$asset" ] && expect "the scorecard's scripts without a session" none GET "$asset" 200
 else
   fail "the agent's address, for the scorecard (from the MCP server, or set SMOKE_AGENT_ADDRESS)"
 fi
-# Every page links these, the login page's browser tab included.
+# Every page links these, the sign-in page's browser tab included.
 for path in /favicon.ico /icon.svg /apple-icon.png; do
-  expect "the $path icon without a login" none GET "$path" 200
+  expect "the $path icon without a session" none GET "$path" 200
   check "$path is an image" 'grep -qi "^content-type: *image/" "$work/headers"'
 done
 # 401 for a delivery without a valid signature, or 503 while QUICKNODE_STREAM_SECURITY_TOKEN is unset.
@@ -162,6 +184,8 @@ check "QuickNode webhook is public and checks its own signature (POST /api/webho
 
 echo "-- internal only"
 expect "the console's agent API is not public" none GET /api/agent/v1/holdings 404
+expect "the console's token lookup is not public" none POST /api/agent/v1/auth/resolve 404 \
+  --header "Content-Type: application/json" --data-binary '{}'
 
 if [ "$failures" -eq 0 ]; then
   echo "All checks passed."

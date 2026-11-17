@@ -51,12 +51,6 @@ services:
       - "${MANDATE_HTTPS_PORT:-443}:443"
     environment:
       MANDATE_HOST: ${MANDATE_HOST:?set MANDATE_HOST in deploy/.env (see mandate.env.template)}
-      CONSOLE_USER: ${CONSOLE_USER:-owner}
-      # Until deploy/set-console-password.sh sets the owner's hash, the base64 of the plain sentence
-      # "locked: run deploy/set-console-password.sh". It is not a bcrypt hash (those start with "$2"), so bcrypt
-      # refuses to compare any password with it: every owner route answers 401, whatever the login, and the rest
-      # of the stack runs. Caddy logs each refused login as an error ("hashedSecret too short") while locked.
-      CONSOLE_PASSWORD_HASH: ${CONSOLE_PASSWORD_HASH:-bG9ja2VkOiBydW4gZGVwbG95L3NldC1jb25zb2xlLXBhc3N3b3JkLnNo}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/app-routes.caddy:/etc/caddy/app-routes.caddy:ro
@@ -104,6 +98,14 @@ services:
       CONSOLE_URL: ${MANDATE_PUBLIC_URL:-https://${MANDATE_HOST}}
       MCP_PUBLIC_URL: ${MANDATE_PUBLIC_URL:-https://${MANDATE_HOST}}/mcp
       CONSOLE_SERVICE_TOKEN: ${CONSOLE_SERVICE_TOKEN:?set CONSOLE_SERVICE_TOKEN in deploy/.env}
+      # Workspaces and passkeys (docs/accounts.md). The master key seals the agents' keys: without it the
+      # console refuses to start, and losing it loses every key the console holds. The passkeys' origin is
+      # CONSOLE_URL above.
+      CONSOLE_MODE: production
+      CONSOLE_MASTER_KEY: ${CONSOLE_MASTER_KEY:?set CONSOLE_MASTER_KEY in deploy/.env (run deploy/init-env.sh)}
+      CONSOLE_WEBAUTHN_RP_ID: ${CONSOLE_WEBAUTHN_RP_ID:-}
+      # Caddy appends the client's address to X-Forwarded-For; the rate limits key on it.
+      CONSOLE_TRUST_PROXY: "true"
       CONSOLE_DATA_DIR: /data/console
       CONSOLE_EVENT_SOURCE: ${CONSOLE_EVENT_SOURCE:-rpc}
       CONSOLE_POLL_INTERVAL_MS: ${CONSOLE_POLL_INTERVAL_MS:-}
@@ -147,7 +149,10 @@ services:
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in deploy/.env}
       MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
       MCP_ADVERTISE_OUTPUT_SCHEMAS: ${MCP_ADVERTISE_OUTPUT_SCHEMAS:-}
-      # The console's agent API, on the private network.
+      # Caddy appends the client's address to X-Forwarded-For; the failed-token limit keys on it.
+      MCP_TRUST_PROXY: "true"
+      # The console's agent API, on the private network. It resolves every bearer token (MCP_AUTH_TOKEN
+      # included) to one agent, so the MCP server answers 503 while the console is down.
       CONSOLE_URL: http://console:3000
       CONSOLE_SERVICE_TOKEN: ${CONSOLE_SERVICE_TOKEN:?set CONSOLE_SERVICE_TOKEN in deploy/.env}
       SIGNALS_URL: http://signals:8788
