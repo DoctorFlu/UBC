@@ -66,3 +66,21 @@ describe("readWakeConfig", () => {
     );
   });
 });
+
+describe("the MCP server's addresses", () => {
+  const dev = { CONSOLE_MODE: "development" };
+  it("asks the MCP server on this machine, where it listens, only while MCP_PUBLIC_URL is not set", () => {
+    expect(readConsoleConfig(dev)).toMatchObject({
+      mcpPublicUrl: null,
+      mcpLocalUrl: "http://127.0.0.1:8787",
+    });
+    expect(readConsoleConfig({ ...dev, MCP_PORT: "9000", MCP_HOST: "0.0.0.0" }).mcpLocalUrl).toBe(
+      "http://127.0.0.1:9000",
+    );
+    expect(readConsoleConfig({ ...dev, MCP_PORT: "nope" }).mcpLocalUrl).toBeNull();
+    expect(readConsoleConfig({ ...dev, MCP_PUBLIC_URL: "https://mcp.example.dev/mcp" })).toMatchObject({
+      mcpPublicUrl: "https://mcp.example.dev/mcp",
+      mcpLocalUrl: null,
+    });
+  });
+});

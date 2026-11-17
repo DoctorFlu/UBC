@@ -4,7 +4,6 @@ import { Check } from "lucide-react";
 
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { CopyButton } from "@/components/ui/CopyButton";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
@@ -19,6 +18,7 @@ import { When } from "@/components/ui/When";
 
 import { AgentsSection } from "./AgentsSection";
 import { DeployCard } from "./DeployCard";
+import { McpServerCard } from "./McpServerCard";
 import { RenameCard } from "./RenameCard";
 import styles from "./setup.module.css";
 import { WakeUpsCard } from "./WakeUps";
@@ -133,25 +133,7 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
             )}
           </Card>
 
-          <Card
-            title="MCP server"
-            description="Add this address to Grok Bot as a connector. It only proposes intents; it cannot move funds."
-            headingLevel={2}
-          >
-            {snapshot.mcpPublicUrl ? (
-              <div className={styles.copyRow}>
-                <code className={styles.endpoint} translate="no">
-                  {snapshot.mcpPublicUrl}
-                </code>
-                <CopyButton value={snapshot.mcpPublicUrl} what="MCP server address" />
-              </div>
-            ) : (
-              <p className={styles.muted}>
-                Not configured. Set <code>MCP_PUBLIC_URL</code> on the console to the public address of the
-                MCP server.
-              </p>
-            )}
-          </Card>
+          <McpServerCard configured={snapshot.mcpPublicUrl} ask={!preview} />
 
           <Card title="Network" headingLevel={2}>
             <dl className={styles.network}>

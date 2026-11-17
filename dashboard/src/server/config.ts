@@ -71,6 +71,11 @@ export interface ConsoleConfig {
   publicUrl: string;
   /** Address of the MCP server as Grok Bot reaches it, shown on the setup page, or null when unknown. */
   mcpPublicUrl: string | null;
+  /**
+   * Where an MCP server on this machine listens (`MCP_HOST` and `MCP_PORT`, the settings it reads too), for
+   * Setup to ask while `MCP_PUBLIC_URL` is not set; null when it is, or in tests.
+   */
+  mcpLocalUrl: string | null;
   accounts: AccountsConfig;
   /** Event wake-ups of the Grok Bot routine (issue #40). */
   wake: WakeConfig;
@@ -293,10 +298,24 @@ export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
     streamSecurityToken: optional(env.QUICKNODE_STREAM_SECURITY_TOKEN),
     publicUrl,
     mcpPublicUrl: optional(env.MCP_PUBLIC_URL),
+    mcpLocalUrl: optional(env.MCP_PUBLIC_URL) === null ? localMcpUrl(env) : null,
     accounts,
     wake,
     mandates: readMandatesConfig(env),
   };
+}
+
+/**
+ * The MCP server's own address on this machine, from the settings it starts with (`agent/src/config.ts`):
+ * `MCP_HOST` (default 127.0.0.1; a wildcard is reached on loopback) and `MCP_PORT` (default 8787).
+ */
+function localMcpUrl(env: Record<string, string | undefined>): string | null {
+  const port = Number(optional(env.MCP_PORT) ?? "8787");
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  const host = optional(env.MCP_HOST) ?? "127.0.0.1";
+  const reachable = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+  if (!/^[A-Za-z0-9.-]+$/.test(reachable)) return null;
+  return `http://${reachable}:${port.toString()}`;
 }
 
 /** Settings for tests: a local console in development mode, with `overrides` on top. */
@@ -314,6 +333,7 @@ export function testConsoleConfig(
     streamSecurityToken: null,
     publicUrl,
     mcpPublicUrl: null,
+    mcpLocalUrl: null,
     wake: readWakeConfig({}),
     mandates: readMandatesConfig({}),
     ...rest,
