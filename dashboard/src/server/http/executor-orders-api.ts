@@ -1,6 +1,8 @@
 import "server-only";
 
 import {
+  EXECUTOR_CONTRACTS_MAX_AGE_MS,
+  executorContractsMessage,
   hashExecutorRecord,
   isFinalVenueOrderState,
   putExecutorVenueRequestSchema,
@@ -9,6 +11,7 @@ import {
   storedVenueOrderSchema,
   VENUE_ORDER_FIXED_FIELDS,
   venueOrderRecordSchema,
+  type ExecutorContract,
   type ExecutorVenue,
   type VenueOrderRecord,
 } from "@mandate/shared";
@@ -271,4 +274,47 @@ export const putExecutorVenue = guarded("put executor venue", async (request, se
     { venue: document.venue, environment: document.environment, announcedAt: document.announcedAt },
     201,
   );
+});
+
+/**
+ * GET /api/executor/v1/contracts?chainId=&issuedAt=&signature= (#95): the contracts on the chain whose
+ * `executor()`, as the console last read it from the chain, is the key that signed the request. One
+ * executor serves every mandate's contract; this is how it finds a new one. It learns only contracts that
+ * name it, which it may act on anyway, and never which mandate or workspace each belongs to.
+ */
+export const listExecutorContracts = guarded("list executor contracts", async (request, service) => {
+  const query = new URL(request.url).searchParams;
+  const chainId = query.get("chainId") ?? "";
+  const issuedAt = query.get("issuedAt") ?? "";
+  const signature = query.get("signature") ?? "";
+  if (!/^[1-9]\d{0,15}$/.test(chainId) || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+    return apiError(400, "invalid_request", "Send chainId, issuedAt and signature.");
+  }
+  const issued = Date.parse(issuedAt);
+  if (!Number.isFinite(issued) || Math.abs(Date.now() - issued) > EXECUTOR_CONTRACTS_MAX_AGE_MS) {
+    return apiError(401, "stale_signature", "Sign the request again: its time is too far from now.");
+  }
+  let signer: `0x${string}`;
+  try {
+    signer = await recoverMessageAddress({
+      message: executorContractsMessage({ chainId: Number(chainId), issuedAt }),
+      signature: signature as Hex,
+    });
+  } catch {
+    return apiError(401, "bad_signature", "The signature does not verify.");
+  }
+  const contracts: ExecutorContract[] = service
+    .followedContracts()
+    .filter(
+      (contract) =>
+        contract.chainId === Number(chainId) &&
+        contract.executor !== null &&
+        isAddressEqual(contract.executor, signer),
+    )
+    .map((contract) => ({
+      chainId: contract.chainId,
+      policy: contract.address.toLowerCase(),
+      deployBlock: contract.deployBlock,
+    }));
+  return json({ contracts });
 });

@@ -5,11 +5,13 @@ import { join } from "node:path";
 import {
   Category,
   PolicyClient,
+  WriteLane,
   type PolicyRules,
   consoleErrorSchema,
   policyAbi,
   signerAccount,
 } from "@mandate/shared";
+import { consoleContractDiscovery, startExecutor, startExecutorFleet } from "@mandate/devchain";
 import { type Address, createWalletClient, http } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -40,6 +42,7 @@ import {
   startStepUp,
 } from "./mandates-api";
 import { createToken, revokeToken } from "./agents-api";
+import { listExecutorContracts } from "./executor-orders-api";
 import { saveHoldings } from "./owner-api";
 
 const silent = { info: () => undefined, warn: () => undefined };
@@ -490,6 +493,128 @@ describe("mandates on the demo chain", () => {
       { agentId, tokenId: view.id },
     );
     expect(revoked.status).toBe(200);
+  });
+
+  it("lets one executor key find and fill every mandate's contract, two approvals at the same moment", async () => {
+    const executorWallet = chain.executor.walletClient;
+    if (!executorWallet) throw new Error("no executor wallet");
+    const chainId = chain.executor.publicClient.chain.id;
+    const consoleFetch = (input: string) => listExecutorContracts(new Request(input), service, {});
+    const discover = consoleContractDiscovery({
+      consoleUrl: ORIGIN,
+      chainId,
+      signMessage: (message) => executorWallet.signMessage({ account: executorWallet.account, message }),
+      fetch: consoleFetch,
+    });
+
+    // The listing names the server's contract and every mandate contract that names this executor.
+    const listed = await discover();
+    const deployed = service.accounts.store.contractMandates().map((m) => m.contract?.address.toLowerCase());
+    expect(listed.map((c) => c.policy).sort()).toEqual([chain.address.toLowerCase(), ...deployed].sort());
+    // Another key learns nothing; nor does a stale or a malformed request.
+    const outsiderWallet = chain.outsider.walletClient;
+    if (!outsiderWallet) throw new Error("no outsider wallet");
+    const outsider = consoleContractDiscovery({
+      consoleUrl: ORIGIN,
+      chainId,
+      signMessage: (message) => outsiderWallet.signMessage({ account: outsiderWallet.account, message }),
+      fetch: consoleFetch,
+    });
+    expect(await outsider()).toEqual([]);
+    const stale = consoleContractDiscovery({
+      consoleUrl: ORIGIN,
+      chainId,
+      signMessage: (message) => executorWallet.signMessage({ account: executorWallet.account, message }),
+      fetch: consoleFetch,
+      now: () => Date.now() - 10 * 60_000,
+    });
+    await expect(stale()).rejects.toThrow(/401/);
+
+    const left = service.accounts.store.mandates(bob.workspaceId).find((m) => m.name === "Hedge");
+    const right = service.accounts.store.mandates(carol.workspaceId).find((m) => m.name === "Left");
+    if (!left?.contract || !right?.contract) throw new Error("no contracts");
+    const views = [
+      ...((await (await listMandates(get(bob, "mandates"), service)).json()) as MandatesResponse).mandates,
+      ...((await (await listMandates(get(carol, "mandates"), service)).json()) as MandatesResponse).mandates,
+    ];
+    const agentFor = (id: string) => {
+      const view = views.find((m) => m.id === id);
+      if (!view) throw new Error("no view");
+      return agentOf(view);
+    };
+
+    const lane = new WriteLane();
+    const placed: string[] = [];
+    const fleet = startExecutorFleet({
+      discover,
+      intervalMs: 60_000,
+      log: () => undefined,
+      start: (contract) =>
+        Promise.resolve(
+          startExecutor({
+            client: new PolicyClient({
+              address: contract.policy as Address,
+              publicClient: chain.executor.publicClient,
+              walletClient: executorWallet,
+              lane,
+            }),
+            venue: {
+              kind: "simulated",
+              categoryOf: () => Promise.resolve(Category.Crypto),
+              placeOrder: (order) => {
+                placed.push(`${contract.policy}:${String(order.intentId)}`);
+                return Promise.resolve({
+                  status: "placed",
+                  placed: { order, venueOrderId: `fake-${String(order.intentId)}` },
+                });
+              },
+              readFill: (order) =>
+                Promise.resolve({ state: "closed", filledCents: order.order.amountCents, detail: "filled" }),
+              positionOutcome: () =>
+                Promise.resolve({ status: "open", expiresAt: "2026-11-20T22:00:00.000Z" }),
+            },
+            fromBlock: BigInt(contract.deployBlock),
+            fillDelayMs: 0,
+            pollingIntervalMs: 50,
+            settleIntervalMs: 60_000,
+            log: () => undefined,
+          }),
+        ),
+    });
+    try {
+      await fleet.refresh();
+      expect(fleet.serving()).toEqual(listed.map((c) => `${String(c.chainId)}:${c.policy}`).sort());
+      const [a, b] = await Promise.all([
+        agentFor(left.id).proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_000 }),
+        agentFor(right.id).proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_100 }),
+      ]);
+      const leftAgent = agentFor(left.id);
+      const rightAgent = agentFor(right.id);
+      await until(() => placed.length >= 2, "orders placed");
+      const deadline = Date.now() + 15_000;
+      let statuses: (string | undefined)[] = [];
+      while (Date.now() < deadline) {
+        statuses = [
+          (await leftAgent.getIntent(a.intentId))?.status,
+          (await rightAgent.getIntent(b.intentId))?.status,
+        ];
+        if (statuses.every((s) => s === "executed")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(statuses).toEqual(["executed", "executed"]);
+      // Each order went to its own contract, once. The executor also filled what earlier tests approved
+      // on other contracts, with the same intent ids on several contracts: each placed apart, never twice.
+      const mine = [
+        `${left.contract.address.toLowerCase()}:${String(a.intentId)}`,
+        `${right.contract.address.toLowerCase()}:${String(b.intentId)}`,
+      ];
+      for (const key of mine) expect(placed.filter((p) => p === key)).toHaveLength(1);
+      expect(new Set(placed).size).toBe(placed.length);
+      const served = new Set(listed.map((c) => c.policy));
+      expect(placed.every((p) => served.has(p.split(":")[0] ?? ""))).toBe(true);
+    } finally {
+      fleet.stop();
+    }
   });
 
   it("refuses a mandate past the workspace's cap, with what to do about it", async () => {

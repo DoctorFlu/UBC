@@ -76,8 +76,18 @@ async function consoleFetch(input: string, init: RequestInit): Promise<Response>
     : getVenueOrder(request, service, params);
 }
 
+/** The contract the test chain deployed, as the executor names it. */
+function deploymentOf() {
+  return { chainId: chain.executor.publicClient.chain.id, policy: chain.address.toLowerCase() };
+}
+
 function journal(sign: RecordSigner = executorSign): OrderJournal {
-  return consoleOrderJournal({ consoleUrl: "http://console.test", sign, fetch: consoleFetch });
+  return consoleOrderJournal({
+    consoleUrl: "http://console.test",
+    sign,
+    fetch: consoleFetch,
+    deployment: deploymentOf(),
+  });
 }
 
 function record(intentId: number, patch: Partial<VenueOrderRecord> = {}): VenueOrderRecord {
@@ -167,12 +177,14 @@ describe("the executor's order journal in the console", () => {
     const lost = consoleOrderJournal({
       consoleUrl: "http://console.test",
       sign: executorSign,
+      deployment: deploymentOf(),
       fetch: () => Promise.resolve(new Response("<html>Not found</html>", { status: 404 })),
     });
     await expect(lost.get(journalId)).rejects.toThrow(/no order journal at this address/);
     const down = consoleOrderJournal({
       consoleUrl: "http://console.test",
       sign: executorSign,
+      deployment: deploymentOf(),
       fetch: () => Promise.reject(new TypeError("fetch failed")),
     });
     await expect(down.get(journalId)).rejects.toThrow(/did not answer/);

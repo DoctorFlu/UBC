@@ -27,10 +27,11 @@ import {
   isLoopbackTestUrl,
   type GeminiPrivateClient,
 } from "@mandate/gemini/private";
-import type { ExecutorVenue } from "@mandate/shared";
+import { type ExecutorContract, type ExecutorVenue, PolicyClient, WriteLane } from "@mandate/shared";
 import { resolvePolicyDeployment } from "@mandate/shared/node";
 import {
   announceVenue,
+  consoleContractDiscovery,
   consoleOrderJournal,
   consoleSettlementSink,
   devGeminiClient,
@@ -38,6 +39,8 @@ import {
   geminiVenue,
   simulatedVenue,
   startExecutor,
+  startExecutorFleet,
+  type Executor,
   type RecordSigner,
   type Venue,
 } from "../src";
@@ -67,12 +70,16 @@ const wallet = client.walletClient;
 if (wallet === undefined || roles.executor.toLowerCase() !== client.account?.address.toLowerCase()) {
   fail(`This contract's executor is ${roles.executor}, not the devchain executor account.`);
 }
+// Narrowed once here: the functions below use it after the check above.
+const signer = wallet;
+const executorAddress = signer.account.address;
 const sign: RecordSigner = (hash) => wallet.signMessage({ account: wallet.account, message: { raw: hash } });
 const chainId = client.publicClient.chain.id;
-const policy = client.address.toLowerCase() as `0x${string}`;
+/** Every contract's writes go through this one lane: one key, one transaction at a time (#95). */
+const lane = new WriteLane();
 
-let venue: Venue;
-let announcement: ExecutorVenue;
+/** The venue for one contract: its own journal and announcement, the account the same for all. */
+let venueFor: (policy: `0x${string}`) => { venue: Venue; announcement: ExecutorVenue };
 let describeVenue: string;
 if (settings.venue === "gemini") {
   let trading: GeminiPrivateClient;
@@ -122,68 +129,117 @@ if (settings.venue === "gemini") {
       `[executor] Could not read the terms status yet (${error instanceof Error ? error.message : String(error)}).`,
     );
   }
-  venue = geminiVenue({
-    publicClient,
-    trading,
-    journal: consoleOrderJournal({ consoleUrl, sign }),
-    deployment: { chainId, policy },
-    orderTtlMs,
+  const environment = trading.environment;
+  venueFor = (policy) => ({
+    venue: geminiVenue({
+      publicClient,
+      trading,
+      journal: consoleOrderJournal({ consoleUrl, sign, deployment: { chainId, policy } }),
+      deployment: { chainId, policy },
+      orderTtlMs,
+    }),
+    announcement: {
+      kind: "executor-venue",
+      version: 1,
+      chainId,
+      policy,
+      venue: "gemini",
+      environment,
+      announcedAt: new Date().toISOString(),
+    },
   });
-  announcement = {
-    kind: "executor-venue",
-    version: 1,
-    chainId,
-    policy,
-    venue: "gemini",
-    environment: trading.environment,
-    announcedAt: new Date().toISOString(),
-  };
   describeVenue =
-    `GEMINI ${trading.environment.toUpperCase()} executor: places approved orders on Gemini's sandbox (test funds), ` +
+    `GEMINI ${environment.toUpperCase()} executor: places approved orders on Gemini's sandbox (test funds), ` +
     `cancels what is unfilled after ${String(Math.round(orderTtlMs / 60_000))} min`;
 } else {
-  venue = simulatedVenue(devGeminiClient());
-  announcement = {
-    kind: "executor-venue",
-    version: 1,
-    chainId,
-    policy,
-    venue: "simulated",
-    environment: null,
-    announcedAt: new Date().toISOString(),
-  };
+  const gemini = devGeminiClient();
+  venueFor = (policy) => ({
+    venue: simulatedVenue(gemini),
+    announcement: {
+      kind: "executor-venue",
+      version: 1,
+      chainId,
+      policy,
+      venue: "simulated",
+      environment: null,
+      announcedAt: new Date().toISOString(),
+    },
+  });
   describeVenue = `SIMULATED executor (dev only): places nothing, fills after ${String(fillDelayMs)} ms`;
 }
 
 console.log(
-  `[executor] ${describeVenue}; watching ${deployment.address}, polling every ${String(pollingIntervalMs ?? 1_000)} ms; ` +
+  `[executor] ${describeVenue}; serving ${deployment.address} and every mandate's contract that names this ` +
+    `executor (listed by the console at ${consoleUrl}), polling every ${String(pollingIntervalMs ?? 1_000)} ms; ` +
     "checks every approved intent against Gemini first; " +
-    `settles expired positions every ${String(settleIntervalMs / 1_000)} s into the console at ${consoleUrl}`,
+    `settles expired positions every ${String(settleIntervalMs / 1_000)} s into the console`,
 );
 
-// Tells the console which venue fills orders (its Sandbox badge). The console may start after the
-// executor, so this tries again with growing waits until it is stored; it asks nothing of Gemini.
-void (async () => {
-  for (let attempt = 0; ; attempt += 1) {
-    const problem = await announceVenue({ consoleUrl, sign }, announcement);
-    if (problem === null) return;
-    if (attempt === 0)
-      console.warn(`[executor] Could not tell the console its venue yet (${problem}); trying again.`);
-    await new Promise((resolve) => setTimeout(resolve, Math.min(5_000 * 2 ** attempt, 60_000)));
-  }
-})();
+/** Tells the console which venue fills this contract's orders (its Sandbox badge), until it is stored. */
+function announce(announcement: ExecutorVenue): void {
+  void (async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      const problem = await announceVenue({ consoleUrl, sign }, announcement);
+      if (problem === null) return;
+      if (attempt === 0) {
+        console.warn(
+          `[executor] Could not tell the console the venue of ${announcement.policy} yet (${problem}); trying again.`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(5_000 * 2 ** attempt, 60_000)));
+    }
+  })();
+}
 
-const executor = startExecutor({
-  client,
-  venue,
-  settlements: consoleSettlementSink({ consoleUrl }),
-  fromBlock: deployment.fromBlock ?? 0n,
-  fillDelayMs,
-  settleIntervalMs,
-  ...(pollingIntervalMs === undefined ? {} : { pollingIntervalMs }),
+/** Serves one contract, once its own `executor()` is this key: the console's listing is not trusted. */
+async function serve(contract: ExecutorContract): Promise<Executor | { refused: string }> {
+  const policy = contract.policy.toLowerCase() as `0x${string}`;
+  const policyClient = new PolicyClient({
+    address: policy,
+    publicClient: client.publicClient,
+    walletClient: signer,
+    lane,
+  });
+  const named = (await policyClient.getRoles()).executor;
+  if (named.toLowerCase() !== executorAddress.toLowerCase()) {
+    return { refused: `its executor is ${named}, not this one` };
+  }
+  const { venue, announcement } = venueFor(policy);
+  announce(announcement);
+  return startExecutor({
+    client: policyClient,
+    venue,
+    settlements: consoleSettlementSink({ consoleUrl }),
+    fromBlock: BigInt(contract.deployBlock),
+    fillDelayMs,
+    settleIntervalMs,
+    ...(pollingIntervalMs === undefined ? {} : { pollingIntervalMs }),
+  });
+}
+
+const discover = consoleContractDiscovery({
+  consoleUrl,
+  chainId,
+  signMessage: (message) => wallet.signMessage({ account: wallet.account, message }),
 });
+const own: ExecutorContract = {
+  chainId,
+  policy: deployment.address.toLowerCase(),
+  deployBlock: Number(deployment.fromBlock ?? 0n),
+};
+// The server's own contract is served at once, whether or not the console answers yet.
+const fleet = startExecutorFleet({
+  always: [own],
+  discover,
+  start: serve,
+  intervalMs: settings.discoveryIntervalMs,
+});
+await fleet.refresh();
+if (!fleet.serving().includes(`${String(chainId)}:${own.policy}`)) {
+  fail(`Could not serve ${own.policy}; see above.`);
+}
 
 process.on("SIGINT", () => {
-  executor.stop();
+  fleet.stop();
   process.exit(0);
 });

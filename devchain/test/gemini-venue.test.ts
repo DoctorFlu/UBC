@@ -124,7 +124,7 @@ describe("placing an order", () => {
       price: "0.31",
       outcome: "no",
       timeInForce: "good-til-cancel",
-      clientOrderId: "mandate-5042002-5fbdb231-7",
+      clientOrderId: "mandate-a36a070dc34de39d1842534d-7",
     });
     expect(placed.venueOrderId).toBe(fake.order(placed.venueOrderId).orderId);
     expect(journal.records.get(7)).toMatchObject({
@@ -335,6 +335,20 @@ describe("a request Gemini refused before reading it", () => {
 
     placedOf(await restarted().placeOrder(order()));
     expect(fake.orders.size).toBe(1);
+  });
+
+  it("sends a new attempt with the client order id the journal already holds, from before #95's form", async () => {
+    await trading.roles();
+    await trading.roles();
+    trading = signedClient();
+    await venue().placeOrder(order());
+    const journaled = journal.records.get(7);
+    if (!journaled) throw new Error("nothing journaled");
+    // As an executor from before the hashed form would have written it.
+    journal.records.set(7, { ...journaled, clientOrderId: "mandate-5042002-5fbdb231-7" });
+    placedOf(await restarted().placeOrder(order()));
+    expect(fake.callsTo(ORDER_ROUTE).at(-1)?.fields.clientOrderId).toBe("mandate-5042002-5fbdb231-7");
+    expect(journal.records.get(7)?.clientOrderId).toBe("mandate-5042002-5fbdb231-7");
   });
 });
 

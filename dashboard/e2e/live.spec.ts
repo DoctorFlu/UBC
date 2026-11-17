@@ -1336,7 +1336,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
         },
         limiter: unpacedLimiter(),
       }),
-      journal: consoleOrderJournal({ consoleUrl: baseURL, sign }),
+      journal: consoleOrderJournal({ consoleUrl: baseURL, sign, deployment: { chainId, policy } }),
       deployment: { chainId, policy },
     }),
     settlements: consoleSettlementSink({ consoleUrl: baseURL }),

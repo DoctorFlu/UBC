@@ -123,11 +123,17 @@ export const executorVenueSchema = z.strictObject({
 export type ExecutorVenue = z.infer<typeof executorVenueSchema>;
 
 /**
- * Our id for an intent's order: the chain, the first 8 hex digits of the contract and the intent id, so
- * it is the same on every attempt and restart, and differs between contracts.
+ * Our id for an intent's order: 24 hex digits (96 bits) of keccak256 of the chain and the contract, then
+ * the intent id. It is the same on every attempt and restart, and differs between contracts. One venue
+ * account serves every mandate's contract (#95), so ids of two contracts must never meet: a prefix of the
+ * address alone could, since anyone deploying a contract on Arc can grind an address to match another's
+ * first digits; 96 bits of a hash cannot be ground to. At most 49 characters.
+ *
+ * An order journaled before this form keeps the id it was placed with (`gemini-venue.ts`).
  */
 export function clientOrderIdFor(chainId: number, policy: string, intentId: number): string {
-  return `mandate-${String(chainId)}-${policy.toLowerCase().slice(2, 10)}-${String(intentId)}`;
+  const contract = keccak256(stringToBytes(`${String(chainId)}:${policy.toLowerCase()}`)).slice(2, 26);
+  return `mandate-${contract}-${String(intentId)}`;
 }
 
 /** Validates a venue order record or announcement and returns keccak256 of its canonical JSON. */

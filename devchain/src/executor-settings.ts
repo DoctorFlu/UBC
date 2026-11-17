@@ -14,6 +14,8 @@
  *                         Gemini; the GEMINI_* settings in @mandate/gemini/private say where and with which key).
  * EXECUTOR_ORDER_TTL_MS   gemini only: how long an order rests unfilled before the rest is cancelled (default
  *                         600000, 10 minutes; at least 10000).
+ * EXECUTOR_DISCOVERY_MS   how often it asks the console which contracts name it as their executor (#95:
+ *                         one executor serves every mandate's contract; default 15000, at least 1000).
  */
 export interface ExecutorSettings {
   fillDelayMs: number;
@@ -22,6 +24,7 @@ export interface ExecutorSettings {
   consoleUrl: string;
   venue: "simulated" | "gemini";
   orderTtlMs: number;
+  discoveryIntervalMs: number;
 }
 
 function wholeMs(name: string, raw: string | undefined, min: number): number | undefined {
@@ -46,6 +49,7 @@ export function executorSettings(env: Record<string, string | undefined>): Execu
   return {
     venue,
     orderTtlMs: wholeMs("EXECUTOR_ORDER_TTL_MS", env.EXECUTOR_ORDER_TTL_MS, 10_000) ?? 600_000,
+    discoveryIntervalMs: wholeMs("EXECUTOR_DISCOVERY_MS", env.EXECUTOR_DISCOVERY_MS, 1_000) ?? 15_000,
     fillDelayMs: wholeMs("SIM_EXECUTOR_DELAY_MS", env.SIM_EXECUTOR_DELAY_MS, 0) ?? 1_500,
     pollingIntervalMs: wholeMs("SIM_EXECUTOR_POLL_MS", env.SIM_EXECUTOR_POLL_MS, 50),
     settleIntervalMs: wholeMs("EXECUTOR_SETTLE_MS", env.EXECUTOR_SETTLE_MS, 1_000) ?? 60_000,

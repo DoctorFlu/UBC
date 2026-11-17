@@ -313,7 +313,8 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       revision: (previous?.revision ?? 0) + 1,
       venue: "gemini",
       environment: trading.environment,
-      clientOrderId: clientOrderIdFor(deployment.chainId, policy, order.intentId),
+      // An earlier attempt's id stands: the record does not allow another, and Gemini knows that one.
+      clientOrderId: previous?.clientOrderId ?? clientOrderIdFor(deployment.chainId, policy, order.intentId),
       market: order.market,
       side: order.isBuy ? "buy" : "sell",
       outcome: order.outcome,
