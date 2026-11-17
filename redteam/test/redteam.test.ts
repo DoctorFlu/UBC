@@ -22,6 +22,7 @@ const EXPECTED: Record<string, Verdict> = {
   "mcp.forged-plan": "held",
   "mcp.cross-tenant": "held",
   "console.cross-tenant": "held",
+  "console.step-up": "held",
   "mcp.repeat-and-overlap-runs": "held",
   "mcp.sell-outside-budget": "bounded",
   "mcp.bad-token": "held",
