@@ -1,12 +1,12 @@
 "use client";
 
 import { Menu } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { LiveIndicator } from "@/components/ui/LiveIndicator";
-import { useLiveConsole } from "@/lib/live/LiveConsole";
+import { type StreamConnection, useLiveConsole } from "@/lib/live/LiveConsole";
 
 import { Brand } from "./Brand";
 import { DevSignerBadge } from "./DevSignerBadge";
@@ -21,18 +21,40 @@ export interface TopBarProps {
   foot: ReactNode;
 }
 
+/** How long the first connection may take before the lamp stops calling the page live. */
+const SLOW_CONNECT_MS = 3_000;
+
+/** True while the event stream has not opened after `SLOW_CONNECT_MS` (a proxy waking an idle console). */
+function useSlowToConnect(connection: StreamConnection): boolean {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (connection !== "connecting") return undefined;
+    const timer = setTimeout(() => setSlow(true), SLOW_CONNECT_MS);
+    return () => clearTimeout(timer);
+  }, [connection]);
+  return slow && connection === "connecting";
+}
+
 /** The status strip: the live lamp, dev signer, wallet and the isolator. On phones, also the menu. */
 export function TopBar({ navCounts, foot }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { snapshot, connection } = useLiveConsole();
+  const slow = useSlowToConnect(connection);
   const { feed } = snapshot;
   const live = {
     source: feed.source,
-    health: connection === "reconnecting" ? ("disconnected" as const) : feed.health,
+    health:
+      connection === "reconnecting"
+        ? ("disconnected" as const)
+        : slow
+          ? ("connecting" as const)
+          : feed.health,
     detail:
       connection === "reconnecting"
         ? "Lost the connection to the console server; reconnecting."
-        : feed.detail,
+        : slow
+          ? "Waiting for the console server to start sending updates. The page shows the state it loaded with."
+          : feed.detail,
     lastEventAt: feed.lastEventAt,
   };
   return (

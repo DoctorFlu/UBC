@@ -21,10 +21,12 @@ const LiveConsoleContext = createContext<LiveConsoleValue | null>(null);
 const NetworkContext = createContext<ConsoleNetwork | null>(null);
 
 export const EVENTS_PATH = "/api/console/events";
+const RETRY_FIRST_MS = 1_000;
+const RETRY_MAX_MS = 30_000;
 
 /**
  * Keeps the console's snapshot current: the server renders with `initial`, then the browser follows
- * /api/console/events. EventSource reconnects by itself; the first message after any (re)connect is a
+ * /api/console/events, opening a new stream when the browser gives up on one; the first message after any (re)connect is a
  * full snapshot, accepted even when its `seq` is lower, which happens after the server restarts.
  */
 export function LiveConsoleProvider({
@@ -44,33 +46,50 @@ export function LiveConsoleProvider({
 
   useEffect(() => {
     if (!follow) return undefined;
-    const source = new EventSource(EVENTS_PATH);
+    let source: EventSource | null = null;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
     let fresh = true;
     const accept = (next: ConsoleSnapshot) => {
       latest.current = next;
       setSnapshot(next);
       for (const waiter of [...waiters.current]) waiter(next);
     };
-    source.addEventListener("open", () => {
-      fresh = true;
-      setConnection("open");
-    });
-    source.addEventListener("error", () => {
-      setConnection("reconnecting");
-    });
-    source.addEventListener("snapshot", (event) => {
-      let next: ConsoleSnapshot;
-      try {
-        next = JSON.parse((event as MessageEvent<string>).data) as ConsoleSnapshot;
-      } catch {
-        return;
-      }
-      if (!fresh && next.seq <= latest.current.seq) return;
-      fresh = false;
-      setConnection("open");
-      accept(next);
-    });
-    return () => source.close();
+    const connect = () => {
+      const current = new EventSource(EVENTS_PATH);
+      source = current;
+      current.addEventListener("open", () => {
+        fresh = true;
+        attempt = 0;
+        setConnection("open");
+      });
+      current.addEventListener("error", () => {
+        setConnection("reconnecting");
+        // EventSource retries a dropped connection by itself, but gives up for good on an HTTP error, such
+        // as a proxy's 502 while the console wakes up: open a new stream after a growing pause.
+        if (current.readyState === EventSource.CLOSED) {
+          retry = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** attempt));
+          attempt += 1;
+        }
+      });
+      current.addEventListener("snapshot", (event) => {
+        let next: ConsoleSnapshot;
+        try {
+          next = JSON.parse((event as MessageEvent<string>).data) as ConsoleSnapshot;
+        } catch {
+          return;
+        }
+        if (!fresh && next.seq <= latest.current.seq) return;
+        fresh = false;
+        setConnection("open");
+        accept(next);
+      });
+    };
+    connect();
+    return () => {
+      clearTimeout(retry);
+      source?.close();
+    };
   }, [follow]);
 
   const waitFor = useCallback(

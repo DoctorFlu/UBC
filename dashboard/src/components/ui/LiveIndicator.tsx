@@ -9,19 +9,23 @@ import styles from "./LiveIndicator.module.css";
 
 const sourceNames: Record<FeedSource, string> = { rpc: "RPC poller", stream: "QuickNode Stream" };
 
-const healthWords: Record<FeedHealth | "disconnected", string> = {
+const healthWords: Record<FeedHealth | "connecting" | "disconnected", string> = {
   live: "Live",
   starting: "Syncing",
   lagging: "Lagging",
   offline: "Offline",
   unconfigured: "No contract",
+  connecting: "Connecting",
   disconnected: "Reconnecting",
 };
 
 export interface LiveIndicatorProps {
   source: FeedSource;
-  /** The feed's health, or "disconnected" when the browser lost the console's event stream. */
-  health: FeedHealth | "disconnected";
+  /**
+   * The feed's health; "connecting" while the browser's first connection to the console's event stream
+   * is slow, "disconnected" when it lost it.
+   */
+  health: FeedHealth | "connecting" | "disconnected";
   /** One sentence on what the feed is doing, for the tooltip and screen readers. */
   detail: string;
   /** ISO time of the newest event. */

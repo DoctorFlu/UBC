@@ -33,6 +33,7 @@
 }
 
 .starting,
+.connecting,
 .lagging,
 .disconnected {
   --live-lamp: var(--color-held-lamp);
