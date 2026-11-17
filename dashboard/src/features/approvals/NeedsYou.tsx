@@ -29,21 +29,23 @@ export function HeldIntent({ intent, chain }: { intent: IntentView; chain: Chain
   const reason = sealedReasonText(chain, intent.id);
   return (
     <li className={styles.held} data-testid={`waiting-intent-${intent.id.toString()}`}>
-      <FlaggedBadge flags={intentFlags(intent)} />
-      <div className={styles.heldHead}>
-        <MarketName symbol={intent.market} />
-        <span className={styles.heldAmount}>{amountLabel(intent)}</span>
+      <div className={styles.heldBody}>
+        <FlaggedBadge flags={intentFlags(intent)} />
+        <div className={styles.heldHead}>
+          <MarketName symbol={intent.market} />
+          <span className={styles.heldAmount}>{amountLabel(intent)}</span>
+        </div>
+        <div className={styles.heldMeta}>
+          <OrderSummary intent={intent} />
+          <span>
+            <IntentLink id={intent.id} /> · <When at={intent.proposedAt} />
+          </span>
+        </div>
+        <Advanced>
+          <HexValue label="Proposed in" value={intent.proposedTxHash} kind="tx" />
+        </Advanced>
+        {reason ? <AgentReason text={reason} /> : null}
       </div>
-      <div className={styles.heldMeta}>
-        <OrderSummary intent={intent} />
-        <span>
-          <IntentLink id={intent.id} /> · <When at={intent.proposedAt} />
-        </span>
-      </div>
-      <Advanced>
-        <HexValue label="Proposed in" value={intent.proposedTxHash} kind="tx" />
-      </Advanced>
-      {reason ? <AgentReason text={reason} /> : null}
       <div className={styles.heldActions}>
         <ApprovalActions intent={intent} block />
       </div>

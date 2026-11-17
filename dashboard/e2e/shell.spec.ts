@@ -181,6 +181,32 @@ test.describe("phone menu on a slow device", () => {
   });
 });
 
+test.describe("layout", () => {
+  for (const width of [1440, 1024, 768, 390]) {
+    test(`a held approval card on Home is as tall as its content at ${width.toString()} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      const card = page.locator('[data-testid^="waiting-intent-"]').first();
+      await expect(card).toBeVisible();
+      const gap = await card.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const inner =
+          element.getBoundingClientRect().bottom -
+          parseFloat(style.paddingBottom) -
+          parseFloat(style.borderBottomWidth);
+        const content = Math.max(
+          ...[...element.children].map((child) => child.getBoundingClientRect().bottom),
+        );
+        return inner - content;
+      });
+      // The last line (or the buttons) sits on the card's bottom padding, with no empty band below it.
+      expect(gap).toBeLessThan(1);
+    });
+  }
+});
+
 test.describe("keyboard", () => {
   test("the Advanced view switch toggles with Space", async ({ page }) => {
     await page.goto("/");

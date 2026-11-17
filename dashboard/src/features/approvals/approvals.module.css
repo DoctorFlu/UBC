@@ -20,42 +20,38 @@
   container-type: inline-size;
 }
 
+/* Two parts: what is held, then the decision. The card is exactly as tall as the taller of the two. */
 .held {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  gap: var(--space-2);
+  gap: var(--space-4);
   min-width: 0;
-  padding: var(--space-4) var(--space-5) var(--space-5);
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
-.held > [data-testid="flagged-badge"] {
-  justify-self: start;
+.heldBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.heldBody > [data-testid="flagged-badge"] {
+  align-self: flex-start;
 }
 
 .heldActions {
-  margin-top: var(--space-2);
+  min-width: 0;
 }
 
 @container (width >= 46rem) {
   .held {
     grid-template-columns: minmax(0, 1fr) 17rem;
     column-gap: var(--space-8);
-    padding-bottom: var(--space-4);
-  }
-
-  .held > * {
-    grid-column: 1;
-  }
-
-  .held > .heldActions {
-    grid-column: 2;
-    grid-row: 1 / span 6;
-    align-self: center;
-    margin-top: 0;
+    align-items: center;
   }
 }
 
