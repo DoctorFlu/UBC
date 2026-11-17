@@ -1,0 +1,24 @@
+# The landing page (site/), served by Caddy as a second origin. Build it first, with the app's public URL
+# baked in, then add this file to COMPOSE_FILE (see docs/hosting.md):
+#   deploy/build-site.sh       # with Docker, into MANDATE_SITE_DIR (default site/out)
+#   COMPOSE_FILE=compose.yml:compose.demo.yml:compose.gateway.yml:compose.site.yml
+#
+# Without this file the stack runs without the site. With it, the folder must exist: Docker refuses to
+# start Caddy rather than serve an empty site. Building again replaces the folder's contents in place, so
+# Caddy serves the new pages without a restart.
+
+services:
+  caddy:
+    environment:
+      # http://:8081 behind a TLS-ending proxy; a public name (example.com) with automatic HTTPS.
+      MANDATE_SITE_ADDRESS: ${MANDATE_SITE_ADDRESS:-http://:8081}
+    ports:
+      - "${MANDATE_BIND_ADDRESS:-127.0.0.1}:${MANDATE_SITE_PORT:-8081}:8081"
+    volumes:
+      - ./caddy/site.caddy:/etc/caddy/sites/site.caddy:ro
+      - type: bind
+        source: ${MANDATE_SITE_DIR:-../site/out}
+        target: /srv/site
+        read_only: true
+        bind:
+          create_host_path: false

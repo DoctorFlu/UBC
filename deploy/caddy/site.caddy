@@ -1,0 +1,41 @@
+# The landing page (site/, built to site/out): a static site on its own origin, mounted at /srv/site by
+# compose.site.yml. MANDATE_SITE_ADDRESS is http://:8081 behind InstaBox's proxy, or a public name such as
+# example.com with automatic HTTPS.
+(site_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+}
+
+{$MANDATE_SITE_ADDRESS} {
+	log {
+		output stdout
+		format json
+	}
+
+	root * /srv/site
+
+	import site_headers
+
+	# Next.js puts a content hash in every file name under _next/static, so those never change.
+	@immutable path /_next/static/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	# Everything else (the pages, images, fonts) is checked again each time; the ETag makes that cheap.
+	header ?Cache-Control "no-cache"
+
+	# A static export writes /about as about.html (or about/index.html).
+	try_files {path} {path}.html {path}/index.html
+	file_server
+
+	# The error routes do not run the directives above, so they set the same headers themselves.
+	handle_errors 404 {
+		import site_headers
+		header Cache-Control "no-cache"
+		rewrite * /404.html
+		file_server
+	}
+}

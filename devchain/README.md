@@ -63,6 +63,8 @@ It refuses an intent and records it as not filled when the market is not a Gemin
 The contract approves all of these when they come from the agent key, so this is the only offchain check between a stolen key and an order.
 It reads Gemini's public market data for the listing; when Gemini cannot be reached it fills nothing and tries again every 15 seconds, leaving the intent approved.
 The logic is in `src/executor.ts`, with the venue injectable so tests run without the network.
+It asks the chain for new approvals every second; `SIM_EXECUTOR_POLL_MS` changes that (at least 50), and `SIM_EXECUTOR_DELAY_MS` sets how long it waits after an approval before it records the fill (default 1500).
+The hosted demo keeps the one-second poll and can set it higher so an idle machine stays quiet.
 
 `dev:chain` writes `devchain/deployments/local.json` (git-ignored), which `resolvePolicyDeployment()` in `@mandate/shared/node` reads when `POLICY_ADDRESS` is unset.
 It deletes the file when it stops, since the chain's state goes with it.

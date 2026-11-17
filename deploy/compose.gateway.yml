@@ -1,0 +1,17 @@
+# Gateway mode: behind a proxy that ends TLS and forwards plain HTTP to a port on this machine, such as
+# InstaBox's published ports. Add it after the chain's file:
+#   COMPOSE_FILE=compose.yml:compose.demo.yml:compose.gateway.yml
+#
+# Caddy then listens on plain HTTP and handles no certificate (Caddyfile.gateway, with the same routes as
+# the Caddyfile), and Docker publishes the app on loopback only, where the proxy connects. MANDATE_HOST is
+# the public name the proxy serves, for example 8080-<machine id>.instabox.tech; the console's links are
+# built from it as https://<MANDATE_HOST>.
+
+services:
+  caddy:
+    ports: !override
+      - "${MANDATE_BIND_ADDRESS:-127.0.0.1}:${MANDATE_APP_PORT:-8080}:8080"
+    volumes:
+      - ./Caddyfile.gateway:/etc/caddy/Caddyfile:ro
+    # High ports only: no privilege to bind 80 or 443.
+    cap_add: !reset []
