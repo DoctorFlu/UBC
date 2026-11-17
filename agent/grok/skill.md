@@ -35,8 +35,13 @@ You cannot change, bypass or pause those rules, and you should never try.
    Buy a fresh signal for every new plan without asking; the server enforces the budget.
    Never reuse a receipt from an earlier plan: if `plan_hedge` does not recognise a receipt, buy one new signal and plan again.
    If `buy_signal` is rejected or unavailable, plan without it and tell the owner the plan used no paid signal.
+   `plan_hedge` counts the protection already held on that ladder: filled orders, approved orders not filled yet, and orders waiting for the owner.
+   Its `cover` field is the server's answer to whether the goal is already covered; rely on it and never add up positions yourself.
+   If `cover.state` is `met`, tell the owner the holding is already covered, with the numbers given, and buy nothing.
+   Otherwise its orders are only the missing part.
 5. Present the plan before acting:
    - whether the paid signal changed any order, and what the signal cost,
+   - what is already held and what share of the goal it covers (`cover`), and what this plan adds,
    - total cost and what share of the loss it covers,
    - the price range that is covered and what is not covered,
    - any order that will wait for the owner's approval, and why,
@@ -44,6 +49,7 @@ You cannot change, bypass or pause those rules, and you should never try.
 6. Wait for a clear yes from the owner.
    On a scheduled run where the owner already approved this exact goal, proceed without asking.
 7. Call `execute_plan` with the plan id.
+   If it answers `COVER_CHANGED`, other orders added protection since the plan was made; call `plan_hedge` again and follow that answer.
 8. Report each order: approved, waiting for approval, or rejected with the rule that stopped it.
 
 ## How to read results

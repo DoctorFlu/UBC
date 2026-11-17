@@ -6,7 +6,10 @@ import { createPublicClient, http, isAddressEqual } from "viem";
 import { describeReason } from "@mandate/shared";
 
 import { auditRows } from "../src/features/audit/audit-rows";
+import { coverNow, coverSentence } from "../src/features/hedge/cover-now";
 import { formatContractsHundredths, formatUsdCents, formatUsdCentsDelta } from "../src/lib/format";
+import type { HedgeMarketResponse } from "../src/lib/hedge/types";
+import { describeMarket } from "../src/lib/markets";
 
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
@@ -174,6 +177,49 @@ test.describe("seeded demo", () => {
     await expect(blank.getByText("Use the ticker, like BTC.")).toHaveCount(0);
     await save.click();
     await expect(blank.getByText("Use the ticker, like BTC.")).toBeVisible();
+  });
+
+  test("the hedge view says how much of the holding is covered now, with the planner's numbers", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const state = await snapshot(baseURL ?? "");
+    const stored = state.offchain.plans[0];
+    if (!stored) throw new Error("the warm-up posted no plan");
+    const market = (await (
+      await fetch(
+        `${baseURL ?? ""}/api/console/hedge/market?asset=${stored.asset}&event=${stored.plan.eventTicker}`,
+      )
+    ).json()) as HedgeMarketResponse;
+    if (!market.quotes) throw new Error("the fake Gemini served no ladder");
+    const holding = state.offchain.holdings.find((h) => h.asset === stored.asset)?.quantity ?? null;
+    const cover = coverNow({
+      plan: stored.plan,
+      holdingQuantity: holding,
+      quotes: market.quotes,
+      intents: state.chain?.intents ?? [],
+    });
+    if (!cover) throw new Error("no cover for the stored plan");
+    // The demo history and the warm-up's orders hold protection on the plan's ladder.
+    expect(cover.assessment.heldPayoutCents).toBeGreaterThan(0);
+    expect(cover.assessment.state).not.toBe("nothing_to_cover");
+
+    await page.goto("/hedge");
+    const card = page.getByTestId("cover-now");
+    await expect(card).toHaveAttribute("data-state", cover.assessment.state);
+    const settles = stored.plan.rungs[0]?.instrumentSymbol ?? "";
+    await expect(card.getByRole("status")).toHaveText(
+      coverSentence(cover.assessment, settles === "" ? null : describeMarket(settles).settles),
+    );
+    await expect(card.getByRole("meter", { name: "Share of the goal covered" })).toBeVisible();
+    // The numbers per strike are Advanced detail.
+    await expect(card.getByRole("table")).toHaveCount(0);
+    await context.addCookies([{ name: "mandate-advanced", value: "on", url: baseURL ?? "" }]);
+    await page.reload();
+    await expect(card.getByRole("table", { name: /Cover per strike/ }).locator("tbody tr")).toHaveCount(
+      cover.assessment.rungs.length,
+    );
   });
 
   test("the hedge view shows the agent's plan with exactly the planner's numbers", async ({

@@ -264,14 +264,14 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
     const eventTicker = String(field(ladder?.structuredContent, "ladder", "eventTicker"));
 
     process.stdout.write("\n-- plan\n");
-    const plan = await run("plan_hedge", {
+    const goal = {
       asset: "BTC",
       dropPercent: 3,
       maxCostCents: 4_000,
       eventTicker,
       requestText: "Protect my 0.05 BTC against a 3% drop this week, for at most $40.",
-    });
-    const planId = field(plan.structuredContent, "plan", "planId");
+    };
+    const stalePlan = await run("plan_hedge", goal);
 
     process.stdout.write("\n-- simulate\n");
     const simulated = await run("simulate_trade", {
@@ -355,7 +355,29 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
       );
     }
 
-    process.stdout.write("\n-- execute the plan (a different MCP session from plan_hedge)\n");
+    process.stdout.write("\n-- a plan made before those orders (issue #88)\n");
+    const staleId = field(stalePlan.structuredContent, "plan", "planId");
+    if (
+      typeof staleId === "string" &&
+      Number(field(stalePlan.structuredContent, "plan", "totals", "orderCount")) > 0
+    ) {
+      const stale = await run("execute_plan", { planId: staleId, reason: "The owner agreed to the plan." });
+      check(
+        field(stale.structuredContent, "reasons", 0, "code") === "COVER_CHANGED" &&
+          field(stale.structuredContent, "execution", "submitted") === 0,
+        "a plan made before other orders on its ladder sends nothing (COVER_CHANGED)",
+      );
+    } else {
+      process.stdout.write("  (the live ladder gave an empty plan; skipping the stale plan)\n");
+    }
+
+    process.stdout.write("\n-- plan again, counting those orders, and execute (a different MCP session)\n");
+    const plan = await run("plan_hedge", goal);
+    const planId = field(plan.structuredContent, "plan", "planId");
+    check(
+      ["partly_met", "met"].includes(String(field(plan.structuredContent, "plan", "cover", "state"))),
+      "plan_hedge counts the approved and held orders as cover",
+    );
     if (
       typeof planId === "string" &&
       Number(field(plan.structuredContent, "plan", "totals", "orderCount")) > 0

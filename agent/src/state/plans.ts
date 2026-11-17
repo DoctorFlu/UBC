@@ -16,6 +16,11 @@ export const PLAN_EXECUTABLE_FOR_MS = 30 * 60_000;
 export const PLAN_RETAINED_FOR_MS = 6 * 60 * 60_000;
 export const MAX_PLANS = 100;
 
+/** The lock key for reading and adding positions on one ladder. */
+export function ladderLockKey(eventTicker: string): string {
+  return `ladder:${eventTicker}`;
+}
+
 /** What happened to one order of a plan. */
 export interface OrderOutcome {
   orderIndex: number;
@@ -42,6 +47,14 @@ export interface StoredPlan {
   readonly ladderSummary: LadderSummary;
   /** Mandate category of the ladder's market. */
   readonly categoryId: CategoryId;
+  /** Every strike of the ladder, to read the positions held on it again at execution. */
+  readonly strikes: readonly { instrumentSymbol: string; strikeCents: number }[];
+  /**
+   * The intents whose positions the plan counted as already held. Execution sends an order only while
+   * every other position on the ladder is one of these or one of the plan's own orders, so a plan made
+   * before other orders landed can never add protection a second time.
+   */
+  readonly basis: ReadonlySet<number>;
   /** Whether the console accepted the plan. */
   consoleStored: boolean;
   /** One entry per submitted order, in plan order. */
@@ -69,7 +82,10 @@ export class PlanStore {
     return this.#plans.get(planId);
   }
 
-  /** Runs `work` for one plan at a time, so two calls for the same plan never interleave. */
+  /**
+   * Runs `work` for one key at a time, so two calls for the same key never interleave. Keys are plan
+   * ids, or `ladderLockKey` for everything that reads and then adds positions on one ladder.
+   */
   exclusive<T>(planId: string, work: () => Promise<T>): Promise<T> {
     const previous = this.#locks.get(planId) ?? Promise.resolve();
     const run = previous.then(work, work);

@@ -20,6 +20,7 @@ const EXPECTED: Record<string, Verdict> = {
   "mcp.zero-amount": "held",
   "mcp.policy-change": "held",
   "mcp.forged-plan": "held",
+  "mcp.repeat-and-overlap-runs": "held",
   "mcp.sell-outside-budget": "bounded",
   "mcp.bad-token": "held",
   "mcp.foreign-origin": "held",

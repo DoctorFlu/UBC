@@ -4,7 +4,13 @@
  * server resolves categories from this data the same way it does from Gemini. The live-stack run
  * uses real Gemini data instead.
  */
-import { GeminiError, type MarketContract, type MarketEvent } from "@mandate/gemini";
+import {
+  buildLadder,
+  GeminiError,
+  type MarketContract,
+  type MarketEvent,
+  type SpotPrice,
+} from "@mandate/gemini";
 import type { MarketsClient } from "@mandate/agent";
 import { categoryFromGemini } from "@mandate/shared";
 
@@ -16,6 +22,7 @@ function contract(
   ticker: string,
   label: string,
   strikeDollars: number | null,
+  expiry = EXPIRY,
 ): MarketContract {
   return {
     instrumentSymbol: symbol,
@@ -23,7 +30,7 @@ function contract(
     label,
     status: "active",
     marketState: "open",
-    expiry: EXPIRY,
+    expiry,
     strike:
       strikeDollars === null
         ? null
@@ -43,6 +50,23 @@ function contract(
 }
 
 export const CRYPTO_SYMBOL = `GEMI-${LADDER_TICKER}-HI64000`;
+/**
+ * A second BTC ladder, the next week's, that only `mcp.repeat-and-overlap-runs` plans on, so the
+ * orders other attacks leave on the first ladder do not count as protection there.
+ */
+export const HEDGE_LADDER_TICKER = "BTC2611272200";
+const HEDGE_EXPIRY = "2026-11-27T22:00:00.000Z";
+/** BTC spot for planning: between the second ladder's $64,000 and $64,500 strikes. */
+export const SPOT_CENTS = 6_420_000;
+const SPOT: SpotPrice = {
+  asset: "BTC",
+  symbol: "btcusd",
+  bidCents: SPOT_CENTS,
+  askCents: SPOT_CENTS,
+  lastCents: SPOT_CENTS,
+  midCents: SPOT_CENTS,
+  fetchedAt: "2026-11-16T12:00:00.000Z",
+};
 export const SPORTS_SYMBOL = "GEMI-NFL-2611152125-SF-DAL-M-SF";
 
 const EVENTS: MarketEvent[] = [
@@ -61,6 +85,23 @@ const EVENTS: MarketEvent[] = [
     volumeCents: 1_000_000,
     contracts: [62_000, 63_000, 64_000, 65_000].map((k) =>
       contract(`GEMI-${LADDER_TICKER}-HI${k}`, `HI${k}`, `$${k} or above`, k),
+    ),
+  },
+  {
+    id: "3",
+    ticker: HEDGE_LADDER_TICKER,
+    title: "BTC price on November 27",
+    category: "Crypto",
+    type: "categorical",
+    status: "active",
+    expiry: HEDGE_EXPIRY,
+    asset: "BTC",
+    kind: "weekly",
+    isLadder: true,
+    settlementIndex: "LS-LRRR-XBTUSD",
+    volumeCents: 1_000_000,
+    contracts: [62_500, 63_000, 63_500, 64_000, 64_500, 65_000].map((k) =>
+      contract(`GEMI-${HEDGE_LADDER_TICKER}-HI${k}`, `HI${k}`, `$${k} or above`, k, HEDGE_EXPIRY),
     ),
   },
   {
@@ -84,7 +125,10 @@ function notUsed(name: string): never {
   throw new GeminiError("invalid_argument", `${name} is not part of the red team's market fixture`);
 }
 
-/** A markets client over the two fixture events. Only lookups are supported; ladders and spot are not. */
+/**
+ * A markets client over the fixture events. Ladders are served by event ticker (a horizon gets the
+ * first ladder of the asset), at a fixed spot and without order book depth.
+ */
 export function fixtureMarkets(): MarketsClient {
   return {
     venue: "gemini",
@@ -112,8 +156,18 @@ export function fixtureMarkets(): MarketsClient {
         : Promise.resolve(event);
     },
     listLadders: () => notUsed("listLadders"),
-    getLadder: () => notUsed("getLadder"),
-    getSpot: () => notUsed("getSpot"),
+    getLadder: (options) => {
+      const event = EVENTS.find((e) =>
+        options.eventTicker !== undefined
+          ? e.ticker === options.eventTicker
+          : e.isLadder && e.asset === options.asset.toUpperCase(),
+      );
+      const ladder = event === undefined ? null : buildLadder(event, SPOT, { fetchedAt: SPOT.fetchedAt });
+      return ladder === null
+        ? Promise.reject(new GeminiError("not_found", "no such ladder in the red team's market fixture"))
+        : Promise.resolve(ladder);
+    },
+    getSpot: (asset) => (asset.toUpperCase() === "BTC" ? Promise.resolve(SPOT) : notUsed(`getSpot ${asset}`)),
     resolveMarket: (instrumentSymbol) => {
       for (const event of EVENTS) {
         const found = event.contracts.find((c) => c.instrumentSymbol === instrumentSymbol);

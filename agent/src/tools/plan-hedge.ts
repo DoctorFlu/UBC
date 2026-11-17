@@ -1,6 +1,6 @@
 import * as z from "zod";
 import { LADDER_KINDS, type Ladder } from "@mandate/gemini";
-import type { HedgePlan, ProtectionGoal } from "@mandate/planner";
+import type { HedgePlan, IntentPosition, PlanCover, ProtectionGoal } from "@mandate/planner";
 import {
   Category,
   evaluateIntent,
@@ -12,6 +12,7 @@ import { ToolError } from "../mcp/errors";
 import { ok, reason, summarizeVerdict, verdictSchema, type Reason } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { PLAN_EXECUTABLE_FOR_MS } from "../state/plans";
+import { heldPositions } from "../trading/positions";
 import { describeFailure, notConfigured, unavailableFor, type Failure } from "../support/failures";
 import { capList } from "../support/format";
 import { reasonCode } from "../support/rules";
@@ -37,9 +38,53 @@ const PlannedOrderSchema = z.object({
   expectedCode: z.string().nullable(),
 });
 
+const CoverSchema = z
+  .object({
+    state: z
+      .enum(["met", "partly_met", "not_met", "nothing_to_cover"])
+      .describe("met: the goal is already covered and the plan has no orders"),
+    measuredBelowCents: z
+      .int()
+      .nullable()
+      .describe("Cover is what positions pay if the price ends below this"),
+    targetPayoutCents: z.int().describe("What the goal calls for there"),
+    heldPayoutCents: z.int().describe("What the positions already held pay there"),
+    heldByState: z.object({
+      filledCents: z.int(),
+      awaitingFillCents: z.int().describe("Approved, not filled yet"),
+      awaitingOwnerCents: z.int().describe("Waiting for the owner's approval"),
+    }),
+    coverBps: z.int().nullable().describe("held / target; 10000 = 100%"),
+    toleranceCents: z.int().describe("A shortfall up to this still counts as met"),
+    withPlanPayoutCents: z.int().describe("Held plus this plan's orders"),
+    withPlanCoverBps: z.int().nullable(),
+  })
+  .describe(
+    "Computed by the server from the positions the contract records on this ladder. Rely on it; do not add up positions yourself",
+  );
+
+function coverView(cover: PlanCover): z.infer<typeof CoverSchema> {
+  return {
+    state: cover.state,
+    measuredBelowCents: cover.measuredBelowCents,
+    targetPayoutCents: cover.targetPayoutCents,
+    heldPayoutCents: cover.heldPayoutCents,
+    heldByState: {
+      filledCents: cover.heldByState.filled,
+      awaitingFillCents: cover.heldByState.awaiting_fill,
+      awaitingOwnerCents: cover.heldByState.awaiting_owner,
+    },
+    coverBps: cover.coverBps,
+    toleranceCents: cover.toleranceCents,
+    withPlanPayoutCents: cover.withPlanPayoutCents,
+    withPlanCoverBps: cover.withPlanCoverBps,
+  };
+}
+
 const PlanViewSchema = z.object({
   planId: z.string().describe("Pass to execute_plan"),
   status: z.enum(["ok", "partial", "empty"]),
+  cover: CoverSchema.nullable(),
   asset: z.string(),
   eventTicker: z.string(),
   expiry: z.string(),
@@ -119,7 +164,7 @@ export const planHedge = defineTool({
   name: "plan_hedge",
   title: "Plan a hedge",
   description:
-    "Plans protection for a crypto holding: a staircase of NO contracts on a Gemini strike ladder that pays out as the price falls from a ceiling (default: spot) to a floor, sized to the holding and kept within the mandate's max trade size, remaining budget and the owner's cost cap. Returns the orders, cost, payoff table, what the mandate would say to each order, and a planId for execute_plan. Nothing is traded. Give exactly one of floorCents or dropPercent.",
+    "Plans protection for a crypto holding: a staircase of NO contracts on a Gemini strike ladder that pays out as the price falls from a ceiling (default: spot) to a floor, sized to the holding and kept within the mandate's max trade size, remaining budget and the owner's cost cap. It counts the protection already held on that ladder (filled, waiting to fill, waiting for the owner) and plans only what is missing: cover.state 'met' means nothing is needed and there are no orders. Returns the cover, the orders, cost, payoff table, what the mandate would say to each order, and a planId for execute_plan. Nothing is traded. Give exactly one of floorCents or dropPercent.",
   inputSchema: z.object({
     asset: assetArg,
     quantity: holdingQuantitySchema
@@ -209,6 +254,14 @@ export const planHedge = defineTool({
       return none(describeFailure(error, ctx));
     }
 
+    // What is already held on this ladder, from the chain. Without it the plan could buy twice.
+    let held: IntentPosition[];
+    try {
+      held = await heldPositions(ctx.policy, ladder);
+    } catch (error) {
+      return none(describeFailure(error, ctx));
+    }
+
     const goal: ProtectionGoal = {
       ...(input.floorCents === undefined
         ? { dropPercent: input.dropPercent ?? 0 }
@@ -239,6 +292,7 @@ export const planHedge = defineTool({
         },
         slippageCents: input.slippageCents,
         ...(purchased === undefined ? {} : { signal: purchased }),
+        held,
       });
     } catch (error) {
       return none(describeFailure(error, ctx));
@@ -252,6 +306,11 @@ export const planHedge = defineTool({
         createdAt: now,
         ladderSummary: ladderSummaryFromLadder(ladder),
         categoryId: Category.Crypto,
+        strikes: ladder.rungs.map((r) => ({
+          instrumentSymbol: r.instrumentSymbol,
+          strikeCents: r.strikeCents,
+        })),
+        basis: new Set(held.map((p) => p.intentId)),
         consoleStored: false,
       },
       now,
@@ -317,8 +376,22 @@ export const planHedge = defineTool({
         ),
       );
     }
-    const v =
-      plan.orders.length === 0
+    const covered = plan.cover?.state === "met";
+    const v = covered
+      ? ok(
+          [
+            reason(
+              "ALREADY_COVERED",
+              plan.warnings.find((w) => w.code === "already_covered")?.message ??
+                "The goal is already covered.",
+            ),
+          ],
+          {
+            actor: "agent",
+            hint: "Tell the owner the holding is already covered and nothing was bought. There is nothing to execute; do not plan again for this goal in this run.",
+          },
+        )
+      : plan.orders.length === 0
         ? ok([...reasons, ...plan.warnings.slice(0, 2).map((w) => reason(w.code.toUpperCase(), w.message))], {
             actor: "agent",
             hint: "Tell the owner why nothing can be planned, and ask whether to change the floor, cost cap or horizon.",
@@ -335,6 +408,7 @@ export const planHedge = defineTool({
         plan: {
           planId: plan.planId,
           status: plan.status,
+          cover: plan.cover === undefined ? null : coverView(plan.cover),
           asset: plan.asset,
           eventTicker: plan.eventTicker,
           expiry: plan.expiry,

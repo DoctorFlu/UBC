@@ -29,6 +29,14 @@ export function summarizePlan(plan: HedgePlan): string {
   const warnings = plan.warnings.filter((w) => w.code !== "signal_ignored" && w.code !== "signal_expensive");
   const signalSentence = plan.signal === undefined ? null : describeSignal(plan, plan.signal);
 
+  const cover = plan.cover;
+  if (cover?.state === "met") {
+    sentences.push(
+      warnings.find((w) => w.code === "already_covered")?.message ?? `Your ${holding} is already covered.`,
+    );
+    sentences.push(`Spot is ${formatPrice(plan.spotCents)}. No orders are needed.`);
+    return sentences.join(" ");
+  }
   if (plan.status === "empty") {
     sentences.push(`No hedge is planned for your ${holding}.`);
     const reasons = warnings.filter((w) => w.code !== "ceiling_above_spot").slice(0, 2);
@@ -50,7 +58,11 @@ export function summarizePlan(plan: HedgePlan): string {
     `To protect your ${holding} (spot ${formatPrice(plan.spotCents)}), buy ${formatContracts(totals.contractsHundredths)} NO contracts ${span} for ${formatUsd(totals.costCents)}, settling ${formatExpiry(plan.expiry)}.`,
   );
 
-  if (plan.floorCents !== null) {
+  if (cover !== undefined && cover.state === "partly_met" && cover.measuredBelowCents !== null) {
+    sentences.push(
+      `Contracts already held pay ${formatUsd(cover.heldPayoutCents)} below ${formatPrice(cover.measuredBelowCents)} (${percent(cover.coverBps ?? 0)} of the ${formatUsd(cover.targetPayoutCents)} the goal calls for), so this plan buys only the missing part; together they pay ${formatUsd(cover.withPlanPayoutCents)} (${percent(cover.withPlanCoverBps ?? 0)}).`,
+    );
+  } else if (plan.floorCents !== null) {
     const coverage =
       totals.lossAtFloorCents === null || totals.coverageAtFloorBps === null
         ? ""

@@ -116,10 +116,15 @@ describe.each<PolicyContractKind>(["production", "reference"])("tools on the %s 
   });
 
   it("executes a plan rung by rung", async () => {
+    // The demo intents above already hold 106.66 NO at $63,000, which covers a goal down to $62,000;
+    // down to $61,000 the plan buys only what they leave missing.
     const planned = await planHedge.run(
-      { asset: "BTC", floorCents: 6_200_000, maxCostCents: 5_000, requestText: "Protect my BTC to $62k." },
+      { asset: "BTC", floorCents: 6_100_000, maxCostCents: 5_000, requestText: "Protect my BTC to $61k." },
       ctx,
     );
+    expect(planned.structured).toMatchObject({
+      plan: { cover: { state: "partly_met", heldPayoutCents: 10_666, targetPayoutCents: 15_000 } },
+    });
     const plan = planned.structured["plan"] as { planId: string; orders: Row[] };
     const { structured } = await executePlan.run({ planId: plan.planId, reason: "Owner agreed." }, ctx);
     expect(structured).toMatchObject({

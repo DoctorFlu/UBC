@@ -65,6 +65,90 @@ export interface HedgeInput {
    * flags expensive ones. Without it the plan is exactly what it would be otherwise.
    */
   signal?: PaidSignal | undefined;
+  /**
+   * Protection already held on this ladder, as the contract and executor record it. When given, the
+   * plan buys only what is missing from the goal (nothing when the goal is already covered) and
+   * carries a `cover` assessment. Without it the plan is the full staircase, as before.
+   */
+  held?: readonly HeldPosition[] | undefined;
+}
+
+/**
+ * How far a position has come: `filled` when the executor recorded a fill, `awaiting_fill` when the
+ * mandate approved it and the executor has not answered yet, `awaiting_owner` while it waits for the
+ * owner's approval. All three count as cover, so a run never buys again what is still on its way.
+ */
+export type PositionState = "filled" | "awaiting_fill" | "awaiting_owner";
+
+/** NO contracts held on one strike of the ladder. */
+export interface HeldPosition {
+  instrumentSymbol: string;
+  strikeCents: number;
+  /** Contracts in hundredths. One contract pays 100 cents, so this is also its payout in cents. */
+  hundredths: number;
+  state: PositionState;
+}
+
+/**
+ * - `met`: what is held pays the goal's target below the floor, within the tolerance.
+ * - `partly_met`: something is held, but less than that.
+ * - `not_met`: nothing held pays below the floor.
+ * - `nothing_to_cover`: the goal calls for no contracts (no strike below spot, the floor is not
+ *   below the ceiling, or the holding is too small for 0.01 contracts).
+ */
+export type CoverState = "met" | "partly_met" | "not_met" | "nothing_to_cover";
+
+/** One strike of the goal's staircase, highest first. */
+export interface CoverRung {
+  instrumentSymbol: string;
+  strikeCents: number;
+  /** Contracts the staircase calls for at this strike. */
+  targetHundredths: number;
+  /** Contracts held at exactly this strike. */
+  heldHundredths: number;
+  /** Contracts to buy here to complete the goal: 0 when it is met. */
+  missingHundredths: number;
+}
+
+/**
+ * Whether positions already held cover a protection goal, measured the same way every time. See
+ * `docs/cover.md` for the definition.
+ */
+export interface CoverAssessment {
+  state: CoverState;
+  asset: string;
+  eventTicker: string;
+  spotCents: number;
+  holdingQuantity: string;
+  ceilingCents: number | null;
+  floorCents: number | null;
+  /**
+   * The price below which the staircase pays in full and cover is measured: the floor when it is a
+   * strike, otherwise the first strike under the floor. Null when there is nothing to cover.
+   */
+  measuredBelowCents: number | null;
+  /** What the goal's staircase pays once the price is below `measuredBelowCents`. */
+  targetPayoutCents: number;
+  /** What every position held on this ladder pays there. */
+  heldPayoutCents: number;
+  /** `heldPayoutCents` split by how far each position has come. */
+  heldByState: Record<PositionState, number>;
+  /** `max(0, target - held)`. */
+  shortfallCents: number;
+  /** A shortfall up to this much still counts as met: rounding and small moves of spot. */
+  toleranceCents: number;
+  /** held / target in basis points (10000 = 100 %), or null when the target is 0. */
+  coverBps: number | null;
+  /** Payout the missing contracts add below `measuredBelowCents`: the shortfall, or 0 when met. */
+  missingPayoutCents: number;
+  rungs: CoverRung[];
+}
+
+/** The cover a plan was made against, and what holding it plus the plan's orders pays. */
+export interface PlanCover extends CoverAssessment {
+  /** Held positions plus this plan's orders, paid below `measuredBelowCents`. */
+  withPlanPayoutCents: number;
+  withPlanCoverBps: number | null;
 }
 
 /**
@@ -187,7 +271,8 @@ export type WarningCode =
   | "trade_cap_too_small"
   | "orders_split"
   | "signal_ignored"
-  | "signal_expensive";
+  | "signal_expensive"
+  | "already_covered";
 
 export interface PlanWarning {
   code: WarningCode;
@@ -254,4 +339,6 @@ export interface HedgePlan {
   uncovered: UncoveredSlice[];
   /** How a paid signal was used. Absent when no signal was given. */
   signal?: PlanSignalUse;
+  /** The cover already held and what this plan adds. Present only when `held` was given. */
+  cover?: PlanCover;
 }

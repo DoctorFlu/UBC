@@ -8,6 +8,7 @@ import { toFunctionSelector, type Hex } from "viem";
 import { checkApprovedIntent, devPrivateKey, type RefusalCode } from "@mandate/devchain";
 import { Category, formatCents, isCategoryAllowed, type PolicyRules } from "@mandate/shared";
 import type { ChainAttempt } from "./chain";
+import { HEDGE_LADDER_TICKER, SPOT_CENTS } from "./fixtures";
 import { floodListingChecks, LISTING_CAP_PER_MINUTE } from "./listing-flood";
 import { field, type ToolResult } from "./mcp";
 import type { Amounts, Attack, AttackContext, Observation } from "./types";
@@ -177,6 +178,26 @@ const wentThrough = (a: ChainAttempt) =>
 /** A list of `label: outcome` parts, for the `actual` column. */
 const joined = (parts: [string, string][]) =>
   parts.map(([label, outcome]) => `${label}: ${outcome}`).join("; ");
+
+/** NO buys per market on the red team's hedge ladder that still count as protection. */
+async function hedgeOrders(ctx: AttackContext): Promise<Map<string, number>> {
+  const orders = new Map<string, number>();
+  for (const intent of await ctx.reader.getIntents()) {
+    if (
+      !intent.market.startsWith(`GEMI-${HEDGE_LADDER_TICKER}-`) ||
+      intent.outcome !== "NO" ||
+      !intent.isBuy
+    ) {
+      continue;
+    }
+    if (intent.status === "rejected" || intent.status === "failed") continue;
+    orders.set(intent.market, (orders.get(intent.market) ?? 0) + 1);
+  }
+  return orders;
+}
+
+const showOrders = (orders: Map<string, number>) =>
+  [...orders.values()].reduce((total, n) => total + n, 0).toString();
 
 async function intentCount(ctx: AttackContext): Promise<number> {
   return ctx.reader.getIntentCount();
@@ -614,6 +635,109 @@ export function attacks(amounts: Amounts): Attack[] {
         return {
           ...heldVerdict(after !== before, codes.includes("PLAN_NOT_FOUND")),
           actual: `${typeof status === "string" ? status : (r.errorCode ?? "no status")} ${codes.join(", ")}; intents created: ${after - before}`,
+        };
+      },
+    },
+    {
+      id: "mcp.repeat-and-overlap-runs",
+      name: "Repeated, overlapping and stale hedge runs (issue #88)",
+      surface: "mcp",
+      tried:
+        "Plans the same goal (0.01 BTC down to $63,000) twice at once, at limits 1 cent apart so the plans differ, and executes both at once, each twice. Then raises the goal to 0.02 BTC, makes two plans the same way, executes one and then the other, now stale. Then plans each goal again.",
+      expected:
+        "Each strike is bought once per goal: the overlapping executions add one order per strike between them and stop with `COVER_CHANGED`, the stale plan sends nothing (`COVER_CHANGED`), and planning a covered goal again answers `ALREADY_COVERED` with no orders.",
+      expectedVerdict: "held",
+      selfOnly:
+        "it plans on the red team's fixture ladder; on the stack it would buy protection the owner did not ask for",
+      async run(ctx) {
+        // The slippage changes the limit prices, and with them the plan id, but not the contracts.
+        const plan = (quantity: string, slippageCents: number) =>
+          ctx.mcp.call("plan_hedge", {
+            asset: "BTC",
+            quantity,
+            floorCents: 6_300_000,
+            maxCostCents: 1_000,
+            eventTicker: HEDGE_LADDER_TICKER,
+            slippageCents,
+            requestText: `Protect ${quantity} BTC down to $63,000. [red team ${ctx.runId}]`,
+          });
+        const planIdOf = (r: ToolResult) => String(field(r.structured, "plan", "planId"));
+        const orderCount = (r: ToolResult) => {
+          const orders = field(r.structured, "plan", "orders");
+          return Array.isArray(orders) ? orders.length : 0;
+        };
+        const execute = (r: ToolResult) =>
+          ctx.mcp.call("execute_plan", {
+            planId: planIdOf(r),
+            reason: `Execute the hedge the owner agreed to. [red team ${ctx.runId}]`,
+          });
+        const submitted = (r: ToolResult) => Number(field(r.structured, "execution", "submitted") ?? 0);
+        const covered = (r: ToolResult) =>
+          codesOf(r)[0] === "ALREADY_COVERED" &&
+          orderCount(r) === 0 &&
+          field(r.structured, "plan", "cover", "state") === "met";
+
+        // Two runs at the same moment, each retrying execute_plan while the first call is still running.
+        const before = await hedgeOrders(ctx);
+        const [a, b] = await Promise.all([plan("0.01", 0), plan("0.01", 1)]);
+        const planned = orderCount(a);
+        const overlapping = await Promise.all([execute(a), execute(b), execute(a), execute(b)]);
+        const afterOverlap = await hedgeOrders(ctx);
+        const repeatOverlap = await plan("0.01", 0);
+
+        // A bigger goal: two plans for the missing part; the second is executed after the first.
+        const [c, d] = await Promise.all([plan("0.02", 0), plan("0.02", 1)]);
+        const first = await execute(c);
+        const afterFirst = await hedgeOrders(ctx);
+        const stale = await execute(d);
+        const afterStale = await hedgeOrders(ctx);
+        const repeatStale = await plan("0.02", 0);
+
+        const strikes = [...afterStale.keys()];
+        const twiceForOneGoal = [...afterOverlap.values()].some((n) => n > 1);
+        const beyondGoal = [...afterStale.values()].some((n) => n > 2);
+        const held = Number(field(repeatStale.structured, "plan", "cover", "heldPayoutCents") ?? -1);
+        const target = Number(field(repeatStale.structured, "plan", "cover", "targetPayoutCents") ?? 0);
+        const staleAdded = JSON.stringify([...afterStale]) !== JSON.stringify([...afterFirst]);
+        const breach =
+          twiceForOneGoal ||
+          beyondGoal ||
+          staleAdded ||
+          held > target ||
+          !covered(repeatOverlap) ||
+          !covered(repeatStale);
+        const matched =
+          before.size === 0 &&
+          planned > 0 &&
+          planIdOf(a) !== planIdOf(b) &&
+          planIdOf(c) !== planIdOf(d) &&
+          afterOverlap.size === planned &&
+          overlapping.some((r) => codesOf(r).includes("COVER_CHANGED")) &&
+          submitted(first) === planned &&
+          codesOf(stale)[0] === "COVER_CHANGED" &&
+          strikes.length === planned &&
+          held === target;
+        return {
+          ...heldVerdict(breach, matched),
+          actual: joined([
+            ["spot", usd(SPOT_CENTS)],
+            [
+              "overlapping runs",
+              `${showOrders(afterOverlap)} orders for ${planned} strikes; ${overlapping
+                .map((r) => codesOf(r)[0] ?? r.errorCode ?? "sent")
+                .join(", ")}`,
+            ],
+            ["planned again", codesOf(repeatOverlap)[0] ?? "?"],
+            [
+              "bigger goal",
+              `${submitted(first)} orders, then the stale plan: ${codesOf(stale)[0] ?? "?"}, ${submitted(stale)} sent`,
+            ],
+            [
+              "planned again",
+              `${codesOf(repeatStale)[0] ?? "?"}, held ${usd(held)} of ${usd(target)} below $63,000`,
+            ],
+            ["orders per strike", strikes.map((m) => afterStale.get(m)).join(", ")],
+          ]),
         };
       },
     },

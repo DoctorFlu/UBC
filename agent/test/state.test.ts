@@ -15,6 +15,8 @@ function entry(planId: string, createdAt = t0): Omit<StoredPlan, "outcomes" | "s
     createdAt,
     ladderSummary: { eventTicker: "E", observedAt: t0.toISOString(), rungs: [] },
     categoryId: Category.Crypto,
+    strikes: [],
+    basis: new Set(),
     consoleStored: false,
   };
 }

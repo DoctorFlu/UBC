@@ -33,6 +33,7 @@ import type { ConsoleSnapshot } from "@/lib/live/types";
 import { describeMarket } from "@/lib/markets";
 import { paymentHref } from "@/lib/payments/links";
 
+import { CoverNowCard } from "./CoverNow";
 import styles from "./hedge.module.css";
 import { HoldingsEditor } from "./HoldingsEditor";
 import { LiveLadder, ladderCaption } from "./LiveLadder";
@@ -373,6 +374,14 @@ function AssetHedge({
 
   return (
     <div className={styles.asset}>
+      {agentPlan ? (
+        <CoverNowCard
+          view={agentPlan}
+          holdingQuantity={holding}
+          quotes={quotes}
+          intents={snapshot.chain?.intents ?? []}
+        />
+      ) : null}
       {agentPlan ? (
         <AgentPlanCard view={agentPlan} snapshot={snapshot} agentName={agentName} />
       ) : (
