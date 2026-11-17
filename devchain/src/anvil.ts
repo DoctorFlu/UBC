@@ -11,6 +11,10 @@ export interface AnvilOptions {
   timestamp?: number;
   /** Forward anvil's output to this process's stdout. */
   verbose?: boolean;
+  /** A chain to fork, read only through this RPC (`--fork-url`), at `forkBlock` when given. */
+  fork?: { rpcUrl: string; block?: bigint };
+  /** Lets any address send transactions unsigned (`--auto-impersonate`). */
+  autoImpersonate?: boolean;
 }
 
 export interface AnvilInstance {
@@ -32,6 +36,11 @@ export async function startAnvil(options: AnvilOptions = {}): Promise<AnvilInsta
     String(options.chainId ?? ARC_TESTNET_CHAIN_ID),
   ];
   if (options.timestamp !== undefined) args.push("--timestamp", String(options.timestamp));
+  if (options.fork) {
+    args.push("--fork-url", options.fork.rpcUrl);
+    if (options.fork.block !== undefined) args.push("--fork-block-number", options.fork.block.toString());
+  }
+  if (options.autoImpersonate) args.push("--auto-impersonate");
 
   const child = spawn(foundryBinary("anvil"), args, { stdio: ["ignore", "pipe", "pipe"] });
   // Keep only a short tail of output: anvil logs every transaction, and the pipes must keep draining
