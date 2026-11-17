@@ -84,7 +84,8 @@ export function coverSentence(cover: CoverNowRow): string {
       : ` (positions pay ${formatCents(cover.heldPayoutCents)} of ${formatCents(cover.targetPayoutCents)}${pending})`;
   switch (cover.state) {
     case "met":
-      return `${goal}: covered${cover.coverBps === null ? "" : ` ${percent(cover.coverBps)}`}${paid}.`;
+      // Met is met: a percentage under 100 within the tolerance would read as "not yet fully" (issue #88).
+      return `${goal}: covered, the goal is met${paid}.`;
     case "partly_met":
     case "not_met":
       return `${goal}: ${cover.coverBps === null ? "not fully covered" : `covered ${percent(cover.coverBps)}`}${paid}, ${formatCents(cover.missingPayoutCents ?? 0)} missing.`;

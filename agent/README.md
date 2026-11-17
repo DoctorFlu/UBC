@@ -23,7 +23,7 @@ Set `MCP_ERA=auto` to negotiate the 2026-07-28 protocol instead of the 2025 `ini
 `npm run mcp:e2e` runs the whole agent flow against a real chain in one command, with nothing to configure and no `.env` read.
 For each Policy contract it starts anvil with a fresh deployment and the demo rules, an in-memory console backend (`testing/fake-console.ts`), and the real server as a child process, each on a free port.
 It then drives the server over HTTP with the official MCP SDK client, opening a new session for every call as Grok Bot does, against live public Gemini market data.
-The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts and each intent's link to its context in the console, `get_intent`, `get_activity` and `request_policy_change`.
+The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts and each intent's link to its context in the console, `get_intent`, `get_activity` and `request_policy_change`, and the daily digest's read-only calls with the fields they add (issue #97).
 It also checks that no key or token reaches the server's logs.
 Pass `-- --contract production` or `-- --contract reference` to run one contract; the default runs both.
 On the reference contract, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain.
@@ -143,7 +143,7 @@ Grok Bot is told the order of work in `src/instructions.ts`; every result carrie
 | `get_setup_state` | Each setup step with the actor who must do it and a hint: key, contract, console link, chain, agent role, gas, rules, pause switch, pairing, holdings. |
 | `request_pairing` | Asks the console to pair this agent and returns the claim link for the owner. |
 | `get_policy` | The owner's rules, today's usage and the headroom left, plus which contract extensions exist. |
-| `get_portfolio` | The holdings the owner entered in the console, valued at Gemini spot, and the last ladder that settled. |
+| `get_portfolio` | The holdings the owner entered in the console, valued at Gemini spot, the last ladder that settled, and the cover held now against each current goal as the console measures it. |
 | `list_markets` | Open Gemini events in the categories the mandate allows, by volume. |
 | `get_ladder` | One asset's strike ladder for a horizon, the rungs nearest spot first. |
 | `plan_hedge` | A hedge plan of NO buys for a holding and a drop, with payoffs and the verdict each order is expected to get; the plan is kept in the server and posted to the console. |
@@ -151,7 +151,7 @@ Grok Bot is told the order of work in `src/instructions.ts`; every result carrie
 | `propose_trade` | Proposes one trade with its decision context; the contract approves, rejects with a reason, or holds it for the owner. Safe to retry. |
 | `execute_plan` | Proposes a plan's orders in order, stops at the first rejection, and reports each rung. Safe to retry and resumable. |
 | `get_intent` | One intent's status, reason, fill and decision context, checked against its hash. |
-| `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged, and what each settled position cost, paid and netted at expiry. |
+| `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged, what each settled position cost, paid and netted at expiry, the last 24 hours summed by the server, and what waits for the owner. |
 | `buy_signal` | Pays the signal API a fraction of a cent for a per-strike cheap, fair or expensive verdict, inside a daily budget; returns a `receiptId` that `plan_hedge` accepts. |
 | `request_policy_change` | Files a rule change with a reason for the owner to decide in the console; it can never touch the pause switch. |
 | `ping`, `whoami` | Liveness and the agent's address. |

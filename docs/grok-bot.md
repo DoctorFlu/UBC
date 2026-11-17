@@ -98,9 +98,11 @@ The server sums the day and the console measures the cover, in fields the existi
 
 - `get_activity` returns `last24h`: the intents proposed in the last 24 hours by status, what they filled, the rejections by the contract's reason, flagged intents, the signals bought and what settled, with cost, payout and net.
   It reads back through the whole day, whatever `limit` asks for, so the routine calls it with `limit` 1 to keep the result small.
-- `get_activity` returns `waitingForOwner`: the intents waiting for approval and the rule change requests still pending, with links to the console.
-  A request's reason was written by the agent, so it is marked untrusted and kept out of the summary.
+- `get_activity` returns `waitingForOwner`: the intents waiting for approval and the rule change requests still pending, with a link to the console's Approvals page.
+  A request's reason was written by the agent, so it is marked untrusted, cut to its start and kept out of the summary.
+  The lists are capped so that the busiest day the caps allow stays under the 4 kB the Bot is known to take (a unit test checks it).
 - `get_portfolio` returns `cover`: the cover held now against each current goal, which the console measures on Gemini's quotes exactly as its Hedge page does, and how much of it waits for the owner's approval.
+  A goal that is met reads as covered, never as "99%" (issue #88).
 
 These come from one new console read route, `GET /api/agent/v1/summary`.
 A field the console cannot fill is null, and the routine reports it as unknown, never as zero.
@@ -124,7 +126,7 @@ A quiet day: the hourly runs found the goal covered and bought nothing.
 
 ```text
 Mandate: all covered, quiet day. Nothing waits for you.
-Protected: BTC below $63,000 to Nov 20 (BTC2611202200): 100% covered.
+Protected: BTC below $63,000 to Nov 20 (BTC2611202200): covered.
 Spent: nothing filled, no signals bought. Budget left $179.00.
 Waiting for you: nothing.
 ```
@@ -133,7 +135,7 @@ A day with a settlement: last week's ladder expired and settled, and the routine
 
 ```text
 Mandate: last week's BTC ladder settled, net +$11.00. BTC is covered again.
-Protected: BTC below $63,000 to Nov 27 (BTC2611272200): 100% covered.
+Protected: BTC below $63,000 to Nov 27 (BTC2611272200): covered.
 Spent: $42.00 on 6 orders, 2 signals for 0.02 USDC. Budget left $158.00.
 Settled: BTC2611202200, 3 positions: cost $21.00, paid $32.00, net +$11.00.
 Waiting for you: nothing.
@@ -143,7 +145,7 @@ A day with something waiting for the owner: one order was above the approval thr
 
 ```text
 Mandate: 1 order and 1 rule change wait for your approval.
-Protected: BTC below $63,000 to Nov 20 (BTC2611202200): 100% covered, $52.50 of it waits for your approval.
+Protected: BTC below $63,000 to Nov 20 (BTC2611202200): covered, $52.50 of it waits for your approval.
 Spent: $23.10 on 2 orders, 1 signal for 0.01 USDC. Budget left $176.90.
 Blocked: 1 order over max trade size.
 Waiting for you: intent #2 ($21.00); change request pcr_1, approval threshold to $25.00. https://console.example/approvals

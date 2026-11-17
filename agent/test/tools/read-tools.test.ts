@@ -779,15 +779,8 @@ describe("the daily digest's fields (issue #97)", () => {
     });
     expect(structured["waitingForOwner"]).toEqual({
       link: "http://localhost:3000/approvals",
-      intents: [
-        {
-          id: 3,
-          market: ladderSymbol(64_000),
-          amountCents: 2_100,
-          proposedAt: "2026-11-15T12:00:00.000Z",
-          link: "http://localhost:3000/activity/3",
-        },
-      ],
+      complete: true,
+      intents: [{ id: 3, market: ladderSymbol(64_000), amountCents: 2_100 }],
       moreIntents: 0,
       changeRequests: [],
       moreChangeRequests: 0,
@@ -843,12 +836,10 @@ describe("the daily digest's fields (issue #97)", () => {
         id: "pcr_3",
         changes: "max trade size to $50.00, daily loss limit to off",
         reason: { untrusted: true, source: "agent", text: injection },
-        createdAt: "2026-11-15T12:00:00.000Z",
       },
       expect.objectContaining({ id: "pcr_2" }),
-      expect.objectContaining({ id: "pcr_1" }),
     ]);
-    expect(waiting["moreChangeRequests"]).toBe(0);
+    expect(waiting["moreChangeRequests"]).toBe(1);
     expect(summary).toContain(
       "Waiting for the owner: change request pcr_3 (max trade size to $50.00, daily loss limit to off); change request pcr_2",
     );
@@ -862,7 +853,7 @@ describe("the daily digest's fields (issue #97)", () => {
     const { structured, summary } = await getActivity.run({ limit: 1 }, h.ctx);
     expect(structured["waitingForOwner"]).toMatchObject({
       link: null,
-      intents: [{ id: 3, link: null }],
+      intents: [{ id: 3, amountCents: 2_100 }],
       changeRequests: null,
     });
     expect((structured["last24h"] as Row)["settled"]).toBeNull();
@@ -932,22 +923,25 @@ describe("the daily digest's fields (issue #97)", () => {
       `ETH below $3,000.00 on ${LADDER_TICKER}: the console cannot measure the cover right now; do not report it as covered or not.`,
     );
 
+    // Met within the tolerance (99.5%): it reads as met, never as "99%" (issue #88).
     const met = harness({
       cover: () => [
         {
           ...goal,
           state: "met",
           targetPayoutCents: 6_500,
-          heldPayoutCents: 6_615,
-          heldByState: { filledCents: 6_615, awaitingFillCents: 0, awaitingOwnerCents: 0 },
-          coverBps: 10_176,
+          heldPayoutCents: 6_470,
+          heldByState: { filledCents: 6_470, awaitingFillCents: 0, awaitingOwnerCents: 0 },
+          coverBps: 9_953,
           missingPayoutCents: 0,
         },
       ],
     });
-    expect((await getPortfolio.run({}, met.ctx)).summary).toContain(
-      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER}: covered 101% (positions pay $66.15 of $65.00).`,
+    const metSummary = (await getPortfolio.run({}, met.ctx)).summary;
+    expect(metSummary).toContain(
+      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER}: covered, the goal is met (positions pay $64.70 of $65.00).`,
     );
+    expect(metSummary).not.toContain("99%");
     expect((await getPortfolio.run({}, harness().ctx)).structured["cover"]).toEqual([]);
   });
 
@@ -957,5 +951,99 @@ describe("the daily digest's fields (issue #97)", () => {
     expect(structured["holdings"]).toHaveLength(1);
     expect(structured["cover"]).toBeNull();
     expect(summary).toContain("Cover now: the console cannot say right now, so do not report the cover.");
+  });
+
+  /** Intents filled 30 hours before the run: older than the day, read only when the list asks. */
+  function oldFills(h: Harness, count: number): void {
+    for (let i = 0; i < count; i++) {
+      h.policy.intents.push({
+        id: h.policy.intents.length,
+        market: ladderSymbol(64_000),
+        category: Category.Crypto,
+        outcome: "NO",
+        isBuy: true,
+        amountCents: 900,
+        limitPrice: 30,
+        status: "executed",
+        proposedAt: Math.floor(NOW / 1000) - 30 * 3_600,
+        filledCents: 900,
+        pnlCents: 0,
+      });
+    }
+  }
+
+  it("never says nothing is waiting when older intents cannot be checked", async () => {
+    const h = harness();
+    oldFills(h, 15);
+    h.policy.intentEvents = () => Promise.reject(new ConsoleClientError("unreachable", "x"));
+    const { structured, summary } = await getActivity.run({ limit: 1 }, h.ctx);
+    expect(structured["waitingForOwner"]).toMatchObject({ complete: false, intents: [] });
+    expect(summary).toContain("Older intents could not be checked, so other approvals may also wait.");
+    expect(summary).not.toContain("Nothing waits");
+
+    // Read back to the first intent, the list itself is the whole answer.
+    const few = harness();
+    oldFills(few, 3);
+    few.policy.intentEvents = () => Promise.reject(new ConsoleClientError("unreachable", "x"));
+    const answer = await getActivity.run({ limit: 1 }, few.ctx);
+    expect(answer.structured["waitingForOwner"]).toMatchObject({ complete: true });
+    expect(answer.summary).toContain("Nothing waits for the owner.");
+  });
+
+  it("stays within the 4 kB Grok Bot is known to take on the busiest day the caps allow", async () => {
+    const h = harness({ payments: paymentsWith([{ amount: 10_000n, paidAt: hoursAgo(1) }]) });
+    oldFills(h, 5);
+    // Seven orders waiting for the owner, two rejected and one filled today.
+    for (let i = 0; i < 7; i++) await buy(h, 64_000 - i * 500, 2_100);
+    await buy(h, 63_000, 3_000);
+    await buy(h, 63_000, 0);
+    // Six ladders settled today, each with one position.
+    for (let i = 0; i < 6; i++) {
+      const eventTicker = `BTC26111${String(i)}2200`;
+      const document: Settlement = {
+        version: 1,
+        chainId: 31337,
+        policy: "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+        intentId: i,
+        market: `GEMI-${eventTicker}-HI64000`,
+        eventTicker,
+        strikeCents: 6_400_000,
+        expiresAt: `2026-11-1${String(i)}T22:00:00.000Z`,
+        outcome: "NO",
+        costCents: 900,
+        limitPrice: 30,
+        contractsHundredths: 3_000,
+        resolution: "no",
+        payoutCents: 3_000,
+        pnlCents: 2_100,
+        settlementValue: "62992.864",
+        resolvedAt: `2026-11-1${String(i)}T22:00:08.232Z`,
+        venue: "simulated",
+      };
+      h.console.state.settlements.set(i, {
+        intentId: i,
+        hash: hashSettlement(document),
+        document,
+        signature: `0x${"11".repeat(65)}`,
+        signer: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+        storedAt: hoursAgo(2),
+      });
+    }
+    // Four change requests, each with the longest reason the console takes (1,000 characters).
+    for (const maxTradeCents of [3_000, 4_000, 5_000, 6_000]) {
+      await h.ctx.console?.postPolicyChangeRequest({
+        agentAddress: TEST_ADDRESS,
+        proposed: { maxTradeCents, approvalAboveCents: 2_500, dailyLossCents: 5_000 },
+        reason: "A long reason. ".repeat(80).slice(0, 1_000),
+      });
+    }
+
+    const { structured, summary } = await getActivity.run({ limit: 1 }, h.ctx);
+    const waiting = structured["waitingForOwner"] as Row;
+    expect(waiting["moreIntents"]).toBe(4);
+    expect(waiting["moreChangeRequests"]).toBe(2);
+    expect((structured["last24h"] as Row)["settled"]).toMatchObject({ positions: 6 });
+    // What Grok Bot reads: the text summary plus the structured JSON.
+    expect(JSON.stringify(structured).length + summary.length).toBeLessThan(4_000);
   });
 });

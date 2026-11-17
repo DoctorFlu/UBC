@@ -15,12 +15,12 @@ import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import type { AgentPolicy } from "../services";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
-import { isoFromUnix } from "../support/format";
 import { intentFlags, intentRow, IntentRowSchema, shownMarket } from "../support/intents";
 import { proposedChangesText, reasonCode } from "../support/rules";
 import {
   LadderSettlementSchema,
   ladderSentence,
+  moneyLine,
   readSettlements,
   settledLadders,
   SettlementTotalsSchema,
@@ -32,9 +32,11 @@ const DAY_MS = 86_400_000;
 const MAX_DAY_INTENTS = 60;
 /** Intents read in parallel while walking back through the day. */
 const READ_BATCH = 10;
-const MAX_WAITING_INTENTS = 5;
-const MAX_WAITING_REQUESTS = 3;
-const MAX_DAY_LADDERS = 3;
+const MAX_WAITING_INTENTS = 3;
+const MAX_WAITING_REQUESTS = 2;
+const MAX_DAY_LADDERS = 2;
+/** A change request's reason is for the console; the result carries only its start. */
+const MAX_REASON_LENGTH = 60;
 
 const DaySchema = z
   .object({
@@ -69,7 +71,7 @@ const DaySchema = z
         "Hedge signals this server paid for in the window. null when this server pays for no signals",
       ),
     settled: SettlementTotalsSchema.extend({
-      ladders: z.array(LadderSettlementSchema).describe("At most 3, the latest expiry first"),
+      ladders: z.array(LadderSettlementSchema).describe("At most 2, the latest expiry first"),
     })
       .nullable()
       .describe(
@@ -86,30 +88,30 @@ const WaitingSchema = z
       .describe(
         "The console's Approvals page, where the owner decides all of these. null when the console cannot say",
       ),
+    complete: z
+      .boolean()
+      .describe("false when older intents could not be checked: approvals older than the list may also wait"),
     intents: z
       .array(
         z.object({
           id: z.int(),
           market: z.string(),
           amountCents: z.int().nullable(),
-          proposedAt: z.string(),
-          link: z.string().nullable().describe("The intent's page in the console"),
         }),
       )
-      .describe("Intents waiting for the owner's approval, newest first, at most 5"),
+      .describe("Intents waiting for the owner's approval, newest first, at most 3"),
     moreIntents: z.int().describe("Waiting intents beyond the list"),
     changeRequests: z
       .array(
         z.object({
           id: z.string(),
           changes: z.string().describe("What it asks for, in this server's words"),
-          reason: UntrustedTextSchema.describe("Why, as the agent wrote it"),
-          createdAt: z.string(),
+          reason: UntrustedTextSchema.describe("Why, as the agent wrote it; the start only"),
         }),
       )
       .nullable()
       .describe(
-        "Rule change requests waiting for the owner, newest first, at most 3. null when the console cannot say",
+        "Rule change requests waiting for the owner, newest first, at most 2. null when the console cannot say",
       ),
     moreChangeRequests: z.int(),
   })
@@ -134,7 +136,7 @@ async function readNewest(
   total: number,
   limit: number,
   fromSeconds: number,
-): Promise<{ intents: Intent[]; complete: boolean }> {
+): Promise<{ intents: Intent[]; complete: boolean; all: boolean }> {
   const intents: Intent[] = [];
   let next = total - 1;
   while (next >= 0) {
@@ -147,7 +149,11 @@ async function readNewest(
     next -= ids.length;
   }
   const oldest = intents.at(-1);
-  return { intents, complete: next < 0 || (oldest !== undefined && oldest.proposedAt < fromSeconds) };
+  return {
+    intents,
+    complete: next < 0 || (oldest !== undefined && oldest.proposedAt < fromSeconds),
+    all: next < 0,
+  };
 }
 
 function summedDay(
@@ -244,7 +250,9 @@ function dayText(day: z.infer<typeof DaySchema>, hasConsole: boolean): string {
         : ""
       : day.settled.positions === 0
         ? " Nothing settled."
-        : ` Settled: ${day.settled.ladders.map((ladder) => ladderSentence(ladder)).join(" ")}`;
+        : day.settled.ladders.length === 1 && day.settled.ladders[0] !== undefined
+          ? ` Settled: ${ladderSentence(day.settled.ladders[0])}`
+          : ` Settled: ${day.settled.positions} positions, ${moneyLine(day.settled)}; latest ladders ${day.settled.ladders.map((ladder) => ladder.eventTicker).join(", ")}.`;
   return `Last 24 hours: ${intents}.${partial}${flagged}${signals}${settled}`;
 }
 
@@ -253,6 +261,7 @@ function waitingFor(
   byId: ReadonlyMap<number, Intent>,
   views: ReadonlyMap<number, IntentView>,
   summary: SummaryResponse | null,
+  complete: boolean,
 ): z.infer<typeof WaitingSchema> {
   const shown = waitingIds.slice(0, MAX_WAITING_INTENTS).map((id) => {
     const intent = byId.get(id);
@@ -262,13 +271,12 @@ function waitingFor(
       id,
       market: market === null ? "(unknown)" : shownMarket(market),
       amountCents: intent === undefined ? (view?.amountCents ?? null) : intent.amountCents,
-      proposedAt: isoFromUnix(intent?.proposedAt ?? view?.proposedAt ?? 0),
-      link: summary === null ? null : consoleLink(summary, `/activity/${id}`),
     };
   });
   const requests = summary?.changeRequests ?? null;
   return {
     link: summary === null ? null : consoleLink(summary, "/approvals"),
+    complete,
     intents: shown,
     moreIntents: waitingIds.length - shown.length,
     changeRequests:
@@ -277,8 +285,7 @@ function waitingFor(
         : requests.slice(0, MAX_WAITING_REQUESTS).map((request) => ({
             id: request.id,
             changes: proposedChangesText(request.proposed),
-            reason: untrusted(request.reason, "agent"),
-            createdAt: request.createdAt,
+            reason: untrusted(request.reason, "agent", MAX_REASON_LENGTH),
           })),
     moreChangeRequests: requests === null ? 0 : Math.max(0, requests.length - MAX_WAITING_REQUESTS),
   };
@@ -298,9 +305,16 @@ function waitingText(waiting: z.infer<typeof WaitingSchema>, hasConsole: boolean
     waiting.changeRequests === null && hasConsole
       ? " Change requests: the console cannot say right now."
       : "";
+  const older = waiting.complete
+    ? ""
+    : " Older intents could not be checked, so other approvals may also wait.";
   const items = [...intents, ...requests];
-  if (items.length === 0) return waiting.changeRequests === null ? unknown : " Nothing waits for the owner.";
-  return ` Waiting for the owner: ${items.join("; ")}.${waiting.link === null ? "" : ` Approvals: ${waiting.link}`}${unknown}`;
+  if (items.length === 0) {
+    return waiting.changeRequests === null || !waiting.complete
+      ? `${unknown}${older}`
+      : " Nothing waits for the owner.";
+  }
+  return ` Waiting for the owner: ${items.join("; ")}.${waiting.link === null ? "" : ` Approvals: ${waiting.link}`}${unknown}${older}`;
 }
 
 export const getActivity = defineTool({
@@ -344,7 +358,7 @@ export const getActivity = defineTool({
     const from = new Date(to.getTime() - DAY_MS);
     const fromSeconds = Math.floor(from.getTime() / 1000);
     let total: number;
-    let newest: { intents: Intent[]; complete: boolean };
+    let newest: { intents: Intent[]; complete: boolean; all: boolean };
     try {
       total = await policy.intentCount();
       newest = await readNewest(policy, total, input.limit, fromSeconds);
@@ -354,10 +368,15 @@ export const getActivity = defineTool({
     }
     const intents = newest.intents.slice(0, input.limit);
     // Rejection reasons live only in events. A failed scan still leaves a useful list.
-    const views: ReadonlyMap<number, IntentView> = await policy.intentEvents().catch((error: unknown) => {
-      describeFailure(error, ctx);
-      return new Map<number, IntentView>();
-    });
+    const events = await policy.intentEvents().then(
+      (views) => ({ views, read: true }),
+      (error: unknown) => {
+        describeFailure(error, ctx);
+        return { views: new Map<number, IntentView>(), read: false };
+      },
+    );
+    const views: ReadonlyMap<number, IntentView> = events.views;
+    const eventsRead = events.read;
     // What filled positions paid at expiry lives in the console, signed by the executor (issue #92); the
     // links and the change requests waiting for the owner too (issue #97).
     const [stored, summary] = await Promise.all([readSettlements(ctx), readSummary(ctx)]);
@@ -385,7 +404,8 @@ export const getActivity = defineTool({
         .filter((view) => view.status === "needs_approval" && !byId.has(view.id))
         .map((view) => view.id),
     ].sort((a, b) => b - a);
-    const waitingForOwner = waitingFor(waitingIds, byId, views, summary);
+    // Approvals older than the intents read are found through the events; without them they are unknown.
+    const waitingForOwner = waitingFor(waitingIds, byId, views, summary, eventsRead || newest.all);
 
     const count = (status: string) => rows.filter((r) => r.status === status).length;
     const v = ok(
@@ -413,6 +433,7 @@ export const getActivity = defineTool({
       flagged.length === 0
         ? ""
         : ` FLAGGED: ${flagged.join(", ")} could not have come from this server (see flags); the agent key was used around it, so tell the owner.`;
+    const settledToday = new Set(last24h.settled?.ladders.map((ladder) => ladder.eventTicker));
     const settledText =
       ladders === null
         ? ctx.console === undefined
@@ -422,6 +443,8 @@ export const getActivity = defineTool({
           ? ""
           : ` ${ladders
               .slice(0, 3)
+              // A ladder settled today is in the day's sentence below; say it once.
+              .filter((ladder) => !settledToday.has(ladder.eventTicker))
               .map((ladder) => ladderSentence(ladder))
               .join(" ")}`;
     const latest =

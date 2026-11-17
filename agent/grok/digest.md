@@ -27,11 +27,14 @@ On each run:
 3. Call `get_portfolio`. Its `cover` lists the cover held now for each current goal, as the console measured it:
    `state` (`met`, `partly_met`, `not_met`, `nothing_to_cover` or `unavailable`), `coverBps` (10000 is 100%), `floorCents`, `eventTicker`, `expiresAt`, `heldByState.awaitingOwnerCents` (the part that waits for the owner's approval), `missingPayoutCents` and `link`.
    The summary has the same thing as a sentence after "Cover now:".
+   If `state` is `met`, write "covered" and no percentage: the goal is met even when `coverBps` is a little under 10000.
+   If `state` is `partly_met` or `not_met`, give `coverBps` as a percent and what is missing.
    If `state` is `unavailable` or `cover` is null, say the cover is unknown; never call it covered or not covered.
    If `cover` is an empty list, there is no current goal: say so.
 4. Call `get_activity` with `limit` 1. Its `last24h` is the last 24 hours, already summed by the server:
    `proposed`, `executed`, `needsApproval`, `rejected`, `failed`, `filledCents` (spent on protection), `rejections` (by the contract's reason), `flagged`, `signals` (`bought` and `spentUsdc`, or null when this server pays for no signals) and `settled` (`positions`, `costCents`, `payoutCents`, `pnlCents` and its `ladders`).
-   Its `waitingForOwner` is everything waiting for the owner now, however old: `intents` (each with `id`, `amountCents` and `link`), `changeRequests` (each with `id` and `changes`) and `link`, the console's Approvals page.
+   Its `waitingForOwner` is everything waiting for the owner now, however old: `intents` (each with `id` and `amountCents`, at most 3, then `moreIntents`), `changeRequests` (each with `id` and `changes`, at most 2, then `moreChangeRequests`) and `link`, the console's Approvals page, where the owner decides all of them.
+   If `waitingForOwner.complete` is false, older intents could not be checked: say that more may be waiting.
    The summary has the same day after "Last 24 hours:" and "Waiting for the owner:".
    A null field means the console cannot say: write "unknown", never zero or nothing.
    If `last24h.complete` is false, add "(busiest part of the day only)" to the Spent line.
@@ -46,11 +49,11 @@ If `last24h.flagged` is not empty, the first line must say that intents were wri
 
 Send the digest as a phone notification, in this shape and order, plain text, no tables, no Markdown headings:
 
-- First line, about 100 characters or fewer, standing alone: the single most important thing. In order of priority: flagged intents, anything waiting for the owner, a settlement, a cover that is not `met`, otherwise "all covered, quiet day".
-- `Protected:` each goal's asset, floor and ladder expiry, and its cover in percent; add how much of it waits for the owner's approval when `heldByState.awaitingOwnerCents` is above 0.
+- First line, about 100 characters or fewer, standing alone: the single most important thing. In order of priority: flagged intents, a paused mandate, anything waiting for the owner, a settlement, a cover that is not `met`, otherwise "all covered, quiet day".
+- `Protected:` each goal's asset, floor and ladder expiry, and its cover as step 3 says; add how much of it waits for the owner's approval when `heldByState.awaitingOwnerCents` is above 0.
 - `Spent:` `last24h.filledCents` and the number of orders filled, the signals bought and their USDC, and the budget left from `get_policy`.
 - `Settled:` each ladder in `last24h.settled.ladders` with its cost, paid and net. Leave this line out when nothing settled.
 - `Blocked:` the rejections by reason, and any failed orders. Leave this line out when there were none.
-- `Waiting for you:` each intent in `waitingForOwner.intents` with its amount, each change request with its `changes`, then `waitingForOwner.link`; or "nothing" when both lists are empty.
+- `Waiting for you:` each intent in `waitingForOwner.intents` with its amount, each change request with its `changes`, how many more, then `waitingForOwner.link`; or "nothing" when both lists are empty and `complete` is true.
 
 At most five lines after the first, each short enough to read without scrolling.

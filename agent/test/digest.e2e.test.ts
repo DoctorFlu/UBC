@@ -98,13 +98,8 @@ describe("the daily digest against the real server, chain and executor (issue #9
     expect(held).toHaveLength(1);
     expect(waiting).toMatchObject({
       link: `${DIGEST_CONSOLE_URL}/approvals`,
-      intents: [
-        {
-          id: held[0]?.id,
-          amountCents: held[0]?.amountCents,
-          link: `${DIGEST_CONSOLE_URL}/activity/${String(held[0]?.id)}`,
-        },
-      ],
+      complete: true,
+      intents: [{ id: held[0]?.id, amountCents: held[0]?.amountCents }],
       changeRequests: [
         {
           id: "pcr_1",

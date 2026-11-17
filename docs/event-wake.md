@@ -12,7 +12,7 @@ The notifier runs inside the console backend (`dashboard/src/server/wake.ts`), w
   Both sources end in one function, `ConsoleService.apply`, which receives only the events the store had not seen (an event is identified by its transaction hash and log index).
   The wake-up rules are called there, so a trigger fires once whichever source delivered its event, and a repeated delivery fires nothing.
 - The console already asks Gemini for live ladders through a cached, rate-limited client (`MarketQuotes`), and it holds what cover needs: the agent's latest plan per asset (the current goal), the owner's holdings and the intents.
-  The price check reuses that client and the server's cover computation (`coverNow`, which calls `assessCover` from `@mandate/planner`; see [cover.md](cover.md)).
+  The price check reuses that client and the server's cover computation (`coverNow`, which calls `coverOfPlan` from `@mandate/planner`; see [cover.md](cover.md)).
 - The MCP server only answers Grok Bot; it has no view of the chain between calls.
 
 ## The event body

@@ -38,7 +38,7 @@ import { silentLogger, type Logger } from "../src/logger";
 import type { MarketsClient, PaymentsClient } from "../src/services";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
 import { coverFromPlans } from "../testing/fake-cover";
-import { FakeMarkets, LADDER_TICKER, ladderEvent } from "./fakes";
+import { EXPIRY, FakeMarkets, LADDER_TICKER, ladderEvent } from "./fakes";
 
 export type Structured = Record<string, unknown>;
 
@@ -267,6 +267,8 @@ export async function startStack(options: {
       executorAddress: devAccount("executor").address,
       // The cover the console measures on Gemini's quotes and the chain's intents (issue #97).
       cover: coverFromPlans({
+        // The fixture's ladder expires on a fixed date: measure as if before it, whenever the test runs.
+        now: () => new Date(Math.min(Date.now(), Date.parse(EXPIRY) - 3_600_000)),
         ladder: (_asset, eventTicker) => Promise.resolve(markets.quote(eventTicker)),
         intents: async () => {
           const count = await reader.getIntentCount();

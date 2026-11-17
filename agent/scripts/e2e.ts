@@ -542,7 +542,7 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
     const requests = (waiting?.["changeRequests"] ?? []) as Record<string, unknown>[];
     check(
       waiting?.["link"] === `${consoleUrl}/approvals` &&
-        waitingIntents.some((i) => i["id"] === heldId && i["link"] === `${consoleUrl}/activity/${heldId}`) &&
+        waitingIntents.some((i) => i["id"] === heldId) &&
         requests.length === 1 &&
         requests[0]?.["changes"] === "max trade size to $50.00" &&
         field(requests[0], "reason", "untrusted") === true,
