@@ -15,10 +15,11 @@ import {
 } from "@/components/domain/Intent";
 import { ButtonLink } from "@/components/ui/Button";
 import { HexValue } from "@/components/ui/HexValue";
+import { When } from "@/components/ui/When";
 import { Advanced } from "@/lib/advanced/Advanced";
-import { formatTimeUtc } from "@/lib/format";
+
 import type { Attention } from "@/lib/live/attention";
-import { agentName, isoFromUnix, sealedReasonText } from "@/lib/live/derive";
+import { agentName, sealedReasonText } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot } from "@/lib/live/types";
 
 import styles from "./approvals.module.css";
@@ -36,14 +37,16 @@ export function HeldIntent({ intent, chain }: { intent: IntentView; chain: Chain
       <div className={styles.heldMeta}>
         <OrderSummary intent={intent} />
         <span>
-          <IntentLink id={intent.id} /> · {formatTimeUtc(isoFromUnix(intent.proposedAt))}
+          <IntentLink id={intent.id} /> · <When at={intent.proposedAt} />
         </span>
       </div>
       <Advanced>
         <HexValue label="Proposed in" value={intent.proposedTxHash} kind="tx" />
       </Advanced>
       {reason ? <AgentReason text={reason} /> : null}
-      <ApprovalActions intent={intent} block />
+      <div className={styles.heldActions}>
+        <ApprovalActions intent={intent} block />
+      </div>
     </li>
   );
 }
@@ -80,9 +83,11 @@ export function NeedsYou({ snapshot, attention }: { snapshot: ConsoleSnapshot; a
                   <span className={styles.taskTitle}>
                     {name} asks to change {count.toString()} {count === 1 ? "rule" : "rules"}
                   </span>
-                  <span className={styles.taskMeta}>Sent {formatTimeUtc(request.createdAt)}</span>
+                  <span className={styles.taskMeta}>
+                    Sent <When inSentence at={request.createdAt} />
+                  </span>
                 </span>
-                <ButtonLink href="/mandate" size="sm" variant="secondary">
+                <ButtonLink href="/rules?tab=requests" size="sm" variant="secondary">
                   Review
                 </ButtonLink>
               </li>
@@ -96,7 +101,7 @@ export function NeedsYou({ snapshot, attention }: { snapshot: ConsoleSnapshot; a
                   {attention.pairing.agentName} wants to pair with this console
                 </span>
                 <span className={styles.taskMeta}>
-                  Announced {formatTimeUtc(attention.pairing.announcedAt)}
+                  Announced <When inSentence at={attention.pairing.announcedAt} />
                 </span>
               </span>
               <ButtonLink

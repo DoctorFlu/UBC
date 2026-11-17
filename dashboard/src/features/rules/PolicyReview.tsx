@@ -13,7 +13,7 @@ import { useSnapshot } from "@/lib/live/LiveConsole";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 
-import styles from "./mandate.module.css";
+import styles from "./rules.module.css";
 import { rulesDiff, rulesWarnings } from "./rules-diff";
 
 export interface PolicyReviewProps {
@@ -54,7 +54,7 @@ export function PolicyReview({ open, onClose, next, title, onSigned }: PolicyRev
 
   const sign = async () => {
     setSignedAgainst(live);
-    const result = await send(current ? "Update the mandate" : "Set the mandate", {
+    const result = await send(current ? "Update the rules" : "Set the rules", {
       functionName: "setPolicy",
       rules: next,
     });
@@ -64,7 +64,7 @@ export function PolicyReview({ open, onClose, next, title, onSigned }: PolicyRev
     }
     // The rules are on the chain once the transaction lands: say so then, not after the follow-up.
     toast({
-      title: current ? "Mandate updated" : "Mandate set",
+      title: current ? "Rules updated" : "Rules set",
       description: "The Policy contract checks every new intent against these rules.",
       tone: "success",
     });

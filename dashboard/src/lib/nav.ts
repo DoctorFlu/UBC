@@ -18,7 +18,7 @@ export const consoleNavGroups: readonly (readonly NavItem[])[] = [
   ],
   [
     { href: "/activity", label: "Activity", icon: "activity" },
-    { href: "/mandate", label: "Rules", icon: "rules" },
+    { href: "/rules", label: "Rules", icon: "rules" },
     { href: "/hedge", label: "Hedge", icon: "hedge" },
   ],
   [

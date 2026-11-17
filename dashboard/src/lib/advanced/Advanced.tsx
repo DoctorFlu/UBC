@@ -52,6 +52,14 @@ export function useAdvanced(): AdvancedState {
   return { advanced: value === "on", setAdvanced: (on) => preference.set(on ? "on" : "off") };
 }
 
+/** The columns to show: those marked `advanced` only while Advanced view is on. */
+export function useAdvancedColumns<Column extends { advanced?: boolean }>(
+  columns: readonly Column[],
+): readonly Column[] {
+  const { advanced } = useAdvanced();
+  return advanced ? columns : columns.filter((column) => !column.advanced);
+}
+
 /** Detail for Advanced view only: hashes, full addresses, raw symbols, block numbers, reason codes. */
 export function Advanced({ children, fallback = null }: { children: ReactNode; fallback?: ReactNode }) {
   const { advanced } = useAdvanced();

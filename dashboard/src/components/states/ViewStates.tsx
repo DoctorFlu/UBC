@@ -8,10 +8,23 @@ import { ErrorState, Skeleton, SkeletonText } from "@/components/ui/States";
 import styles from "./ViewStates.module.css";
 
 /** Generic loading frame: the header and two blocks, at their real sizes. */
-export function ViewSkeleton({ title, children }: { title: string; children?: ReactNode }) {
+export function ViewSkeleton({
+  title,
+  fallback = false,
+  children,
+}: {
+  title: string;
+  /** True for the route's loading fallback, shown before the page has arrived. */
+  fallback?: boolean;
+  children?: ReactNode;
+}) {
   return (
     <div aria-busy="true">
-      <PageHeader title={title} description={<Skeleton width="22rem" height="1rem" />} />
+      <PageHeader
+        title={title}
+        description={<Skeleton width="22rem" height="1rem" />}
+        reportsHydration={!fallback}
+      />
       <span className="visually-hidden" role="status">
         Loading {title}
       </span>

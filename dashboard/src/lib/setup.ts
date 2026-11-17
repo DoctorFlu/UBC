@@ -20,12 +20,12 @@ export function setupSteps(snapshot: ConsoleSnapshot, ownerConnected: boolean): 
     {
       id: "connect-wallet",
       title: "Connect the owner wallet",
-      hint: "The contract's user(): the wallet that signs the mandate, approvals and the kill switch.",
+      hint: "The wallet the contract names as its owner: it signs the rules, approvals and pauses.",
       done: ownerConnected,
     },
     {
       id: "set-mandate",
-      title: "Set the first mandate",
+      title: "Set the first rules",
       hint: "Budget, max trade size, markets, approval threshold and daily loss limit.",
       done: snapshot.chain?.rules != null,
     },
@@ -43,8 +43,8 @@ export function setupSteps(snapshot: ConsoleSnapshot, ownerConnected: boolean): 
     },
     {
       id: "contract-agent",
-      title: "The agent's key is the contract's agent",
-      hint: "The Policy contract only accepts proposals from agent(). The console reads it directly.",
+      title: "The contract accepts the agent's key",
+      hint: "The Policy contract only accepts proposals from the agent address it was set up with. The console reads it from the contract.",
       done: pairing?.isContractAgent === true,
     },
   ];

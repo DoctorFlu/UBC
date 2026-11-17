@@ -22,7 +22,7 @@ export const statusDescriptions: Record<StatusKind, string> = {
   rejected: "The Policy contract rejected this intent.",
   executed: "Approved, and the executor recorded a fill.",
   failed: "Approved, but the executor recorded that the order did not fill.",
-  paused: "The mandate is paused; new intents are rejected.",
+  paused: "Trading is paused; new intents are rejected.",
 };
 
 export interface StatusChipProps {

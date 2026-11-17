@@ -47,10 +47,10 @@ export function NoPolicyYet({ children }: { children?: ReactNode }) {
   return (
     <EmptyState
       icon={<FileSignature strokeWidth={1.75} />}
-      title="No mandate yet"
+      title="No rules yet"
       action={
-        <ButtonLink href="/mandate" variant="primary">
-          Set the mandate
+        <ButtonLink href="/rules" variant="primary">
+          Set the rules
         </ButtonLink>
       }
     >

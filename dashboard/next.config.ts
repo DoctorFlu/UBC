@@ -28,6 +28,8 @@ const nextConfig: NextConfig = {
   // only the files the server was traced to load, so the image carries no full node_modules. Every other
   // build keeps the usual `.next` output for `next start`.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
+  // The rules page was /mandate before the console named it Rules; old links and bookmarks still land.
+  redirects: () => Promise.resolve([{ source: "/mandate", destination: "/rules", permanent: true }]),
 };
 
 export default nextConfig;

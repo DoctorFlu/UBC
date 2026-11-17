@@ -7,12 +7,14 @@ import type { ReactNode } from "react";
 
 import { FlaggedBadge, IntentLink, MarketName, amountLabel, intentFlags } from "@/components/domain/Intent";
 import { ArrowLink } from "@/components/ui/ArrowLink";
+import { Advanced, useAdvanced } from "@/lib/advanced/Advanced";
 import { Card } from "@/components/ui/Card";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { HexValue } from "@/components/ui/HexValue";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { When } from "@/components/ui/When";
 import {
   type ChainIntent,
   type ChainStatus,
@@ -22,7 +24,7 @@ import {
   chainHeadline,
   evidenceChain,
 } from "@/lib/evidence/chain";
-import { formatContractsHundredths, formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { formatContractsHundredths, formatUsdCents } from "@/lib/format";
 import type { AgentPlanView } from "@/lib/hedge/types";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { isoFromUnix } from "@/lib/live/derive";
@@ -33,8 +35,6 @@ import { formatUsdc } from "@/lib/payments/usdc";
 import { clip } from "@/lib/text";
 
 import styles from "./evidence.module.css";
-
-const at = (iso: string) => `${formatDateUtc(iso)}, ${formatTimeUtc(iso)}`;
 
 /** Agent-supplied and onchain strings are clipped to these lengths; the full value stays copyable. */
 const MAX_SYMBOL = 64;
@@ -83,8 +83,10 @@ function Tx({ tx }: { tx: ChainTx }) {
   const iso = isoFromUnix(tx.at);
   return (
     <span className={styles.tx}>
-      <span className={styles.txTime}>{at(iso)}</span>
-      <HexValue value={tx.txHash} kind="tx" />
+      <When at={iso} date className={styles.txTime} />
+      <Advanced>
+        <HexValue value={tx.txHash} kind="tx" />
+      </Advanced>
     </span>
   );
 }
@@ -118,6 +120,7 @@ function ChainLink({
 }
 
 function StatusCard({ evidence, network }: { evidence: EvidenceChain; network: ConsoleNetwork }) {
+  const { advanced } = useAdvanced();
   const Icon =
     evidence.status === "verified"
       ? ShieldCheck
@@ -140,9 +143,11 @@ function StatusCard({ evidence, network }: { evidence: EvidenceChain; network: C
             </ul>
           ) : null}
           <p className={styles.note}>
-            {network.explorerUrl
-              ? `Each transaction opens on the ${network.name} explorer.`
-              : "This is the local chain, which has no explorer: copy a transaction hash to check it with any RPC client."}
+            {!advanced
+              ? "Advanced view shows the transaction behind each step, to check it onchain."
+              : network.explorerUrl
+                ? `Each transaction opens on the ${network.name} explorer.`
+                : "This is the local chain, which has no explorer: copy a transaction hash to check it with any RPC client."}
           </p>
         </div>
       </div>
@@ -160,7 +165,9 @@ function RequestLink({ view }: { view: AgentPlanView }) {
       ) : (
         <p className={styles.muted}>The agent stored the plan without the request that led to it.</p>
       )}
-      <p className={styles.note}>As the agent reported it with the plan, {at(view.createdAt)}.</p>
+      <p className={styles.note}>
+        As the agent reported it with the plan, <When inSentence at={view.createdAt} date />.
+      </p>
     </ChainLink>
   );
 }
@@ -191,31 +198,37 @@ function SignalLink({ view, evidence }: { view: AgentPlanView; evidence: Evidenc
       testId="evidence-signal"
     >
       <dl className={styles.facts}>
-        <dt>Receipt</dt>
-        <dd>
-          <HexValue value={clip(signal.receiptId, 80)} kind="hash" />
-        </dd>
+        <Advanced>
+          <dt>Receipt</dt>
+          <dd>
+            <HexValue value={clip(signal.receiptId, 80)} kind="hash" />
+          </dd>
+        </Advanced>
         {payment ? (
           <>
             <dt>Price</dt>
             <dd className="num">{formatUsdc(payment.amount)}</dd>
             <dt>Paid</dt>
-            <dd>{at(payment.paidAt)}</dd>
-            <dt>Network</dt>
-            <dd className="mono">{clip(payment.network, MAX_SYMBOL)}</dd>
-            <dt>Gateway settlement</dt>
             <dd>
-              {payment.settlementId ? (
-                <span className={styles.copyable}>
-                  <span className="mono" title="A Circle Gateway reference, not an onchain transaction">
-                    {clip(payment.settlementId, MAX_ID)}
-                  </span>
-                  <CopyButton value={payment.settlementId} what="settlement reference" />
-                </span>
-              ) : (
-                <span className={styles.muted}>The seller gave no settlement reference.</span>
-              )}
+              <When at={payment.paidAt} date />
             </dd>
+            <Advanced>
+              <dt>Network</dt>
+              <dd className="mono">{clip(payment.network, MAX_SYMBOL)}</dd>
+              <dt>Gateway settlement</dt>
+              <dd>
+                {payment.settlementId ? (
+                  <span className={styles.copyable}>
+                    <span className="mono" title="A Circle Gateway reference, not an onchain transaction">
+                      {clip(payment.settlementId, MAX_ID)}
+                    </span>
+                    <CopyButton value={payment.settlementId} what="settlement reference" />
+                  </span>
+                ) : (
+                  <span className={styles.muted}>The seller gave no settlement reference.</span>
+                )}
+              </dd>
+            </Advanced>
           </>
         ) : (
           <>
@@ -265,7 +278,9 @@ function PlanLink({
           </span>
         </dd>
         <dt>Planned</dt>
-        <dd>{at(view.createdAt)}</dd>
+        <dd>
+          <When at={view.createdAt} date />
+        </dd>
         <dt>Costs</dt>
         <dd>
           <Money cents={plan.totals.costCents} />, for{" "}
@@ -276,8 +291,10 @@ function PlanLink({
         <dd>
           <Money cents={plan.totals.maxPayoutCents} />
         </dd>
-        <dt>Event</dt>
-        <dd className="mono">{clip(plan.eventTicker, MAX_SYMBOL)}</dd>
+        <Advanced>
+          <dt>Event</dt>
+          <dd className="mono">{clip(plan.eventTicker, MAX_SYMBOL)}</dd>
+        </Advanced>
       </dl>
       {current ? null : (
         <p className={styles.note}>
@@ -290,7 +307,9 @@ function PlanLink({
           <ul>
             {unproposed.map(({ index, order }) => (
               <li key={index}>
-                <span className="mono">{clip(order.instrumentSymbol, MAX_SYMBOL)}</span>
+                <Advanced fallback={<span>{describeMarket(order.instrumentSymbol).title}</span>}>
+                  <span className="mono">{clip(order.instrumentSymbol, MAX_SYMBOL)}</span>
+                </Advanced>
                 <span className="num">{formatUsdCents(order.amountCents)}</span>
               </li>
             ))}
@@ -453,7 +472,9 @@ export function EvidenceView({ view, preview }: { view: AgentPlanView; preview?:
             <Lamp tone={status.tone} testId="chain-status-chip">
               {status.label}
             </Lamp>
-            <span>Planned {at(view.createdAt)}</span>
+            <span>
+              Planned <When inSentence at={view.createdAt} date />
+            </span>
           </>
         }
       />

@@ -138,7 +138,7 @@ describe("GET /api/console/hedge/market", () => {
     );
     expect(withHolding.preview).toEqual({
       status: "unavailable",
-      reason: "Sign a mandate first: a hedge has to fit its limits.",
+      reason: "Set the rules first: a hedge has to fit their limits.",
     });
   });
 
@@ -298,7 +298,7 @@ describe("previewPlan", () => {
     });
     expect(preview).toEqual({
       status: "unavailable",
-      reason: "The mandate's budget is fully committed ($200.00), so no hedge fits.",
+      reason: "The whole budget is committed ($200.00), so no hedge fits.",
     });
   });
 });

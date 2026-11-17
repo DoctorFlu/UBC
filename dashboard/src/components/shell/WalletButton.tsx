@@ -136,7 +136,7 @@ export function WalletButton({ block = false }: { block?: boolean }) {
           open={detailsOpen}
           onClose={() => setDetailsOpen(false)}
           title="Owner wallet"
-          description="This wallet signs the mandate, approvals and the kill switch."
+          description="This wallet signs the rules, approvals and pauses."
           variant="sheet"
           footer={
             <Button

@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { FlaggedBadge, IntentLink } from "@/components/domain/Intent";
 import { ChainUnavailable } from "@/components/states/ChainStates";
+import { Advanced, useAdvanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Field";
 import { HexValue } from "@/components/ui/HexValue";
@@ -14,7 +15,8 @@ import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import { type TabItem, Tabs } from "@/components/ui/Tabs";
-import { formatCount, formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { When } from "@/components/ui/When";
+import { formatCount } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 
@@ -37,12 +39,7 @@ const columns: readonly Column<AuditRow>[] = [
   {
     key: "when",
     header: "Time",
-    cell: (row) => (
-      <span className={styles.when}>
-        <span>{formatTimeUtc(row.at)}</span>
-        <span className={styles.date}>{formatDateUtc(row.at)}</span>
-      </span>
-    ),
+    cell: (row) => <When at={row.at} className={styles.when} dateClassName={styles.date} />,
     nowrap: true,
   },
   {
@@ -51,6 +48,7 @@ const columns: readonly Column<AuditRow>[] = [
     cell: (row) => formatCount(row.blockNumber),
     align: "end",
     nowrap: true,
+    advanced: true,
   },
   {
     key: "event",
@@ -72,7 +70,9 @@ const columns: readonly Column<AuditRow>[] = [
             <FlaggedBadge flags={row.flags} />
           </span>
         ) : null}
-        <span className={`mono ${styles.eventCode}`}>{row.event}</span>
+        <Advanced>
+          <span className={`mono ${styles.eventCode}`}>{row.event}</span>
+        </Advanced>
       </span>
     ),
     role: "primary",
@@ -92,6 +92,7 @@ const columns: readonly Column<AuditRow>[] = [
     header: "Transaction",
     cell: (row) => <HexValue value={row.txHash} kind="tx" />,
     nowrap: true,
+    advanced: true,
   },
 ];
 
@@ -103,9 +104,9 @@ const ORDER_OPTIONS = [
 const GROUPS: readonly (AuditGroup | "all")[] = ["all", "mandate", "pause", "verdict", "owner", "result"];
 
 const emptyText: Record<AuditGroup | "all", string> = {
-  all: "The first event appears when you set a mandate. Every intent after that adds a row.",
-  mandate: "No mandate has been signed yet.",
-  pause: "The kill switch has not been used.",
+  all: "The first event appears when you set the rules. Every intent after that adds a row.",
+  mandate: "No rules have been signed yet.",
+  pause: "Trading has not been paused.",
   verdict: "No intent has been proposed yet.",
   owner: "You have not approved or rejected a held intent yet.",
   result: "The executor has not recorded a result yet.",
@@ -121,6 +122,8 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
   const snapshot = preview ?? live;
   const [group, setGroup] = useState<AuditGroup | "all">("all");
   const [order, setOrder] = useState<AuditOrder>("newest");
+  const { advanced } = useAdvanced();
+  const shownColumns = useAdvancedColumns(columns);
   const chain = snapshot.chain;
   const contract = snapshot.contract;
   if (!chain || !contract) return <ChainUnavailable snapshot={snapshot} title="Audit" />;
@@ -149,7 +152,7 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
           <Table
             caption={`${label}: Policy contract events, ${orderWord}`}
             captionHidden
-            columns={columns}
+            columns={shownColumns}
             rows={shown}
             rowKey={(row) => row.id}
             rowTone={(row) => (row.status === "rejected" ? "muted" : undefined)}
@@ -167,8 +170,14 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
     <div className={styles.view}>
       <PageHeader
         title="Audit"
-        description="Every decision the Policy contract recorded, read from its events. Each row carries its block and transaction, so it can be checked onchain."
-        meta={<HexValue label="Policy contract" value={contract.address} kind="address" />}
+        description={
+          advanced
+            ? "Every decision the Policy contract recorded, read from its events. Each row carries its block and transaction, so it can be checked onchain."
+            : "Every decision the Policy contract recorded. Advanced view adds each one's block and transaction, to check it onchain."
+        }
+        meta={
+          advanced ? <HexValue label="Policy contract" value={contract.address} kind="address" /> : undefined
+        }
         actions={
           <ExportButtons
             count={exported.length}
@@ -193,7 +202,7 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
           title="Events"
           description={`${formatCount(shown.length)} of ${formatCount(rows.length)} shown, ${orderWord}.${
             leftOut > 0
-              ? ` The exports also hold ${formatCount(leftOut)} kill switch ${leftOut === 1 ? "event" : "events"} that changed nothing: setPolicy emits one with every rule change.`
+              ? ` The exports also hold ${formatCount(leftOut)} pause ${leftOut === 1 ? "event" : "events"} that changed nothing: setPolicy emits one with every rule change.`
               : ""
           }`}
           padding="flush"
@@ -225,14 +234,16 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
           className={styles.blocked}
         >
           {blocked.length === 0 ? (
-            <p className={styles.none}>Nothing blocked. Every intent so far was inside the mandate.</p>
+            <p className={styles.none}>Nothing blocked. Every intent so far was inside the rules.</p>
           ) : (
             <dl className={styles.rules} data-testid="blocked-by-rule">
               {blocked.map(([reason, count]) => (
                 <div key={reason} className={styles.rule}>
                   <dt>
                     <span className={styles.ruleLabel}>{describeReason(reason).label}</span>
-                    <span className={`mono ${styles.ruleCode}`}>{reason}</span>
+                    <Advanced>
+                      <span className={`mono ${styles.ruleCode}`}>{reason}</span>
+                    </Advanced>
                   </dt>
                   <dd className="num">{formatCount(count)}</dd>
                 </div>

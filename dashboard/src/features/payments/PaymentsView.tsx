@@ -5,6 +5,7 @@ import { Receipt } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { IntentLink } from "@/components/domain/Intent";
+import { Advanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -12,7 +13,8 @@ import { Stat, StatGroup } from "@/components/ui/Stat";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import { UsdcMeter } from "@/components/ui/LimitMeter";
-import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { When } from "@/components/ui/When";
+import { formatTimeUtc } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { budgetReading, intentsByReceipt, paymentAnchor } from "@/lib/payments/links";
@@ -20,8 +22,6 @@ import type { SignalBudgetView, SignalPaymentView } from "@/lib/payments/types";
 import { formatUsdc } from "@/lib/payments/usdc";
 
 import styles from "./payments.module.css";
-
-const at = (iso: string) => `${formatDateUtc(iso)}, ${formatTimeUtc(iso)}`;
 
 interface PaymentRow {
   payment: SignalPaymentView;
@@ -49,7 +49,8 @@ function Bought({ payment }: { payment: SignalPaymentView }) {
       </span>
       <span className={styles.detail}>
         {cheap} cheap, {fair} fair, {expensive} expensive
-        {noOffer > 0 ? `, ${noOffer.toString()} with no offer` : ""}. Computed {formatTimeUtc(signal.asOf)}.
+        {noOffer > 0 ? `, ${noOffer.toString()} with no offer` : ""}.
+        <Advanced> Computed {formatTimeUtc(signal.asOf)}.</Advanced>
       </span>
     </span>
   );
@@ -59,12 +60,7 @@ const columns: readonly Column<PaymentRow>[] = [
   {
     key: "time",
     header: "Paid",
-    cell: ({ payment }) => (
-      <time dateTime={payment.paidAt} className={styles.time}>
-        <span>{formatTimeUtc(payment.paidAt)}</span>
-        <span className={styles.detail}>{formatDateUtc(payment.paidAt)}</span>
-      </time>
-    ),
+    cell: ({ payment }) => <When at={payment.paidAt} className={styles.time} dateClassName={styles.detail} />,
     nowrap: true,
   },
   { key: "item", header: "Bought", cell: ({ payment }) => <Bought payment={payment} />, role: "primary" },
@@ -92,6 +88,7 @@ const columns: readonly Column<PaymentRow>[] = [
   {
     key: "receipt",
     header: "Receipt and settlement",
+    advanced: true,
     cell: ({ payment }) => (
       <span className={styles.item}>
         <HexValue label="Receipt" value={payment.receiptId} kind="hash" />
@@ -110,6 +107,7 @@ const columns: readonly Column<PaymentRow>[] = [
   {
     key: "parties",
     header: "Payer and payee",
+    advanced: true,
     cell: ({ payment }) => (
       <span className={styles.item}>
         <HexValue label="From" value={payment.payer} kind="address" />
@@ -157,9 +155,17 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
       <Card title="Signal budget today" headingLevel={2}>
         <UsdcMeter label="Spent" used={reading.spent} limit={reading.daily} usedWord="of today's budget" />
         <p className={styles.note} data-testid="budget-note">
-          {reading.reset
-            ? `A new day started at ${at(budget.resetsAt)}; nothing is counted until the agent reports today's spend.`
-            : `Resets ${at(budget.resetsAt)}. At most ${formatUsdc(reading.maxPerPurchase)} per purchase.`}
+          {reading.reset ? (
+            <>
+              A new day started <When inSentence at={budget.resetsAt} date />; nothing is counted until the
+              agent reports today&apos;s spend.
+            </>
+          ) : (
+            <>
+              Resets <When inSentence at={budget.resetsAt} date />. At most{" "}
+              {formatUsdc(reading.maxPerPurchase)} per purchase.
+            </>
+          )}
         </p>
       </Card>
       <Card title="Gateway balance" headingLevel={2}>
@@ -173,7 +179,15 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
                 <span className="num">{formatUsdc(budget.gatewayBalance)}</span>
               )
             }
-            hint={budget.gatewayBalance === null ? "The agent could not read it" : `As of ${at(budget.asOf)}`}
+            hint={
+              budget.gatewayBalance === null ? (
+                "The agent could not read it"
+              ) : (
+                <>
+                  As of <When inSentence at={budget.asOf} date />
+                </>
+              )
+            }
           />
           <Stat
             label="Purchases recorded"
@@ -181,9 +195,11 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
             hint="All time"
           />
         </StatGroup>
-        <p className={styles.note}>
-          <HexValue label="Buyer wallet" value={budget.buyerAddress} kind="address" />
-        </p>
+        <Advanced>
+          <p className={styles.note}>
+            <HexValue label="Buyer wallet" value={budget.buyerAddress} kind="address" />
+          </p>
+        </Advanced>
       </Card>
     </div>
   );
@@ -196,6 +212,7 @@ export function PaymentsView({ preview }: { preview?: ConsoleSnapshot }) {
   const { signalPayments, signalBudget, pairing } = snapshot.offchain;
   const agentName = pairing?.agentName ?? "The agent";
   const byReceipt = intentsByReceipt(snapshot.chain);
+  const shownColumns = useAdvancedColumns(columns);
   const rows: PaymentRow[] = signalPayments.map((payment) => ({
     payment,
     intents: byReceipt.get(payment.receiptId) ?? [],
@@ -217,14 +234,13 @@ export function PaymentsView({ preview }: { preview?: ConsoleSnapshot }) {
         <Table
           caption="Paid signal requests, newest first"
           captionHidden
-          columns={columns}
+          columns={shownColumns}
           rows={rows}
           rowKey={({ payment }) => payment.receiptId}
           rowId={({ payment }) => paymentAnchor(payment.receiptId)}
           empty={
             <EmptyState plain icon={<Receipt strokeWidth={1.75} />} title="No purchases yet">
-              When the agent pays for a signal, the purchase, its receipt and its settlement reference appear
-              here without a refresh.
+              When the agent pays for a signal, the purchase appears here without a refresh.
             </EmptyState>
           }
         />

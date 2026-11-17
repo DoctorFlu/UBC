@@ -15,13 +15,13 @@ const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 /** Why a slice of the range is not bought, in the owner's words. */
 const SHORTFALL_REASONS: Partial<Record<UncoveredSlice["code"], string>> = {
   cost_cap_reached: "the spend cap ran out",
-  budget_exhausted: "the mandate's remaining budget ran out",
+  budget_exhausted: "the remaining budget ran out",
   trade_cap_too_small: "the max trade size is too small for one contract",
   thin_depth: "too few contracts were on offer",
   no_price: "nobody was selling that contract",
   market_not_open: "that market was not open",
   below_minimum: "the order was below Gemini's minimum",
-  category_not_allowed: "the mandate does not allow crypto markets",
+  category_not_allowed: "the rules do not allow crypto markets",
 };
 
 /** Cost, payout, range, contracts, what is left exposed and the planner's warnings, for one plan. */

@@ -11,7 +11,7 @@ import { formatCount, formatUsdCents } from "@/lib/format";
 import type { ChainView } from "@/lib/live/types";
 
 import { type ReplayedIntent, type Verdict, type VerdictCounts, backtest } from "./backtest";
-import styles from "./mandate.module.css";
+import styles from "./rules.module.css";
 
 /**
  * A verdict at proposal. "Held" rather than the live "Waiting": the owner may since have approved and
@@ -141,8 +141,8 @@ export function BacktestPanel({
             it might have proposed other intents altogether.
           </li>
           <li>
-            The kill switch: each intent is replayed with the pause state it met, since signing rules never
-            pauses or resumes the agent.
+            Pauses: each intent is replayed with the pause state it met, since signing rules never pauses or
+            resumes the agent.
           </li>
         </ul>
       </details>

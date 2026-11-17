@@ -11,12 +11,13 @@ import { HexValue } from "@/components/ui/HexValue";
 import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Toast";
-import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { When } from "@/components/ui/When";
+
 import type { ChainView } from "@/lib/live/types";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
 
-import styles from "./mandate.module.css";
+import styles from "./rules.module.css";
 import { BacktestPanel } from "./BacktestPanel";
 import { PolicyReview } from "./PolicyReview";
 import { type RuleChange, requestedValues, rulesDiff } from "./rules-diff";
@@ -129,7 +130,11 @@ function RequestCard({
           ) : null}
           <AgentReason
             text={request.reason}
-            footer={`${agentName}, ${formatDateUtc(request.createdAt)} at ${formatTimeUtc(request.createdAt)}`}
+            footer={
+              <>
+                {agentName}, <When inSentence at={request.createdAt} date />
+              </>
+            }
           />
           {pendingRequest && next && changes.length > 0 ? (
             <section className={styles.requestBacktest} aria-label="Backtest of the requested rules">
@@ -161,9 +166,14 @@ function RequestCard({
           ) : (
             <p className={styles.resolved}>
               {request.status === "applied" ? "Applied" : "Dismissed"}
-              {request.resolvedAt
-                ? ` ${formatDateUtc(request.resolvedAt)} at ${formatTimeUtc(request.resolvedAt)}`
-                : ""}
+              {request.resolvedAt ? (
+                <>
+                  {" "}
+                  <When inSentence at={request.resolvedAt} date />
+                </>
+              ) : (
+                ""
+              )}
               {request.appliedTxHash ? <HexValue label="in" value={request.appliedTxHash} kind="tx" /> : null}
             </p>
           )}
@@ -204,7 +214,7 @@ export function ChangeRequests({
       <Card>
         <EmptyState icon={<MessageSquareDiff strokeWidth={1.75} />} title="No change requests">
           When {agentName === "The agent" ? "the agent" : agentName} hits a limit it thinks is wrong, it can
-          ask you to change it. Requests wait here; the mandate never changes without your signature.
+          ask you to change it. Requests wait here; the rules never change without your signature.
         </EmptyState>
       </Card>
     );

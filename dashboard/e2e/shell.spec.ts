@@ -79,6 +79,77 @@ test.describe("Advanced view", () => {
   });
 });
 
+test.describe("times", () => {
+  test.use({ timezoneId: "America/Vancouver", locale: "en-US" });
+
+  test("read in the owner's time zone by default, with the exact UTC time kept in the markup", async ({
+    page,
+  }) => {
+    const problems = watchConsole(page);
+    await page.goto("/activity");
+    const time = page.locator("main tbody time").first();
+    // Relative or local ("Just now", "5 min ago", "Today, 3:20 PM"): never the UTC form the server sent.
+    await expect(time).not.toContainText("UTC");
+    await expect(time).toHaveAttribute("title", /^\d{1,2} \w{3} \d{4}, \d{2}:\d{2}:\d{2} UTC$/);
+    await expect(time).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    await page.waitForLoadState("networkidle");
+    expect(problems).toEqual([]);
+  });
+
+  test("are exact UTC times in Advanced view", async ({ page, context, baseURL }) => {
+    const problems = watchConsole(page);
+    await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
+    await page.goto("/activity");
+    await expect(page.locator("main tbody time").first()).toHaveText(/^\d{2}:\d{2}:\d{2} UTC$/);
+    await page.waitForLoadState("networkidle");
+    expect(problems).toEqual([]);
+  });
+});
+
+test.describe("live connection behind a proxy", () => {
+  test("a slow event stream reads Connecting, then Live, with nothing added to the page", async ({
+    page,
+  }) => {
+    // A proxy in front of an idle console can take seconds to answer the first request.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/console/events", async (route) => {
+      await held;
+      await route.continue().catch(() => {});
+    });
+    await page.goto("/");
+    const lamp = page.getByTestId("live-indicator").filter({ visible: true });
+    await expect(lamp).toHaveAttribute("data-health", "connecting");
+    await expect(lamp).toHaveText(/^Connecting/);
+    release();
+    await expect(lamp).toHaveAttribute("data-health", "live");
+    await expect(lamp).toHaveText(/^Live/);
+  });
+
+  test("the event stream comes back after the proxy answered with an HTTP error", async ({ page }) => {
+    // A browser's EventSource gives up for good on an HTTP error (a 502 while the console wakes up),
+    // where it would retry a dropped connection by itself.
+    let failures = 2;
+    await page.route("**/api/console/events", async (route) => {
+      if (failures > 0) {
+        failures -= 1;
+        await route.fulfill({ status: 502, contentType: "text/plain", body: "Bad gateway" });
+        return;
+      }
+      await route.continue().catch(() => {});
+    });
+    await page.goto("/");
+    const lamp = page.getByTestId("live-indicator").filter({ visible: true });
+    await expect(lamp).toHaveAttribute("data-health", "disconnected");
+    await expect(lamp).toHaveText(/^Reconnecting/);
+    // Two retries, one and two seconds apart.
+    await expect(lamp).toHaveAttribute("data-health", "live", { timeout: 10_000 });
+    expect(failures).toBe(0);
+  });
+});
+
 test.describe("phone menu on a slow device", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 

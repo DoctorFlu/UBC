@@ -52,6 +52,7 @@ export type OwnerTxResult =
 
 /** How long the console may take to show a mined transaction's event before the UI stops waiting. */
 const SYNC_TIMEOUT_MS = 30_000;
+const SYNC_POLL_MS = 2_000;
 
 function callArgs(call: OwnerCall) {
   switch (call.functionName) {
@@ -116,7 +117,7 @@ function describeFailure(error: unknown): string {
 export function useOwnerTx() {
   const config = useConfig();
   const access = useOwnerAccess();
-  const { snapshot, waitFor } = useLiveConsole();
+  const { snapshot, waitFor, refresh } = useLiveConsole();
   const network = snapshot.network;
   const policy = snapshot.contract?.address ?? null;
   const [state, setState] = useState<OwnerTxState>({ phase: "idle" });
@@ -177,10 +178,12 @@ export function useOwnerTx() {
         }
 
         setState({ phase: "syncing", label, hash: sent });
+        // The event stream normally brings the change; reading the snapshot too covers a stalled stream.
+        const poll = setInterval(() => void refresh(), SYNC_POLL_MS);
         const seen = await waitFor(
           (next) => next.chain?.events.some((event) => event.transactionHash === sent) ?? false,
           SYNC_TIMEOUT_MS,
-        );
+        ).finally(() => clearInterval(poll));
         setState({ phase: "done", label, hash: sent, synced: seen !== null });
         return { ok: true, hash: sent, snapshot: seen };
       } catch (error) {
@@ -191,7 +194,7 @@ export function useOwnerTx() {
         busy.current = false;
       }
     },
-    [access, config, network, policy, publicClient, waitFor],
+    [access, config, network, policy, publicClient, refresh, waitFor],
   );
 
   const reset = useCallback(() => setState({ phase: "idle" }), []);

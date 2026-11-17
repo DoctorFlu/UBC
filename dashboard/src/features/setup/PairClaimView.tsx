@@ -10,7 +10,7 @@ import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { useToast } from "@/components/ui/Toast";
-import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { When } from "@/components/ui/When";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { PairingView } from "@/lib/live/types";
 import { ownerBlockedReason } from "@/lib/owner/access";
@@ -91,15 +91,19 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
             <div>
               <dt>Asked</dt>
               <dd>
-                {formatDateUtc(pairing.announcedAt)} at {formatTimeUtc(pairing.announcedAt)}
+                <When at={pairing.announcedAt} date />
               </dd>
             </div>
             <div>
               <dt>Status</dt>
               <dd>
-                {pairing.status === "confirmed" && pairing.confirmedAt
-                  ? `Confirmed ${formatDateUtc(pairing.confirmedAt)} at ${formatTimeUtc(pairing.confirmedAt)}`
-                  : "Waiting for you"}
+                {pairing.status === "confirmed" && pairing.confirmedAt ? (
+                  <>
+                    Confirmed <When inSentence at={pairing.confirmedAt} date />
+                  </>
+                ) : (
+                  "Waiting for you"
+                )}
               </dd>
             </div>
           </dl>

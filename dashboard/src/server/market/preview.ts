@@ -25,13 +25,13 @@ export function previewPlan(input: {
     return { status: "unavailable", reason: `Save your ${input.asset} holding to see a preview.` };
   }
   if (!input.rules) {
-    return { status: "unavailable", reason: "Sign a mandate first: a hedge has to fit its limits." };
+    return { status: "unavailable", reason: "Set the rules first: a hedge has to fit their limits." };
   }
   const remainingBudgetCents = Math.max(0, input.rules.budgetCents - input.committedCents);
   if (remainingBudgetCents === 0) {
     return {
       status: "unavailable",
-      reason: `The mandate's budget is fully committed (${formatUsdCents(input.rules.budgetCents)}), so no hedge fits.`,
+      reason: `The whole budget is committed (${formatUsdCents(input.rules.budgetCents)}), so no hedge fits.`,
     };
   }
   try {

@@ -29,7 +29,7 @@ import {
 import { type FakeGemini, SPORTS_MARKET, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 
 /**
- * The owner's whole loop against a real chain, as a person would do it: set the first mandate, watch
+ * The owner's whole loop against a real chain, as a person would do it: set the first rules, watch
  * intents arrive without a refresh, approve one, reject one, see a fill, pull the kill switch and watch
  * the contract refuse the next proposal, then restart the console and find exactly the same state.
  *
@@ -158,22 +158,22 @@ test.afterAll(async () => {
   await gemini.stop();
 });
 
-test("before the first mandate, the console says so", async ({ page }) => {
+test("before the first rules, the console says so", async ({ page }) => {
   await open(page, "/");
-  await expect(page.locator("main").getByText("No mandate yet", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Set the mandate" })).toBeVisible();
+  await expect(page.locator("main").getByText("No rules yet", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Set the rules" })).toBeVisible();
   await open(page, "/activity");
   await expect(page.getByText("No intents yet").first()).toBeVisible();
 });
 
-test("the owner signs the first mandate", async ({ page }) => {
-  await open(page, "/mandate");
-  await expect(page.getByRole("heading", { name: "Set the first mandate" })).toBeVisible();
+test("the owner signs the first rules", async ({ page }) => {
+  await open(page, "/rules");
+  await expect(page.getByRole("heading", { name: "Set the first rules" })).toBeVisible();
   await page.getByRole("button", { name: "Review and sign" }).click();
-  const review = page.getByRole("dialog", { name: "Review the first mandate" });
+  const review = page.getByRole("dialog", { name: "Review the first rules" });
   await expect(review.getByTestId("policy-review")).toContainText("Budget");
   await review.getByRole("button", { name: "Sign in wallet" }).click();
-  await expect(toast(page)).toContainText("Mandate set");
+  await expect(toast(page)).toContainText("Rules set");
   await review.getByRole("button", { name: "Done" }).click();
   await expect(page.getByText(/^Version 1, set /)).toBeVisible();
   const rules = (await snapshot(baseURL)).chain?.rules;
@@ -254,7 +254,7 @@ test("a rule that blocks an intent says so on Home", async ({ page }) => {
 
 test("editing a limit changes the backtest of past intents before anything is signed", async ({ page }) => {
   const before = await snapshot(baseURL);
-  await open(page, "/mandate");
+  await open(page, "/rules");
   const backtest = page.getByTestId("backtest");
   // The draft starts as the rules in force, which gave every one of the four intents its verdict.
   await expect(backtest).toHaveAttribute("data-changed", "0");
@@ -300,7 +300,7 @@ test("the agent's change request shows a diff and its backtest, and applying it 
   })) as { id: string; status: string };
   expect(filed.status).toBe("pending");
 
-  await open(page, "/mandate");
+  await open(page, "/rules");
   // A pending request opens its tab and counts on it.
   await expect(page.getByRole("tab", { name: /Change requests/ })).toHaveAttribute("aria-selected", "true");
   const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
@@ -319,7 +319,7 @@ test("the agent's change request shows a diff and its backtest, and applying it 
   const review = page.getByRole("dialog", { name: "Apply the agent's request" });
   await expect(review.getByTestId("policy-review")).toContainText("Max trade size");
   await review.getByRole("button", { name: "Sign in wallet" }).click();
-  await expect(toast(page)).toContainText("Mandate updated");
+  await expect(toast(page)).toContainText("Rules updated");
   await review.getByRole("button", { name: "Done" }).click();
 
   // The request is closed with the transaction that applied it, and the contract has the new rule.
@@ -351,7 +351,7 @@ test("the owner can dismiss a change request, and the rules stay as they are", a
     reason: "More room for next week's ladder.",
   })) as { id: string };
   const rules = (await snapshot(baseURL)).chain?.rules;
-  await open(page, "/mandate");
+  await open(page, "/rules");
   const card = page.locator(`[data-testid="change-request"][data-status="pending"]`);
   await expect(card).toContainText("asks to change budget");
   await card.getByRole("button", { name: "Dismiss" }).click();
@@ -364,6 +364,45 @@ test("the owner can dismiss a change request, and the rules stay as they are", a
   };
   expect(seen.status).toBe("dismissed");
   expect((await snapshot(baseURL)).chain?.rules).toEqual(rules);
+});
+
+test("saved holdings show as saved, with their preview, even while the live stream is quiet", async ({
+  page,
+}) => {
+  // Behind the public proxy the event stream can stall or drop; the owner's own save must still show.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/console/events", async (route) => {
+    await held;
+    await route.abort().catch(() => {});
+  });
+  await open(page, "/hedge");
+  const preview = page.getByTestId("hedge-preview");
+  await expect(preview).toHaveText("No preview: Save your BTC holding to see a preview.");
+  const status = page.getByTestId("holdings-status");
+  await expect(status).toHaveText("Never saved.");
+
+  const save = page.getByRole("button", { name: "Sign and save" });
+  await page.getByRole("button", { name: "Add an asset" }).click();
+  const holding = page.getByTestId("holding-row").last();
+  await holding.getByRole("textbox", { name: "Asset" }).fill("BTC");
+  await holding.getByRole("textbox", { name: "Quantity" }).fill("0.05");
+  // While edited, the line under the rows says the list is not saved yet.
+  await expect(status).toHaveText("Not saved yet.");
+  await save.click();
+  await expect(toast(page)).toContainText("Holdings saved");
+  await expect(status).toHaveText(/^Saved just now/);
+  await expect(save).toBeDisabled();
+  await expect(preview).toContainText("Preview, not the agent’s plan.");
+  await expect(preview).toContainText("on your 0.05 BTC");
+
+  // Leave the holdings empty again for the next test.
+  await holding.getByRole("button", { name: /Remove/ }).click();
+  await save.click();
+  await expect(preview).toHaveText("No preview: Save your BTC holding to see a preview.");
+  release();
 });
 
 test("the hedge view: an honest empty state and preview, then the agent's plan, executed onchain", async ({
@@ -386,7 +425,7 @@ test("the hedge view: an honest empty state and preview, then the agent's plan, 
   await expect(toast(page)).toContainText("Holdings saved");
   const state = await snapshot(baseURL);
   const rules = state.chain?.rules;
-  if (!rules) throw new Error("no mandate");
+  if (!rules) throw new Error("no rules");
   const remaining = rules.budgetCents - (state.chain?.committedCents ?? 0);
   const expected = (
     await recordedPlanRequest({
@@ -516,8 +555,11 @@ test("a signal payment the agent records appears live, linked to the intent that
   await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
   await expect(payment).toContainText("3 cheap, 15 fair, 3 expensive");
   await expect(payment).toContainText("0.001 USDC");
-  await expect(payment).toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
   await expect(payment).toContainText("No intent cites it");
+  // The settlement reference is Advanced detail.
+  await expect(payment).not.toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
+  await page.getByRole("switch", { name: "Advanced view" }).click();
+  await expect(payment).toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
 
   // An intent whose sealed reason cites the receipt links to it, and back.
   const proposed = await chain.agent.proposeTrade(noBuy(BTC_65K, 500, 31));
@@ -610,7 +652,7 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   );
   const state = await snapshot(baseURL);
   const rules = state.chain?.rules;
-  if (!rules) throw new Error("no mandate");
+  if (!rules) throw new Error("no rules");
   // Block times have whole seconds, so the new plan is made in a later second than every intent so far:
   // none of them can have carried it out.
   const lastProposed = Math.max(...(state.chain?.intents.map((intent) => intent.proposedAt) ?? [0]));
@@ -768,7 +810,7 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
     );
     expect.soft(await overflowsViewport(page)).toBe(false);
 
-    for (const path of ["/audit", "/hedge", "/payments", "/mandate"]) {
+    for (const path of ["/audit", "/hedge", "/payments", "/rules"]) {
       await view(page, path);
       expect.soft(await overflowsViewport(page), `${path} at ${width.toString()} px`).toBe(false);
     }

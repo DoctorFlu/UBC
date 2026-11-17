@@ -21,7 +21,7 @@ import type { ChainView } from "@/lib/live/types";
 import { ownerBlockedReason, useOwnerAccess } from "@/lib/owner/access";
 import { useHydrated } from "@/lib/useHydrated";
 
-import styles from "./mandate.module.css";
+import styles from "./rules.module.css";
 import { BacktestPanel } from "./BacktestPanel";
 import { PolicyReview } from "./PolicyReview";
 import { AMOUNT_LABELS, type AmountKey, rulesDiff } from "./rules-diff";
@@ -35,7 +35,7 @@ const amountHints: Record<AmountKey, string> = {
 
 const AMOUNT_KEYS = Object.keys(AMOUNT_LABELS) as AmountKey[];
 
-/** A starting point for the first mandate: small, crypto only, and every rule on. */
+/** A starting point for the first rules: small, crypto only, and every rule on. */
 const FIRST_MANDATE: PolicyRules = {
   budgetCents: 20_000,
   maxTradeCents: 2_500,
@@ -64,7 +64,7 @@ function draftFrom(rules: PolicyRules): Draft {
   };
 }
 
-export interface MandateEditorProps {
+export interface RulesEditorProps {
   /** Rules in force, or null before the first `setPolicy`. */
   rules: PolicyRules | null;
   version: number;
@@ -76,14 +76,14 @@ export interface MandateEditorProps {
  * The policy editor: edit a draft, see exactly what changes and how past intents would have fared
  * under it, review it, then sign `setPolicy` with the owner's wallet. The rules shown in force always come from the contract's events, never from the draft.
  */
-export function MandateEditor({ rules, version, chain }: MandateEditorProps) {
+export function RulesEditor({ rules, version, chain }: RulesEditorProps) {
   const access = useOwnerAccess();
   const blocked = ownerBlockedReason(access);
   const hydrated = useHydrated();
   const base = rules ?? FIRST_MANDATE;
   const [draft, setDraft] = useState(() => draftFrom(base));
   // The review dialog's title, fixed when it opens: signing a first mandate must not retitle the
-  // dialog to "new mandate" the moment the contract's event lands.
+  // dialog to "new rules" the moment the contract's event lands.
   const [reviewing, setReviewing] = useState<string | null>(null);
   // When new rules land (signed here or elsewhere), an untouched draft follows them.
   const [baseline, setBaseline] = useState(base);
@@ -132,11 +132,11 @@ export function MandateEditor({ rules, version, chain }: MandateEditorProps) {
   return (
     <div className={styles.editor}>
       <Card
-        title={rules ? "Edit the rules" : "Set the first mandate"}
+        title={rules ? "Edit the rules" : "Set the first rules"}
         description={
           rules
             ? `Version ${version.toString()} is in force. Edit a draft here; nothing changes until you sign it.`
-            : "Until you sign a mandate, the Policy contract rejects every intent. These values are a starting point."
+            : "Until you sign the first rules, the Policy contract rejects every intent. These values are a starting point."
         }
       >
         <form
@@ -144,7 +144,7 @@ export function MandateEditor({ rules, version, chain }: MandateEditorProps) {
           onSubmit={(event) => {
             event.preventDefault();
             if (next && changes.length > 0) {
-              setReviewing(rules ? "Review the new mandate" : "Review the first mandate");
+              setReviewing(rules ? "Review the new rules" : "Review the first rules");
             }
           }}
         >
@@ -226,7 +226,7 @@ export function MandateEditor({ rules, version, chain }: MandateEditorProps) {
         tone="sunken"
         title="What changes"
         description={
-          rules ? "The draft against the version in force." : "The first mandate the contract will enforce."
+          rules ? "The draft against the version in force." : "The first rules the contract will enforce."
         }
         headingLevel={2}
       >
@@ -260,7 +260,7 @@ export function MandateEditor({ rules, version, chain }: MandateEditorProps) {
           open={reviewing !== null}
           onClose={() => setReviewing(null)}
           next={next}
-          title={reviewing ?? "Review the new mandate"}
+          title={reviewing ?? "Review the new rules"}
         />
       ) : null}
     </div>
