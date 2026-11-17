@@ -56,3 +56,30 @@ export function wellKnownKeyRefusal(
     `${target.network}. Generate a key of its own with npm run arc:keygen.`
   );
 }
+
+/** Whether `url` points at this machine (`127.0.0.1`, `localhost`, `[::1]`). False for anything unparsable. */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a devchain deployment file's RPC is a devchain: a loopback address, or a compose service reached
+ * by a bare name with no dot (`http://anvil:8545`), which only the compose network resolves. Arc's RPCs (the
+ * public one, QuickNode) all have a dotted host, and an IP address is never a service name, so a
+ * hand-written file naming one is not a devchain. Only a deployment file is judged this way: a name typed
+ * into `ARC_RPC_URL` is never taken for a devchain.
+ */
+export function isDevchainRpc(url: string): boolean {
+  if (isLoopbackUrl(url)) return true;
+  try {
+    const host = new URL(url).hostname;
+    return /^[a-z0-9-]+$/i.test(host) && !/^\d+$/.test(host);
+  } catch {
+    return false;
+  }
+}

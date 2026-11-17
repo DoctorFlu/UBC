@@ -3,6 +3,8 @@
  *
  * - The local devchain (a deployment file, as `npm run dev:chain` and the hosted demo chain write): anvil's
  *   executor account, the contract's executor from the deploy script. `EXECUTOR_PRIVATE_KEY` is ignored.
+ *   The file's RPC must be a devchain (loopback, or a compose service name such as `anvil`): a file that
+ *   names any other host is refused, so anvil's key never signs on Arc through a hand-written file.
  * - A contract named by `POLICY_ADDRESS` (Arc testnet, or a chain of your own on a loopback RPC): the key
  *   in `EXECUTOR_PRIVATE_KEY`, which `npm run arc:keygen` makes. Off a loopback RPC it must not be one of
  *   anvil's published keys, and `POLICY_DEPLOY_BLOCK` must be set, so the executor never scans from block 0.
@@ -11,7 +13,12 @@
  * Never prints a key.
  */
 import { PolicyClient, arcTestnet, devchain, type WriteLane } from "@mandate/shared";
-import { type ResolvedDeployment, wellKnownKeyRefusal } from "@mandate/shared/node";
+import {
+  type ResolvedDeployment,
+  isDevchainRpc,
+  isLoopbackUrl,
+  wellKnownKeyRefusal,
+} from "@mandate/shared/node";
 import { type Address, type Chain, type Hex, createPublicClient, createWalletClient, http } from "viem";
 import { type PrivateKeyAccount, privateKeyToAccount } from "viem/accounts";
 import { devAccount } from "./accounts";
@@ -33,15 +40,6 @@ export class ExecutorConfigError extends Error {
   override readonly name = "ExecutorConfigError";
 }
 
-function isLoopbackUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname;
-    return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-  } catch {
-    return false;
-  }
-}
-
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
@@ -55,6 +53,13 @@ export function executorTarget(
   deployment: Pick<ResolvedDeployment, "source" | "address" | "chain" | "rpcUrl" | "fromBlock">,
 ): ExecutorTarget {
   if (deployment.source === "devchain") {
+    if (!isDevchainRpc(deployment.rpcUrl)) {
+      throw new ExecutorConfigError(
+        `The deployment file names an RPC at ${hostOf(deployment.rpcUrl)}, which is not a devchain (a ` +
+          "loopback address or a compose service name), and the devchain's executor key is anvil's published " +
+          "one. For Arc testnet set POLICY_ADDRESS and EXECUTOR_PRIVATE_KEY (npm run arc:keygen) instead.",
+      );
+    }
     return {
       local: true,
       network: "the local devchain",

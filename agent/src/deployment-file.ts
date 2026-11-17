@@ -1,18 +1,7 @@
-import { resolvePolicyDeployment } from "@mandate/shared/node";
-import { ConfigError, DEVCHAIN_DEPLOYMENT, isLoopbackUrl } from "./config";
+import { isDevchainRpc, resolvePolicyDeployment } from "@mandate/shared/node";
+import { ConfigError, DEVCHAIN_DEPLOYMENT } from "./config";
 
 type Env = Readonly<Record<string, string | undefined>>;
-
-/**
- * Whether a deployment file's RPC is a devchain: a loopback address, or a compose service reached by a
- * bare name with no dot (`http://anvil:8545`), which only the compose network resolves. Arc's RPCs (the
- * public one, QuickNode) all have a dotted host, so a hand-written file naming one is not a devchain.
- */
-export function isDevchainRpc(url: string): boolean {
-  if (isLoopbackUrl(url)) return true;
-  const host = new URL(url).hostname;
-  return /^[a-z0-9-]+$/i.test(host) && !/^\d+$/.test(host);
-}
 
 /**
  * Lets the MCP server follow a devchain deployment file, the way the console and the simulated executor do.

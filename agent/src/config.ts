@@ -2,7 +2,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import * as z from "zod";
 import { marketDataSource, type MarketDataSource } from "@mandate/gemini";
 import { ARC_TESTNET } from "@mandate/shared";
-import { wellKnownKeyRefusal } from "@mandate/shared/node";
+import { isLoopbackUrl, wellKnownKeyRefusal } from "@mandate/shared/node";
 import { Secret } from "./secret";
 import {
   PAYMENTS_ENV_KEYS,
@@ -19,10 +19,7 @@ import {
 export const DEVCHAIN_DEPLOYMENT: unique symbol = Symbol("devchain deployment");
 
 /** A loopback RPC is the local devchain, as `createAgentPolicy` decides. */
-export function isLoopbackUrl(url: string): boolean {
-  const host = new URL(url).hostname;
-  return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-}
+export { isLoopbackUrl };
 
 /** Every environment variable the MCP server reads. */
 export const ENV_KEYS = [

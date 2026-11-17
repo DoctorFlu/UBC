@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { isWellKnownAddress, isWellKnownKey, wellKnownKeyRefusal } from "../src/node";
+import {
+  isDevchainRpc,
+  isLoopbackUrl,
+  isWellKnownAddress,
+  isWellKnownKey,
+  wellKnownKeyRefusal,
+} from "../src/node";
 
 /** Anvil's accounts 0, 1, 2 and 9, as anvil prints them. */
 const ANVIL = {
@@ -35,5 +41,23 @@ describe("well-known keys", () => {
     expect(refusal).toContain("Arc testnet (chain 5042002)");
     expect(refusal).not.toContain(ANVIL[2].slice(2, 12));
     expect(wellKnownKeyRefusal("AGENT_PRIVATE_KEY", generatePrivateKey(), arc)).toBeNull();
+  });
+});
+
+describe("where a process signs", () => {
+  it.each([
+    ["http://127.0.0.1:8545", true, true],
+    ["http://localhost:8545", true, true],
+    ["http://[::1]:8545", true, true],
+    ["http://anvil:8545", false, true],
+    ["https://rpc.testnet.arc.io", false, false],
+    ["https://anvil.example.quiknode.pro/key/", false, false],
+    ["http://10.0.0.5:8545", false, false],
+    // The WHATWG parser reads a bare number as an IPv4 address: this is 127.0.0.1.
+    ["http://2130706433:8545", true, true],
+    ["not a url", false, false],
+  ])("%s: loopback %s, devchain deployment file %s", (url, loopback, devchain) => {
+    expect(isLoopbackUrl(url)).toBe(loopback);
+    expect(isDevchainRpc(url)).toBe(devchain);
   });
 });

@@ -45,6 +45,21 @@ describe("executorTarget", () => {
     expect(target.account.address).toBe(devAccount("executor").address);
   });
 
+  it.each([
+    ["https://rpc.testnet.arc.io", "rpc.testnet.arc.io"],
+    ["https://anvil.example.quiknode.pro/secret-key-path/", "anvil.example.quiknode.pro"],
+    ["http://10.0.0.5:8545", "10.0.0.5:8545"],
+  ])(
+    "refuses a deployment file naming %s: anvil's executor key never signs off a devchain",
+    (rpcUrl, host) => {
+      const message = refusal(() =>
+        executorTarget({}, { source: "devchain", address: POLICY, chain: devchain, rpcUrl, fromBlock: 7n }),
+      );
+      expect(message).toContain(`names an RPC at ${host}, which is not a devchain`);
+      expect(message).not.toContain("secret-key-path");
+    },
+  );
+
   it("signs with EXECUTOR_PRIVATE_KEY on Arc testnet, from POLICY_DEPLOY_BLOCK", () => {
     const target = executorTarget(
       { EXECUTOR_PRIVATE_KEY: ` '${OWN_KEY}' ` },
