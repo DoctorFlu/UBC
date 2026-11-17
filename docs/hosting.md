@@ -3,6 +3,7 @@
 This runbook puts the whole product on one small Linux VM with `docker compose up -d`, behind Caddy with an automatic HTTPS certificate.
 The example host is an Oracle Cloud Always Free Ubuntu VM with a free `sslip.io` name, but nothing in the images or compose files depends on the host.
 Any Linux VM with Docker, a public IP and ports 80 and 443 open works the same way, on arm64 or amd64.
+A host without a public IP, whose own proxy ends TLS and forwards plain HTTP, uses gateway mode instead; [InstaBox](#instabox) below is the worked example.
 
 ## What runs
 
@@ -10,7 +11,7 @@ Everything is in [`deploy/`](../deploy).
 
 | Container | What it is | Public |
 | --- | --- | --- |
-| `caddy` | TLS and routing for one hostname, and the owner's login. | ports 80 and 443 |
+| `caddy` | TLS and routing for one hostname, and the owner's login. | ports 80 and 443, or one high port in gateway mode |
 | `console` | The owner's console (Next.js, standalone build). | through Caddy |
 | `mcp` | The MCP server Grok Bot connects to. | `/mcp` through Caddy |
 | `signals` | The x402 signal API. Only the MCP server calls it. | no |
@@ -18,7 +19,7 @@ Everything is in [`deploy/`](../deploy).
 | `chain-init` | Demo chain only: deploys the Policy contract once, then exits. | no |
 | `executor` | Demo chain only: the simulated executor, which records fills without placing orders. | no |
 
-There are two modes, chosen by `COMPOSE_FILE` in `deploy/.env`.
+The chain is chosen by `COMPOSE_FILE` in `deploy/.env`.
 
 - `compose.yml:compose.demo.yml` runs the self-contained demo chain.
   The contract is deployed with the demo rules on first start, and the chain keeps its state across restarts.
@@ -27,9 +28,16 @@ There are two modes, chosen by `COMPOSE_FILE` in `deploy/.env`.
   There is no anvil and no executor, and the owner signs with a real browser wallet.
   It refuses to start until `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and `AGENT_PRIVATE_KEY` are set.
 
+Two optional files go after the chain's:
+
+- `compose.gateway.yml` is gateway mode, for a host behind a proxy that ends TLS (see [InstaBox](#instabox)).
+  Caddy serves plain HTTP on `MANDATE_APP_PORT` (default 8080), published on `127.0.0.1` only, and handles no certificate.
+- `compose.site.yml` serves the landing page, the static build of `site/` in `site/out`, as a second origin (see [Landing page](#landing-page)).
+
 ### Routes and who may use them
 
 Caddy denies by default: every path that is not listed as public needs the owner's login.
+The rules are in one file, [`deploy/caddy/app-routes.caddy`](../deploy/caddy/app-routes.caddy), which both the HTTPS `Caddyfile` and the gateway's `Caddyfile.gateway` import.
 
 | Path | Who | Check |
 | --- | --- | --- |
@@ -42,6 +50,7 @@ Caddy denies by default: every path that is not listed as public needs the owner
 | `/rpc` (demo chain only) | the owner | The owner's login. It forwards to anvil, so the browser's test signer can send transactions. |
 | everything else (pages, `/api/console/*`) | the owner | The owner's login (HTTP basic auth over HTTPS). |
 
+Until the owner sets a password, `CONSOLE_PASSWORD_HASH` is empty and compose uses the base64 of the sentence `locked: run deploy/set-console-password.sh`, which is not a bcrypt hash, so no password can match it: every owner route answers 401 to everyone while the rest of the stack runs.
 The owner's login is needed because the console's pages and read APIs show holdings, hedge plans and decision contexts, and on the demo chain the owner's key is public, so wallet signatures alone prove nothing there.
 Caddy strips the login header before the request reaches the console.
 A browser request from another site (`Sec-Fetch-Site: cross-site` or `same-site`) to an owner route is refused unless it is a plain page navigation, so another site cannot use a logged-in browser to make changes.
@@ -59,7 +68,7 @@ Compose prefixes each name with the project name, `mandate`.
 | --- | --- | --- |
 | `mandate_console-data` | `console.sqlite` (with its `-wal` and `-shm`): event cache, holdings, decision contexts, hedge plans, pairing, change requests, signal payments. | `console` |
 | `mandate_agent-data` | The MCP server's signal spend ledger and purchased signals. | `mcp` |
-| `mandate_chain` (demo chain only) | `anvil-state.json`, the chain itself, saved every 5 seconds and on shutdown, and `deployment.json`, the contract the other services use. | `anvil`, `chain-init`; read only for `console`, `mcp`, `executor` |
+| `mandate_chain` (demo chain only) | `anvil-state.json`, the chain itself, saved every 60 seconds (`ANVIL_STATE_INTERVAL`) and on shutdown, and `deployment.json`, the contract the other services use. | `anvil`, `chain-init`; read only for `console`, `mcp`, `executor` |
 | `mandate_caddy-data` | The HTTPS certificate and its key, and Caddy's account with Let's Encrypt. | `caddy` |
 | `mandate_caddy-config` | Caddy's saved runtime configuration. | `caddy` |
 
@@ -173,7 +182,10 @@ read -rs CONSOLE_PASSWORD && export CONSOLE_PASSWORD
 ./smoke.sh https://<host>
 ```
 
-It checks both health endpoints, that `/mcp` refuses a request without the token and answers with it, that owner pages and APIs refuse a request without the login or with a wrong one, that the live event stream and a cross-site write behave, that the scorecard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs the login.
+Without `CONSOLE_PASSWORD` it checks instead that every owner route refuses everyone, and skips the checks that need the login.
+Without `MCP_AUTH_TOKEN` it skips the MCP checks that need the token, so it can run from a machine that should not hold it; set `SMOKE_AGENT_ADDRESS` to the agent's address then, for the scorecard check.
+
+It checks both health endpoints, that `/mcp` refuses a request without the token and answers `initialize`, `tools/list` and a read-only `whoami` call with it, that owner pages and APIs refuse a request without the login or with a wrong one, that the live event stream and a cross-site write behave, that the scorecard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs the login.
 It ends with `All checks passed.`
 
 Open `https://<host>` in a browser and log in as `owner` (or your `CONSOLE_USER`) with the password.
@@ -211,11 +223,16 @@ The console keeps a slow RPC poll in stream mode, so a missed delivery is filled
 cd mandate
 git pull
 cd deploy
+./build-site.sh                                  # only with compose.site.yml
 docker compose up -d --build --remove-orphans
+docker compose up -d --force-recreate --no-deps caddy
 docker image prune -f
+docker builder prune -f --filter until=24h
 ```
 
 Compose rebuilds the images, replaces only the containers whose image or settings changed, and keeps every volume.
+Caddy's configuration files are mounted one by one, and a mounted file that is replaced (as `git pull` does) stays the old file inside a running container, so the second `up` recreates Caddy to load the new routes; it takes a second.
+The last two lines keep the disk from filling: a full build caches about 4 GB, and each build whose dependencies changed adds about as much again.
 After changing `deploy/.env`, `docker compose up -d` applies it.
 After switching `COMPOSE_FILE` between the modes, `--remove-orphans` removes the containers the new mode does not use.
 
@@ -265,6 +282,220 @@ docker compose down -v   # also delete every volume: the console's data, the dem
 
 Containers restart on their own after a crash or a reboot, unless you stopped them.
 Avoid `down -v` unless you mean to start from nothing: a new certificate counts against Let's Encrypt's weekly limit.
+
+## Landing page
+
+The landing page in `site/` is a static export, served by Caddy from its own origin so it shares no cookies or storage with the console.
+Add `compose.site.yml` to `COMPOSE_FILE`, build the site, and apply:
+
+```sh
+./build-site.sh
+docker compose up -d
+```
+
+[`build-site.sh`](../deploy/build-site.sh) builds it with Docker (the Dockerfile's `site` stage, from the same install as the console), so the host needs no Node.js; once the console has been built it takes about 10 seconds and 1.3 GB of memory.
+It bakes in three public settings from the env file: `NEXT_PUBLIC_APP_URL` (default `MANDATE_PUBLIC_URL`, else `https://<MANDATE_HOST>`), `NEXT_PUBLIC_SCORECARD_AGENT` (default the demo chain's agent) and `NEXT_PUBLIC_REPO_URL` (default empty, no source link).
+It replaces the folder's contents only when the build succeeds, and in place, so a running Caddy serves the new pages at once.
+Caddy serves `site/out` (or `MANDATE_SITE_DIR`) on a second listener, `MANDATE_SITE_ADDRESS`.
+Files under `/_next/static/` carry a content hash, so they are cached for a year; everything else is revalidated on every visit.
+Without `compose.site.yml` the stack runs without the site, whether or not `site/` exists.
+With it, the folder must exist, or Docker refuses to start Caddy.
+
+- In gateway mode, `MANDATE_SITE_ADDRESS` keeps its default `http://:8081`, Docker publishes it on `127.0.0.1:MANDATE_SITE_PORT` (default 8081), and the host's proxy gives it its own URL (on InstaBox, `instabox port publish mandate 8081`).
+- With automatic HTTPS, give the site and the app a name each, both pointing at the VM: for example `MANDATE_SITE_ADDRESS=example.com` for the site and `MANDATE_HOST=app.example.com` for the app.
+  Caddy then gets a certificate for each name on the same ports 80 and 443; the compose file needs no other change.
+
+## InstaBox
+
+[InstaBox](https://instabox.sh) machines have no public IP.
+`instabox port publish` gives a port on the machine a public HTTPS URL, `https://<port>-<machine id>.instabox.tech`.
+InstaBox's proxy ends TLS and connects to that port from inside the machine over plain HTTP, so the stack runs in gateway mode.
+Every command below that starts with `instabox` runs on your own computer (`npx --yes instabox@0.8.281` if it is not installed); the others run on the machine, in `instabox ssh mandate`.
+
+### What the proxy does
+
+These were checked on a real machine.
+
+- It connects to the port on the machine's loopback interface, so Docker publishes the app on `127.0.0.1` only.
+- It rewrites `Host` to `127.0.0.1:<port>`, puts the public name in `X-Forwarded-Host`, and sets `X-Forwarded-Proto: https` and `X-Forwarded-For`.
+  Caddy sets `Host` back to `MANDATE_HOST` from the env file, never from the request, and trusts the forwarded headers only from private addresses.
+- It passes `Authorization` (the owner's login and the MCP token) and the browser's `Origin` and `Sec-Fetch-*` headers unchanged, so the login and the cross-site check work as on a VM.
+- It streams responses, so the console's live events work, and it adds `X-Robots-Tag: noindex` and a few security headers of its own.
+- The console builds its links from `MANDATE_HOST` (`https://<MANDATE_HOST>`), and its redirects are relative, so pairing links and the browser's `/rpc` point at the public URL.
+
+### Create the machine
+
+On the free plan, one machine from the default template (`agent-browser`: Debian 13, amd64, Docker with Compose) is enough:
+
+```sh
+instabox create --name mandate
+instabox get mandate        # "id" is m_<machine id>; the public names use the part after m_
+```
+
+`/data` is the machine's persistent disk (20 GiB); everything Mandate keeps is under `/data/mandate`.
+
+| Path | What |
+| --- | --- |
+| `/data/mandate/repo` | The code, replaced on every update, and the built landing page in `repo/site/out`. |
+| `/data/mandate/mandate.env` | The env file, mode 600: the tokens and the owner's password hash. |
+| `/data/mandate/docker` | Docker's data root: the named volumes (the console's database, the demo chain) and the containers' state. |
+| `/data/mandate/containerd` | containerd's root: Docker's images and build cache, because Docker 29 keeps images in containerd. |
+
+Move both there once, before the first build; the root disk is only 16 GiB and holds the system:
+
+```sh
+sudo mkdir -p /data/mandate/docker /data/mandate/containerd
+sudo chown "$USER:$USER" /data/mandate
+echo '{ "data-root": "/data/mandate/docker" }' | sudo tee /etc/docker/daemon.json
+sudo sed -i '1i root = "/data/mandate/containerd"' /etc/containerd/config.toml
+sudo systemctl restart containerd docker
+```
+
+Measured with the demo chain and the landing page, `/data` holds 8.3 GB: InstaBox's own 4 GiB swap file, about 0.8 GB of images, 3.9 GB of build cache, and some 70 MB of code, volumes and settings.
+That leaves 12 GB, enough for a rebuild with new dependencies (about 4 GB more) before the update's prune step.
+
+### Deploy
+
+The repository is private, so copy the code from a checkout on your computer instead of cloning it on the machine:
+
+```sh
+git archive --format=tar.gz -o mandate-src.tgz HEAD
+instabox cp -p mandate-src.tgz mandate:/data/mandate/mandate-src.tgz
+```
+
+On the machine, unpack it and create the env file.
+The images run as an unprivileged user, so the files must be readable by everyone (`umask 022`); the build stops with `permission denied` otherwise.
+
+```sh
+cd /data/mandate
+umask 022
+mkdir repo
+tar -xzf mandate-src.tgz -C repo
+MANDATE_ENV_FILE=/data/mandate/mandate.env repo/deploy/init-env.sh
+```
+
+`init-env.sh` creates the tokens on the machine; they never leave it.
+In `/data/mandate/mandate.env`, set:
+
+- `COMPOSE_FILE=compose.yml:compose.demo.yml:compose.gateway.yml`;
+- `MANDATE_HOST=8080-<machine id>.instabox.tech`;
+- `X402_SELLER_ADDRESS`, the address that receives signal payments.
+
+Leave `CONSOLE_PASSWORD_HASH` empty: until the owner sets the password, every owner route refuses everyone.
+Then build and start, which takes about 10 minutes the first time:
+
+```sh
+cd /data/mandate/repo/deploy
+docker compose --env-file /data/mandate/mandate.env up -d --build
+```
+
+Publish the app's port, and only that one (never anvil's 8545 or the signal API's):
+
+```sh
+instabox port publish mandate 8080 --name "Mandate app"
+```
+
+For the landing page, add `compose.site.yml` to `COMPOSE_FILE` and set `NEXT_PUBLIC_REPO_URL` (and `NEXT_PUBLIC_SCORECARD_AGENT`, for another agent) in the env file, then build it, apply, and publish its port:
+
+```sh
+MANDATE_ENV_FILE=/data/mandate/mandate.env ./build-site.sh
+docker compose --env-file /data/mandate/mandate.env up -d
+```
+
+```sh
+instabox port publish mandate 8081 --name "Mandate site"
+```
+
+The site's origin serves only the static files: `/mcp`, `/rpc`, `/api/*` and the console's pages answer 404 there.
+
+### The owner's password
+
+The owner sets it from their own terminal; the command asks twice, shows nothing, and restarts Caddy with the new hash:
+
+```sh
+instabox ssh mandate -- -t 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-console-password.sh && cd /data/mandate/repo/deploy && docker compose --env-file /data/mandate/mandate.env up -d caddy'
+```
+
+### Smoke test
+
+From any computer, without secrets (the agent's address is public):
+
+```sh
+SMOKE_AGENT_ADDRESS=<agent address> deploy/smoke.sh https://8080-<machine id>.instabox.tech
+```
+
+With the MCP token, run it on the machine against its own public URL, so the token stays there:
+
+```sh
+instabox ssh mandate -- 'cd /data/mandate/repo/deploy && MCP_AUTH_TOKEN="$(sed -n "s/^MCP_AUTH_TOKEN=//p" /data/mandate/mandate.env)" ./smoke.sh "https://8080-<machine id>.instabox.tech"'
+```
+
+### Update
+
+Copy a new archive as in [Deploy](#deploy), then on the machine:
+
+```sh
+cd /data/mandate
+umask 022
+rm -rf repo.old
+mv repo repo.old
+mkdir repo
+tar -xzf mandate-src.tgz -C repo
+cd repo/deploy
+MANDATE_ENV_FILE=/data/mandate/mandate.env ./build-site.sh    # only with compose.site.yml
+docker compose --env-file /data/mandate/mandate.env up -d --build --remove-orphans
+docker compose --env-file /data/mandate/mandate.env up -d --force-recreate --no-deps caddy
+docker image prune -f
+docker builder prune -f --filter until=24h
+```
+
+The env file and the volumes are outside `repo`, so they are kept, and `repo.old` holds the previous version until the next update.
+The update never writes the env file, so a password the owner sets in the meantime stays.
+Caddy is recreated because its configuration files are mounted one by one from `repo`: after `mv repo repo.old` a running Caddy still reads the old files (checked on the machine), so new routes would apply only at its next restart.
+Every other command in this runbook works the same way with `--env-file /data/mandate/mandate.env` added after `docker compose`.
+
+### Pauses and the free plan's limits
+
+A free machine pauses itself after 30 minutes without use, and wakes on the next request to a published URL.
+A pause keeps memory and every process, so the stack carries on where it was: the containers are not restarted, the chain, the console's database and the tokens are as they were, and the console's poll picks up again.
+Use means requests to a published port, commands and file copies over the CLI, SSH traffic, or CPU load.
+The idle stack does not count as use: it needs about 0.02 vCPU (the bare machine about 0.01), because its health checks run every 5 minutes and it polls the chain once a second.
+
+Measured on the free plan with the demo chain running and nobody using it:
+
+- The machine paused 44 and 53 minutes after the last request, in two tries: InstaBox's 30 minutes plus however it samples use.
+- The first request after the pause took 3.5 seconds, the next ones 0.3 to 0.4 seconds.
+- After the wake every container had its original start time and no restart, and the chain, the contract and the console's data were unchanged.
+
+Each wake starts a new run of at most 120 minutes.
+With 5 minutes left, InstaBox looks at the last 30 minutes: 5 or more minutes of use add 120 minutes, 1 to 4 add 30, none lets the run end; one run lasts at most 480 minutes.
+When a run ends, the machine pauses for a cooldown of 5 to 20 minutes (60 to 75 for a second one in a row, 120 to 135 after that).
+During a cooldown nothing wakes the machine: the published URL fails (InstaBox documents `409 machine_cooldown` with a `Retry-After`; this setup has not met a cooldown yet), so the console, the scorecard and Grok Bot's connector are all unreachable until it ends.
+An idle pause owes no cooldown and ends the run, so a machine that rests between visits rarely meets one.
+A cooldown comes when a run reaches its limit: after 8 hours of steady use, or when light use (a request now and then) keeps the machine from idling but is too little to extend the run.
+
+Before a demo, wake the machine and check it:
+
+```sh
+instabox wake mandate
+instabox get mandate        # "state": "running", "cooldownUntil": null
+SMOKE_AGENT_ADDRESS=<agent address> deploy/smoke.sh https://8080-<machine id>.instabox.tech
+```
+
+If `cooldownUntil` is set, the machine cannot run before then.
+`instabox get mandate` also shows `runStartedAt` and `maxRunMinutes`; if the run is close to its limit, let the machine idle-pause for 30 minutes first, and the wake starts a fresh run.
+
+### Connect Grok Bot
+
+In Grok Bot's connector, set the URL to `https://8080-<machine id>.instabox.tech/mcp`.
+The connector's `Authorization` header is `Bearer ` and the token.
+On a Mac, this copies exactly that value to the clipboard without showing it; paste it into Grok Bot:
+
+```sh
+instabox ssh mandate -- "sed -n 's/^MCP_AUTH_TOKEN=/Bearer /p' /data/mandate/mandate.env" | tr -d '\n' | pbcopy
+```
+
+Wake the machine before a session (`instabox wake mandate`): a connector call that has to wake it waits for the resume, and during a cooldown it fails.
 
 ## Limits
 
