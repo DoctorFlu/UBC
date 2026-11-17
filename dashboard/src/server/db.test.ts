@@ -403,20 +403,6 @@ describe("migration to accounts (after the hosted version)", () => {
     },
   );
 
-  it("refuses a database a newer console upgraded, and leaves it as it was", () => {
-    const dataDir = hostedDatabase();
-    const newer = new DatabaseSync(join(dataDir, "console.sqlite"));
-    newer.exec(`PRAGMA user_version = ${String(MIGRATIONS.length + 1)}`);
-    newer.close();
-    expect(() => openDatabase(dataDir)).toThrow(
-      `schema version ${String(MIGRATIONS.length + 1)}, newer than this console's ${String(MIGRATIONS.length)}`,
-    );
-    const after = new DatabaseSync(join(dataDir, "console.sqlite"));
-    expect(after.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length + 1 });
-    expect(tables(after)).not.toContain("workspaces");
-    after.close();
-  });
-
   it("runs once: opening the upgraded database again changes nothing", () => {
     const dataDir = hostedDatabase();
     const first = openDatabase(dataDir);

@@ -659,8 +659,9 @@ The steps were first used for the update from version 5 to 6 (the `settlements` 
    Only the times in that row change (`as_of`, `stored_at` and the snapshot's `asOf`), not the amounts.
 
 If the new version misbehaves after the swap, roll back to the old images and the old `repo`.
-The old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
+After an update that only adds tables, the old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
 So the backup is restored only if the upgrade damaged the data, and restoring it loses what was written since the backup (the onchain part comes back from the chain, offchain records do not).
+An update that changes existing tables, such as [the upgrade to workspaces](#upgrade-to-workspaces-once), must restore the backup on a rollback: the old console still starts and passes its health check on such a file, but cannot read the changed tables.
 The rollback is three blocks, and the second one is run only to restore the backup.
 
 First, put the old `repo` and the old images back:
@@ -738,7 +739,6 @@ It is an update that changes the console's database, run exactly as in [Updates 
 - **A rollback restores the backup**: run all three blocks of the rollback, the second one included.
   The previous console cannot read the upgraded tables, whose rows now carry a mandate, and it does not notice: it opens a version 8 file without an error and its health check passes, but reading or saving the holdings fails (`no such column: id`).
   So the health check is no sign that a rollback worked; the restored backup is.
-  From this version on, a console refuses to start on a file that a newer console upgraded, and says to restore the backup.
   Passkeys made after the swap stay on their devices unused.
 
 ### Pauses and the free plan's limits
