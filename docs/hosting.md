@@ -661,7 +661,7 @@ The steps were first used for the update from version 5 to 6 (the `settlements` 
 If the new version misbehaves after the swap, roll back to the old images and the old `repo`.
 After an update that only adds tables, the old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
 So the backup is restored only if the upgrade damaged the data, and restoring it loses what was written since the backup (the onchain part comes back from the chain, offchain records do not).
-An update that changes existing tables, such as [the upgrade to workspaces](#upgrade-to-workspaces-once), must restore the backup on a rollback: the old console still starts and passes its health check on such a file, but cannot read the changed tables.
+An update that changes existing tables, such as [the upgrade to workspaces](#upgrade-to-workspaces-once), must restore the backup on a rollback: the old console cannot read the changed tables.
 The rollback is three blocks, and the second one is run only to restore the backup.
 
 First, put the old `repo` and the old images back:
@@ -716,19 +716,22 @@ It is an update that changes the console's database, run exactly as in [Updates 
   The `diff` shows more than new empty tables, because the upgrade gives every record to the first workspace:
   - the version line;
   - new tables `workspaces`, `mandates` and `agents` with 1 row each, and `members`, `passkeys`, `sessions`, `recovery_codes`, `ceremonies`, `access_codes` and `agent_tokens` with 0;
-  - `holdings`, `decision_contexts`, `hedge_plans`, `policy_change_requests`, `pairings`, `intent_context_links`, `signal_payments`, `signal_budget`, `wake_deliveries`, `wake_sources` and `wake_price_memory` with the same number of rows as before and a new hash, because each row gains the first mandate's id.
+  - `holdings`, `decision_contexts`, `hedge_plans`, `policy_change_requests`, `pairings`, `intent_context_links`, `signal_payments`, `signal_budget`, `wake_deliveries`, `wake_sources` and `wake_price_memory` with the same number of rows as before and, when they have rows, a new hash, because each row gains the first mandate's id.
 
   `policy_events`, `ingest_cursors`, `intent_details`, `market_listings`, `settlements`, `venue_orders` and `executor_venues` keep their rows and their hash: they stay keyed by deployment ([accounts.md](accounts.md#the-model)).
   Any other change, a different row count above all, means stop.
-  The comparison after the swap may also show rows in `access_codes`, `agent_tokens` and `sessions`, from a claim code, Grok Bot's first call with the env file's token, and a sign-in.
+  The comparison after the swap shows the same tables changed, but not the rehearsal's hashes: the first workspace's ids are random, so the live upgrade gives the records another mandate id than the rehearsal did; compare the row counts.
+  It may also show rows in `access_codes`, `agent_tokens` and `sessions`, from a claim code, Grok Bot's first call with the env file's token, and a sign-in, and a new hash in `executor_venues` and `ingest_cursors`, from the executor's announcement when it starts and the console's reading of the chain.
   `dashboard/src/server/db.test.ts` upgrades a database of the hosted schema with rows in every table, checks every count, and reads the records back through the console's stores.
-- **During the swap**, `/mcp` answers 503 while the console restarts (the MCP server asks the console about every token and never guesses), and the MCP server starts only once the console is healthy.
+- **During the swap**, `/mcp` cannot be reached for about ten seconds: Caddy answers 502 while the MCP server restarts, then refuses connections while Caddy itself restarts (its routes changed).
+  The MCP server starts only once the console is healthy, and asks the console about every token, never guessing; if the console stops answering later, `/mcp` answers 503 with `Retry-After: 5`.
+  In the rehearsal on Docker (17 Nov 2026), Grok Bot's calls failed for 10.2 s and then worked with the env file's token on the first try.
 - **After the swap**, run the smoke test with the token as in [Smoke test](#smoke-test): Grok Bot's token from the env file is now the first workspace's agent token, and works as before.
   Then claim the first workspace as in [Claim the first workspace](#claim-the-first-workspace-1); until then the console shows nobody its data.
   Under **Setup**, **Agents**, the first workspace's agent lists the env file's token, with when Grok Bot last used it.
 - **Between the swap and the claim** the owner cannot sign in, and everything that does not need the owner keeps working:
   - Grok Bot's hourly run: `/mcp` resolves the env file's token to the first workspace's agent on its first call (and registers it), and every tool works as before.
-    Only during the swap itself, while the console and the MCP server restart, does `/mcp` answer 503 with `Retry-After: 5`, so swap away from the run's hour mark.
+    Only during the swap itself, about ten seconds, can `/mcp` not be reached, so swap away from the run's hour mark.
   - The contract approves a proposal inside the mandate's rules by itself, as always, and the executor places and settles it; it keeps storing settlements and its venue order journal, the event wake-ups keep going to Grok Bot's webhook, the console keeps following the chain, and `/agent/<address>` stays public.
   - The owner gets nothing: every console page sends them to `/sign-in`, which has no passkey yet to offer, and every `/api/console/*` request is refused with 401.
     So no holdings change, and no pairing or change request is confirmed.
@@ -738,8 +741,8 @@ It is an update that changes the console's database, run exactly as in [Updates 
     Pages of the new version go to `/sign-in` by themselves when their stream is refused.
   - The claim ends the window: the owner then sees everything that happened in it.
 - **A rollback restores the backup**: run all three blocks of the rollback, the second one included.
-  The previous console cannot read the upgraded tables, whose rows now carry a mandate, and it does not notice: it opens a version 8 file without an error and its health check passes, but reading or saving the holdings fails (`no such column: id`).
-  So the health check is no sign that a rollback worked; the restored backup is.
+  The previous console cannot read the upgraded tables, whose rows now carry a mandate.
+  On a version 8 file it starts, but its health check, its pages and the agent API's holdings answer 500 (`no such column: id`), as the version 7 image did on Docker on 17 Nov 2026; the MCP server and Caddy wait for a healthy console, so they are not started either.
   Passkeys made after the swap stay on their devices unused.
 
 ### Pauses and the free plan's limits
