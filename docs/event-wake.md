@@ -160,6 +160,8 @@ The console's Setup page shows, in Advanced view, whether wake-ups are on (or wh
 - `dashboard/src/server/wake.test.ts`: the console's pipeline on anvil with a fake receiver.
 - `dashboard/src/server/settlement-wake.test.ts`: a ladder of two positions wakes the Bot once, after its last settlement, with the ladder's totals; a repeated record and a restart send nothing.
 - `dashboard/e2e/wake.spec.ts` (in the `live` project): the real console and chain, the fake Gemini and a local webhook receiver; an owner pause, a rejected intent, a late fill and a fall of spot each send exactly one event, the debounce and the cap hold, a restart resends nothing, and the Setup page shows it.
+  The console runs its wake-ups on a test clock (`GROK_WAKE_TEST_CLOCK=on`, issue #110), and the spec moves it to the end of the rejection's debounce window itself (`POST /api/dev/wake-clock` with the service token), so a slow or sleeping machine never ends a window between two tests.
+  The clock runs at real speed between moves; production refuses to start with it, and without it the route answers 404.
 - `redteam` attack `chain.wake-flood`: a stolen agent key sends a burst of rejected intents, replayed through the same rules and notifier over a simulated day, and stays inside the cap.
 
 Not verified: a real Grok Bot routine receiving the body (see [grok-bot.md](grok-bot.md#still-to-verify-by-hand)).

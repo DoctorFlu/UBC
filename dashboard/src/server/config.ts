@@ -85,6 +85,11 @@ export interface WakeConfig {
   dailyCap: number;
   /** Least time between two price checks while the console runs. */
   priceCheckMs: number;
+  /**
+   * `GROK_WAKE_TEST_CLOCK=on`: wake-ups run on a clock the end-to-end tests move forward through
+   * `POST /api/dev/wake-clock`, so a debounce window ends when a test says so. Refused in production.
+   */
+  testClock: boolean;
 }
 
 /** Five minutes: a goal's floor is far from spot, and each check costs two Gemini requests per goal. */
@@ -198,14 +203,22 @@ export function readWakeConfig(env: EnvVars = process.env): WakeConfig {
     1_000,
     86_400_000,
   );
-  const off = (offReason: string): WakeConfig => ({ target: null, offReason, dailyCap, priceCheckMs });
+  const testClock =
+    oneOf("GROK_WAKE_TEST_CLOCK", optional(env.GROK_WAKE_TEST_CLOCK), ["on", "off"] as const, "off") === "on";
+  const off = (offReason: string): WakeConfig => ({
+    target: null,
+    offReason,
+    dailyCap,
+    priceCheckMs,
+    testClock,
+  });
   if (url === null && key === null) {
     return off("Set GROK_WEBHOOK_URL and GROK_WEBHOOK_KEY on the console to the routine's webhook.");
   }
   if (url === null) return off("GROK_WEBHOOK_KEY is set but GROK_WEBHOOK_URL is empty.");
   if (key === null) return off("GROK_WEBHOOK_URL is set but GROK_WEBHOOK_KEY is empty.");
   try {
-    return { target: new WakeTarget(url, key), offReason: null, dailyCap, priceCheckMs };
+    return { target: new WakeTarget(url, key), offReason: null, dailyCap, priceCheckMs, testClock };
   } catch {
     return off("GROK_WEBHOOK_URL is not an http or https URL.");
   }
@@ -217,6 +230,13 @@ export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
     throw new Error(`CONSOLE_EVENT_SOURCE must be "rpc" or "stream", got "${source}"`);
   }
   const publicUrl = (optional(env.CONSOLE_URL) ?? "http://localhost:3000").replace(/\/+$/, "");
+  const accounts = readAccountsConfig(env, publicUrl);
+  const wake = readWakeConfig(env);
+  if (accounts.mode === "production" && wake.testClock) {
+    throw new Error(
+      "GROK_WAKE_TEST_CLOCK=on is refused in production: anyone with the service token could move the wake-ups' clock.",
+    );
+  }
   return {
     dataDir: resolve(optional(env.CONSOLE_DATA_DIR) ?? DEFAULT_DATA_DIR),
     eventSource: source,
@@ -225,8 +245,8 @@ export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
     streamSecurityToken: optional(env.QUICKNODE_STREAM_SECURITY_TOKEN),
     publicUrl,
     mcpPublicUrl: optional(env.MCP_PUBLIC_URL),
-    accounts: readAccountsConfig(env, publicUrl),
-    wake: readWakeConfig(env),
+    accounts,
+    wake,
   };
 }
 
