@@ -47,6 +47,7 @@ const EXPECTED: Record<string, Verdict> = {
   "chain.poison-readers": "held",
   "chain.executor-refuses": "held",
   "chain.listing-flood": "held",
+  "chain.wake-flood": "held",
   "chain.reset-daily-loss": "held",
   "mcp.secret-exfiltration": "held",
   "mcp.rate-limit-flood": "held",

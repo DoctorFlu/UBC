@@ -66,11 +66,13 @@ It leaves the demo usable:
 - Committed spend never passes the budget, and the owner's late approval of a held intent is re-checked against it.
 - The MCP server's auth, origin check, body limit and rate limit hold, and no answer or log line carries the agent key or the token.
 - Invented markets from the agent key cannot make the console spend its Gemini rate limit: its listing checker, replayed over intents read back from the chain against a Gemini that makes every lookup cost the most it can, sends at most 24 requests in any 60 s and checks the intent waiting for approval first (`chain.listing-flood`).
+- Rejected intents from the agent key cannot make the console spend the owner's Grok Bot usage: replayed in bursts every 5 minutes for 30 simulated hours through the console's wake-up rules and notifier, with no Bot run in progress to drop them as its own, they wake the routine at most once per 10 minutes and never more than the daily cap in a UTC day (`chain.wake-flood`, [docs/event-wake.md](../docs/event-wake.md)).
 
 ## What it does not prove
 
 - It does not attack the console, the owner's wallet or Gemini, and it checks the executor only through its pre-trade check (`chain.executor-refuses`), not by letting it trade; a stolen owner or executor key is out of scope.
   The console's listing checker runs on a simulated clock against a simulated Gemini (`chain.listing-flood`), not inside a running console.
+  Likewise the wake-up rules and notifier (`chain.wake-flood`) run on a simulated clock against a stand-in webhook; the dashboard's `wake.spec.ts` runs them inside a real console.
 - It does not test the paid signal API or Circle (`buy_signal`), so no real money moves.
 - An LLM jailbreak is simulated by a script that does exactly what a jailbroken agent would; it does not test how resistant Grok itself is.
 - Refused owner-only calls are mined as reverted transactions with the agent's address and hash, but they emit no event, so the console's activity feed (built from events) does not show them; only proposals and their verdicts appear there.
