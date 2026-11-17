@@ -47,6 +47,7 @@ import {
   loadEnv,
 } from "@mandate/shared";
 import { localDeploymentPath } from "@mandate/shared/node";
+import { stackPortEnv, stackPorts } from "../src/stack-ports";
 import {
   type AnvilInstance,
   buildContracts,
@@ -100,8 +101,8 @@ const withSite = !values["no-site"];
 
 // The same file the MCP server and the signal API read, so the ports below are the ones they will use.
 loadEnv();
-const mcpPort = Number(process.env.MCP_PORT ?? 8787);
-const signalsPort = Number(process.env.SIGNALS_PORT ?? 8788);
+const { mcp: mcpPort, signals: signalsPort } = stackPorts(process.env);
+const portEnv = stackPortEnv({ mcp: mcpPort, signals: signalsPort });
 if (!process.env.MCP_AUTH_TOKEN?.trim()) {
   fail("MCP_AUTH_TOKEN is not set. Run `npm run mcp:token` once, then start the stack again.");
 }
@@ -309,9 +310,8 @@ async function main(): Promise<void> {
   // Empty values beat whatever `.env` configures: every process must use this run's chain.
   const localChain = { POLICY_ADDRESS: "", POLICY_DEPLOY_BLOCK: "", POLICY_DEPLOYMENT_FILE: deploymentPath };
 
-  // The port it is waited on: the signal API's own default (4021) is not the stack's, so a clean clone
-  // without SIGNALS_PORT in `.env` would never be found (issue #26).
-  start("signals", ["run", "start", "-w", "@mandate/signals"], { SIGNALS_PORT: String(signalsPort) });
+  // On the port it is waited on, which is not its own default (issue #26, `src/stack-ports.ts`).
+  start("signals", ["run", "start", "-w", "@mandate/signals"], portEnv.signals);
 
   const consoleEnv = {
     ...localChain,
@@ -360,7 +360,7 @@ async function main(): Promise<void> {
     CONSOLE_URL: consoleUrl,
     CONSOLE_SERVICE_TOKEN: serviceToken,
     SIGNALS_URL: signalsUrl,
-    MCP_PORT: String(mcpPort),
+    ...portEnv.mcp,
   });
 
   if (!values["no-executor"]) {
