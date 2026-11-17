@@ -9,7 +9,7 @@ import type { ConsoleSnapshot } from "../src/lib/live/types";
 import { schemes, viewports } from "./routes";
 import { E2E_SERVICE_TOKEN, ownerHeaders, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
-import { addVirtualPasskey, registerOnPage } from "./support/session";
+import { type VirtualPasskey, addVirtualPasskey, registerOnPage } from "./support/session";
 
 /**
  * Workspaces and passkeys as a person meets them (docs/accounts.md), on the smoke suite's console, whose
@@ -138,11 +138,12 @@ test.describe("a second workspace", () => {
   let recoveryCode = "";
   let token = "";
   let agentId = "";
+  let passkey: VirtualPasskey;
 
   test.beforeAll(async ({ browser, baseURL }) => {
     const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });
     page = await context.newPage();
-    await addVirtualPasskey(page);
+    passkey = await addVirtualPasskey(page);
   });
 
   test.afterAll(async () => {
@@ -304,6 +305,108 @@ test.describe("a second workspace", () => {
     await expect(page.getByText("No Policy contract yet", { exact: true })).toHaveCount(0);
     await page.goto("/");
     await expect(page.getByTestId("mandate-row").getByText("No contract yet")).toHaveCount(0);
+    expect(problems).toEqual([]);
+  });
+
+  test("a refused passkey prompt leaves his first rules unsigned and the page as it was", async () => {
+    const problems = watchConsole(page);
+    await page.goto("/rules");
+    await hydrated(page);
+    await expect(page.getByRole("heading", { name: "Set the first rules" })).toBeVisible();
+    await page.getByRole("button", { name: "Review and confirm" }).click();
+    const review = page.getByRole("dialog", { name: "Review the first rules" });
+    await passkey.setUserVerified(false);
+    try {
+      await review.getByRole("button", { name: "Confirm rules with passkey" }).click();
+      await expect(page.getByText("You closed the passkey prompt, so nothing was changed.")).toBeVisible();
+    } finally {
+      await passkey.setUserVerified(true);
+    }
+    // One prompt, refused: the dialog still offers the same confirmation, and nothing reached the chain.
+    await expect(review.getByRole("button", { name: "Confirm rules with passkey" })).toBeEnabled();
+    const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(his.chain?.rules ?? null).toBeNull();
+    expect(problems).toEqual([]);
+  });
+
+  test("sets his first rules with one passkey prompt, signed by the console with his mandate's owner key", async () => {
+    const testInfo = test.info();
+    await page.goto("/rules");
+    await hydrated(page);
+    await page.getByRole("button", { name: "Review and confirm" }).click();
+    const review = page.getByRole("dialog", { name: "Review the first rules" });
+    await shotOf(review, testInfo, "rules-passkey-1440-light");
+    await review.getByRole("button", { name: "Confirm rules with passkey" }).click();
+    await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Rules set");
+    await review.getByRole("button", { name: "Done" }).click();
+    await expect(page.getByText(/^Version 1, set /)).toBeVisible();
+    const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(his.chain?.rules).toMatchObject({ budgetCents: 20_000, maxTradeCents: 2_500 });
+    // The audit trail names him and the passkey that confirmed it.
+    await page.goto("/audit");
+    const actions = page.getByRole("region", { name: "Owner actions" });
+    await expect(actions.getByRole("row").filter({ hasText: "Set the rules" })).toContainText("Passkey");
+  });
+
+  test("creates a second mandate with one passkey prompt, sees its token once, and switches between the two", async ({
+    baseURL,
+  }, testInfo) => {
+    const problems = watchConsole(page);
+    await page.goto("/mandates/new");
+    await hydrated(page);
+    await page.getByLabel("Mandate name").fill("Hedge ETH");
+    const created = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && response.url().endsWith("/api/console/mandates"),
+    );
+    await page.getByRole("button", { name: "Create and deploy with passkey" }).click();
+    expect((await created).status()).toBe(201);
+    await expect(page.getByText("Hedge ETH is ready")).toBeVisible();
+    const newToken = (await page.getByTestId("new-token").first().textContent())?.trim() ?? "";
+    expect(newToken.length).toBeGreaterThan(20);
+    await shotOf(page.getByRole("main"), testInfo, "new-mandate-ready-1440-light");
+    // The token reaches the new mandate's own agent, not his first one.
+    const newAgent = await resolveToken(baseURL ?? "", newToken);
+    expect(newAgent).not.toBeNull();
+    expect(newAgent).not.toBe(agentId);
+    // Shown once: a reload of the page does not show it again.
+    await page.reload();
+    await expect(page.getByText(newToken)).toHaveCount(0);
+
+    // Home: two rows, each its own.
+    await page.goto("/");
+    await expect(page.getByTestId("mandate-row")).toHaveCount(2);
+    await expect(page.getByTestId("mandate-row").filter({ hasText: "Hedge ETH" })).toHaveCount(1);
+    for (const width of [1440, 390]) {
+      for (const scheme of ["light", "dark"] as const) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ colorScheme: scheme });
+        await shot(page, testInfo, `home-two-${width.toString()}-${scheme}`);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ colorScheme: "light" });
+
+    // The switcher lists both, and takes him to the same view of the other mandate.
+    await page.goto("/rules");
+    await hydrated(page);
+    await page.getByTestId("mandate-switcher").filter({ visible: true }).click();
+    const menu = page.getByRole("menu");
+    await expect(menu.getByRole("menuitem", { name: "Hedge ETH" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Mandate", exact: true })).toBeVisible();
+    await shot(page, testInfo, "switcher-open-1440-light");
+    await menu.getByRole("menuitem", { name: "Hedge ETH" }).click();
+    await expect(page).toHaveURL(/\/m\/mnd_[a-z0-9]+\/rules$/);
+    await expect(page.getByTestId("mandate-switcher").filter({ visible: true })).toContainText("Hedge ETH");
+    // Its rules are the ones its passkey confirmed at creation, on its own contract.
+    const hedge = (await (
+      await page.request.get(
+        `/api/console/snapshot?mandate=${page.url().split("/m/")[1]?.split("/")[0] ?? ""}`,
+      )
+    ).json()) as ConsoleSnapshot;
+    const first = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+    expect(hedge.chain?.rules).toMatchObject({ budgetCents: 20_000 });
+    expect(hedge.contract?.address.toLowerCase()).not.toBe(first.contract?.address.toLowerCase());
     expect(problems).toEqual([]);
   });
 
