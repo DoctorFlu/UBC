@@ -47,6 +47,9 @@ function contract(
     resolutionSide: null,
     resolvedAt: null,
     settlementValue: null,
+    quantityIncrement: null,
+    quantityMinimum: null,
+    priceIncrement: null,
   };
 }
 

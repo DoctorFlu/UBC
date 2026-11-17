@@ -110,3 +110,5 @@ The agent (no tool input changed):
 - `agent/test/routine.e2e.test.ts`: a ladder moves past expiry, its positions settle once, `get_activity` and `get_portfolio` report it, and the next run plans on the next ladder only.
 - `dashboard/e2e/live.spec.ts` ("an expired ladder settles once"): the real console, chain and executor with the fake Gemini; the Hedge, Activity and intent pages show what the ladder paid.
 - The Gemini venue's own tests are listed in [gemini-venue.md](gemini-venue.md#tests).
+- `npm run dev:settle-proof [-- hourly|daily]`: against Gemini's live public API (no key, nothing placed), plans on the soonest hourly or daily BTC ladder, fills the plan with the simulated executor on a throwaway anvil, and waits until it settles by itself.
+  On 17 November 2026 it settled both positions of `BTC2611171000` (expired 10:00 UTC, BTC at $64,305.67, both NO strikes resolved YES); Gemini's own `resolvedAt` put the strikes 6 to 141 seconds after expiry.
