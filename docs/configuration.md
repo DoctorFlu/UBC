@@ -72,16 +72,19 @@ Every service reads the same `ARC_RPC_URL`, so one env file decides for the cons
 The default, Arc's public `https://rpc.testnet.arc.io`, costs no credits.
 A QuickNode endpoint on our account costs 20 credits per call on Arc, from the Build plan's 80M credits a month (2.67M a day on average), and overage must never be incurred.
 
-Calls at the default settings, with Arc's blocks every 0.5 s (QuickNode's budget basis; 0.508 s measured over the 11,407 blocks after the deploy block):
+Calls at the default settings, with Arc's blocks every 0.5 s (QuickNode's budget basis; 0.508 s measured over the 11,407 blocks after the deploy block).
+The console and the executor rows were measured, not only derived: on 2026-11-17 the real console (`next dev`, a fresh database) and the real executor ran for 60 s against the production Policy on a local anvil that mined a block every 0.5 s, through a proxy that counted every JSON-RPC call; the console made 136 calls (59 `eth_getBlockByNumber`, 59 `eth_getLogs`, 18 `eth_call`) and the executor 120 (60 `eth_blockNumber`, 60 `eth_getLogs`).
+The MCP server's `mcp:smoke` (seven read-only tool calls) made 21.
+Each row is **per contract**: the console follows, and the executor serves, every mandate's contract with a loop of its own, so two mandates' contracts double the console's and the executor's calls.
 
 | Service | What it calls | Calls a minute | Calls a day | QuickNode credits a day |
 | --- | --- | --- | --- | --- |
-| Console, `CONSOLE_EVENT_SOURCE=rpc`, poll 1 s | each poll: the latest block and `eth_getLogs`; the three roles every 10 s | up to 138 | up to 198,720 | up to 3,974,400 |
+| Console, `CONSOLE_EVENT_SOURCE=rpc`, poll 1 s | each poll: the latest block and `eth_getLogs`; the three roles every 10 s | 136 measured (138 at most) | up to 198,720 | up to 3,974,400 |
 | Console, `CONSOLE_EVENT_SOURCE=stream` | the same poll every 15 s, roles included | 20 | 28,800 | 576,000, plus the Stream's 3,456,000 |
-| Executor, `SIM_EXECUTOR_POLL_MS=1000` | each poll: `eth_blockNumber` and `eth_getLogs` | 120 | 172,800 | 3,456,000 |
-| MCP server | only during a tool call: about 10 calls for a proposal (fees, simulation, nonce, gas, send, receipt, the event index), 2 to 5 for a read | 0 when idle | about 2,000 at 200 tool calls | about 40,000 |
+| Executor, `SIM_EXECUTOR_POLL_MS=1000` | each poll: `eth_blockNumber` and `eth_getLogs` | 120 measured | 172,800 | 3,456,000 |
+| MCP server | only during a tool call: about 10 calls for a proposal (fees, simulation, nonce, gas, send, receipt, the event index), about 3 for a read (21 measured for 7) | 0 when idle | about 2,000 at 200 tool calls | about 40,000 |
 
-So the three at their defaults on QuickNode would spend about 7.5M credits a day and use up the month's 80M in 11 days.
+So the three at their defaults on QuickNode, with one contract, would spend about 7.5M credits a day and use up the month's 80M in 11 days.
 **Run all three on the public RPC**, and spend QuickNode credits only on the Stream, in demo windows ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
 If a service must use QuickNode, these settings bound it (credits a day, `I` in seconds):
 
