@@ -725,6 +725,16 @@ It is an update that changes the console's database, run exactly as in [Updates 
 - **After the swap**, run the smoke test with the token as in [Smoke test](#smoke-test): Grok Bot's token from the env file is now the first workspace's agent token, and works as before.
   Then claim the first workspace as in [Claim the first workspace](#claim-the-first-workspace-1); until then the console shows nobody its data.
   Under **Setup**, **Agents**, the first workspace's agent lists the env file's token, with when Grok Bot last used it.
+- **Between the swap and the claim** the owner cannot sign in, and everything that does not need the owner keeps working:
+  - Grok Bot's hourly run: `/mcp` resolves the env file's token to the first workspace's agent on its first call (and registers it), and every tool works as before.
+    Only during the swap itself, while the console and the MCP server restart, does `/mcp` answer 503 with `Retry-After: 5`, so swap away from the run's hour mark.
+  - The executor keeps storing settlements and its venue order journal, the event wake-ups keep going to Grok Bot's webhook, the console keeps following the chain, and `/agent/<address>` stays public.
+  - The owner gets nothing: every console page sends them to `/sign-in`, which has no passkey yet to offer, and every `/api/console/*` request is refused with 401.
+    So no holdings change, no pairing or change request is confirmed, and an intent Grok Bot proposes waits for the owner's approval until the claim.
+  - A console tab left open from before the swap keeps its old page: its live stream drops when the console restarts and comes back refused, so the page shows the last data it had with the lamp on reconnecting, and a write from it fails.
+    Reloading it goes to `/sign-in`.
+    Pages of the new version go to `/sign-in` by themselves when their stream is refused.
+  - The claim ends the window: the owner then sees everything that happened in it.
 - **A rollback restores the backup**: run all three blocks of the rollback, the second one included.
   The previous console cannot read the upgraded tables, whose rows now carry a mandate, and it does not notice: it opens a version 8 file without an error and its health check passes, but reading or saving the holdings fails (`no such column: id`).
   So the health check is no sign that a rollback worked; the restored backup is.
