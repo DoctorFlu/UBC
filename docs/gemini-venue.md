@@ -45,6 +45,7 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 
 The cost recorded onchain is what the fills cost at their prices, rounded up to the cent.
 It does not include Gemini's fee, which no answer reports; the order's size leaves room for it inside the approved amount.
+The result recorded onchain (`pnlCents`) is 0 at every fill: the contract cannot record the settlement (request 2.4 in [contract-interface.md](contract-interface.md)), so a position's result is its signed settlement.
 
 ## Fees
 
@@ -56,7 +57,17 @@ For example, $10 at 50c buys 19.32 contracts, not 20; 98c at 97c buys 1 contract
 One case is outside the bound: the page does not say whether the rounding to a cent is per order or per fill.
 If it is per fill, an order filled in many small pieces can pay up to 1 cent more per extra fill.
 A strict bound would need the number of fills, which is unknown when the order is sized.
-The one fill seen so far (below) was rounded per order, and it matched the bound exactly.
+The one fill seen so far (below) is consistent with the schedule: its fee was 1 cent, as the taker rate rounded up gives.
+One fill of 1 contract cannot tell per-order rounding from per-fill rounding, and at that size the maker rate rounds up to 1 cent as well.
+
+### The estimated fee
+
+No Gemini answer reports the fee, so the executor estimates it from the schedule at the taker rate (`estimatedFeeCents` in `gemini/src/fees.ts`), on the filled contracts and their average price, rounded up to the cent.
+The taker rate is the larger, so the estimate never understates a fee that the schedule gives.
+The journal stores it with the order's record when the order fills (`feeCents`), and the signed settlement carries it too: `feeCents`, with `pnlCents` = payout - cost - fee, the net after fees.
+A record written before the estimate was stored gets the estimate at settlement, from the cost and the contracts.
+A simulated fill pays no fee, so its settlement has no `feeCents` and its net is payout - cost.
+The console and the agent show the fee as estimated, said once next to any total.
 
 ## Settlement
 
@@ -165,9 +176,9 @@ Verified end to end on 17 November 2026, a local stack on the sandbox (devchain,
   The USD balance fell from 100000.00 to 99999.02: 97c and a 1c fee, the taker fee rounded up, exactly the worst case the order was sized for.
 - Buy NO on HI65100, $0.02 at 1c: 1 contract rested (`fundsOnHold` 0.01), and the executor cancelled it at its time limit with nothing filled, so its budget was released onchain.
 - Afterwards `npm run gemini:sandbox-orders` listed no open order.
-- At expiry the fill settled on Gemini's settled positions: Gemini published the outcome at 17:00:07 UTC (NO, BTC at $63,696.06), and the executor recorded the settlement, signed, at 17:00:30 UTC: cost $0.97, paid $1.00, net $0.03.
-  The balance rose to 100000.02, so the payout carried no fee.
-  The net the console shows leaves out the 1c fee paid at the fill, which no answer reports.
+- At expiry the fill settled on Gemini's settled positions: Gemini published the outcome at 17:00:07 UTC (NO, BTC at $63,696.06), and the executor recorded the settlement, signed, at 17:00:30 UTC: cost $0.97, paid $1.00.
+  The balance rose from 99999.02 to 100000.02, so the payout carried no fee: the only fee was the 1c at the fill.
+  Over the position the balance went from 100000.00 to 100000.02, a net of +$0.02, which is what the settlement now records with the estimated fee (cost $0.97, fee $0.01, paid $1.00, net after fees +$0.02).
 
 From Gemini's documentation only, not yet checked with a key:
 

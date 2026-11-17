@@ -51,7 +51,7 @@ The body is version 1 of `wakeEventSchema` (`shared/src/wake.ts`), usually 300 t
 | `mandate_changed` | The owner changed the rules, paused or resumed the agent. | `change` (`rules`, `paused` or `resumed`), `paused` |
 | `order_filled` | The executor recorded a fill more than 2 minutes (chain time) after the approval. | `intents[]`: `id`, `market`, `filledCents`, `pnlCents` |
 | `order_failed` | The executor recorded that an approved order did not fill. | `intents[]`: `id`, `market` |
-| `ladder_settled` | A ladder expired and the executor's settlement of its last filled position was stored (issue #92). | `ladders[]`: `asset`, `eventTicker`, `expiresAt`, `settlementValue`, `positions`, `costCents`, `payoutCents`, `pnlCents` |
+| `ladder_settled` | A ladder expired and the executor's settlement of its last filled position was stored (issue #92). | `ladders[]`: `asset`, `eventTicker`, `expiresAt`, `settlementValue`, `positions`, `costCents`, `feeCents` (Gemini's estimated fees; absent when none), `payoutCents`, `pnlCents` (the net after fees) |
 
 What the Bot does with each kind is in the routine, [agent/grok/routine.md](../agent/grok/routine.md).
 
