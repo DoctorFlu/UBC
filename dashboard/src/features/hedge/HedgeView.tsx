@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { type Column, Table } from "@/components/ui/Table";
 import { Tabs } from "@/components/ui/Tabs";
+import { When } from "@/components/ui/When";
 import { evidenceHref } from "@/lib/evidence/chain";
 import { type OrderOnChain, executionSummary, planExecution } from "@/lib/hedge/execution";
 import type { AgentPlanView, PreviewState } from "@/lib/hedge/types";
@@ -214,7 +215,17 @@ function AgentPlanCard({
     <>
       <Card
         title={`${agentName}'s plan`}
-        description={`Planned ${at(view.createdAt)}${at(view.createdAt) === at(view.storedAt) ? "" : `, stored ${at(view.storedAt)}`}.`}
+        description={
+          <>
+            Planned <When at={view.createdAt} date />
+            {at(view.createdAt) === at(view.storedAt) ? null : (
+              <>
+                , stored <When at={view.storedAt} date />
+              </>
+            )}
+            .
+          </>
+        }
         actions={<ArrowLink href={evidenceHref(view.planId)}>Evidence chain</ArrowLink>}
         headingLevel={2}
         className={styles.planCard}

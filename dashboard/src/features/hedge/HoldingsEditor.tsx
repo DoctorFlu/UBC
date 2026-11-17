@@ -7,7 +7,7 @@ import { useId, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
 import { useToast } from "@/components/ui/Toast";
-import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { When } from "@/components/ui/When";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
 import { useHydrated } from "@/lib/useHydrated";
@@ -207,11 +207,15 @@ export function HoldingsEditor({
         </Button>
       </div>
       <p className={styles.muted}>
-        {blocked && access.kind !== "loading" && dirty
-          ? blocked
-          : updatedAt
-            ? `Saved ${formatDateUtc(updatedAt)} at ${formatTimeUtc(updatedAt)}.`
-            : "Never saved."}
+        {blocked && access.kind !== "loading" && dirty ? (
+          blocked
+        ) : updatedAt ? (
+          <>
+            Saved <When at={updatedAt} date />.
+          </>
+        ) : (
+          "Never saved."
+        )}
       </p>
     </form>
   );

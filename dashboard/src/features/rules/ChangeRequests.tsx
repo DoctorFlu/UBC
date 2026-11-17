@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Toast";
 import { When } from "@/components/ui/When";
-import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+
 import type { ChainView } from "@/lib/live/types";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
@@ -130,7 +130,11 @@ function RequestCard({
           ) : null}
           <AgentReason
             text={request.reason}
-            footer={`${agentName}, ${formatDateUtc(request.createdAt)} at ${formatTimeUtc(request.createdAt)}`}
+            footer={
+              <>
+                {agentName}, <When at={request.createdAt} date />
+              </>
+            }
           />
           {pendingRequest && next && changes.length > 0 ? (
             <section className={styles.requestBacktest} aria-label="Backtest of the requested rules">

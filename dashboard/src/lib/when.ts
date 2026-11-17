@@ -31,6 +31,7 @@ export function relativeTime(date: Date, { now, timeZone, locale }: WhenOptions)
   const day = dayKey(date, timeZone);
   if (day === dayKey(now, timeZone)) return `Today, ${clock}`;
   if (day === dayKey(new Date(now.getTime() - 24 * 60 * MINUTE), timeZone)) return `Yesterday, ${clock}`;
+  if (day === dayKey(new Date(now.getTime() + 24 * 60 * MINUTE), timeZone)) return `Tomorrow, ${clock}`;
 
   const sameYear =
     new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(date) ===

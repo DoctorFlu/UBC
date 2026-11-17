@@ -14,7 +14,7 @@ import { EmptyState } from "@/components/ui/States";
 import { type Column, Table } from "@/components/ui/Table";
 import { UsdcMeter } from "@/components/ui/LimitMeter";
 import { When } from "@/components/ui/When";
-import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { formatTimeUtc } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { budgetReading, intentsByReceipt, paymentAnchor } from "@/lib/payments/links";
@@ -22,8 +22,6 @@ import type { SignalBudgetView, SignalPaymentView } from "@/lib/payments/types";
 import { formatUsdc } from "@/lib/payments/usdc";
 
 import styles from "./payments.module.css";
-
-const at = (iso: string) => `${formatDateUtc(iso)}, ${formatTimeUtc(iso)}`;
 
 interface PaymentRow {
   payment: SignalPaymentView;
@@ -157,9 +155,17 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
       <Card title="Signal budget today" headingLevel={2}>
         <UsdcMeter label="Spent" used={reading.spent} limit={reading.daily} usedWord="of today's budget" />
         <p className={styles.note} data-testid="budget-note">
-          {reading.reset
-            ? `A new day started at ${at(budget.resetsAt)}; nothing is counted until the agent reports today's spend.`
-            : `Resets ${at(budget.resetsAt)}. At most ${formatUsdc(reading.maxPerPurchase)} per purchase.`}
+          {reading.reset ? (
+            <>
+              A new day started <When at={budget.resetsAt} date />; nothing is counted until the agent reports
+              today&apos;s spend.
+            </>
+          ) : (
+            <>
+              Resets <When at={budget.resetsAt} date />. At most {formatUsdc(reading.maxPerPurchase)} per
+              purchase.
+            </>
+          )}
         </p>
       </Card>
       <Card title="Gateway balance" headingLevel={2}>
@@ -173,7 +179,15 @@ function BudgetCards({ budget, payments }: { budget: SignalBudgetView | null; pa
                 <span className="num">{formatUsdc(budget.gatewayBalance)}</span>
               )
             }
-            hint={budget.gatewayBalance === null ? "The agent could not read it" : `As of ${at(budget.asOf)}`}
+            hint={
+              budget.gatewayBalance === null ? (
+                "The agent could not read it"
+              ) : (
+                <>
+                  As of <When at={budget.asOf} date />
+                </>
+              )
+            }
           />
           <Stat
             label="Purchases recorded"

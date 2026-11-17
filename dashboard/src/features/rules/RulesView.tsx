@@ -5,9 +5,9 @@ import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Tabs } from "@/components/ui/Tabs";
 import { useAdvanced } from "@/lib/advanced/Advanced";
-import { formatDateUtc, formatTimeUtc } from "@/lib/format";
+import { When } from "@/components/ui/When";
 import { useSnapshot } from "@/lib/live/LiveConsole";
-import { agentName, isoFromUnix } from "@/lib/live/derive";
+import { agentName } from "@/lib/live/derive";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { useQueryTab } from "@/lib/useQueryTab";
 
@@ -40,8 +40,7 @@ export function RulesView({ tab, preview }: { tab?: RulesTab | undefined; previe
           setBy ? (
             <>
               <span>
-                Version {chain.policyVersion}, set {formatDateUtc(isoFromUnix(setBy.timestamp))} at{" "}
-                {formatTimeUtc(isoFromUnix(setBy.timestamp))}
+                Version {chain.policyVersion}, set <When at={setBy.timestamp} date />
               </span>
               {advanced ? <HexValue label="Signed in" value={setBy.txHash} kind="tx" /> : null}
             </>
