@@ -432,7 +432,7 @@ The idle stack does not count as use: it needs about 0.02 vCPU (the bare machine
 
 Measured on the free plan with the demo chain running and nobody using it:
 
-- The machine paused about 44 minutes after the last request (InstaBox's 30 minutes plus however often it checks).
+- The machine paused 44 and 53 minutes after the last request, in two tries: InstaBox's 30 minutes plus however it samples use.
 - The first request after the pause took 3.5 seconds, the next ones 0.3 to 0.4 seconds.
 - After the wake every container had its original start time and no restart, and the chain, the contract and the console's data were unchanged.
 
