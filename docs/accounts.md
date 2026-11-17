@@ -183,6 +183,9 @@ The hosted stack passes `CONSOLE_MASTER_KEY` from its env file, which `deploy/in
 - **A stolen session cookie** acts as that member until it expires or they sign out; it is `HttpOnly`, so page scripts cannot read it.
 - **Another workspace's member** cannot name a foreign mandate: every route takes the mandate from the session, and a `?mandate=` that is not the session's is 404, the same answer as one that does not exist.
 - **Guessing codes and tokens** is hopeless at 120 to 256 bits, and sign-in, sign-up, claim, recovery and token checks are rate limited besides.
+- **Timing** tells nothing about a token or code: the store looks them up by the SHA-256 of what was presented, never by the secret, so how long a lookup takes depends on a hash an attacker cannot steer toward a stored one; the service token is compared in constant time.
+- **The executor's route** (`/api/executor/v1/*`) takes no session and no token, so neither can be stolen for it: a settlement is stored only when its signature recovers to the contract's `executor()`.
+  Caddy answers 404 for it from outside, and forward auth never sees it.
 - **Cross-site requests** cannot write: `SameSite=Lax`, the `Origin` check on every write, and Caddy's refusal of cross-site requests that are not navigations.
 - **A copy of the database** holds no usable secret: hashes of tokens, sessions and codes, passkey public keys, and agent keys encrypted under a master key that is not in the database.
 - **A copy of the master key and the database together** reveals the agent keys; that is why production keeps them apart.
