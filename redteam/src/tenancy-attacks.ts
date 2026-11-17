@@ -32,6 +32,8 @@ function outcome(result: ToolResult): string {
   return found.length > 0 ? found.join("+") : result.isError ? "error" : "ok";
 }
 
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
 function needIntruder(ctx: AttackContext): Intruder {
   if (ctx.intruder === null) throw new Error("this target has no second workspace");
   return ctx.intruder;
@@ -358,6 +360,131 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
             `his token resolves to ${bobResolvesTo === bob.agentId ? "his agent" : `AGENT ${String(bobResolvesTo)}`}`,
             `his chain view: ${bobHasNoChain ? "none" : "PRESENT"}; the contract's venue orders, venue or settlements in his views: ${executorRecords ? "YES" : "no"}`,
             `her token, request and holdings: ${changed ? "CHANGED" : "unchanged"} (request ${String(after.request)}, token resolves to ${after.resolvesTo === alice.agentId ? "her agent" : String(after.resolvesTo)})`,
+          ].join("; "),
+        };
+      },
+    },
+
+    {
+      id: "console.step-up",
+      name: "A stolen session, without the member's passkey, mints a credential",
+      surface: "console",
+      tried:
+        "With Bob's session and no passkey, as a thief who copied his cookie would have, the attacker asks for a real passkey challenge for a token on Bob's own agent, then answers it with a forged assertion for Bob's credential, replays the same challenge, spends a second challenge on a token of another name, presents Bob's challenge from Alice's session, and invents a challenge id. Every write carries the console's own Origin.",
+      expected:
+        "The challenge is issued (201), and every answer is refused: 401 step_up_refused for the forged assertion, the other name and the other workspace, 401 step_up_expired for the replay and the made-up id. No token is added to either agent.",
+      expectedVerdict: "held",
+      selfOnly: SELF_ONLY,
+      async run(ctx) {
+        const api = needConsole(ctx);
+        const { alice, bob } = api;
+        const tokens = async (who: "alice" | "bob", agentId: string) => {
+          const agents = (field(json(await api.as(who, "GET", "/api/console/agents")), "agents") ?? []) as {
+            id: string;
+            tokens: { id: string }[];
+          }[];
+          return agents.find((a) => a.id === agentId)?.tokens.length ?? -1;
+        };
+        const before = { bob: await tokens("bob", bob.agentId), alice: await tokens("alice", alice.agentId) };
+
+        const challenge = async (name: string) => {
+          const response = await api.as("bob", "POST", "/api/console/step-up", {
+            action: { kind: "create-token", agentId: bob.agentId, name },
+          });
+          const id = field(json(response), "id");
+          const options = field(json(response), "options");
+          return {
+            response,
+            id: typeof id === "string" ? id : "",
+            challenge: text(field(options, "challenge")),
+            credentialId: text(
+              (field(options, "allowCredentials") as { id?: unknown }[] | undefined)?.[0]?.id,
+            ),
+          };
+        };
+        // A well-formed assertion for Bob's credential and this challenge, signed by nobody.
+        const forged = (c: { challenge: string; credentialId: string }) => {
+          const b64 = (bytes: Buffer) => bytes.toString("base64url");
+          const authenticatorData = Buffer.alloc(37);
+          authenticatorData[32] = 0x05; // user present and verified
+          return {
+            id: c.credentialId,
+            rawId: c.credentialId,
+            type: "public-key",
+            clientExtensionResults: {},
+            response: {
+              clientDataJSON: b64(
+                Buffer.from(
+                  JSON.stringify({
+                    type: "webauthn.get",
+                    challenge: c.challenge,
+                    origin: new URL(api.base).origin,
+                  }),
+                ),
+              ),
+              authenticatorData: b64(authenticatorData),
+              signature: b64(Buffer.alloc(72, 1)),
+            },
+          };
+        };
+        const mint = (who: "alice" | "bob", agentId: string, name: string, stepUp: unknown) =>
+          api.as(who, "POST", `/api/console/agents/${agentId}/tokens`, { name, stepUp });
+
+        const first = await challenge("Stolen");
+        const second = await challenge("Stolen");
+        const third = await challenge("Stolen");
+        const attempts: [string, ApiResponse, number, string][] = [
+          [
+            "a forged assertion for his own credential",
+            await mint("bob", bob.agentId, "Stolen", { id: first.id, response: forged(first) }),
+            401,
+            "step_up_refused",
+          ],
+          [
+            "the same challenge again",
+            await mint("bob", bob.agentId, "Stolen", { id: first.id, response: forged(first) }),
+            401,
+            "step_up_expired",
+          ],
+          [
+            "a challenge for one name, spent on another",
+            await mint("bob", bob.agentId, "Other name", { id: second.id, response: forged(second) }),
+            401,
+            "step_up_refused",
+          ],
+          [
+            "his challenge, from Alice's session on her agent",
+            await mint("alice", alice.agentId, "Stolen", { id: third.id, response: forged(third) }),
+            401,
+            "step_up_refused",
+          ],
+          [
+            "a made-up challenge id",
+            await mint("bob", bob.agentId, "Stolen", { id: "made-up", response: forged(first) }),
+            401,
+            "step_up_expired",
+          ],
+        ];
+        const after = { bob: await tokens("bob", bob.agentId), alice: await tokens("alice", alice.agentId) };
+
+        const codeOf = (response: ApiResponse) => text(field(json(response), "error", "code"));
+        const accepted = attempts.filter(([, response]) => ok(response.status));
+        const minted = after.bob !== before.bob || after.alice !== before.alice;
+        const issued = [first, second, third].every(
+          (c) => c.response.status === 201 && c.id !== "" && c.challenge !== "" && c.credentialId !== "",
+        );
+        const exact = attempts.every(
+          ([, response, status, code]) => response.status === status && codeOf(response) === code,
+        );
+        return {
+          verdict: accepted.length > 0 || minted ? "BREACH" : "held",
+          matched: issued && before.bob > 0 && before.alice > 0 && exact,
+          actual: [
+            `challenges issued: ${[first, second, third].map((c) => String(c.response.status)).join("/")}`,
+            attempts
+              .map(([label, response]) => `${label}: ${String(response.status)} ${codeOf(response)}`)
+              .join("; "),
+            `tokens: Bob ${String(before.bob)} -> ${String(after.bob)}, Alice ${String(before.alice)} -> ${String(after.alice)}`,
           ].join("; "),
         };
       },
