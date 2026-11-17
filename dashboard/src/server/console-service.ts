@@ -194,7 +194,7 @@ export class ConsoleService {
     return this.options.env ?? process.env;
   }
 
-  private get log(): Logger {
+  get log(): Logger {
     return this.options.logger ?? consoleLogger;
   }
 

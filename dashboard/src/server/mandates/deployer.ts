@@ -1,6 +1,6 @@
 import "server-only";
 
-import { PolicyClient, type PolicyRules, toSafeNumber } from "@mandate/shared";
+import { PolicyClient, toSafeNumber } from "@mandate/shared";
 import {
   type Abi,
   type Address,
@@ -163,7 +163,8 @@ const DEMO_BALANCE = parseEther("100");
 
 /**
  * The demo chain's deployer: funds the mandate's owner key and agent key with anvil's `anvil_setBalance`
- * (the chain's own test faucet), deploys from the owner key and sets the first rules.
+ * (the chain's own test faucet) and deploys from the owner key. The contract starts with no rules, so it
+ * allows nothing; the first rules are an owner call like any other (`MandateManager.ownerCall`).
  *
  * The contract's address follows from the owner key and its first nonce, so a deployment that was sent
  * but not recorded is found again instead of being sent twice, and a demo chain that lost its state gets
@@ -174,7 +175,6 @@ export async function deployFromServer(
   artifact: PolicyArtifact,
   target: DeployTarget,
   owner: { master: MasterKey; key: { address: Address; sealed: string } },
-  rules: PolicyRules | null,
 ): Promise<MandateContract> {
   const account = ownerAccount(owner.master, target.mandateId, owner.key);
   const address = getContractAddress({ from: account.address, nonce: 0n });
@@ -219,20 +219,9 @@ export async function deployFromServer(
   if (receipt.status !== "success" || !receipt.contractAddress) {
     throw new DeployError("not_deployed", "The deployment transaction failed.");
   }
-  const contract = await verifyDeployment(access, artifact, target, {
+  return verifyDeployment(access, artifact, target, {
     address: receipt.contractAddress,
     blockNumber: receipt.blockNumber,
     owner: account.address,
   });
-  if (rules) {
-    const client = new PolicyClient({
-      address: contract.address,
-      publicClient: access.client,
-      walletClient: wallet,
-      minMaxFeePerGas: 0n,
-      receiptPollingMs: 100,
-    });
-    await client.setPolicy(rules);
-  }
-  return contract;
 }

@@ -107,15 +107,17 @@ export const createMandate = consoleRoute(async (request, service, scope) => {
   );
   if (wait > 0) return limited(wait, "Too many new mandates.");
   const { name, rules, stepUp } = body.data;
+  let credentialId: string | null = null;
   if (deployer === "server") {
     // The first rules decide what the agent may spend from the first block: a passkey confirms them.
     if (rules === null || stepUp === null) {
       return apiError(422, "step_up_required", "Confirm the new mandate and its rules with your passkey.");
     }
-    await service.stepUp.finish(scope.access, stepUp, {
+    const confirmed = await service.stepUp.finish(scope.access, stepUp, {
       action: { kind: "create-mandate", name, rules },
       target: { workspaceId: scope.access.workspace.id, contract: null },
     });
+    credentialId = confirmed.credentialId;
   } else if (rules !== null) {
     return apiError(
       422,
@@ -123,7 +125,7 @@ export const createMandate = consoleRoute(async (request, service, scope) => {
       "Your wallet sets this mandate's rules once it has deployed the contract.",
     );
   }
-  const created = await service.mandates.create(scope.access, { name, rules });
+  const created = await service.mandates.create(scope.access, { name, rules, credentialId });
   const answer: CreatedMandateResponse = {
     mandate: mandateView(service, created.mandate),
     token: created.token,
@@ -178,7 +180,7 @@ export const postDeployment = consoleRoute(async (request, service, scope, param
   let attached: Mandate;
   if (body.data.txHash === null) {
     try {
-      attached = await service.mandates.deployFromServer(mandate, null);
+      attached = await service.mandates.deployFromServer(mandate);
     } catch (error) {
       if (error instanceof DeployError) return apiError(409, error.code, error.message);
       throw error;

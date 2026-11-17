@@ -45,6 +45,7 @@ const TOP_UP = parseEther("100");
  */
 export class MandateManager {
   readonly #deploying = new Set<string>();
+  #warnedDeployer = false;
   /** One owner client per mandate, so its writes are serialized and never race for a nonce. */
   readonly #ownerClients = new Map<string, PolicyClient>();
 
@@ -54,7 +55,19 @@ export class MandateManager {
   deployer(): "server" | "wallet" | null {
     const session = this.service.serverContract;
     if (!session) return null;
-    return this.service.config.mandates.deployer ?? (session.network.kind === "local" ? "server" : "wallet");
+    const local = session.network.kind === "local";
+    const configured = this.service.config.mandates.deployer;
+    if (configured === "server" && !local) {
+      // The console holding owner keys, funded from the chain's own faucet, is for the demo chain only.
+      if (!this.#warnedDeployer) {
+        this.#warnedDeployer = true;
+        this.service.log.warn(
+          "CONSOLE_MANDATE_DEPLOYER=server is for the demo chain only; new mandates are off until it is removed.",
+        );
+      }
+      return null;
+    }
+    return configured ?? (local ? "server" : "wallet");
   }
 
   /** The chain every mandate's contract is on: the server's own contract's. */
@@ -90,7 +103,10 @@ export class MandateManager {
    * deploys its contract with `rules`. Refused past the workspace's cap, checked where the mandate is
    * written. A failed deployment leaves the mandate without a contract, to deploy again from Setup.
    */
-  async create(access: Access, input: { name: string; rules: PolicyRules | null }): Promise<CreatedMandate> {
+  async create(
+    access: Access,
+    input: { name: string; rules: PolicyRules | null; credentialId: string | null },
+  ): Promise<CreatedMandate> {
     const deployer = this.deployer();
     if (deployer === null) {
       throw new AccountError(
@@ -120,9 +136,22 @@ export class MandateManager {
     let mandate = created.mandate;
     if (deployer === "server") {
       try {
-        mandate = await this.deployFromServer(mandate, input.rules);
+        mandate = await this.deployFromServer(mandate);
       } catch (error) {
         deployProblem = describeDeployFailure(error);
+      }
+      if (deployProblem === null && input.rules) {
+        // The first rules, as the passkey that confirmed this creation authorised them, recorded with it.
+        try {
+          await this.ownerCall(
+            access,
+            mandate,
+            { functionName: "setPolicy", rules: input.rules },
+            input.credentialId,
+          );
+        } catch (error) {
+          deployProblem = `The contract is deployed, but its first rules were not set: ${errorMessage(error)}`;
+        }
       }
     }
     this.service.changed(mandate.id);
@@ -130,7 +159,7 @@ export class MandateManager {
   }
 
   /** Deploys a mandate's contract from the owner key the console holds for it (the demo chain). */
-  async deployFromServer(mandate: Mandate, rules: PolicyRules | null): Promise<Mandate> {
+  async deployFromServer(mandate: Mandate): Promise<Mandate> {
     if (mandate.contract) return mandate;
     if (this.deployer() !== "server") {
       throw new DeployError("unavailable", "Here the owner's wallet deploys each mandate's contract.");
@@ -148,13 +177,10 @@ export class MandateManager {
       if (!artifact) {
         throw new DeployError("unavailable", "The compiled Policy contract is missing; ask the operator.");
       }
-      const contract = await deployFromServer(
-        access,
-        artifact,
-        target,
-        { master: this.service.accounts.master, key },
-        rules,
-      );
+      const contract = await deployFromServer(access, artifact, target, {
+        master: this.service.accounts.master,
+        key,
+      });
       const attached = this.service.accounts.store.attachContract(mandate.id, "server", contract);
       if (!attached) throw new DeployError("unavailable", "Another mandate already follows that contract.");
       this.service.refreshFollowers();

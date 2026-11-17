@@ -39,6 +39,7 @@ import {
   postOwnerCall,
   startStepUp,
 } from "./mandates-api";
+import { saveHoldings } from "./owner-api";
 
 const silent = { info: () => undefined, warn: () => undefined };
 const ORIGIN = "http://console.test";
@@ -158,7 +159,7 @@ describe("mandates on the demo chain", () => {
   async function read<T>(address: Address, functionName: "user" | "agent" | "executor"): Promise<T> {
     const session = service.serverContract;
     if (!session) throw new Error("no chain");
-    return (await session.client.readContract({ address, abi: policyAbi, functionName }));
+    return await session.client.readContract({ address, abi: policyAbi, functionName });
   }
 
   beforeAll(async () => {
@@ -223,6 +224,10 @@ describe("mandates on the demo chain", () => {
     expect(await read<Address>(contract.address, "executor")).toBe(chain.executor.account?.address);
     await until(() => snapshotOf(created.mandate.id).chain?.rules !== null, "the new mandate's rules");
     expect(snapshotOf(created.mandate.id).chain?.rules).toEqual(RULES);
+    // The first rules are an owner action like any other: recorded with the passkey that confirmed them.
+    const [first] = service.accounts.store.ownerActions(created.mandate.id, 10);
+    expect(first).toMatchObject({ functionName: "setPolicy", status: "sent", memberName: "Bob" });
+    expect(first?.credentialId).toBe(keys.get(bob.id)?.id);
   });
 
   it("deploys a sign-up's first mandate on a session alone, with no rules: it allows nothing yet", async () => {
@@ -308,9 +313,68 @@ describe("mandates on the demo chain", () => {
       actions: { functionName: string; memberName: string; credentialId: string | null; status: string }[];
     };
     const sent = audit.actions.filter((a) => a.status === "sent");
-    expect(sent.map((a) => a.functionName).sort()).toEqual(["approveIntent", "setPaused", "setPaused"]);
+    expect(sent.map((a) => a.functionName).sort()).toEqual(["approveIntent", "setPaused", "setPaused", "setPolicy"]);
     expect(sent.find((a) => a.functionName === "approveIntent")?.credentialId).toBe(keys.get(bob.id)?.id);
     expect(sent.every((a) => a.memberName === "Bob")).toBe(true);
+  });
+
+  it("sends two approvals confirmed at the same moment, one after the other, without a nonce race", async () => {
+    const mandate = service.accounts.store.mandates(bob.workspaceId).find((m) => m.name === "Approvals");
+    if (!mandate?.contract) throw new Error("no mandate");
+    const views = (await (await listMandates(get(bob, "mandates"), service)).json()) as MandatesResponse;
+    const view = views.mandates.find((m) => m.id === mandate.id);
+    if (!view) throw new Error("no view");
+    const agent = agentOf(view);
+    const one = await agent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 2_100 });
+    const two = await agent.proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 2_200 });
+    const calls = [one, two].map((held): OwnerCall => ({
+      functionName: "approveIntent",
+      intentId: held.intentId,
+    }));
+    const confirmations = await Promise.all(
+      calls.map((c) => confirm(bob, { kind: "owner-call", mandateId: mandate.id, call: c })),
+    );
+    const responses = await Promise.all(calls.map((c, i) => call(bob, mandate.id, c, confirmations[i])));
+    expect(responses.map((r) => r.status)).toEqual([201, 201]);
+    expect((await agent.getIntent(one.intentId))?.status).toBe("approved");
+    expect((await agent.getIntent(two.intentId))?.status).toBe("approved");
+  });
+
+  it("takes a passkey, never a wallet signature or a bare session, for offchain owner requests", async () => {
+    const mandate = service.accounts.store.mandates(bob.workspaceId).find((m) => m.name === "Approvals");
+    if (!mandate) throw new Error("no mandate");
+    const payload = { holdings: [{ asset: "BTC", quantity: "0.5" }] };
+    const path = `holdings?mandate=${mandate.id}`;
+    const save = (body: unknown) =>
+      saveHoldings(
+        new Request(`${ORIGIN}/api/console/${path}`, {
+          method: "PUT",
+          headers: consoleHeaders(service, bob),
+          body: JSON.stringify(body),
+        }),
+        service,
+      );
+    const signed = await save({
+      payload,
+      auth: { issuedAt: new Date().toISOString(), nonce: `0x${"1".repeat(32)}`, signature: "0x00" },
+    });
+    expect(await errorCode(signed)).toBe("step_up_required");
+    const otherPayload = await confirm(bob, {
+      kind: "owner-request",
+      mandateId: mandate.id,
+      request: { action: "holdings.save", payload: { holdings: [{ asset: "BTC", quantity: "9" }] } },
+    });
+    expect(await errorCode(await save({ payload, stepUp: otherPayload }))).toBe("step_up_refused");
+    const confirmed = await confirm(bob, {
+      kind: "owner-request",
+      mandateId: mandate.id,
+      request: { action: "holdings.save", payload },
+    });
+    const saved = await save({ payload, stepUp: confirmed });
+    expect(saved.status).toBe(200);
+    expect(service.offchain.holdings(mandate.id).holdings).toEqual(payload.holdings);
+    // Nothing reached Bob's other mandate.
+    expect(service.offchain.holdings(mandateOf(service, bob)).holdings).toEqual([]);
   });
 
   it("refuses owner calls on another workspace's mandate, and on the server's own contract", async () => {

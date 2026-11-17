@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 
 import { ownerCallSchema } from "@/lib/owner/calls";
-import { OWNER_ACTIONS } from "@/lib/owner-request";
+import { ownerRequestSchema } from "@/lib/owner-request";
 
 import type { AccountsConfig } from "../config";
 import { AccountError, type Access, isPlainText } from "./accounts";
@@ -49,10 +49,7 @@ export const stepUpActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("owner-request"),
     mandateId: z.string().min(1).max(64),
-    action: z.enum(
-      Object.keys(OWNER_ACTIONS) as [keyof typeof OWNER_ACTIONS, ...(keyof typeof OWNER_ACTIONS)[]],
-    ),
-    payload: z.unknown(),
+    request: ownerRequestSchema,
   }),
   z.strictObject({
     kind: z.literal("create-mandate"),
