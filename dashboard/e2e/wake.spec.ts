@@ -3,7 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { type Page, expect, test } from "@playwright/test";
 
 import { DEMO_POLICY } from "@mandate/devchain";
-import { CONSOLE_AGENT_ROUTES, type WakeEvent, wakeEventSchema } from "@mandate/shared";
+import { CONSOLE_AGENT_ROUTES, WAKE_DEBOUNCE_MS, type WakeEvent, wakeEventSchema } from "@mandate/shared";
 import { createTestClient, http } from "viem";
 
 import {
@@ -34,6 +34,9 @@ import { type FakeWebhook, startFakeWebhook } from "./support/fake-webhook";
  * (a rejected intent, a late fill, the owner's kill switch in the browser, a fall of spot) must each send
  * exactly one well-formed event; the debounce and the daily cap must hold; a restart must resend nothing;
  * and neither the webhook's secret path nor its key may reach the console's output or its pages.
+ *
+ * The wake-ups run on the console's test clock (`GROK_WAKE_TEST_CLOCK=on`, issue #110), which the spec
+ * moves past a debounce window itself: a slow or sleeping machine can never end one between two tests.
  */
 
 const PORT = Number(process.env.E2E_WAKE_PORT ?? 3104);
@@ -41,8 +44,8 @@ const CHAIN_PORT = Number(process.env.E2E_WAKE_CHAIN_PORT ?? 8648);
 const GEMINI_PORT = Number(process.env.E2E_WAKE_GEMINI_PORT ?? 8658);
 const WEBHOOK_PORT = Number(process.env.E2E_WAKE_WEBHOOK_PORT ?? 8668);
 const baseURL = `http://localhost:${PORT.toString()}`;
-/** Low, so the suite reaches it: four triggers are sent, the fifth must not be. */
-const DAILY_CAP = 4;
+/** Low, so the suite reaches it: five wake-ups are sent, the sixth must not be. */
+const DAILY_CAP = 5;
 
 test.describe.configure({ mode: "serial" });
 test.use({ baseURL, viewport: { width: 1440, height: 900 } });
@@ -74,6 +77,7 @@ async function startConsole(): Promise<void> {
       GROK_WEBHOOK_KEY: webhook.key,
       GROK_WAKE_DAILY_CAP: DAILY_CAP.toString(),
       GROK_WAKE_PRICE_CHECK_MS: "1000",
+      GROK_WAKE_TEST_CLOCK: "on",
       NEXT_DEV_CACHE: "off",
     },
   });
@@ -114,6 +118,16 @@ function events(): WakeEvent[] {
 async function received(count: number, timeoutMs = 20_000): Promise<WakeEvent[]> {
   await expect.poll(() => webhook.received.length, { timeout: timeoutMs }).toBeGreaterThanOrEqual(count);
   return events();
+}
+
+/** Moves the wake-ups' clock forward; the console answers once what is due by then has been sent. */
+async function advanceWakeClock(ms: number): Promise<void> {
+  const response = await fetch(new URL("/api/dev/wake-clock", baseURL), {
+    method: "POST",
+    headers: { authorization: `Bearer ${E2E_SERVICE_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify({ advanceMs: ms }),
+  });
+  expect(response.status).toBe(200);
 }
 
 /** Lets the console read the chain's head and act on it, then returns what it shows. */
@@ -164,7 +178,7 @@ test("the chain's history wakes nothing, and wake-ups are on", async () => {
   });
 });
 
-test("an intent the contract rejects sends one event; a second one waits for the debounce window", async () => {
+test("an intent the contract rejects sends one event; a second one waits for the debounce window to end", async () => {
   const rejected = await chain.agent.proposeTrade(noBuy(BTC_65K, 3_000, 31));
   expect(rejected.verdict).toBe("rejected");
   const [event] = await received(1);
@@ -183,6 +197,18 @@ test("an intent the contract rejects sends one event; a second one waits for the
   const current = await settled();
   expect(webhook.received).toHaveLength(1);
   expect(current.wake.recent[0]).toMatchObject({ kind: "intent_rejected", status: "queued", count: 1 });
+
+  // A minute before the window ends it still waits; at its end it goes out, once.
+  await advanceWakeClock(WAKE_DEBOUNCE_MS.intent_rejected - 60_000);
+  expect(webhook.received).toHaveLength(1);
+  await advanceWakeClock(60_000);
+  const [, second] = await received(2);
+  expect(second).toMatchObject({
+    kind: "intent_rejected",
+    count: 1,
+    summary: `The contract rejected intent #${again.intentId.toString()}: over max trade size.`,
+  });
+  expect((await snapshot(baseURL)).wake.recent[0]).toMatchObject({ kind: "intent_rejected", status: "sent" });
 });
 
 test("a fill recorded long after its approval sends one event; one right after it sends none", async () => {
@@ -197,15 +223,15 @@ test("a fill recorded long after its approval sends one event; one right after i
   const held = await chain.agent.proposeTrade(noBuy(BTC_64K, 2_200, 24));
   expect(held.verdict).toBe("needs_approval");
   await settled();
-  expect(webhook.received).toHaveLength(1);
+  expect(webhook.received).toHaveLength(2);
 
   const late = await chain.agent.proposeTrade(noBuy(BTC_65K, 600, 31));
   await createTestClient({ mode: "anvil", transport: http(chain.anvil.rpcUrl) }).increaseTime({
     seconds: 600,
   });
   await chain.executor.recordResult({ intentId: late.intentId, filled: true, filledCents: 600, pnlCents: 0 });
-  const all = await received(2);
-  expect(all[1]).toMatchObject({
+  const all = await received(3);
+  expect(all[2]).toMatchObject({
     kind: "order_filled",
     detail: { intents: [{ id: late.intentId, market: BTC_65K, filledCents: 600, pnlCents: 0 }] },
   });
@@ -218,8 +244,8 @@ test("the owner's kill switch in the console sends one event", async ({ page }) 
   await page.keyboard.press("Enter");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("paused-banner")).toBeVisible();
-  const all = await received(3);
-  expect(all[2]).toMatchObject({
+  const all = await received(4);
+  expect(all[3]).toMatchObject({
     kind: "mandate_changed",
     summary: "The owner paused the agent.",
     detail: { change: "paused", paused: true },
@@ -242,18 +268,18 @@ test("spot falling below the floor of the agent's plan sends one event", async (
   // Spot as recorded is above the floor: checks run every second and wake nothing.
   await settled();
   await new Promise((resolve) => setTimeout(resolve, 2_000));
-  expect(webhook.received).toHaveLength(3);
+  expect(webhook.received).toHaveLength(4);
 
   gemini.setBtcSpot(floor - 50_000);
-  const all = await received(4);
-  expect(all[3]).toMatchObject({
+  const all = await received(5);
+  expect(all[4]).toMatchObject({
     kind: "price_below_floor",
     detail: { asset: "BTC", planId: request.planId, floorCents: floor, spotCents: floor - 50_000 },
     link: `${baseURL}/hedge`,
   });
   // Still below on the next checks: the same fall, never sent again.
   await new Promise((resolve) => setTimeout(resolve, 3_000));
-  expect(webhook.received).toHaveLength(4);
+  expect(webhook.received).toHaveLength(5);
 });
 
 test("past the daily cap, the owner's decision is recorded but not sent", async () => {
@@ -271,6 +297,7 @@ test("past the daily cap, the owner's decision is recorded but not sent", async 
 test("exactly one well-formed event per trigger, each with its own id", () => {
   const all = events();
   expect(all.map((event) => event.kind)).toEqual([
+    "intent_rejected",
     "intent_rejected",
     "order_filled",
     "mandate_changed",

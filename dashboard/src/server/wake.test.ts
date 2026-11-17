@@ -27,6 +27,7 @@ function config(dataDir: string): ConsoleConfig {
       offReason: null,
       dailyCap: 6,
       priceCheckMs: 50,
+      testClock: false,
     },
   });
 }
