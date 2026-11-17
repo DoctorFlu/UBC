@@ -108,7 +108,7 @@ Create both keys with `npm run x402:keygen`.
 | `SIGNALS_HEDGE_PRICE_USD` | no | Price of one hedge signal in dollars, a fraction of a cent from `0.000001` to `0.009999`. Defaults to `0.001`. |
 | `SIGNALS_ASSETS` | no | Comma-separated assets the signal API sells hedge signals for. Defaults to every asset the Gemini client knows. |
 | `SIGNALS_FAIR_BAND_CENTS` | no | Edge, either way, below which protection counts as fairly priced, from 1 to 50 cents. Defaults to `2`. |
-| `SIGNALS_VOL_WINDOW_HOURS` | no | Hourly candles behind the realised volatility, from 24 to 1000. Defaults to `168` (one week). |
+| `SIGNALS_VOL_WINDOW_HOURS` | no | Hours of history behind the realised volatility, ending at the newest closed hourly candle, from 24 to 1000. Defaults to `168` (one week). Hours missing from Gemini's candles are skipped, so the signal states the returns it used and `missingHours`. |
 | `SIGNAL_DAILY_BUDGET_USDC` | no | Most the MCP server's `buy_signal` tool spends per UTC day. Defaults to `0.02`. |
 | `SIGNAL_MAX_PRICE_USDC` | no | Most `buy_signal` pays for one signal; checked before anything is signed. At most the daily budget. Defaults to `0.005`. |
 | `AGENT_DATA_DIR` | no | Where the MCP server keeps its signal spend ledger and purchased signals. Defaults to `.data/agent`, which is git-ignored. |

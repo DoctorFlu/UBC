@@ -1,8 +1,15 @@
-import type { Ladder } from "@mandate/gemini";
+import { candlesSchema, normalizeCandles, type Candle, type Ladder } from "@mandate/gemini";
 import { hedgeSignalSchema, verifyHedgeSignal, type HedgeSignal } from "@mandate/shared";
 import { describe, expect, it } from "vitest";
 import { buildHedgeSignal, DEFAULT_SIGNAL_MODEL, HOUR_MS, type BuildResult } from "../src/index";
-import { hourlyCandles, RECORDED_AT, weeklyLadder } from "../src/testing";
+import {
+  GAP_RECORDED_AT,
+  gappedCandlesBody,
+  healedCandlesBody,
+  hourlyCandles,
+  RECORDED_AT,
+  weeklyLadder,
+} from "../src/testing";
 
 function signalOf(result: BuildResult): HedgeSignal {
   if (!result.ok) throw new Error(`expected a signal, got ${result.code}: ${result.message}`);
@@ -28,7 +35,14 @@ describe("buildHedgeSignal on the recorded weekly BTC ladder", () => {
       asOf: "2026-11-15T20:19:00.000Z",
       secondsToExpiry: 438_060,
       spot: { midCents: 6_471_001, source: "gemini:btcusd" },
-      volatility: { method: "close-to-close", candle: "1hr", returns: 168, to: "2026-11-15T20:00:00.000Z" },
+      volatility: {
+        method: "close-to-close",
+        candle: "1hr",
+        returns: 168,
+        from: "2026-11-08T19:00:00.000Z",
+        to: "2026-11-15T20:00:00.000Z",
+        missingHours: 0,
+      },
       model: { name: "lognormal-driftless", fairBandBps: 200 },
     });
   });
@@ -136,10 +150,19 @@ describe("buildHedgeSignal edge cases", () => {
     expect(tooSoon).toMatchObject({ ok: false, code: "expired" });
   });
 
-  it("refuses when there is too little price history", () => {
+  it("refuses when there is too little price history, and says how little", () => {
     const recent = hourlyCandles().slice(-10);
-    expect(build(weeklyLadder(), recent)).toMatchObject({ ok: false, code: "insufficient_history" });
-    expect(build(weeklyLadder(), [])).toMatchObject({ ok: false, code: "insufficient_history" });
+    expect(build(weeklyLadder(), recent)).toEqual({
+      ok: false,
+      code: "insufficient_history",
+      message:
+        "Only 9 hourly BTC returns are available in the 10 hours to 2026-11-15T20:00:00.000Z. At least 24 are needed to estimate volatility.",
+    });
+    expect(build(weeklyLadder(), [])).toEqual({
+      ok: false,
+      code: "insufficient_history",
+      message: "Gemini returned no closed hourly BTC candles. At least 24 are needed to estimate volatility.",
+    });
   });
 
   it("refuses a ladder with no strikes", () => {
@@ -154,5 +177,53 @@ describe("buildHedgeSignal edge cases", () => {
     const forming = { ...last, openTimeMs: last.openTimeMs + HOUR_MS, closeCents: last.closeCents * 2 };
     const withForming = signalOf(build(weeklyLadder(), [...candles, forming]));
     expect(withForming.volatility).toEqual(signalOf(build()).volatility);
+  });
+});
+
+describe("buildHedgeSignal on Gemini's candles with a gap (issue #98)", () => {
+  // Recorded 2026-11-17 04:14 UTC: one answer lacked 2026-11-16 08:00 to 21:00, the next had them all.
+  const gapped = normalizeCandles(candlesSchema.parse(gappedCandlesBody()));
+  const healed = normalizeCandles(candlesSchema.parse(healedCandlesBody()));
+  const at = (candles: Candle[]) => build(weeklyLadder(), candles, GAP_RECORDED_AT);
+
+  it("records a gap of missing rows, the other rows unchanged", () => {
+    const byTime = new Map(healed.map((c) => [c.openTimeMs, c]));
+    expect(healed.length - gapped.length).toBe(14);
+    for (const candle of gapped) expect(byTime.get(candle.openTimeMs)).toEqual(candle);
+  });
+
+  it("uses the full week when the data has no gap", () => {
+    expect(signalOf(at(healed)).volatility).toMatchObject({
+      returns: 168,
+      from: "2026-11-10T03:00:00.000Z",
+      to: "2026-11-17T04:00:00.000Z",
+      missingHours: 0,
+    });
+  });
+
+  it("estimates over the hours that exist and says how many are missing", () => {
+    const signal = signalOf(at(gapped));
+    expect(verifyHedgeSignal(signal)).toBe(true);
+    // The same week: 14 missing hours remove 15 returns (one per missing hour, plus the one after the gap).
+    expect(signal.volatility).toMatchObject({
+      returns: 153,
+      from: "2026-11-10T03:00:00.000Z",
+      to: "2026-11-17T04:00:00.000Z",
+      missingHours: 14,
+    });
+    // Fewer samples of the same week: close to the complete estimate, not equal to it.
+    const complete = signalOf(at(healed)).volatility.annualizedBps;
+    expect(signal.volatility.annualizedBps).not.toBe(complete);
+    expect(Math.abs(signal.volatility.annualizedBps - complete)).toBeLessThan(complete / 5);
+  });
+
+  it("refuses with the count, the window and the missing hours when the gap leaves too little", () => {
+    // The newest 20 candles Gemini sent: 6 after the gap and 14 before it.
+    expect(at(gapped.slice(-20))).toEqual({
+      ok: false,
+      code: "insufficient_history",
+      message:
+        "Only 18 hourly BTC returns are available in the 34 hours to 2026-11-17T04:00:00.000Z; Gemini's candles are missing 14 of those hours, and none is filled in. At least 24 are needed to estimate volatility.",
+    });
   });
 });

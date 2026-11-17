@@ -118,6 +118,7 @@ const EXAMPLE_SIGNAL: HedgeSignal = {
     returns: 168,
     from: "2026-11-08T19:00:00.000Z",
     to: "2026-11-15T20:00:00.000Z",
+    missingHours: 0,
     source: "gemini:btcusd",
   },
   model: { name: "lognormal-driftless", fairBandBps: 200, assumptions: [...MODEL_ASSUMPTIONS] },

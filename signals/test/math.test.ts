@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  annualizedVolatilityBps,
   bookState,
   classifyEdge,
   HOUR_MS,
@@ -8,6 +9,7 @@ import {
   normalCdf,
   probabilityAtOrAboveBps,
   realizedVolatility,
+  returnWindow,
   roundDiv,
   SECONDS_PER_YEAR,
   toBps,
@@ -126,7 +128,13 @@ describe("realizedVolatility", () => {
       minReturns: 2,
       nowMs: 3 * HOUR_MS,
     });
-    expect(estimate).toEqual({ annualizedBps: 132_807, returns: 2, fromMs: 0, toMs: 3 * HOUR_MS });
+    expect(estimate).toEqual({
+      annualizedBps: 132_807,
+      returns: 2,
+      fromMs: 0,
+      toMs: 3 * HOUR_MS,
+      missingIntervals: 0,
+    });
   });
 
   it("is zero for a price that never changes or grows at a constant rate", () => {
@@ -144,14 +152,58 @@ describe("realizedVolatility", () => {
     const series = candles([100, 300, 100, 110, 99, 5_000]);
     // The last candle opened at 5h and has not closed at 5.5h; the window keeps two returns: 100 -> 110 -> 99.
     const estimate = realizedVolatility(series, { maxReturns: 2, minReturns: 2, nowMs: 5.5 * HOUR_MS });
-    expect(estimate).toEqual({ annualizedBps: 132_807, returns: 2, fromMs: 2 * HOUR_MS, toMs: 5 * HOUR_MS });
+    expect(estimate).toEqual({
+      annualizedBps: 132_807,
+      returns: 2,
+      fromMs: 2 * HOUR_MS,
+      toMs: 5 * HOUR_MS,
+      missingIntervals: 0,
+    });
   });
 
-  it("stops at a gap instead of treating it as one hour", () => {
+  it("uses the returns on both sides of a gap and never one across it", () => {
+    // Hours 2, 3 and 4 are missing. The 400 -> 100 move spans four hours and must not count as one.
     const series = [...candles([100, 400]), ...candles([100, 110, 99], 5 * HOUR_MS)];
     const estimate = realizedVolatility(series, { maxReturns: 10, minReturns: 2, nowMs: 8 * HOUR_MS });
-    expect(estimate?.returns).toBe(2);
-    expect(estimate?.annualizedBps).toBe(132_807);
+    expect(estimate).toEqual({
+      annualizedBps: annualizedVolatilityBps([Math.log(4), Math.log(1.1), Math.log(99 / 110)]),
+      returns: 3,
+      fromMs: 0,
+      toMs: 8 * HOUR_MS,
+      missingIntervals: 3,
+    });
+    const bridged = annualizedVolatilityBps([Math.log(4), Math.log(100 / 400), Math.log(1.1), Math.log(0.9)]);
+    expect(estimate?.annualizedBps).not.toBe(bridged);
+  });
+
+  it("keeps the window to the newest maxReturns hours when a gap thins it", () => {
+    // Hours 0 to 9 with hour 7 missing; a 4-hour window ending at 10h holds hours 5, 6, 8 and 9.
+    const series = candles([100, 101, 102, 103, 104, 105, 106, 107, 108, 109]).filter(
+      (c) => c.openTimeMs !== 7 * HOUR_MS,
+    );
+    expect(returnWindow(series, { maxReturns: 4, nowMs: 10 * HOUR_MS })).toEqual({
+      logReturns: [Math.log(106 / 105), Math.log(109 / 108)],
+      fromMs: 5 * HOUR_MS,
+      toMs: 10 * HOUR_MS,
+      missingIntervals: 1,
+    });
+  });
+
+  it("has no estimate when a gap leaves too few returns", () => {
+    const series = [...candles([100, 110]), ...candles([120, 130], 3 * HOUR_MS)];
+    const options = { maxReturns: 10, minReturns: 3, nowMs: 5 * HOUR_MS };
+    expect(realizedVolatility(series, options)).toBeNull();
+    expect(returnWindow(series, options)).toMatchObject({
+      missingIntervals: 1,
+      fromMs: 0,
+      toMs: 5 * HOUR_MS,
+    });
+    expect(returnWindow(series, options)?.logReturns).toHaveLength(2);
+  });
+
+  it("has no window without a closed candle", () => {
+    expect(returnWindow([], { maxReturns: 10, nowMs: HOUR_MS })).toBeNull();
+    expect(returnWindow(candles([100]), { maxReturns: 10, nowMs: HOUR_MS - 1 })).toBeNull();
   });
 
   it("accepts candles in any order", () => {

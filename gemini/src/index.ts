@@ -23,6 +23,7 @@ export {
 export {
   buildLadder,
   classifyKind,
+  countMissingCandles,
   depthFromBook,
   ladderRungs,
   listingFromEvent,
@@ -55,6 +56,7 @@ export {
   type RawEvent,
 } from "./schemas";
 export {
+  CANDLE_INTERVAL_MS,
   CANDLE_TIME_FRAMES,
   KNOWN_ASSETS,
   LADDER_KINDS,

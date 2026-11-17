@@ -88,7 +88,10 @@ function payerOf(payload: PaymentPayload): string {
   return typeof authorization?.from === "string" ? authorization.from : "";
 }
 
-/** Gemini responses recorded on 2026-11-15 (see gemini/scripts/record-fixtures.ts). */
+/**
+ * Gemini responses recorded on 2026-11-15 (see gemini/scripts/record-fixtures.ts), plus two hourly BTC
+ * candle answers recorded on 2026-11-17 (issue #98).
+ */
 const FIXTURES = join(import.meta.dirname, "..", "..", "gemini", "test", "fixtures");
 
 /** When the recorded event, ticker and candles were live. */
@@ -121,18 +124,42 @@ const RECORDED_PATHS: Record<string, string> = {
 };
 
 /**
- * A Gemini client whose fetch answers from the recorded fixtures and counts requests. Set `failing` to
- * make every request fail as if Gemini were down.
+ * When the two candle fetches below were made, five seconds apart: the first came back with 14 hours
+ * missing (2026-11-16 08:00 to 21:00 UTC), the second complete.
  */
-export function recordedGemini(now = () => RECORDED_AT) {
+export const GAP_RECORDED_AT = Date.parse("2026-11-17T04:14:12Z");
+
+/** Newest 240 rows of the gapped fetch, as Gemini sent them (newest first). */
+export function gappedCandlesBody(): unknown[] {
+  return fixture("candles-btcusd-1hr-gap.json") as unknown[];
+}
+
+/** The same 254 hours from the complete fetch five seconds later. */
+export function healedCandlesBody(): unknown[] {
+  return fixture("candles-btcusd-1hr-healed.json") as unknown[];
+}
+
+/**
+ * A Gemini client whose fetch answers from the recorded fixtures and counts requests. Set `failing` to
+ * make every request fail as if Gemini were down. `candles` replaces the hourly BTC candles answer
+ * with these bodies in turn, one per request, repeating the last.
+ */
+export function recordedGemini(now = () => RECORDED_AT, options: { candles?: readonly unknown[] } = {}) {
   const state = { calls: [] as string[], failing: false };
   const respond = (body: unknown) =>
     new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  let candleAnswers = 0;
   const fetchImpl: FetchLike = (input) => {
     const url = new URL(input);
     const path = url.pathname + url.search;
     state.calls.push(path);
     if (state.failing) return Promise.resolve(new Response("upstream down", { status: 503 }));
+    const sequence = options.candles;
+    if (path === "/v2/candles/btcusd/1hr" && sequence !== undefined && sequence.length > 0) {
+      const body = sequence[Math.min(candleAnswers, sequence.length - 1)];
+      candleAnswers += 1;
+      return Promise.resolve(respond(body));
+    }
     const recorded = RECORDED_PATHS[path];
     if (recorded !== undefined) return Promise.resolve(respond(fixture(recorded)));
     if (path.startsWith("/v1/prediction-markets/events?")) {
@@ -154,13 +181,20 @@ export function recordedGemini(now = () => RECORDED_AT) {
 
 /**
  * The whole seller, offline: hello and hedge routes, recorded Gemini data and a fake facilitator.
- * The hedge signal costs `priceUsd` (default 0.0005).
+ * The hedge signal costs `priceUsd` (default 0.0005). Pass `now: () => GAP_RECORDED_AT` with
+ * `candles: [gappedCandlesBody()]` for the hourly candles with a gap of issue #98.
  */
 export function recordedSignalsApp(
-  options: { sellerAddress?: Address; priceUsd?: string; now?: () => number } = {},
+  options: {
+    sellerAddress?: Address;
+    priceUsd?: string;
+    now?: () => number;
+    /** Hourly BTC candle answers in turn, as for `recordedGemini`. */
+    candles?: readonly unknown[];
+  } = {},
 ) {
   const now = options.now ?? (() => RECORDED_AT);
-  const gemini = recordedGemini(now);
+  const gemini = recordedGemini(now, options.candles === undefined ? {} : { candles: options.candles });
   const facilitator = new FakeGatewayFacilitator();
   const service = createHedgeSignalService({
     source: gemini.client,

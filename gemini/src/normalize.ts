@@ -320,3 +320,17 @@ export function normalizeCandles(raw: RawCandles): Candle[] {
   }
   return [...byTime.values()].sort((a, b) => a.openTimeMs - b.openTimeMs);
 }
+
+/**
+ * How many candles are missing between the oldest and the newest of a series sorted oldest first,
+ * for candles `intervalMs` wide. Only gaps inside the series count: a series that starts late or ends
+ * early is shorter, not gapped.
+ */
+export function countMissingCandles(candles: readonly Candle[], intervalMs: number): number {
+  let missing = 0;
+  for (let i = 1; i < candles.length; i++) {
+    const step = (candles[i]?.openTimeMs ?? 0) - (candles[i - 1]?.openTimeMs ?? 0);
+    missing += Math.max(0, Math.round(step / intervalMs) - 1);
+  }
+  return missing;
+}

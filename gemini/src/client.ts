@@ -7,6 +7,7 @@ import { GeminiError } from "./errors";
 import { getJson, type FetchLike, type HttpOptions } from "./http";
 import {
   buildLadder,
+  countMissingCandles,
   depthFromBook,
   ladderRungs,
   listingFromEvent,
@@ -28,19 +29,20 @@ import {
   tickerSchema,
   type RawEvent,
 } from "./schemas";
-import type {
-  Candle,
-  CandleTimeFrame,
-  EventSummary,
-  Ladder,
-  LadderKind,
-  LadderListing,
-  MarketEvent,
-  OrderBook,
-  RungDepth,
-  SeriesKind,
-  SettledEvent,
-  SpotPrice,
+import {
+  CANDLE_INTERVAL_MS,
+  type Candle,
+  type CandleTimeFrame,
+  type EventSummary,
+  type Ladder,
+  type LadderKind,
+  type LadderListing,
+  type MarketEvent,
+  type OrderBook,
+  type RungDepth,
+  type SeriesKind,
+  type SettledEvent,
+  type SpotPrice,
 } from "./types";
 
 export const DEFAULT_BASE_URL = "https://api.gemini.com";
@@ -93,6 +95,11 @@ export interface GeminiClientOptions {
   /** Token bucket settings. Defaults: burst 5, 100 per minute (Gemini's public limit is 120). */
   rateLimit?: { capacity?: number; refillPerMinute?: number };
   cacheTtlMs?: Partial<CacheTtls>;
+  /**
+   * Pause before asking again when a candle series comes back with candles missing inside it.
+   * Default 1 s. The second request also waits for the token bucket like any other.
+   */
+  candleGapRetryDelayMs?: number;
   /** Called with the path of each request as it is sent, retries included (cached answers send none). */
   onRequest?: (path: string) => void;
 }
@@ -143,7 +150,13 @@ export interface GeminiClient {
   getEvent(eventTicker: string): Promise<MarketEvent>;
   getOrderBook(instrumentSymbol: string): Promise<OrderBook>;
   getSpot(asset: string): Promise<SpotPrice>;
-  /** Spot-market candles for the asset against USD, oldest first. Gemini returns about 60 days of hourly candles. */
+  /**
+   * Spot-market candles for the asset against USD, oldest first. Gemini returns about 60 days of hourly
+   * candles. Gemini sometimes answers with candles missing inside the series (issue #98: 14 hourly rows
+   * gone in one answer, all present five seconds later), so an answer with a gap is asked for once more
+   * and whichever answer misses fewer candles is kept and cached. A gap that remains is returned as it
+   * is: missing candles are never filled in.
+   */
   getCandles(asset: string, timeFrame: CandleTimeFrame): Promise<Candle[]>;
   listRecentlySettled(options?: SettledOptions): Promise<SettledEvent[]>;
   listCategories(): Promise<string[]>;
@@ -175,6 +188,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     ...(options.onRequest ? { onRequest: options.onRequest } : {}),
   };
   const cache = new TtlCache(now);
+  const candleGapRetryDelayMs = options.candleGapRetryDelayMs ?? 1_000;
   const isoNow = () => new Date(now()).toISOString();
 
   async function fetchEventPages(query: URLSearchParams, maxPages: number): Promise<RawEvent[]> {
@@ -247,8 +261,26 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     requireToken(asset, "asset");
     requireToken(timeFrame, "timeFrame");
     const path = `/v2/candles/${spotSymbol(asset.toUpperCase())}/${timeFrame}`;
-    const raw = await cache.getOrLoad(path, ttl.candles, () => getJson(http, path, candlesSchema));
-    return normalizeCandles(raw);
+    // A copy, so no caller can reorder the cached series for the next one.
+    return [
+      ...(await cache.getOrLoad(path, ttl.candles, () => loadCandles(path, CANDLE_INTERVAL_MS[timeFrame]))),
+    ];
+  }
+
+  /** One request, and one more only when the first answer has candles missing inside it. */
+  async function loadCandles(path: string, intervalMs: number): Promise<Candle[]> {
+    const first = normalizeCandles(await getJson(http, path, candlesSchema));
+    const firstMissing = countMissingCandles(first, intervalMs);
+    if (firstMissing === 0) return first;
+    await sleep(candleGapRetryDelayMs);
+    let second: Candle[];
+    try {
+      second = normalizeCandles(await getJson(http, path, candlesSchema));
+    } catch {
+      // The first answer is still a real answer; its gap is the caller's to handle.
+      return first;
+    }
+    return countMissingCandles(second, intervalMs) <= firstMissing ? second : first;
   }
 
   async function listRecentlySettled(opts: SettledOptions = {}): Promise<SettledEvent[]> {
