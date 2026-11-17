@@ -319,7 +319,7 @@ test("the agent's change request shows a diff and its backtest, and applying it 
   const review = page.getByRole("dialog", { name: "Apply the agent's request" });
   await expect(review.getByTestId("policy-review")).toContainText("Max trade size");
   await review.getByRole("button", { name: "Sign in wallet" }).click();
-  await expect(toast(page)).toContainText("Mandate updated");
+  await expect(toast(page)).toContainText("Rules updated");
   await review.getByRole("button", { name: "Done" }).click();
 
   // The request is closed with the transaction that applied it, and the contract has the new rule.
@@ -386,7 +386,7 @@ test("the hedge view: an honest empty state and preview, then the agent's plan, 
   await expect(toast(page)).toContainText("Holdings saved");
   const state = await snapshot(baseURL);
   const rules = state.chain?.rules;
-  if (!rules) throw new Error("no mandate");
+  if (!rules) throw new Error("no rules");
   const remaining = rules.budgetCents - (state.chain?.committedCents ?? 0);
   const expected = (
     await recordedPlanRequest({
@@ -613,7 +613,7 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   );
   const state = await snapshot(baseURL);
   const rules = state.chain?.rules;
-  if (!rules) throw new Error("no mandate");
+  if (!rules) throw new Error("no rules");
   // Block times have whole seconds, so the new plan is made in a later second than every intent so far:
   // none of them can have carried it out.
   const lastProposed = Math.max(...(state.chain?.intents.map((intent) => intent.proposedAt) ?? [0]));

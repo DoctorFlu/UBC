@@ -29,9 +29,7 @@ const nextConfig: NextConfig = {
   // build keeps the usual `.next` output for `next start`.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   // The rules page was /mandate before the console named it Rules; old links and bookmarks still land.
-  async redirects() {
-    return [{ source: "/mandate", destination: "/rules", permanent: true }];
-  },
+  redirects: () => Promise.resolve([{ source: "/mandate", destination: "/rules", permanent: true }]),
 };
 
 export default nextConfig;
