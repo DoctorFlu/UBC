@@ -30,7 +30,8 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 ## What the executor does with an approved intent
 
 1. It checks the intent as before (Gemini symbol, YES or NO, limit 1 to 99, listed under the right category), now against the trading environment's listings.
-2. It turns the amount into contracts at the limit price, rounded down to the contract's quantity step, and refuses a price off the contract's price step or less than its minimum quantity.
+2. It turns the amount into the most contracts whose cost at the limit price plus Gemini's worst-case fee fits in it, rounded down to the contract's quantity step (see [Fees](#fees)).
+   It refuses a price off the contract's price step, fewer contracts than the contract's minimum quantity, and an order that would cost less than one cent, which Gemini refuses too.
 3. It writes "placing" to the journal, then sends one limit order, good till cancelled.
 4. It follows the order (`POST /v1/prediction-markets/orders/active`, then `orders/history`) and records each change in the journal.
 5. When the order fills, or when its time is up (`EXECUTOR_ORDER_TTL_MS`, 10 minutes by default, and never later than a minute before the market stops trading), it cancels what is left and records the fill onchain with `recordResult`.
@@ -42,8 +43,20 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 | The request refused (key, nonce, terms, account, rate limit) | `not_placed` | nothing; held, tried again with waits of 15 s doubling to 10 minutes |
 | No answer (timeout, network, 5xx, a redirect) | `unknown` | nothing; held and looked up, never sent again |
 
-The cost recorded is what the fills cost at their prices, rounded up to the cent.
-It does not include Gemini's fees, which the docs do not state for prediction markets, so the account can spend slightly more than the approved amount.
+The cost recorded onchain is what the fills cost at their prices, rounded up to the cent.
+It does not include Gemini's fee, which no answer reports; the order's size leaves room for it inside the approved amount.
+
+## Fees
+
+Gemini's fee page gives the prediction-market fee as a rate times the contracts times P times (1 - P), where P is the price in dollars, rounded up to the next cent.
+The rate is 0.07 for a taker and 0.0175 for a maker.
+The fee is largest for a taker filled at the limit price, so the executor sizes every order for that case (`worstCaseSpendCents` in `gemini/src/fees.ts`): cost plus the taker fee never exceeds the approved amount.
+For example, $10 at 50c buys 19.32 contracts, not 20; 98c at 97c buys 1 contract (97c, and a 1c fee).
+
+One case is outside the bound: the page does not say whether the rounding to a cent is per order or per fill.
+If it is per fill, an order filled in many small pieces can pay up to 1 cent more per extra fill.
+A strict bound would need the number of fills, which is unknown when the order is sized.
+The one fill seen so far (below) was rounded per order, and it matched the bound exactly.
 
 ## Settlement
 
@@ -114,6 +127,21 @@ When they disagree, nothing is traded on the wrong exchange:
 
 [configuration.md](configuration.md#one-gemini-for-the-whole-stack) has the table of settings.
 
+## What a sandbox demo can show
+
+Seen on 17 November 2026, and checked again before each sandbox run:
+
+- The sandbox lists the same ladders as production, but a test market maker quotes only some of them, and not all the time.
+  The hourly BTC ladder was quoted for most of each hour, and empty for the first few minutes after a new one opened.
+  The 15-minute and 5-minute ladders were quoted; the daily and weekly ladders were empty.
+- On an empty ladder, `get_ladder` and `plan_hedge` say so first, with the reason `NO_PRICES`: nothing can be planned or filled there.
+  The answer names the environment (`marketEnvironment`) and how many strikes are priced (`pricedRungCount`).
+- The sandbox's own BTC spot can sit far from the ladder's strikes (about $63,700 against strikes of $64,400 to $65,100 that day), so `plan_hedge` can find nothing to buy on a quoted ladder.
+  A demo then proposes one intent directly.
+- A fill is achievable: with a YES bid at 3c, buying NO at 97c crosses it and fills at once.
+  An order far from the market rests, and the executor cancels it at its time limit.
+- Sandbox fills spend test funds only; the account starts with $100,000 of them.
+
 ## What is verified and what is not
 
 Verified against the sandbox's public endpoints (no key): the host `https://api.sandbox.gemini.com`, its terms (version 2, while production's public terms are version 1), its event and contract listings and their quantity and price steps (0.01 each), and its settled ladders.
@@ -124,10 +152,19 @@ Verified with the owner's sandbox key on 17 November 2026 (the doctor answered R
 - The REST order request takes `clientOrderId`, and the place answer, the active list and the history all return it.
 - Order ids are larger than a JavaScript number holds exactly (for example 145853902320696849, above 2^53). The client reads them as strings before parsing and sends them back digit for digit; read through `JSON.parse` they would be rounded, and a cancel would name another order.
 - Gemini refuses an order that costs less than one cent: `InvalidInput`, "Validation error for quantity: Order cost must be at least 0.01". The smallest order is 1 contract at 1 cent.
-- The states seen: `open` after placing, `cancelled` after cancelling (with `cancelledAt`). A fill has not been seen yet.
+- The states seen: `open` after placing, `cancelled` after cancelling (with `cancelledAt`), and `filled`.
 - An open order in the active list carries `fundsOnHold` (0.01 for 1 contract at 1 cent: the cost, nothing more) and `contractMetadata`. No answer carries a fee field.
 - Without a `symbol`, the active and history lists cover every contract.
 - The cancel answer is `{"result":"ok","message":"Order <id> cancelled successfully"}`.
+
+Verified end to end on 17 November 2026, a local stack on the sandbox (devchain, console, executor with `EXECUTOR_VENUE=gemini` and `GEMINI_ENV=sandbox`), two intents on the 17:00 UTC hourly BTC ladder:
+
+- Buy NO on HI64500, $0.98 at 97c, against a YES bid of 3c: the executor placed 1 contract, which filled at once at 0.97.
+  The fill was recorded onchain as $0.97, and the intent page shows the Gemini order id, Filled, and the Sandbox badge.
+  The history row is `filled`, `filledQuantity` 1, `avgExecutionPrice` 0.97, and still no fee field.
+  The USD balance fell from 100000.00 to 99999.02: 97c and a 1c fee, the taker fee rounded up, exactly the worst case the order was sized for.
+- Buy NO on HI65100, $0.02 at 1c: 1 contract rested (`fundsOnHold` 0.01), and the executor cancelled it at its time limit with nothing filled, so its budget was released onchain.
+- Afterwards `npm run gemini:sandbox-orders` listed no open order.
 
 From Gemini's documentation only, not yet checked with a key:
 
@@ -135,7 +172,7 @@ From Gemini's documentation only, not yet checked with a key:
 - The roles: the quickstart says orders need the Trader role; the API reference names NewOrder, CancelOrder and OrderStatus permissions per endpoint. The owner's key has Trader and Fund Manager.
 - The terms: the API reference and quickstart describe `POST /v1/prediction-markets/terms/accept`, while an older getting-started page says to accept them in the web interface first. We never call the accept endpoint either way.
 - Order states other than open and cancelled: one page lists open, filled and cancelled, another adds closed.
-- Fees for prediction markets.
+- Whether the fee is rounded per order or per fill (see [Fees](#fees)).
 
 The opt-in sandbox test (`gemini/test/sandbox.live.test.ts`) checks these facts with a real sandbox key: it runs only with `GEMINI_SANDBOX_TEST=1` and sandbox keys in the environment, places one order of 1 contract at 1 cent, far from the market, prints Gemini's raw answers, and cancels it.
 It should be the first order ever sent with a new key, before the executor trades.
@@ -143,7 +180,7 @@ To see its output, add `--silent=false`:
 
 ```sh
 ENV_FILE="$PWD/.env" GEMINI_SANDBOX_TEST=1 npx vitest run --root gemini --silent=false test/sandbox.live.test.ts
-npm run gemini:sandbox-orders   # the sandbox account's open orders; -- --cancel <id> cancels one
+npm run gemini:sandbox-orders   # the sandbox account's open orders; -- --cancel <id> cancels one, --balances adds the USD balance, --raw prints the history as sent
 ```
 
 ## Tests
