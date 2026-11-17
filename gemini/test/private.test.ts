@@ -262,7 +262,7 @@ describe("what a failure says", () => {
     expect(error).toMatchObject({ kind: "invalid_response", outcomeUnknown: true });
   });
 
-  it("refuses an order id too large to keep exactly", async () => {
+  it("refuses an order id longer than 64 bits", async () => {
     const { fetch } = recording(
       () =>
         new Response(
@@ -271,6 +271,64 @@ describe("what a failure says", () => {
     );
     const error = await failure(client(fetch), (g) => g.activeOrders("S"));
     expect(error.kind).toBe("invalid_response");
+  });
+});
+
+describe("order ids", () => {
+  // The id the sandbox gave the first real order: above 2^53, so a JavaScript number would round it to
+  // 145853902320696850 and a cancel would name another order.
+  const REAL_ID = "145853902320696849";
+
+  it("keeps every digit of an id larger than a JavaScript number holds", async () => {
+    const { fetch } = recording(
+      () =>
+        new Response(
+          `{"orderId":${REAL_ID},"hashOrderId":"2vmozdOZvvbb","clientOrderId":"c-1","globalOrderId":"cba9","status":"open","symbol":"GEMI-BTC2611171500-HI64600","side":"buy","outcome":"yes","orderType":"limit","timeInForce":"good-til-cancel","quantity":"1","filledQuantity":"0","remainingQuantity":"1","price":"0.01","createdAt":"2026-11-17T14:28:13.301Z","updatedAt":"2026-11-17T14:28:13.301Z"}`,
+          { status: 201 },
+        ),
+    );
+    const order = await client(fetch).placeOrder({
+      symbol: "GEMI-BTC2611171500-HI64600",
+      side: "buy",
+      outcome: "yes",
+      quantity: "1",
+      price: "0.01",
+    });
+    expect(order.orderId).toBe(REAL_ID);
+
+    const listed = recording(
+      () =>
+        new Response(
+          `{"orders":[{"orderId": ${REAL_ID} ,"status":"open","symbol":"S","side":"buy","outcome":"yes","quantity":"1","price":"0.5"}]}`,
+        ),
+    );
+    expect((await client(listed.fetch).activeOrders())[0]?.orderId).toBe(REAL_ID);
+  });
+
+  it("sends an id back as the same digits, never through a rounded number", async () => {
+    const { sent, fetch } = recording(() => json({ result: "ok", message: "cancelled" }));
+    await client(fetch).cancelOrder(REAL_ID);
+    const text = Buffer.from(sent[0]?.headers["x-gemini-payload"] ?? "", "base64").toString("utf8");
+    expect(text).toContain(`"orderId":${REAL_ID}`);
+    expect(text).not.toContain('"orderId":"');
+  });
+
+  it("refuses to cancel an id that is not a 64-bit whole number, sending nothing", async () => {
+    const { sent, fetch } = recording(() => json({ result: "ok" }));
+    for (const id of ["18446744073709551616", "1.5", "-1", ""]) {
+      await expect(client(fetch).cancelOrder(id)).rejects.toMatchObject({ kind: "invalid_argument" });
+    }
+    expect(sent).toHaveLength(0);
+  });
+
+  it("asks for every contract's orders when no symbol is given", async () => {
+    const { sent, fetch } = recording(() => json({ orders: [] }));
+    await client(fetch).activeOrders();
+    await client(fetch, () => NOW + 1_000).orderHistory();
+    expect(sent.map((request) => decodePayload(request.headers["x-gemini-payload"]))).toEqual([
+      expect.not.objectContaining({ symbol: expect.anything() as unknown }),
+      expect.not.objectContaining({ symbol: expect.anything() as unknown }),
+    ]);
   });
 });
 

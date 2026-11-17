@@ -104,18 +104,33 @@ The sandbox's order books are mostly empty, so a sandbox order may rest unfilled
 
 Verified against the sandbox's public endpoints (no key): the host `https://api.sandbox.gemini.com`, its terms (version 2, while production's public terms are version 1), its event and contract listings and their quantity and price steps (0.01 each), and its settled ladders.
 
+Verified with the owner's sandbox key on 17 November 2026 (the doctor answered READY, then the opt-in sandbox test ran three times, each order cancelled; `npm run gemini:sandbox-orders` lists none open):
+
+- The authentication scheme works as documented: a base64 JSON payload with `request` and `nonce` in `X-GEMINI-PAYLOAD`, its HMAC-SHA384 with the secret in `X-GEMINI-SIGNATURE`, the key in `X-GEMINI-APIKEY`, a time-based nonce in whole seconds.
+- The REST order request takes `clientOrderId`, and the place answer, the active list and the history all return it.
+- Order ids are larger than a JavaScript number holds exactly (for example 145853902320696849, above 2^53). The client reads them as strings before parsing and sends them back digit for digit; read through `JSON.parse` they would be rounded, and a cancel would name another order.
+- Gemini refuses an order that costs less than one cent: `InvalidInput`, "Validation error for quantity: Order cost must be at least 0.01". The smallest order is 1 contract at 1 cent.
+- The states seen: `open` after placing, `cancelled` after cancelling (with `cancelledAt`). A fill has not been seen yet.
+- An open order in the active list carries `fundsOnHold` (0.01 for 1 contract at 1 cent: the cost, nothing more) and `contractMetadata`. No answer carries a fee field.
+- Without a `symbol`, the active and history lists cover every contract.
+- The cancel answer is `{"result":"ok","message":"Order <id> cancelled successfully"}`.
+
 From Gemini's documentation only, not yet checked with a key:
 
-- The authentication scheme: a base64 JSON payload with `request` and `nonce` in `X-GEMINI-PAYLOAD`, its HMAC-SHA384 with the secret in `X-GEMINI-SIGNATURE`, the key in `X-GEMINI-APIKEY`.
 - That a key the sandbox does not know gets `InvalidApiKey`, and a wrong secret `InvalidSignature`.
-- The roles: the quickstart says orders need the Trader role; the API reference names NewOrder, CancelOrder and OrderStatus permissions per endpoint.
+- The roles: the quickstart says orders need the Trader role; the API reference names NewOrder, CancelOrder and OrderStatus permissions per endpoint. The owner's key has Trader and Fund Manager.
 - The terms: the API reference and quickstart describe `POST /v1/prediction-markets/terms/accept`, while an older getting-started page says to accept them in the web interface first. We never call the accept endpoint either way.
-- Client order ids: the REST order request lists no `clientOrderId` field, although order answers carry one and the WebSocket API accepts one. The executor sends it and does not rely on it. If Gemini refused unknown fields, every order would be refused; the opt-in sandbox test checks this first.
-- Order states: one page lists open, filled and cancelled, another adds closed.
+- Order states other than open and cancelled: one page lists open, filled and cancelled, another adds closed.
 - Fees for prediction markets.
 
-The opt-in sandbox test (`gemini/test/sandbox.live.test.ts`) checks the facts above with a real sandbox key: it runs only with `GEMINI_SANDBOX_TEST=1` and sandbox keys in the environment, places one order of 0.01 contracts at 1 cent, far from the market, and cancels it.
+The opt-in sandbox test (`gemini/test/sandbox.live.test.ts`) checks these facts with a real sandbox key: it runs only with `GEMINI_SANDBOX_TEST=1` and sandbox keys in the environment, places one order of 1 contract at 1 cent, far from the market, prints Gemini's raw answers, and cancels it.
 It should be the first order ever sent with a new key, before the executor trades.
+To see its output, add `--silent=false`:
+
+```sh
+ENV_FILE="$PWD/.env" GEMINI_SANDBOX_TEST=1 npx vitest run --root gemini --silent=false test/sandbox.live.test.ts
+npm run gemini:sandbox-orders   # the sandbox account's open orders; -- --cancel <id> cancels one
+```
 
 ## Tests
 

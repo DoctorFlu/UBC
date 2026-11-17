@@ -126,7 +126,7 @@ describe("placing an order", () => {
       timeInForce: "good-til-cancel",
       clientOrderId: "mandate-5042002-5fbdb231-7",
     });
-    expect(placed.venueOrderId).toBe(String(fake.order(placed.venueOrderId).orderId));
+    expect(placed.venueOrderId).toBe(fake.order(placed.venueOrderId).orderId);
     expect(journal.records.get(7)).toMatchObject({
       state: "open",
       environment: "sandbox",

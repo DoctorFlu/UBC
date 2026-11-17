@@ -12,6 +12,7 @@
  * Use `handle` from an HTTP server (the end-to-end fake) or `fetch` in-process (unit tests).
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { exactOrderIds } from "../src/private";
 import { TokenBucket } from "../src/rate-limiter";
 
 /** A limiter that never waits, for tests that send many signed requests at once. */
@@ -32,7 +33,8 @@ export interface FakeGeminiPrivateOptions {
 }
 
 export interface FakeOrder {
-  orderId: number;
+  /** Decimal digits: real ids are 64-bit integers larger than a JavaScript number holds exactly. */
+  orderId: string;
   clientOrderId: string | null;
   symbol: string;
   side: "buy" | "sell";
@@ -85,6 +87,11 @@ export type PlacementFault =
 
 const DROPPED = Symbol("dropped");
 
+/** An answer's JSON as Gemini writes it: order ids as bare integers, digit for digit. */
+export function answerText(body: unknown): string {
+  return JSON.stringify(body).replace(/"orderId":"(\d+)"/g, '"orderId":$1');
+}
+
 function decimal(hundredths: number): string {
   const whole = Math.floor(hundredths / 100);
   const rest = hundredths % 100;
@@ -100,7 +107,7 @@ function parseHundredths(value: unknown): number | null {
 export class FakeGeminiPrivate {
   /** Every request that passed authentication, in order. */
   readonly requests: FakeRequest[] = [];
-  readonly orders = new Map<number, FakeOrder>();
+  readonly orders = new Map<string, FakeOrder>();
   termsAccepted = true;
   /** Whether answers carry the clientOrderId a placement sent (unverified on the real REST API). */
   echoClientOrderId = true;
@@ -110,7 +117,8 @@ export class FakeGeminiPrivate {
   failing = false;
   private faults: PlacementFault[] = [];
   private settled: SettledEntry[] = [];
-  private nextOrderId = 7_310_000_001;
+  /** Real-sized ids, above 2^53 like the sandbox's (145853902320696849), so rounding one shows up. */
+  private nextOrderId = 145_853_902_320_696_849n;
   private lastNonce = 0;
   private readonly now: () => number;
 
@@ -129,9 +137,9 @@ export class FakeGeminiPrivate {
   }
 
   /** Fills `hundredths` more of an open order (all that remains by default) at `priceCents` (its limit). */
-  fill(orderId: number | string, hundredths?: number, priceCents?: number): FakeOrder {
+  fill(orderId: string, hundredths?: number, priceCents?: number): FakeOrder {
     const order = this.order(orderId);
-    if (order.status !== "open") throw new Error(`order ${String(orderId)} is ${order.status}`);
+    if (order.status !== "open") throw new Error(`order ${orderId} is ${order.status}`);
     const amount = Math.min(hundredths ?? order.quantity - order.filled, order.quantity - order.filled);
     order.filled += amount;
     order.costUnits += amount * (priceCents ?? order.priceCents);
@@ -177,9 +185,9 @@ export class FakeGeminiPrivate {
   }
 
   /** The order by id. Throws when there is none. */
-  order(orderId: number | string): FakeOrder {
-    const order = this.orders.get(Number(orderId));
-    if (!order) throw new Error(`no order ${String(orderId)}`);
+  order(orderId: string): FakeOrder {
+    const order = this.orders.get(orderId);
+    if (!order) throw new Error(`no order ${orderId}`);
     return order;
   }
 
@@ -198,7 +206,7 @@ export class FakeGeminiPrivate {
       return Promise.reject(error);
     }
     return Promise.resolve(
-      new Response(JSON.stringify(answer.body), {
+      new Response(answerText(answer.body), {
         status: answer.status,
         headers: { "content-type": "application/json", ...answer.headers },
       }),
@@ -278,7 +286,11 @@ export class FakeGeminiPrivate {
     }
     let decoded: Record<string, unknown>;
     try {
-      decoded = JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as Record<string, unknown>;
+      // As Gemini reads it: an order id keeps every digit (a string here), however large.
+      decoded = JSON.parse(exactOrderIds(Buffer.from(payload, "base64").toString("utf8"))) as Record<
+        string,
+        unknown
+      >;
     } catch {
       return authError(400, "InvalidJson", "Payload is not JSON");
     }
@@ -325,8 +337,18 @@ export class FakeGeminiPrivate {
     ) {
       return { status: 400, body: { error: "InvalidInput", message: "Invalid order" } };
     }
+    // The sandbox's own answer to 0.01 contracts at 1 cent: an order must cost at least one cent.
+    if (quantity * price < 100) {
+      return {
+        status: 400,
+        body: {
+          error: "InvalidInput",
+          message: "Validation error for quantity: Order cost must be at least 0.01",
+        },
+      };
+    }
     const order: FakeOrder = {
-      orderId: this.nextOrderId++,
+      orderId: String(this.nextOrderId++),
       clientOrderId: typeof fields.clientOrderId === "string" ? fields.clientOrderId : null,
       symbol: fields.symbol,
       side,
@@ -346,7 +368,7 @@ export class FakeGeminiPrivate {
   }
 
   private cancelRoute(fields: Record<string, unknown>): FakeAnswer {
-    const order = this.orders.get(Number(fields.orderId));
+    const order = typeof fields.orderId === "string" ? this.orders.get(fields.orderId) : undefined;
     if (!order) return { status: 404, body: { error: "OrderNotFound", message: "Order not found" } };
     if (order.status !== "open") {
       return { status: 422, body: { error: "OrderNotCancellable", message: `Order is ${order.status}` } };
@@ -354,7 +376,7 @@ export class FakeGeminiPrivate {
     this.cancel(order);
     return {
       status: 200,
-      body: { result: "ok", message: `Order ${String(order.orderId)} cancelled successfully` },
+      body: { result: "ok", message: `Order ${order.orderId} cancelled successfully` },
     };
   }
 

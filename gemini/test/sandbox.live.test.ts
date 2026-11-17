@@ -7,8 +7,8 @@
  *   GEMINI_SANDBOX_TEST=1 npx vitest run gemini/test/sandbox.live.test.ts
  *
  * Run `npm run gemini:doctor` first, and make this the first order a new sandbox key ever sends. It
- * places one order of 0.01 contracts at 1 cent (a hundredth of a cent at most), far from any market, and
- * cancels it. It checks what the docs leave open: whether the REST API takes and returns our client order
+ * places one order of 1 contract at 1 cent (one cent at most, the smallest order Gemini takes), far from any
+ * market, and cancels it. It checks what the docs leave open: whether the REST API takes and returns our client order
  * id, the shape of an order in the active and history lists, and the order states.
  */
 import { loadEnv } from "@mandate/shared";
@@ -26,7 +26,22 @@ describe.skipIf(!ENABLED)("Gemini's sandbox, with a key (opt-in)", () => {
     const settings = geminiTradingSettings(process.env);
     if (settings.environment !== "sandbox") throw new Error("GEMINI_ENV must be sandbox for this test");
     if (settings.credentials === null) throw new Error("GEMINI_API_KEY and GEMINI_API_SECRET are not set");
-    const trading = createGeminiPrivateClient({ environment: "sandbox", credentials: settings.credentials });
+    // The raw answers of the order routes, printed whole: the parsed order drops fields the docs do not
+    // list (a fee, say). They hold order data only; the key and secret travel in request headers.
+    const trading = createGeminiPrivateClient({
+      environment: "sandbox",
+      credentials: settings.credentials,
+      fetch: async (input, init) => {
+        const response = await fetch(input, init);
+        const path = new URL(input).pathname;
+        if (path.startsWith("/v1/prediction-markets/order")) {
+          console.info(
+            `[sandbox] raw ${path} (HTTP ${String(response.status)}): ${await response.clone().text()}`,
+          );
+        }
+        return response;
+      },
+    });
 
     const roles = await trading.roles();
     expect(roles.isTrader, "the key needs the Trader role").toBe(true);
@@ -51,7 +66,9 @@ describe.skipIf(!ENABLED)("Gemini's sandbox, with a key (opt-in)", () => {
         symbol,
         side: "buy",
         outcome: "yes",
-        quantity: "0.01",
+        // Gemini refuses an order that costs less than one cent ("Order cost must be at least 0.01"), so
+        // this is the smallest order it takes: 1 contract at 1 cent.
+        quantity: "1",
         price: "0.01",
         clientOrderId,
       });

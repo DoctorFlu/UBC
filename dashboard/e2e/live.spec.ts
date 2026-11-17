@@ -1267,9 +1267,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await open(page, `/activity/${intentId.toString()}`);
     await expect(page.getByTestId("intent-venue-order")).toHaveCount(0);
     await page.getByRole("switch", { name: "Advanced view" }).click();
-    await expect(page.getByTestId("intent-venue-order")).toHaveText(
-      `Gemini sandbox #${String(order.orderId)}`,
-    );
+    await expect(page.getByTestId("intent-venue-order")).toHaveText(`Gemini sandbox #${order.orderId}`);
     await expect(page.getByTestId("intent-venue-state")).toHaveText("Open");
     await expect(page.getByTestId("intent-venue-note")).toHaveText("Resting on Gemini's sandbox at 31c");
 
@@ -1280,7 +1278,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
     expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
     const view = (await snapshot(baseURL)).chain?.venueOrders[intentId];
-    expect(view).toMatchObject({ state: "filled", venueOrderId: String(order.orderId), filledCents: 300 });
+    expect(view).toMatchObject({ state: "filled", venueOrderId: order.orderId, filledCents: 300 });
     await shoot(
       page,
       testInfo,
