@@ -1,5 +1,5 @@
 import type { Client } from "@modelcontextprotocol/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import { ToolError } from "../src/mcp/errors";
 import { defineTool } from "../src/mcp/tool";
@@ -153,30 +153,150 @@ describe("tool failures", () => {
     expect(logs).not.toContain("at Object.");
   });
 
-  it("times out slow handlers with TIMEOUT and aborts their signal", async () => {
+  it("stops a call at its deadline: aborts its signal, names the slow step, logs one line", async () => {
     let aborted = false;
     const slow = defineTool({
       name: "slow",
       title: "Slow",
       description: "Test tool",
+      inputSchema: z.object({ secret: z.string() }),
+      outputSchema: z.object({ ok: z.boolean() }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: (_input, ctx) =>
+        ctx.deadline.step("chain.snapshot", (signal) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+          return new Promise<never>((_, reject) => {
+            signal.addEventListener("abort", () => {
+              reject(signal.reason as Error);
+            });
+          });
+        }),
+    });
+    const server = testServer({ tools: [slow], limits: { toolDeadlineMs: 200 } });
+    const client = await connect(server);
+    const started = performance.now();
+    const result = await client.callTool({ name: "slow", arguments: { secret: "do-not-log-me" } });
+    expect(performance.now() - started).toBeLessThan(1_500);
+    expect(text(result)).toMatch(
+      /^TIMEOUT: The Arc RPC endpoint did not answer within this call's 0.2 s limit/,
+    );
+    expect(aborted).toBe(true);
+    const stops = server.lines.filter((line) => line.includes('"tool.deadline_exceeded"'));
+    expect(stops).toHaveLength(1);
+    const stop = JSON.parse(stops[0] ?? "{}") as Record<string, unknown>;
+    expect(stop).toMatchObject({ level: "warn", tool: "slow", step: "chain.snapshot", deadlineMs: 200 });
+    expect(typeof stop["stepMs"]).toBe("number");
+    expect(typeof stop["durationMs"]).toBe("number");
+    expect(server.lines.join("\n")).not.toContain("do-not-log-me");
+  });
+
+  it("a tool can only shorten the server's deadline", async () => {
+    let budget = 0;
+    const probe = defineTool({
+      name: "probe",
+      title: "Probe",
+      description: "Test tool",
       inputSchema: z.object({}),
       outputSchema: z.object({ ok: z.boolean() }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      timeoutMs: 50,
+      timeoutMs: 90_000,
+      handler: (_input, ctx) => {
+        budget = ctx.deadline.budgetMs;
+        return { structured: { ok: true }, summary: "ok" };
+      },
+    });
+    const client = await connect(testServer({ tools: [probe], limits: { toolDeadlineMs: 7_000 } }));
+    await client.callTool({ name: "probe", arguments: {} });
+    expect(budget).toBe(7_000);
+  });
+
+  it(
+    "answers TIMEOUT a grace period after the deadline when a handler ignores its signal",
+    { timeout: 15_000 },
+    async () => {
+      const stubborn = defineTool({
+        name: "stubborn",
+        title: "Stubborn",
+        description: "Test tool",
+        inputSchema: z.object({}),
+        outputSchema: z.object({ ok: z.boolean() }),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        timeoutMs: 50,
+        handler: () =>
+          new Promise<{ structured: { ok: boolean }; summary: string }>((resolve) => {
+            setTimeout(() => {
+              resolve({ structured: { ok: true }, summary: "late" });
+            }, 10_000).unref();
+          }),
+      });
+      const server = testServer({ tools: [stubborn] });
+      const client = await connect(server);
+      const result = await client.callTool({ name: "stubborn", arguments: {} });
+      expect(text(result)).toMatch(
+        /^TIMEOUT: The server could not finish this call within its 0.1 s limit\./,
+      );
+      expect(server.lines.some((line) => line.includes('"tool.abandoned"'))).toBe(true);
+    },
+  );
+
+  it("logs one line naming the step when the client goes away mid-call", async () => {
+    let started: () => void = () => undefined;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const waiting = defineTool({
+      name: "waiting",
+      title: "Waiting",
+      description: "Test tool",
+      inputSchema: z.object({}),
+      outputSchema: z.object({ ok: z.boolean() }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       handler: (_input, ctx) =>
-        new Promise((resolve) => {
-          ctx.signal.addEventListener("abort", () => {
-            aborted = true;
+        ctx.deadline.step("console.holdings", (signal) => {
+          started();
+          return new Promise<never>((_, reject) => {
+            signal.addEventListener("abort", () => {
+              reject(signal.reason as Error);
+            });
           });
-          setTimeout(() => {
-            resolve({ structured: { ok: true }, summary: "late" });
-          }, 1000);
         }),
     });
-    const client = await connect(testServer({ tools: [slow] }));
-    const result = await client.callTool({ name: "slow", arguments: {} });
-    expect(text(result)).toMatch(/^TIMEOUT: /);
-    expect(aborted).toBe(true);
+    const server = testServer({ tools: [waiting] });
+    const client = new AbortController();
+    const response = server.fetch(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          ...authHeader(),
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "waiting", arguments: {} },
+        }),
+        signal: client.signal,
+      }),
+    );
+    await running;
+    client.abort();
+    await Promise.resolve(response).catch(() => undefined);
+    await vi.waitFor(() => {
+      expect(server.lines.some((line) => line.includes('"tool.call"'))).toBe(true);
+    });
+    const gone = server.lines.filter((line) => line.includes('"tool.client_gone"'));
+    expect(gone).toHaveLength(1);
+    expect(JSON.parse(gone[0] ?? "{}")).toMatchObject({ tool: "waiting", step: "console.holdings" });
+    expect(server.lines.some((line) => line.includes('"tool.deadline_exceeded"'))).toBe(false);
   });
 
   it("rejects output that does not match the output schema as INTERNAL", async () => {

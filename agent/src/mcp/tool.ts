@@ -3,7 +3,9 @@ import type * as z from "zod";
 import type { OptionalEnvKey } from "../config";
 import type { AppContext, ToolContext } from "../context";
 import { scrubText } from "../logger";
+import { CallDeadline, describeStop, type Stop } from "./deadline";
 import { ToolError, type ToolErrorCode } from "./errors";
+import { scopedServices } from "./scoped-services";
 
 /** Behaviour hints shown to the client. All four are required so every tool states them. */
 export interface ToolAnnotations {
@@ -36,7 +38,10 @@ export interface ToolSpec<I extends z.ZodObject, O extends z.ZodObject> {
   readonly annotations: ToolAnnotations;
   /** Environment variables without which this tool cannot work. The server refuses to start without them. */
   readonly requires?: readonly OptionalEnvKey[];
-  /** Time budget for one call. Defaults to the server's `toolTimeoutMs`. */
+  /**
+   * A shorter time budget for one call than the server's `toolDeadlineMs` (`MCP_TOOL_DEADLINE_MS`).
+   * It can only shorten the server's deadline, never lengthen it.
+   */
   readonly timeoutMs?: number;
   /** May be sync or async. Throw `ToolError` for real errors; return a verdict for denials. */
   readonly handler: (
@@ -106,17 +111,40 @@ export function toolErrorResult(code: ToolErrorCode, message: string, requestId:
   };
 }
 
-class Timeout extends Error {}
+/**
+ * How long after the deadline a stopped call may take to unwind (its steps reject at once; the tool
+ * then builds its answer) before the server answers without it.
+ */
+export const UNWIND_GRACE_MS = 3_000;
 
-function withTimeout<T>(work: Promise<T>, ms: number, controller: AbortController): Promise<T> {
+/** The call did not unwind in time after its deadline: some step ignored the signal. A bug. */
+class Abandoned extends Error {}
+
+/**
+ * Settles with `work`, or rejects with `Abandoned` when `work` is still running `graceMs` after the
+ * deadline. Work that must not be cut (a broadcast proposal, a signed payment) is waited for: its own
+ * bounds end it, and the answer must say what became of it.
+ */
+function unwound<T>(work: Promise<T>, deadline: CallDeadline, graceMs: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      controller.abort(new Timeout());
-      reject(new Timeout());
-    }, ms);
+  let settled = false;
+  const backstop = new Promise<never>((_, reject) => {
+    const arm = (ms: number) => {
+      timer = setTimeout(() => {
+        if (settled) return;
+        if (deadline.committing()) {
+          void deadline.commitsSettled().then(() => {
+            arm(graceMs);
+          });
+          return;
+        }
+        reject(new Abandoned());
+      }, ms);
+    };
+    arm(deadline.remainingMs() + graceMs);
   });
-  return Promise.race([work, timeout]).finally(() => {
+  return Promise.race([work, backstop]).finally(() => {
+    settled = true;
     clearTimeout(timer);
   });
 }
@@ -131,9 +159,13 @@ function argumentShape(args: unknown): { argKeys: string[]; argBytes: number } {
 }
 
 /**
- * Runs one tool call: time budget, abort signal, logging and conversion to an MCP result.
- * Real errors become `isError` results with a stable code. Unexpected errors are logged (scrubbed)
- * and reported to the model only as `INTERNAL` with the request id.
+ * Runs one tool call: deadline, abort signal, logging and conversion to an MCP result.
+ *
+ * The call gets one deadline (`MCP_TOOL_DEADLINE_MS`). When it passes, or the client goes away, the
+ * call's signal aborts every upstream request in its path and the server logs one line naming the
+ * step that was slow; the tool then answers in its own words, normally an `unavailable` verdict that
+ * names what was slow. Real errors become `isError` results with a stable code. Unexpected errors are
+ * logged (scrubbed) and reported to the model only as `INTERNAL` with the request id.
  */
 export async function invokeTool(
   tool: Tool,
@@ -143,37 +175,47 @@ export async function invokeTool(
 ): Promise<CallToolResult> {
   const started = performance.now();
   const logger = app.logger.child({ requestId: scope.requestId, tool: tool.name });
-  const controller = new AbortController();
-  const onAbort = () => {
-    controller.abort(scope.signal?.reason);
-  };
-  scope.signal?.addEventListener("abort", onAbort, { once: true });
+  const budgetMs = Math.min(tool.timeoutMs ?? Number.POSITIVE_INFINITY, app.config.limits.toolDeadlineMs);
+  const deadline = new CallDeadline({
+    budgetMs,
+    clientSignal: scope.signal,
+    onStop: (stop) => {
+      logger.warn(stop.reason === "deadline" ? "tool.deadline_exceeded" : "tool.client_gone", {
+        ...stopFields(stop),
+        deadlineMs: budgetMs,
+      });
+    },
+  });
 
   let result: CallToolResult;
   let outcome: string;
   let errorCode: ToolErrorCode | undefined;
   let status: unknown;
   try {
-    const ctx: ToolContext = { ...app, logger, requestId: scope.requestId, signal: controller.signal };
-    const timeoutMs = tool.timeoutMs ?? app.config.limits.toolTimeoutMs;
-    const output = await withTimeout(tool.run(args, ctx), timeoutMs, controller);
+    const ctx = toolContext(app, deadline, { requestId: scope.requestId, logger });
+    const output = await unwound(tool.run(args, ctx), deadline, UNWIND_GRACE_MS);
     status = output.structured["status"];
     result = { content: [{ type: "text", text: output.summary }], structuredContent: output.structured };
     outcome = "ok";
   } catch (error) {
+    const stop = deadline.stop;
     if (error instanceof ToolError) {
       errorCode = error.code;
       result = toolErrorResult(error.code, error.message, scope.requestId);
       if (error.code === "INTERNAL") {
         logger.error("tool.internal_error", { cause: describeCause(error.cause) });
       }
-    } else if (error instanceof Timeout) {
+    } else if (error instanceof Abandoned || stop !== undefined) {
+      // The tool did not turn the stop into its own answer: say what was slow all the same.
       errorCode = "TIMEOUT";
-      result = toolErrorResult(
-        "TIMEOUT",
-        "The tool did not finish in time. Try again shortly.",
-        scope.requestId,
-      );
+      if (error instanceof Abandoned) {
+        logger.error("tool.abandoned", {
+          ...(stop === undefined ? {} : stopFields(stop)),
+          graceMs: UNWIND_GRACE_MS,
+        });
+      }
+      const what = stop === undefined ? "The tool did not finish in time." : describeStop(stop, budgetMs);
+      result = toolErrorResult("TIMEOUT", `${what} Try this call again in a minute.`, scope.requestId);
     } else {
       errorCode = "INTERNAL";
       logger.error("tool.internal_error", { cause: describeCause(error) });
@@ -185,17 +227,45 @@ export async function invokeTool(
     }
     outcome = "error";
   } finally {
-    scope.signal?.removeEventListener("abort", onAbort);
+    deadline.dispose();
   }
 
+  const stopped = deadline.stop?.reason;
   logger.info("tool.call", {
     outcome,
     ...(errorCode === undefined ? {} : { errorCode }),
+    ...(stopped === undefined ? {} : { stopped }),
     ...(typeof status === "string" ? { status } : {}),
     durationMs: Math.round(performance.now() - started),
     ...argumentShape(args),
   });
   return result;
+}
+
+/** The context one call's handler gets: the app's services bound to the call's deadline. */
+export function toolContext(
+  app: AppContext,
+  deadline: CallDeadline,
+  scope: { requestId: string; logger?: AppContext["logger"] },
+): ToolContext {
+  return {
+    ...app,
+    ...scopedServices(app, deadline),
+    logger: scope.logger ?? app.logger,
+    requestId: scope.requestId,
+    signal: deadline.signal,
+    deadline,
+  };
+}
+
+/** Log fields for a stop: fixed step names and durations only, never arguments. */
+function stopFields(stop: Stop): Record<string, unknown> {
+  return {
+    step: stop.step ?? "none",
+    stepMs: stop.stepMs,
+    ...(stop.alsoWaiting.length === 0 ? {} : { alsoWaiting: stop.alsoWaiting }),
+    durationMs: stop.elapsedMs,
+  };
 }
 
 function describeCause(error: unknown): { name: string; message: string } {

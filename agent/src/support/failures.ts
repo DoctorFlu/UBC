@@ -11,6 +11,7 @@ import { PolicyClientError, PolicyRevertError } from "@mandate/shared";
 import { ConsoleClientError } from "../console/client";
 import type { ToolContext } from "../context";
 import { scrubText } from "../logger";
+import { describeStop, NotEnoughTime, type CallDeadline } from "../mcp/deadline";
 import { reason, unavailable, type NextAction, type Reason, type Verdict } from "../mcp/envelope";
 
 export interface Failure {
@@ -51,8 +52,49 @@ export function unavailableFor(failure: Failure): Verdict {
   return unavailable([failure.reason], failure.nextAction);
 }
 
-/** Maps an expected error to a failure, logging it scrubbed. Rethrows anything unexpected. */
-export function describeFailure(error: unknown, ctx: Pick<ToolContext, "logger">): Failure {
+/** The reason code of a call stopped by its deadline (issue #105). */
+export const TIMED_OUT = "TIMED_OUT";
+/** The reason code of work not started because too little of the call's time was left. */
+export const NOT_STARTED = "NOT_STARTED";
+
+/**
+ * The failure of a call its deadline stopped: what was slow, and to try again. Undefined while the
+ * call runs.
+ */
+export function stoppedFailure(deadline: CallDeadline | undefined): Failure | undefined {
+  const stop = deadline?.stop;
+  if (deadline === undefined || stop === undefined) return undefined;
+  return {
+    reason: reason(TIMED_OUT, describeStop(stop, deadline.budgetMs)),
+    nextAction: {
+      actor: "agent",
+      hint: "Try this call once more in a minute. If it times out again, tell the owner what was slow.",
+    },
+  };
+}
+
+/**
+ * Maps an expected error to a failure, logging it scrubbed. Rethrows anything unexpected.
+ *
+ * Once the call's deadline has stopped it, an error is that stop (the upstream was cut off, it did
+ * not fail), with one exception that always wins: a proposal that was sent and not confirmed stays
+ * `TX_UNCONFIRMED`, because whoever reads it must never send that proposal again.
+ */
+export function describeFailure(
+  error: unknown,
+  ctx: Pick<ToolContext, "logger"> & { readonly deadline?: CallDeadline },
+): Failure {
+  const stopped = isUnconfirmed(error) ? undefined : stoppedFailure(ctx.deadline);
+  if (stopped !== undefined) return stopped;
+  if (error instanceof NotEnoughTime) {
+    return {
+      reason: reason(
+        NOT_STARTED,
+        "Too little of this call's time was left to start this safely, so nothing was sent.",
+      ),
+      nextAction: { actor: "agent", hint: "Call the tool again to continue." },
+    };
+  }
   const failure = classify(error);
   if (failure === null) throw error;
   ctx.logger.warn("tool.dependency_failed", {
@@ -125,7 +167,7 @@ function classify(error: unknown): Failure | null {
       },
     };
   }
-  if (error instanceof PolicyClientError && /no receipt/.test(error.message)) {
+  if (isUnconfirmed(error)) {
     return {
       reason: reason("TX_UNCONFIRMED", "The proposal was sent but not confirmed in time; it may still land."),
       nextAction: {
@@ -144,6 +186,11 @@ function classify(error: unknown): Failure | null {
     };
   }
   return null;
+}
+
+/** A proposal that was sent, or may have been, and has no receipt yet. */
+function isUnconfirmed(error: unknown): boolean {
+  return error instanceof PolicyClientError && /no receipt/.test(error.message);
 }
 
 function consoleFailure(error: ConsoleClientError): Failure {

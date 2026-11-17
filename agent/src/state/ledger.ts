@@ -61,18 +61,24 @@ export class ProposalLedger {
   /**
    * Runs `work` once per `key` inside the replay window. `keep` decides whether a finished result
    * is replayed to later identical calls; results that are safe to retry are dropped instead.
-   * A thrown error is never kept.
+   * A thrown error is never kept. `whileWaiting` gets the wait for an identical call that is still
+   * running and returns the wait to use, for example one that gives up at the caller's deadline; the
+   * running call goes on either way.
    */
   async once<T>(
     key: string,
     now: Date,
     work: () => Promise<T>,
     keep: (value: T) => boolean,
+    options: { whileWaiting?: (wait: Promise<T>) => Promise<T> } = {},
   ): Promise<Replayed<T>> {
     this.#prune(now.getTime());
     const existing = this.#replays.get(key) as ReplayEntry<T> | undefined;
     if (existing !== undefined) {
-      return { value: await existing.promise, replayed: true, firstAt: new Date(existing.at) };
+      const value = await (options.whileWaiting === undefined
+        ? existing.promise
+        : options.whileWaiting(existing.promise));
+      return { value, replayed: true, firstAt: new Date(existing.at) };
     }
     const promise = work();
     const entry: ReplayEntry<T> = { at: now.getTime(), promise };

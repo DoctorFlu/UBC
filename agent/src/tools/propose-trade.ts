@@ -3,7 +3,8 @@ import { formatCents } from "@mandate/shared";
 import { summarizeVerdict, verdictSchema, type Verdict } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import type { DecisionContext } from "@mandate/shared";
-import { notConfigured, unavailableFor } from "../support/failures";
+import type { Replayed } from "../state/ledger";
+import { notConfigured, stoppedFailure, unavailableFor } from "../support/failures";
 import { tradeArgs } from "../support/format";
 import { DIRECT_PLAN_ID, ladderSummaryFromEvent, relinkContext } from "../trading/context";
 import { resolveTradeMarket } from "../trading/market";
@@ -23,6 +24,9 @@ export const decisionReasonArg = z
   .describe(
     "Why you are doing this, in one or two sentences for the owner. It is sealed into the intent's decision context",
   );
+
+/** A trade whose market could not be resolved: nothing was proposed. */
+type Unresolved = { kind: "unresolved"; verdict: Verdict };
 
 /** Outcomes safe to repeat are not replayed; anything that may have reached the chain is. */
 function keepForReplay(outcome: ProposalOutcome): boolean {
@@ -70,7 +74,6 @@ export const proposeTrade = defineTool({
     replayed: z.boolean().describe("True when this repeats an identical earlier call; nothing new was sent"),
   }),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  timeoutMs: 60_000,
   handler: async (input, ctx) => {
     const policy = ctx.policy;
     if (policy === undefined || policy.agentAddress === undefined) {
@@ -87,44 +90,51 @@ export const proposeTrade = defineTool({
       input.reason,
     ]);
 
-    const {
-      value: outcome,
-      replayed,
-      firstAt,
-    } = await ctx.ledger.once(
-      key,
-      ctx.clock.now(),
-      async (): Promise<ProposalOutcome | { kind: "unresolved"; verdict: Verdict }> => {
-        const resolved = await resolveTradeMarket(ctx, input.market);
-        if (resolved.failure !== undefined)
-          return { kind: "unresolved", verdict: unavailableFor(resolved.failure) };
-        const context: Omit<DecisionContext, "version" | "createdAt"> = {
-          requestText: input.requestText,
-          planId: DIRECT_PLAN_ID,
-          rungIndex: Math.max(
-            0,
-            resolved.market.event.contracts.findIndex((c) => c.instrumentSymbol === input.market),
-          ),
-          ladderSummary: ladderSummaryFromEvent(resolved.market.event, ctx.clock.now().toISOString()),
-          signalReceiptIds: input.signalReceiptIds,
-          reason: input.reason,
-        };
-        return proposeIntent(
-          ctx,
-          policy,
-          {
-            market: input.market,
-            outcome: input.outcome,
-            isBuy,
-            amountCents: input.amountCents,
-            limitPrice: input.limitPrice,
-            categoryId: resolved.market.categoryId,
-          },
-          context,
-        );
-      },
-      (result) => result.kind !== "unresolved" && keepForReplay(result),
-    );
+    let replay: Replayed<ProposalOutcome | Unresolved>;
+    try {
+      replay = await ctx.ledger.once(
+        key,
+        ctx.clock.now(),
+        async (): Promise<ProposalOutcome | Unresolved> => {
+          const resolved = await resolveTradeMarket(ctx, input.market);
+          if (resolved.failure !== undefined)
+            return { kind: "unresolved", verdict: unavailableFor(resolved.failure) };
+          const context: Omit<DecisionContext, "version" | "createdAt"> = {
+            requestText: input.requestText,
+            planId: DIRECT_PLAN_ID,
+            rungIndex: Math.max(
+              0,
+              resolved.market.event.contracts.findIndex((c) => c.instrumentSymbol === input.market),
+            ),
+            ladderSummary: ladderSummaryFromEvent(resolved.market.event, ctx.clock.now().toISOString()),
+            signalReceiptIds: input.signalReceiptIds,
+            reason: input.reason,
+          };
+          return proposeIntent(
+            ctx,
+            policy,
+            {
+              market: input.market,
+              outcome: input.outcome,
+              isBuy,
+              amountCents: input.amountCents,
+              limitPrice: input.limitPrice,
+              categoryId: resolved.market.categoryId,
+            },
+            context,
+          );
+        },
+        (result) => result.kind !== "unresolved" && keepForReplay(result),
+        // An identical call is still running: wait for its answer, but only within this call's time.
+        { whileWaiting: (wait) => ctx.deadline.waitFor("lock.replay", wait) },
+      );
+    } catch (error) {
+      const failure = stoppedFailure(ctx.deadline);
+      if (failure === undefined) throw error;
+      const v = unavailableFor(failure);
+      return { structured: { ...v, proposal: null, replayed: true }, summary: summarizeVerdict(v) };
+    }
+    const { value: outcome, replayed, firstAt } = replay;
 
     if (outcome.kind === "unresolved") {
       return {

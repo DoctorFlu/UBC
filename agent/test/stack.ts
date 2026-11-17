@@ -33,7 +33,8 @@ import {
 import type { Intent, PolicyClient, PolicyRules } from "@mandate/shared";
 import { createMandateServer, type MandateServer } from "../src/app";
 import { parseConfig } from "../src/config";
-import { silentLogger } from "../src/logger";
+import { silentLogger, type Logger } from "../src/logger";
+import type { MarketsClient } from "../src/services";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
 import { FakeMarkets, LADDER_TICKER, ladderEvent } from "./fakes";
 
@@ -207,6 +208,22 @@ export async function startStack(options: {
   spotCents: number;
   contract?: PolicyContractKind;
   rules?: PolicyRules;
+  /** The market data the MCP server reads, for example the real Gemini client on a fake Gemini. */
+  marketsClient?: MarketsClient;
+  /** More server settings, for example `MCP_TOOL_DEADLINE_MS`. */
+  env?: Record<string, string>;
+  logger?: Logger;
+  /**
+   * Runs before the console answers a request, for example to hold it as a slow console would. The
+   * request's signal aborts when the caller gives up on it.
+   */
+  consoleGate?: (request: Request) => Promise<void>;
+  /**
+   * Runs before a JSON-RPC request from the MCP server reaches the chain, for example to hold every
+   * `eth_getTransactionReceipt` as a stalled RPC endpoint would. `signal` aborts when the server gives
+   * up on the request. Other clients (the executor, the test's reader) reach the chain directly.
+   */
+  rpcGate?: (methods: string[], signal: AbortSignal) => Promise<void>;
 }): Promise<Stack> {
   const chain = await startDevchain({
     contract: options.contract ?? "production",
@@ -228,7 +245,15 @@ export async function startStack(options: {
         (await reader.getRoles()).agent.toLowerCase() === address.toLowerCase(),
       executorAddress: devAccount("executor").address,
     });
-    const consoleHttp = await listen(fake.fetch);
+    const gate = options.consoleGate;
+    const consoleHttp = await listen(
+      gate === undefined
+        ? fake.fetch
+        : async (request) => {
+            await gate(request);
+            return fake.fetch(request);
+          },
+    );
     servers.push(consoleHttp.server);
 
     // The executor reads outcomes from the same markets the agent plans on, and records settlements in
@@ -248,20 +273,45 @@ export async function startStack(options: {
       log: () => undefined,
     });
 
+    let agentRpcUrl = chain.rpcUrl;
+    const rpcGate = options.rpcGate;
+    if (rpcGate !== undefined) {
+      const proxy = await listen(async (request) => {
+        const body = await request.text();
+        const parsed = JSON.parse(body) as { method: string } | { method: string }[];
+        await rpcGate(
+          (Array.isArray(parsed) ? parsed : [parsed]).map((call) => call.method),
+          request.signal,
+        );
+        const answer = await fetch(chain.rpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        });
+        return new Response(await answer.text(), {
+          status: answer.status,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      servers.push(proxy.server);
+      agentRpcUrl = proxy.url;
+    }
+
     const mcpToken = randomBytes(32).toString("base64url");
     const server = createMandateServer(
       parseConfig({
         MCP_AUTH_TOKEN: mcpToken,
         MCP_HOST: "127.0.0.1",
-        ARC_RPC_URL: chain.rpcUrl,
+        ARC_RPC_URL: agentRpcUrl,
         POLICY_ADDRESS: policy,
         POLICY_DEPLOY_BLOCK: chain.deployment.blockNumber.toString(),
         AGENT_PRIVATE_KEY: devPrivateKey("agent"),
         CONSOLE_URL: consoleHttp.url,
         CONSOLE_SERVICE_TOKEN: consoleToken,
+        ...options.env,
       }),
-      silentLogger,
-      { services: { markets } },
+      options.logger ?? silentLogger,
+      { services: { markets: options.marketsClient ?? markets } },
     );
     const mcpHttp = await listen(server.fetch);
     servers.push(mcpHttp.server);

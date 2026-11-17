@@ -2,9 +2,9 @@ import * as z from "zod";
 import type { HoldingsResponse, PairingResponse, PolicySnapshot, Roles } from "@mandate/shared";
 import { isConfigured, type Config } from "../config";
 import type { ToolContext } from "../context";
-import { ok, verdictSchema } from "../mcp/envelope";
+import { ok, summarizeVerdict, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
-import { describeFailure } from "../support/failures";
+import { describeFailure, stoppedFailure, unavailableFor } from "../support/failures";
 
 /** Below this the agent cannot pay for a few proposals: 0.01 USDC in Arc's 18-decimal gas units. */
 export const MIN_AGENT_GAS_WEI = 10n ** 16n;
@@ -157,6 +157,16 @@ export const getSetupState = defineTool({
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   handler: async (_input, ctx) => {
     const steps = await liveSetupSteps(ctx);
+    // Out of time (issue #105): the live steps would read "not done" only because they were slow, so
+    // report what was slow and only the steps the configuration alone decides.
+    const stopped = stoppedFailure(ctx.deadline);
+    if (stopped !== undefined) {
+      const v = unavailableFor(stopped);
+      return {
+        structured: { ...v, ready: false, steps: setupSteps(ctx.config) },
+        summary: summarizeVerdict(v),
+      };
+    }
     const remaining = steps.filter((step) => !step.done);
     const next = remaining[0];
     // The agent can act on its own steps right away; list the owner's after.
