@@ -17,6 +17,7 @@ import { Advanced } from "@/lib/advanced/Advanced";
 import { When } from "@/components/ui/When";
 
 import styles from "./setup.module.css";
+import { WakeUpsCard } from "./WakeUps";
 
 /** Pairing Grok Bot with this console, as a checklist derived from live state, plus the details to copy. */
 export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
@@ -184,6 +185,10 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
               </Advanced>
             </dl>
           </Card>
+
+          <Advanced>
+            <WakeUpsCard wake={snapshot.wake} />
+          </Advanced>
         </div>
       </div>
     </div>

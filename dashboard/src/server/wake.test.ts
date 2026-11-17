@@ -196,7 +196,8 @@ describe("event wake-ups from the console's pipeline", () => {
       remainingBudgetCents: 20_000,
       requestText: "Protect my 0.05 BTC below 3% down this week.",
     });
-    service.offchain.putPlan(request);
+    // As the agent API stores it: the plan is plain JSON on the wire.
+    service.offchain.putPlan({ ...request, plan: { ...request.plan } });
     service.offchain.saveHoldings([{ asset: "BTC", quantity: "0.05" }]);
     const floor = request.plan.floorCents ?? 0;
     await new Promise((resolve) => setTimeout(resolve, 100));
