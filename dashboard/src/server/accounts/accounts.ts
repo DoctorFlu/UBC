@@ -412,6 +412,20 @@ export class Accounts {
 
   closeSession(sessionId: string | null): void {
     if (sessionId && sessionId.length <= 128) this.store.deleteSession(hashSecret(sessionId));
+    for (const listener of [...this.#sessionEnded]) listener();
+  }
+
+  readonly #sessionEnded = new Set<() => void>();
+
+  /**
+   * Calls `listener` whenever a session is closed here (a sign-out), so what a session holds open, such as
+   * an event stream, can check whether it is still live. Returns the unsubscribe.
+   */
+  onSessionClosed(listener: () => void): () => void {
+    this.#sessionEnded.add(listener);
+    return () => {
+      this.#sessionEnded.delete(listener);
+    };
   }
 
   /**

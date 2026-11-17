@@ -286,8 +286,8 @@ test.describe("a second workspace", () => {
   test("an open page whose session ends goes to sign in, not to a stream that never comes back", async ({
     baseURL,
   }) => {
-    // Signed in, on a live page. The session then ends elsewhere (another tab signs out; on the hosted
-    // machine, the upgrade to workspaces under an open page), and the page's stream drops.
+    // Signed in, on a live page. The session then ends elsewhere (another tab signs out), and the
+    // console ends the page's stream with it.
     await page.goto("/activity");
     await hydrated(page);
     const elsewhere = await page.context().newPage();
@@ -296,8 +296,6 @@ test.describe("a second workspace", () => {
     });
     expect(out.status()).toBe(200);
     await elsewhere.close();
-    await page.context().setOffline(true);
-    await page.context().setOffline(false);
     // The stream's reconnect gets 401: the page asks the console once, and goes to sign in.
     await page.waitForURL(/\/sign-in\?next=%2Factivity$/);
     await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toBeVisible();

@@ -188,6 +188,7 @@ The hosted stack passes `CONSOLE_MASTER_KEY` from its env file, which `deploy/in
   It cannot read or write another workspace, sign in to the console, create or revoke tokens, approve, change rules, or make its key sign anything but a proposal to its own contract.
   The owner revokes it in Setup, and it stops working on its next call.
 - **A stolen session cookie** acts as that member until it expires or they sign out; it is `HttpOnly`, so page scripts cannot read it.
+  An event stream opened with it ends with the session: at once on sign-out, and at its next snapshot or 15-second heartbeat otherwise.
 - **Another workspace's member** cannot name a foreign mandate: every route takes the mandate from the session, and a `?mandate=` that is not the session's is 404, the same answer as one that does not exist.
 - **Guessing codes and tokens** is hopeless at 120 to 256 bits, and sign-in, sign-up, claim, recovery and token checks are rate limited besides.
 - **Timing** tells nothing about a token or code: the store looks them up by the SHA-256 of what was presented, never by the secret, so how long a lookup takes depends on a hash an attacker cannot steer toward a stored one; the service token is compared in constant time.

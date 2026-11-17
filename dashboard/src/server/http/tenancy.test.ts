@@ -253,6 +253,48 @@ describe("reads across workspaces", () => {
     await reader.cancel();
   });
 
+  it("ends a stream when its session signs out, and leaves another session's open", async () => {
+    const open = async () => {
+      const cookie = sessionHeader(service, bob);
+      const response = await eventStream(
+        new Request(`${ORIGIN}/api/console/events`, { headers: { cookie } }),
+        service,
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("no stream");
+      await reader.read();
+      return { reader, sessionId: cookie.slice(cookie.indexOf("=") + 1) };
+    };
+    const stolen = await open();
+    const other = await open();
+    service.accounts.closeSession(stolen.sessionId);
+    // Ended at once: nothing more arrives on it, whatever changes next.
+    const ended = await Promise.race([
+      (async () => {
+        for (;;) if ((await stolen.reader.read()).done) return "ended";
+      })(),
+      new Promise((resolve) => setTimeout(() => resolve("still open"), 2_000)),
+    ]);
+    expect(ended).toBe("ended");
+    // The other session's stream still gets the next change.
+    const decoder = new TextDecoder();
+    const holdingsBefore = service.offchain.holdings(bobMandate).holdings;
+    try {
+      service.offchain.saveHoldings(bobMandate, [{ asset: "ETH", quantity: "1" }]);
+      service.changed();
+      let text = "";
+      while (!text.includes('"ETH"')) {
+        const chunk = await other.reader.read();
+        if (chunk.done) throw new Error("the other session's stream ended");
+        text += decoder.decode(chunk.value);
+      }
+    } finally {
+      await other.reader.cancel();
+      service.offchain.saveHoldings(bobMandate, holdingsBefore);
+    }
+  });
+
   it("lists each member their own agents only", async () => {
     const listed = (await (
       await listAgents(asMember(bob, "GET", "/api/console/agents"), service)
