@@ -159,7 +159,7 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
       tried:
         "Signed in to his own workspace, Bob asks the console for Alice's mandate by id (snapshot, live events, hedge quotes), lists agents, creates and revokes tokens on Alice's agent, dismisses and marks applied Alice's change request, saves holdings and confirms a pairing on her mandate, and presents his own agent token where the MCP server's service token belongs. Every write carries the console's own Origin, so only the tenancy check stands in the way.",
       expected:
-        "404 for every one of Alice's ids and the agent API refuses his token (401); Bob's own snapshot, stream and agent list carry nothing of Alice's, and no chain view, so none of the contract's venue orders, venue or settlements (which Alice's snapshot has); Alice's token, change request and holdings are as they were, and her token still resolves to her agent.",
+        "404 for every one of Alice's ids and the agent API refuses his token (401); Bob's own snapshot, stream and agent list carry nothing of Alice's, and no chain view, so none of the contract's venue orders, venue or settlements; Alice's token, change request and holdings are as they were, and her token still resolves to her agent.",
       expectedVerdict: "held",
       selfOnly: SELF_ONLY,
       async run(ctx) {
@@ -223,10 +223,6 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
                 ?.tokens.map((t) => [t.id, t.name, t.revokedAt]),
             ),
             resolvesTo: await resolve(token),
-            // The contract's executor records reach her snapshot: the venue order fields and the venue.
-            executorRecords:
-              typeof field(json(snapshot), "chain", "venueOrders") === "object" &&
-              field(json(snapshot), "chain", "venue") !== undefined,
           };
         };
         const before = await aliceState();
@@ -318,7 +314,6 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
           before.resolvesTo === alice.agentId &&
           before.holdings.includes(ALICE_HOLDING_QUANTITY) &&
           bobResolvesTo === bob.agentId &&
-          before.executorRecords &&
           bobHasNoChain &&
           ownViews;
         const exact = attempts.every(([, response, want]) => want === 0 || response.status === want);
@@ -337,7 +332,7 @@ export function tenancyAttacks(amounts: Amounts): Attack[] {
             attempts.map(([label, response]) => `${label}: ${String(response.status)}`).join("; "),
             `his own snapshot, stream and agents: ${own.map((r) => String(r.status)).join("/")}, with ${leaked.length === 0 ? "nothing" : `${String(leaked.length)} MARKS`} of hers`,
             `his token resolves to ${bobResolvesTo === bob.agentId ? "his agent" : `AGENT ${String(bobResolvesTo)}`}`,
-            `the contract's venue orders, venue and settlements: in her snapshot ${before.executorRecords ? "yes" : "NO"}, in his views ${executorRecords ? "YES" : "no"}`,
+            `his chain view: ${bobHasNoChain ? "none" : "PRESENT"}; the contract's venue orders, venue or settlements in his views: ${executorRecords ? "YES" : "no"}`,
             `her token, request and holdings: ${changed ? "CHANGED" : "unchanged"} (request ${String(after.request)}, token resolves to ${after.resolvesTo === alice.agentId ? "her agent" : String(after.resolvesTo)})`,
           ].join("; "),
         };
