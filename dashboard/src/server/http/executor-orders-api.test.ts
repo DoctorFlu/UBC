@@ -29,11 +29,23 @@ import {
 } from "@mandate/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { envMandate, envSnapshot, signUpWorkspace, workspaceAgent } from "../../../test/support/accounts";
+import type { ConsoleSnapshot } from "@/lib/live/types";
+
+import {
+  claimFirstWorkspace,
+  consoleHeaders,
+  envMandate,
+  envSnapshot,
+  signUpWorkspace,
+  workspaceAgent,
+} from "../../../test/support/accounts";
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
+import type { Member } from "../accounts/store";
 import { readWakeConfig, testConsoleConfig } from "../config";
+import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
+import { eventStream } from "./event-stream";
 import { getVenueOrder, putExecutorVenue, putVenueOrder } from "./executor-orders-api";
 
 const silent = { info: () => undefined, warn: () => undefined };
@@ -303,16 +315,59 @@ describe("the executor's order journal in the console", () => {
     await expectError(await announce({ ...base, announcedAt: "2026-11-17T07:00:00.000Z" }), 409, "stale");
   });
 
-  it("keeps the journal and the venue with the server's contract: another workspace sees neither", () => {
+  it("keeps the journal and the venue with the server's contract: another workspace sees neither", async () => {
     // Keyed by deployment like settlements (docs/accounts.md): only the mandate that follows the
     // server's contract sees the venue badge and the order fields.
     expect(Object.keys(envSnapshot(service).chain?.venueOrders ?? {})).not.toHaveLength(0);
     expect(envSnapshot(service).chain?.venue).not.toBeNull();
-    const other = workspaceAgent(service, signUpWorkspace(service, "Mallory"));
+    const mallory = signUpWorkspace(service, "Mallory");
+    const other = workspaceAgent(service, mallory);
     const theirs = service.snapshot(other.mandate);
     expect(theirs.chain).toBeNull();
     expect(JSON.stringify(theirs)).not.toMatch(/venueOrder|"venue"|clientOrderId|sandbox/);
     expect(service.deploymentIdFor(other.mandate)).toBeNull();
     expect(service.deploymentIdFor(envMandate(service))).not.toBeNull();
+
+    // Through the console's routes, signed in: the first workspace's owner sees them; Mallory's own
+    // views carry none of it, and naming the first mandate is a 404, the answer for one that does not exist.
+    setConsoleServiceForTests(service);
+    try {
+      const alice = claimFirstWorkspace(service, "Alice");
+      const { GET } = await import("@/app/api/console/snapshot/route");
+      const as = (member: Member, query = "") =>
+        new Request(`http://console.test/api/console/snapshot${query}`, {
+          headers: consoleHeaders(service, member),
+        });
+      const hers = (await (await GET(as(alice))).json()) as ConsoleSnapshot;
+      expect(hers.chain?.venue).toMatchObject({ venue: "gemini", environment: "sandbox" });
+      expect(hers.chain?.venueOrders[placedId]).toMatchObject({ state: "filled" });
+      const his = await GET(as(mallory));
+      expect(his.status).toBe(200);
+      expect(await his.text()).not.toMatch(/venueOrder|"venue"|clientOrderId|sandbox/);
+      for (const mandate of [envMandate(service).id, "mnd_does_not_exist"]) {
+        const query = `?mandate=${encodeURIComponent(mandate)}`;
+        expect((await GET(as(mallory, query))).status, mandate).toBe(404);
+        const events = await eventStream(
+          new Request(`http://console.test/api/console/events${query}`, {
+            headers: consoleHeaders(service, mallory),
+          }),
+          service,
+        );
+        expect(events.status, mandate).toBe(404);
+      }
+    } finally {
+      setConsoleServiceForTests(undefined);
+    }
+  });
+
+  it("holds no venue credential: the journal, the venue and the snapshot carry no API key or secret", () => {
+    const deploymentId = service.deploymentIdFor(envMandate(service)) ?? "";
+    const stored = JSON.stringify([
+      service.venueOrders.orders(deploymentId),
+      service.venueOrders.venue(deploymentId),
+      envSnapshot(service),
+    ]);
+    expect(stored).toContain(BTC_ABOVE_65K);
+    for (const secret of ["account-FAKEKEY", "fake-secret"]) expect(stored).not.toContain(secret);
   });
 });
