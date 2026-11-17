@@ -2,6 +2,7 @@
 
 How one hedge order goes from the agent's plan to what it paid at expiry, which part of the stack owns each step, and what is recorded where.
 Issue #92 added the last steps: settlement at expiry and the roll to the next ladder.
+Issue #93 added a real venue, Gemini's sandbox ([gemini-venue.md](gemini-venue.md)).
 
 ```text
 plan_hedge -> execute_plan -> proposeTrade -> verdict -> (owner approves) -> executor checks the market
@@ -29,13 +30,13 @@ Every venue sits behind one interface, `Venue` in `devchain/src/venue.ts`, so th
 | Method | Answers |
 | --- | --- |
 | `categoryOf(symbol)` | The mandate category Gemini lists the market under, or null when it lists no such market. |
-| `placeOrder(order)` | The venue's id for the order. A refusal is a closed fill, not an error. |
+| `placeOrder(order)` | `placed` with the venue's id for the order; `refused` (the venue refused the order itself: recorded as not filled); or `held` (no order now and nothing recorded, for example while the terms are not accepted or a lost answer is looked up: asked again later). |
 | `readFill(placed)` | `open` (ask again) or `closed`, with the cents filled and why it closed. |
-| `positionOutcome(position)` | `open` with its expiry, `awaiting` (expired, no outcome yet), `unlisted`, or `resolved` with the resolution, the settlement value, the contracts held and the payout. |
+| `positionOutcome(position)` | `open` with its expiry, `awaiting` (expired, no outcome yet), `unlisted`, `disputed` (the venue's own record disagrees with the public outcome: never settled), or `resolved` with the resolution, the settlement value, the contracts held and the payout. |
 
 Each method throws when the venue cannot be reached; the executor then waits and asks again, and never guesses.
-The only venue today is `simulatedVenue`: it places nothing, fills every order in full at its limit price, and reads listings and outcomes from Gemini's public market data, so a position settles exactly as the real market did.
-A real Gemini venue (issue #93) plugs in behind the same interface.
+`simulatedVenue`, the default, places nothing, fills every order in full at its limit price, and reads listings and outcomes from Gemini's public market data, so a position settles exactly as the real market did.
+`geminiVenue` (issue #93, `EXECUTOR_VENUE=gemini`) places the order on Gemini Prediction Markets' sandbox, journals it in the console so it is never placed twice, and settles only when the account's settled position agrees with the public outcome; [gemini-venue.md](gemini-venue.md) has the rules.
 
 ## 4. Settlement
 
@@ -77,6 +78,7 @@ And the contract's daily loss rule never sees a settlement loss.
 The hosted machine pauses after about 30 idle minutes ([hosting.md](hosting.md#pauses-and-the-free-plans-limits)).
 The executor's settlement timer looks every 60 seconds (`EXECUTOR_SETTLE_MS`), but the look is local: on a tick where no filled, unsettled position has reached its expiry or the end of its wait, it calls neither Gemini nor the console, so it never keeps the machine awake.
 While the machine is paused nothing runs, so a ladder that expires during a pause is settled on the next wake: the first tick after it finds the position due and asks at once.
+On Gemini the same holds for its private API: the executor asks it about an order only while that order is open or held (its waits grow to 10 minutes), and about settled positions only after the public outcome is out, so with nothing open it sends Gemini nothing.
 The hourly scheduled run of Grok Bot wakes the machine anyway, so a settlement waits at most about an hour.
 
 ## 6. What the owner and the agent see
@@ -107,3 +109,4 @@ The agent (no tool input changed):
 - `dashboard/src/server/settlement-wake.test.ts`: one wake-up per ladder, after its last settlement.
 - `agent/test/routine.e2e.test.ts`: a ladder moves past expiry, its positions settle once, `get_activity` and `get_portfolio` report it, and the next run plans on the next ladder only.
 - `dashboard/e2e/live.spec.ts` ("an expired ladder settles once"): the real console, chain and executor with the fake Gemini; the Hedge, Activity and intent pages show what the ladder paid.
+- The Gemini venue's own tests are listed in [gemini-venue.md](gemini-venue.md#tests).
