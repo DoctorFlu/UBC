@@ -35,6 +35,10 @@ describe("planExecution", () => {
       "Not executed: no intent on the chain cites this plan yet.",
     );
     expect(executionSummary(planExecution(plan, null), plan.orders.length)).toContain("Not executed");
+    // Once its ladder has expired, it never will be: no "yet".
+    expect(executionSummary(execution, plan.orders.length, true)).toBe(
+      "Not executed: no intent on the chain cites this plan, and its ladder has expired.",
+    );
   });
 
   it("matches orders by market and amount, only through verified sealed reasons", () => {

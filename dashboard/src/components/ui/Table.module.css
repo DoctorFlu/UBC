@@ -138,6 +138,11 @@
     text-align: start;
   }
 
+  /* A stacked record never shows a label with nothing after it (an intent not settled yet, say). */
+  .table .td:empty {
+    display: none;
+  }
+
   /* The primary cell leads the record: first, full width, no label. */
   .table .td.primary {
     display: block;

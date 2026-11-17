@@ -1052,6 +1052,7 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     await expect(expired).toHaveAttribute("data-state", "settling");
     await expect(expired).toContainText("Waiting for Gemini to publish the outcome");
     await expect(page.getByTestId("cover-now")).toHaveCount(0);
+    await expect(page.getByText("for a ladder that has expired", { exact: false })).toBeVisible();
     await expect.poll(() => logs.some((line) => line.includes("waiting for Gemini to publish"))).toBe(true);
     expect(Object.keys((await snapshot(baseURL)).chain?.settlements ?? {})).toEqual([]);
     await page.screenshot({
@@ -1136,6 +1137,13 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     );
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
+      if (width === 390) {
+        // Stacked, an intent with nothing settled shows no empty "At expiry" label.
+        const unsettled = chainView.intents.find((intent) => chainView.settlements[intent.id] === undefined);
+        if (unsettled) {
+          await expect(row(page, unsettled.id).locator('td[data-label="At expiry"]')).toBeHidden();
+        }
+      }
       await page.screenshot({
         path: testInfo.outputPath(`activity-settled-${width.toString()}-light.png`),
         fullPage: true,

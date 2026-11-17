@@ -65,11 +65,16 @@ export function planExecution(
   };
 }
 
-/** One honest line about a plan's execution, from what the chain shows. */
-export function executionSummary(execution: PlanExecution, orderCount: number): string {
+/**
+ * One honest line about a plan's execution, from what the chain shows. `expired`: the plan's ladder has
+ * expired, so an unexecuted plan never will be.
+ */
+export function executionSummary(execution: PlanExecution, orderCount: number, expired = false): string {
   if (orderCount === 0) return "Nothing to execute: the plan has no orders.";
   if (execution.proposed === 0 && execution.extra.length === 0) {
-    return "Not executed: no intent on the chain cites this plan yet.";
+    return expired
+      ? "Not executed: no intent on the chain cites this plan, and its ladder has expired."
+      : "Not executed: no intent on the chain cites this plan yet.";
   }
   const parts: string[] = [`${String(execution.proposed)} of ${String(orderCount)} orders proposed`];
   const executed = execution.byStatus.executed ?? 0;

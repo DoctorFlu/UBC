@@ -206,10 +206,13 @@ function AgentPlanCard({
   view,
   snapshot,
   agentName,
+  expired,
 }: {
   view: AgentPlanView;
   snapshot: ConsoleSnapshot;
   agentName: string;
+  /** The plan's ladder has expired: the plan is history, and the next one goes on the next ladder. */
+  expired: boolean;
 }) {
   const { plan } = view;
   const execution = planExecution(plan, snapshot.chain);
@@ -228,7 +231,7 @@ function AgentPlanCard({
                 , stored <When inSentence at={view.storedAt} date />
               </>
             )}
-            .
+            {expired ? ", for a ladder that has expired" : null}.
           </>
         }
         actions={<ArrowLink href={evidenceHref(view.planId)}>Evidence chain</ArrowLink>}
@@ -243,7 +246,7 @@ function AgentPlanCard({
             </blockquote>
           ) : null}
           <p className={styles.execution} data-testid="plan-execution" role="status">
-            {executionSummary(execution, plan.orders.length)}
+            {executionSummary(execution, plan.orders.length, expired)}
           </p>
           <PlanDetails plan={plan} settles={settles} />
           <p className={styles.signal} data-testid="plan-signal">
@@ -396,7 +399,12 @@ function AssetHedge({
         />
       ) : null}
       {agentPlan ? (
-        <AgentPlanCard view={agentPlan} snapshot={snapshot} agentName={agentName} />
+        <AgentPlanCard
+          view={agentPlan}
+          snapshot={snapshot}
+          agentName={agentName}
+          expired={expiry.state !== "open"}
+        />
       ) : (
         <NoPlanCard asset={asset} holding={holding} preview={preview} agentName={agentName} />
       )}
