@@ -50,6 +50,9 @@ export function getConsoleService(): ConsoleService {
         lookup: (symbol) => getMarketQuotes().marketCategory(symbol),
         attemptsPerRequest: MarketQuotes.ATTEMPTS_PER_REQUEST,
       },
+      // The price wake-ups read the same cached client: a goal's ladder costs nothing extra while the
+      // hedge view has it, and at most two requests per goal per check otherwise.
+      ladder: (asset, eventTicker) => getMarketQuotes().ladder(asset, eventTicker),
     });
     holder[KEY] = service;
   }

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { HedgeMarketResponse } from "@/lib/hedge/types";
 
 import { RECORDED_EVENT, recordedResponse } from "../../../e2e/support/fake-gemini";
-import type { ConsoleConfig } from "../config";
+import { type ConsoleConfig, readWakeConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { previewPlan } from "../market/preview";
@@ -30,6 +30,7 @@ function makeService(): ConsoleService {
     streamSecurityToken: null,
     publicUrl: "http://console.test",
     mcpPublicUrl: null,
+    wake: readWakeConfig({}),
   };
   return new ConsoleService(config, openDatabase(dataDir), {
     env: { POLICY_DEPLOYMENT_FILE: join(dataDir, "missing.json") },

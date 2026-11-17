@@ -16,7 +16,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
-import type { ConsoleConfig } from "../config";
+import { type ConsoleConfig, readWakeConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { getSettlements } from "./agent-api";
@@ -40,6 +40,7 @@ function makeService(): ConsoleService {
     streamSecurityToken: null,
     publicUrl: "http://console.test",
     mcpPublicUrl: null,
+    wake: readWakeConfig({}),
   };
   return new ConsoleService(config, openDatabase(dataDir), { env: chain.env, logger: silent });
 }

@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GET as holdingsRoute } from "@/app/api/agent/v1/holdings/route";
 
 import { BTC_ABOVE_66K, type TestChain, startTestChain } from "../../../test/support/devchain";
-import type { ConsoleConfig } from "../config";
+import { type ConsoleConfig, readWakeConfig } from "../config";
 import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
@@ -58,6 +58,7 @@ function makeService(options: { token?: string | null; env?: EnvVars } = {}): Co
     streamSecurityToken: null,
     publicUrl: "http://console.test",
     mcpPublicUrl: null,
+    wake: readWakeConfig({}),
   };
   // No deployment file: the console runs without a chain, as it does before `dev:chain`.
   const env = options.env ?? { POLICY_DEPLOYMENT_FILE: join(dataDir, "missing.json") };

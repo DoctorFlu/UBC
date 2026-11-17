@@ -201,6 +201,8 @@ export interface FakeGemini {
   url: string;
   /** Answer every request with 503, as if Gemini were down. */
   setFailing: (failing: boolean) => void;
+  /** BTC spot in cents, bid and ask both, in place of the recorded one; null restores the recording. */
+  setBtcSpot: (cents: number | null) => void;
   /**
    * Moves an event past its expiry, as Gemini shows it once the index settled at `settlementValue`
    * dollars: expired a minute ago, every strike resolved YES at or above the value and NO below it, with
@@ -247,6 +249,7 @@ function settledBody(body: unknown, settled: Settled): unknown {
 
 export async function startFakeGemini(port: number): Promise<FakeGemini> {
   let failing = false;
+  let btcSpot: number | null = null;
   const requests: string[] = [];
   const settledEvents = new Map<string, Settled>();
   const server: Server = createServer((request, response) => {
@@ -260,12 +263,16 @@ export async function startFakeGemini(port: number): Promise<FakeGemini> {
       send(503, { result: "error", reason: "Maintenance" });
       return;
     }
-    const recorded = request.method === "GET" ? recordedResponse(path) : null;
+    let body = request.method === "GET" ? recordedResponse(path) : null;
     const route = path.split("?")[0] ?? "";
+    if (btcSpot !== null && body !== null && route === "/v1/pubticker/btcusd") {
+      const price = (btcSpot / 100).toFixed(2);
+      body = { ...(body as Record<string, unknown>), bid: price, ask: price, last: price };
+    }
     const settled = route.startsWith(EVENT_ROUTE)
       ? settledEvents.get(decodeURIComponent(route.slice(EVENT_ROUTE.length)))
       : undefined;
-    const body = settled && recorded !== null ? settledBody(recorded, settled) : recorded;
+    if (settled && body !== null) body = settledBody(body, settled);
     if (body === null) send(404, { result: "error", reason: "NotFound" });
     else send(200, body);
   });
@@ -277,6 +284,9 @@ export async function startFakeGemini(port: number): Promise<FakeGemini> {
     url: `http://127.0.0.1:${port.toString()}`,
     setFailing: (next) => {
       failing = next;
+    },
+    setBtcSpot: (cents) => {
+      btcSpot = cents;
     },
     settle: (ticker, value, options = {}) => {
       const now = Date.now();

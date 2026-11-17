@@ -129,7 +129,40 @@ const MIGRATIONS: readonly string[] = [
     checked_at TEXT    NOT NULL
   ) STRICT;
   `,
-  // 5: what each filled position paid at settlement, signed by the executor (#92). First record wins.
+  // 5: event wake-ups of the Grok Bot routine (#40): each wake-up, the triggers it carries (so a trigger
+  // is offered once, across restarts), and what the last price check of each goal saw. Times in unix ms.
+  `
+  CREATE TABLE wake_deliveries (
+    id               TEXT    NOT NULL PRIMARY KEY,
+    kind             TEXT    NOT NULL,
+    status           TEXT    NOT NULL,
+    detail           TEXT    NOT NULL,
+    count            INTEGER NOT NULL,
+    occurred_at      INTEGER NOT NULL,
+    created_at       INTEGER NOT NULL,
+    due_at           INTEGER NOT NULL,
+    attempts         INTEGER NOT NULL,
+    attempted_at     INTEGER,
+    sent_at          INTEGER,
+    result           TEXT,
+    counts_toward_cap INTEGER NOT NULL
+  ) STRICT;
+  CREATE INDEX wake_deliveries_status ON wake_deliveries (status, due_at);
+  CREATE INDEX wake_deliveries_created ON wake_deliveries (created_at);
+
+  CREATE TABLE wake_sources (
+    source_id   TEXT    NOT NULL PRIMARY KEY,
+    delivery_id TEXT    NOT NULL,
+    seen_at     INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE TABLE wake_price_memory (
+    plan_id    TEXT    NOT NULL PRIMARY KEY,
+    memory     TEXT    NOT NULL,
+    updated_at INTEGER NOT NULL
+  ) STRICT;
+  `,
+  // 6: what each filled position paid at settlement, signed by the executor (#92). First record wins.
   `
   CREATE TABLE settlements (
     deployment_id TEXT    NOT NULL,

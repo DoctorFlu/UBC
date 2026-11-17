@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type OwnerAction, newNonce, ownerRequestMessage } from "@/lib/owner-request";
 
 import { type TestChain, startTestChain } from "../../../test/support/devchain";
-import type { ConsoleConfig } from "../config";
+import { type ConsoleConfig, readWakeConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
 import { confirmPairing, dismissChangeRequest, markChangeRequestApplied, saveHoldings } from "./owner-api";
@@ -27,6 +27,7 @@ function makeService(env: EnvVars): ConsoleService {
     streamSecurityToken: null,
     publicUrl: "http://console.test",
     mcpPublicUrl: null,
+    wake: readWakeConfig({}),
   };
   return new ConsoleService(config, openDatabase(dataDir), { env, logger: silent });
 }
