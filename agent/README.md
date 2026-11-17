@@ -40,6 +40,7 @@ Grok's servers call the MCP server over the public internet, so a server on a la
 2. In a second terminal, run `npm run dev:tunnel`.
    It starts a Cloudflare quick tunnel, waits until the public URL answers `/health`, and prints the values for the connector.
    If `cloudflared` is missing it says how to install it (`brew install cloudflared` on macOS).
+   Cloudflare sometimes fails to hand out a quick tunnel, and `cloudflared` then exits; the script asks again, up to 3 times, 3 seconds apart.
 3. In Grok Bot (the web client at grok.com/bot or the desktop app), open **Connect apps**, choose **Add a custom connector**, and enter:
    - **Name**: `Mandate`
    - **Type**: `Remote HTTPS`
