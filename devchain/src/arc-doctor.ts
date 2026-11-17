@@ -42,7 +42,7 @@ export interface ArcDoctorOptions {
   /** The owner's address, as the operator names it (`--owner` or `ARC_OWNER_ADDRESS`). */
   owner?: string | undefined;
   /** The compiled contract to compare with; defaults to the production build under devchain/out. */
-  artifactPath?: string;
+  artifactPath?: string | undefined;
   /** The RPC the fork reads. Defaults to Arc's public RPC; tests pass a local chain. */
   forkRpcUrl?: string;
   /** False skips the fork and its gas figures (`--no-fork`). */

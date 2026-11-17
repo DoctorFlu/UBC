@@ -8,8 +8,9 @@
  * - One of anvil's published test keys, a value that is not a key, or the same key for both roles is
  *   refused: run again with `--replace` to put new keys in their place.
  *
- * The addresses then need gas (Arc testnet USDC from https://faucet.circle.com) and their roles
- * (`setAgent`, `setExecutor`, called by the contract's owner); `npm run arc:doctor` says which is missing.
+ * The addresses then need gas (Arc testnet USDC from https://faucet.circle.com) and their roles, which
+ * the contract's owner gives them; `npm run arc:doctor` says which is missing and prints the exact calls.
+ * This package never names an owner function (agent/test/no-owner-calls.test.ts), so this script does not.
  */
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,8 +21,8 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { resolveEnvFile, writeEnvVar } from "../src/env-file";
 
 export const ARC_KEYS = [
-  { name: "AGENT_PRIVATE_KEY", role: "agent", setter: "setAgent" },
-  { name: "EXECUTOR_PRIVATE_KEY", role: "executor", setter: "setExecutor" },
+  { name: "AGENT_PRIVATE_KEY", role: "agent" },
+  { name: "EXECUTOR_PRIVATE_KEY", role: "executor" },
 ] as const;
 
 export type ArcKeyName = (typeof ARC_KEYS)[number]["name"];
@@ -127,8 +128,8 @@ function main(): void {
       "",
       "Next:",
       `  1. Fund both addresses with Arc testnet USDC (gas) at https://faucet.circle.com.`,
-      `  2. Ask the contract's owner to call setAgent(${result.addresses.agent}) and setExecutor(${result.addresses.executor}).`,
-      "  3. Run npm run arc:doctor; it ends with READY or with the next step.",
+      `  2. Ask the contract's owner to make ${result.addresses.agent} the agent and ${result.addresses.executor} the executor.`,
+      "  3. Run npm run arc:doctor -- --owner 0x<owner>: it prints the owner's exact calls, and ends with READY or the next step.",
       "  On the hosted machine, put the same keys in with deploy/set-secret.sh (docs/hosting.md, Arc testnet).",
       "",
     ].join("\n"),

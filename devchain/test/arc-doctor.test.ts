@@ -92,7 +92,7 @@ describe("arc:doctor", () => {
   });
 
   it("names the setter the owner must call when a key does not hold its role", async () => {
-    const other = `0x${"b2".repeat(32)}`;
+    const other = `0x${"b2".repeat(32)}` as const;
     const { status, verdict } = await run({ AGENT_PRIVATE_KEY: other });
     expect(status).toBe(1);
     expect(verdict).toBe(

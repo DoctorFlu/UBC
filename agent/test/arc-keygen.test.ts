@@ -90,8 +90,8 @@ describe("arc:keygen", () => {
     expect(run.status).toBe(0);
     const agent = privateKeyToAccount(keyOf(file, "AGENT_PRIVATE_KEY")).address;
     const executor = privateKeyToAccount(keyOf(file, "EXECUTOR_PRIVATE_KEY")).address;
-    expect(run.stdout).toContain(`setAgent(${agent})`);
-    expect(run.stdout).toContain(`setExecutor(${executor})`);
+    expect(run.stdout).toContain(`make ${agent} the agent and ${executor} the executor`);
+    expect(run.stdout).toContain("npm run arc:doctor");
     expect(run.stdout + run.stderr).not.toContain(keyOf(file, "AGENT_PRIVATE_KEY").slice(2, 18));
     expect(run.stdout + run.stderr).not.toContain(keyOf(file, "EXECUTOR_PRIVATE_KEY").slice(2, 18));
   });
