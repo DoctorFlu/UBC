@@ -38,7 +38,14 @@ import { connect } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { CONSOLE_AGENT_API_BASE, CONSOLE_AGENT_ROUTES, formatCents, loadEnv } from "@mandate/shared";
+import {
+  AGENT_ID_HEADER,
+  CONSOLE_AGENT_API_BASE,
+  CONSOLE_AGENT_ROUTES,
+  ENV_AGENT_ID,
+  formatCents,
+  loadEnv,
+} from "@mandate/shared";
 import { localDeploymentPath } from "@mandate/shared/node";
 import {
   type AnvilInstance,
@@ -242,6 +249,23 @@ async function waitFor(name: string, url: string, init?: RequestInit): Promise<v
   throw new Error(`${name} was not ready after ${String(STARTUP_TIMEOUT_MS / 1_000)} s (${last})`);
 }
 
+/** A claim code from the console's admin command (`npm run console:admin -- claim-code`), on this run's store. */
+async function adminClaimCode(dataDir: string): Promise<string> {
+  const admin = spawn("npm", ["run", "--silent", "admin", "-w", "@mandate/dashboard", "--", "claim-code"], {
+    cwd: ROOT,
+    env: { ...process.env, CONSOLE_DATA_DIR: dataDir },
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  let code = "";
+  admin.stdout.setEncoding("utf8");
+  admin.stdout.on("data", (chunk: string) => {
+    code += chunk;
+  });
+  const exit = await new Promise<number | null>((resolve) => admin.once("exit", resolve));
+  if (exit !== 0) throw new Error(`the admin command could not make a claim code (code ${String(exit)})`);
+  return code.trim();
+}
+
 // ------------------------------------------------------------------ start-up
 
 async function main(): Promise<void> {
@@ -360,14 +384,16 @@ async function main(): Promise<void> {
     }
   }
 
-  const asAgent = { headers: { authorization: `Bearer ${serviceToken}` } };
+  // As the MCP server calls it: the service token, for the first workspace's agent (the one it holds the key of).
+  const asAgent = { headers: { authorization: `Bearer ${serviceToken}`, [AGENT_ID_HEADER]: ENV_AGENT_ID } };
   await Promise.all([
     waitFor("the signal API", `${signalsUrl}/health`),
     waitFor("the MCP server", `${mcpUrl}/health`),
     ...(withSite ? [waitFor("the landing page", `${siteUrl}/`)] : []),
     // `next dev` compiles a route on its first request; do that now so the agent's first calls are fast.
-    waitFor("the console", `${consoleUrl}/api/console/snapshot`).then(() =>
+    waitFor("the console", `${consoleUrl}/api/health`).then(() =>
       Promise.all([
+        // Signed out, the console answers with its sign-in page: that compiles the account pages.
         waitFor("the console", `${consoleUrl}/`),
         waitFor("the console's agent API", `${consoleUrl}${CONSOLE_AGENT_ROUTES.holdings}`, asAgent),
       ]),
@@ -381,9 +407,13 @@ async function main(): Promise<void> {
       `approval above ${formatCents(DEMO_POLICY.approvalAboveCents)}, daily loss ${formatCents(DEMO_POLICY.dailyLossCents)}`;
   const reach =
     mcpPublicUrl === undefined ? "expose it with `npm run dev:tunnel`" : `public at ${mcpPublicUrl}`;
+  // The store is new on every run, so the first workspace is unclaimed: the operator's admin command
+  // makes a one-time code for it, as on a hosted console (docs/accounts.md).
+  const claimCode = await adminClaimCode(dataDir);
   console.log(`
 Mandate local stack is running (development only).
   Console     ${consoleUrl}  (owner signs with the test signer, anvil account 0)
+  Claim       ${consoleUrl}/claim  with the one-time code ${claimCode}, and a passkey
   Site        ${withSite ? siteUrl : "not started"}
   MCP server  ${mcpUrl}/mcp  (${reach})
   Signal API  ${signalsUrl}
@@ -393,7 +423,7 @@ Mandate local stack is running (development only).
   Agent API   ${consoleUrl}${CONSOLE_AGENT_API_BASE}
   Rules       ${rules}
 
-Next: open the console, enter a holding under Hedge, then ask the agent to protect it.
+Next: claim the console, enter a holding under Hedge, then ask the agent to protect it.
 Press Ctrl+C to stop everything.`);
 }
 
