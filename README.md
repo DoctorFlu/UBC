@@ -123,7 +123,7 @@ The owner has entered a holding in the console, for example 0.05 BTC, and saved 
 
 | Piece | State today |
 | --- | --- |
-| Policy contract | The real contract from `contracts/`, on a local anvil chain that uses Arc testnet's chain id (5042002), both locally and on the hosted demo. No Arc testnet deployment is recorded yet ([docs/contract-interface.md](docs/contract-interface.md), section 4); moving to one is configuration only ([docs/configuration.md](docs/configuration.md#chain)). |
+| Policy contract | The real contract from `contracts/` (Policy v2), on a local anvil chain that uses Arc testnet's chain id (5042002), both locally and on the hosted demo. Policy v2 is deployed on Arc testnet at [`0x571D8ea7C86c80a230C10818743f8861084F82f3`](https://explorer.testnet.arc.io/address/0x571D8ea7C86c80a230C10818743f8861084F82f3) (block 72740419); its owner, agent and executor are all still the deployer's address, so the agent and executor roles are pending, and no run has used it yet. Moving to it is configuration only ([docs/configuration.md](docs/configuration.md#chain)). |
 | Order placement | Simulated by default: the executor checks each approved intent against Gemini's listing, records a fill marked "Simulated fill", and places no order. With `EXECUTOR_VENUE=gemini` it places orders on Gemini's sandbox, with test funds. |
 | Gemini sandbox run | Measured on 17 November 2026 ([docs/gemini-venue.md](docs/gemini-venue.md#what-a-sandbox-demo-can-show)): $9.73 approved at 97c, 10 contracts placed and filled at 0.97, a fee of $0.03 equal to the estimate, and at expiry a payout of $10.00, net +$0.27 after fees, matching the sandbox balance to the cent. |
 | Gemini market data | Gemini's public endpoints, read only. |
