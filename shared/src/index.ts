@@ -20,3 +20,5 @@ export * from "./reducer";
 export * from "./signal-api";
 export * from "./types";
 export * from "./units";
+export * from "./wake";
+export * from "./wake-notifier";

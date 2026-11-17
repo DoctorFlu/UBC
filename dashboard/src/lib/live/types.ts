@@ -14,6 +14,7 @@ import type {
   PolicyEvent,
   PolicyRules,
   Roles,
+  WakeStatus,
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
 
@@ -143,6 +144,21 @@ export interface OffchainView {
   signalBudget: SignalBudgetView | null;
 }
 
+/**
+ * Event wake-ups of the Grok Bot routine (issue #40): whether they are on, today's count and the last
+ * few. Never the webhook's URL or key.
+ */
+export interface ConsoleWakeStatus extends WakeStatus {
+  /** Why wake-ups are off, in one sentence, or null when they are on. */
+  offReason: string | null;
+  /** Least time between two price checks while the console runs. */
+  priceCheckEveryMs: number;
+  /** When the console last checked spot against the current goals, or null before the first check. */
+  lastPriceCheckAt: string | null;
+  /** Why the last price check could not measure a goal, or null. */
+  priceProblem: string | null;
+}
+
 export interface ConsoleSnapshot {
   /** Increases with every change, so a client can drop an out-of-date message. */
   seq: number;
@@ -155,4 +171,5 @@ export interface ConsoleSnapshot {
   offchain: OffchainView;
   /** Where Grok Bot reaches the MCP server, when configured. */
   mcpPublicUrl: string | null;
+  wake: ConsoleWakeStatus;
 }

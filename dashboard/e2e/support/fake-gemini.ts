@@ -201,12 +201,15 @@ export interface FakeGemini {
   url: string;
   /** Answer every request with 503, as if Gemini were down. */
   setFailing: (failing: boolean) => void;
+  /** BTC spot in cents, bid and ask both, in place of the recorded one; null restores the recording. */
+  setBtcSpot: (cents: number | null) => void;
   requests: string[];
   stop: () => Promise<void>;
 }
 
 export async function startFakeGemini(port: number): Promise<FakeGemini> {
   let failing = false;
+  let btcSpot: number | null = null;
   const requests: string[] = [];
   const server: Server = createServer((request, response) => {
     const path = request.url ?? "/";
@@ -219,7 +222,11 @@ export async function startFakeGemini(port: number): Promise<FakeGemini> {
       send(503, { result: "error", reason: "Maintenance" });
       return;
     }
-    const body = request.method === "GET" ? recordedResponse(path) : null;
+    let body = request.method === "GET" ? recordedResponse(path) : null;
+    if (btcSpot !== null && body !== null && path.split("?")[0] === "/v1/pubticker/btcusd") {
+      const price = (btcSpot / 100).toFixed(2);
+      body = { ...(body as Record<string, unknown>), bid: price, ask: price, last: price };
+    }
     if (body === null) send(404, { result: "error", reason: "NotFound" });
     else send(200, body);
   });
@@ -231,6 +238,9 @@ export async function startFakeGemini(port: number): Promise<FakeGemini> {
     url: `http://127.0.0.1:${port.toString()}`,
     setFailing: (next) => {
       failing = next;
+    },
+    setBtcSpot: (cents) => {
+      btcSpot = cents;
     },
     requests,
     stop: () => new Promise<void>((resolve) => server.close(() => resolve())),

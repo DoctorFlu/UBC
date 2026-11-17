@@ -20,6 +20,7 @@ import {
 } from "@mandate/shared";
 import type { EnvVars, ResolvedDeployment } from "@mandate/shared/node";
 import type { StreamBatch } from "@mandate/streams";
+import type { WakeFetch } from "@mandate/shared";
 import { type Address, type Hex, type Log, createPublicClient, http, isAddressEqual } from "viem";
 
 import type {
@@ -53,6 +54,7 @@ import {
   type StoredPairing,
   type StoredPlan,
 } from "./store/offchain";
+import { ConsoleWake, type LadderSource } from "./wake";
 
 export interface Logger {
   info: (message: string) => void;
@@ -76,6 +78,11 @@ interface Session {
   scanner: LogScanner;
   deployBlock: bigint;
   fileStamp: number | null;
+  /**
+   * True while the console reads a deployment it had never read (no scan cursor when the session
+   * opened), until its first sync: those events are history and wake nothing.
+   */
+  backfilling: boolean;
 }
 
 const ROLES_REFRESH_MS = 10_000;
@@ -104,6 +111,8 @@ export class ConsoleService {
   readonly stream: StreamReceiver;
   /** Gemini's listing of each intent's market, when the console has a way to ask Gemini. */
   readonly listings: ListingChecker | null;
+  /** Event wake-ups of the Grok Bot routine (issue #40); does nothing while they are off. */
+  readonly wake: ConsoleWake;
 
   private session: Session | null = null;
   private network: ConsoleNetwork = UNCONFIGURED_NETWORK;
@@ -134,6 +143,10 @@ export class ConsoleService {
       logger?: Logger;
       /** How to ask Gemini about a market, and the most times its client sends one request. */
       marketLookup?: { lookup: ListingLookup; attemptsPerRequest: number };
+      /** Gemini's ladder for a goal, for the price wake-ups; without it, price is not checked. */
+      ladder?: LadderSource;
+      /** How wake-ups are posted; tests pass their own. */
+      wakeFetch?: WakeFetch;
     } = {},
   ) {
     this.events = new EventStore(db);
@@ -147,6 +160,14 @@ export class ConsoleService {
           logger: this.log,
         })
       : null;
+    this.wake = new ConsoleWake(config, db, {
+      logger: this.log,
+      onChange: () => {
+        this.changed();
+      },
+      ...(options.ladder ? { ladder: options.ladder } : {}),
+      ...(options.wakeFetch ? { fetch: options.wakeFetch } : {}),
+    });
     this.feed = {
       source: config.eventSource,
       health: "starting",
@@ -172,6 +193,7 @@ export class ConsoleService {
     if (this.running) return;
     this.running = true;
     this.abort = new AbortController();
+    this.wake.start();
     this.loop = this.run(this.abort.signal);
   }
 
@@ -181,6 +203,7 @@ export class ConsoleService {
     await this.loop;
     this.loop = null;
     this.listings?.stop();
+    this.wake.stop();
     if (this.notifyTimer) clearTimeout(this.notifyTimer);
   }
 
@@ -246,6 +269,7 @@ export class ConsoleService {
     }
 
     const policy = new PolicyClient({ address: deployment.address, publicClient: client });
+    const backfilling = this.events.cursor(id) === null;
     const session: Session = {
       id,
       deployment,
@@ -259,6 +283,7 @@ export class ConsoleService {
       }),
       deployBlock,
       fileStamp,
+      backfilling,
     };
     this.closeSession();
     this.session = session;
@@ -330,7 +355,7 @@ export class ConsoleService {
         const events = await session.scanner.read(chunk);
         const added = this.events.insertScanned(session.id, events, chunk.to + 1n);
         cursor = chunk.to + 1n;
-        this.apply(added);
+        this.apply(added, session.backfilling);
         if (cursor <= latest) {
           this.setFeed({
             health: "starting",
@@ -343,6 +368,9 @@ export class ConsoleService {
       await this.fillIntentDetails(session);
       await this.refreshRoles(session);
       this.markSynced(Number(latest), primaryRpc);
+      session.backfilling = false;
+      // Price wake-ups ride on this loop: a check runs when the last is old enough, never more often.
+      this.wake.tick(() => this.priceInputs());
       await sleep(primaryRpc ? interval : Math.max(interval, STREAM_SAFETY_POLL_MS), signal);
     }
   }
@@ -380,11 +408,34 @@ export class ConsoleService {
 
   // ---------------------------------------------------------------- the pipeline
 
-  /** Folds newly stored events into the state. Every source ends here. */
-  private apply(added: readonly PolicyEvent[]): void {
+  /**
+   * Folds newly stored events into the state and offers them to the wake-up rules. Every source ends
+   * here, so a trigger fires once whichever source (RPC poll or QuickNode Stream) delivered its event.
+   */
+  private apply(added: readonly PolicyEvent[], history = false): void {
     if (added.length === 0) return;
     this.state = applyEvents(this.state, added);
+    const session = this.session;
+    if (session) {
+      this.wake.onChainEvents(added, this.state.events, { deploymentId: session.id, history });
+    }
     this.changed();
+  }
+
+  /** The agent's MCP server called the console: a Bot run is in progress. */
+  noteAgentActivity(): void {
+    this.wake.noteAgentActivity();
+  }
+
+  /** What a price check reads: the agent's latest plans, the holdings and the intents. */
+  private priceInputs() {
+    const plans = this.offchain.latestPlans().flatMap((stored) => {
+      const view = toPlanView(stored);
+      return view ? [view] : [];
+    });
+    const head = this.head;
+    const intents = head ? buildChainView(this.state, head, this.details).intents : [];
+    return { plans, holdings: this.offchain.holdings().holdings, intents };
   }
 
   /**
@@ -577,6 +628,7 @@ export class ConsoleService {
         signalBudget: this.offchain.signalBudget(),
       },
       mcpPublicUrl: this.config.mcpPublicUrl,
+      wake: this.wake.status(),
     };
     return this.snapshotCache;
   }

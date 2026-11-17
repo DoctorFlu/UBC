@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../test/support/devchain";
-import type { ConsoleConfig } from "./config";
+import { type ConsoleConfig, readWakeConfig } from "./config";
 import { ConsoleService } from "./console-service";
 import { openDatabase } from "./db";
 
@@ -24,6 +24,7 @@ function config(dataDir: string): ConsoleConfig {
     streamSecurityToken: null,
     publicUrl: "http://localhost:3000",
     mcpPublicUrl: null,
+    wake: readWakeConfig({}),
   };
 }
 

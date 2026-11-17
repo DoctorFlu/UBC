@@ -50,6 +50,18 @@ See [agent/README.md](../agent/README.md).
 
 The network is not a build setting: the console decides it at runtime from the Chain variables above, and the browser follows.
 
+## Grok Bot event wake-ups
+
+The console starts Grok Bot's routine through its webhook when an event is worth a run (issue #40); [event-wake.md](event-wake.md) says which events, the body it posts and the limits.
+The URL and the key are secrets: some products put a secret in the URL's path, so neither is ever logged, shown or put in an error.
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `GROK_WEBHOOK_URL` | for wake-ups | The "POST to" URL from the routine's Webhook section in Grok Bot. Empty: wake-ups are off, and the rest of the stack runs as before. |
+| `GROK_WEBHOOK_KEY` | for wake-ups | The routine's webhook key, sent as `Authorization: Bearer <key>`. Empty: wake-ups are off. |
+| `GROK_WAKE_DAILY_CAP` | no | Most wake-ups the console sends per UTC day, from 0 to 1000. Defaults to `12`, half again the 24 runs of an hourly schedule. |
+| `GROK_WAKE_PRICE_CHECK_MS` | no | Least time between two checks of Gemini's spot against the current goal, at least `1000`. Defaults to `300000` (5 minutes). The check rides on the console's chain poll, so it adds no timer. |
+
 ## Landing page
 
 The landing page (`site/`) is a static export: `npm run build -w @mandate/site` writes `site/out`, which any static file server can serve.
