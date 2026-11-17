@@ -15,6 +15,7 @@ import { PLAN_EXECUTABLE_FOR_MS } from "../state/plans";
 import { heldPositions } from "../trading/positions";
 import { describeFailure, notConfigured, unavailableFor, type Failure } from "../support/failures";
 import { capList } from "../support/format";
+import { NO_PRICES_HINT, noPricesReason } from "../support/no-prices";
 import { reasonCode } from "../support/rules";
 import { ladderSummaryFromLadder } from "../trading/context";
 import { assetArg } from "./get-ladder";
@@ -84,6 +85,9 @@ function coverView(cover: PlanCover): z.infer<typeof CoverSchema> {
 const PlanViewSchema = z.object({
   planId: z.string().describe("Pass to execute_plan"),
   status: z.enum(["ok", "partial", "empty"]),
+  marketEnvironment: z
+    .enum(["sandbox", "production"])
+    .describe("Which Gemini the prices come from: the sandbox when the executor trades there"),
   cover: CoverSchema.nullable(),
   asset: z.string(),
   eventTicker: z.string(),
@@ -377,6 +381,8 @@ export const planHedge = defineTool({
       );
     }
     const covered = plan.cover?.state === "met";
+    const environment = ctx.config.marketData.environment;
+    const noPrices = plan.orders.length === 0 && !covered ? noPricesReason(ladder, environment) : null;
     const v = covered
       ? ok(
           [
@@ -391,23 +397,29 @@ export const planHedge = defineTool({
             hint: "Tell the owner the holding is already covered and nothing was bought. There is nothing to execute; do not plan again for this goal in this run.",
           },
         )
-      : plan.orders.length === 0
-        ? ok([...reasons, ...plan.warnings.slice(0, 2).map((w) => reason(w.code.toUpperCase(), w.message))], {
-            actor: "agent",
-            hint: "Tell the owner why nothing can be planned, and ask whether to change the floor, cost cap or horizon.",
-          })
-        : ok(reasons, {
-            actor: "owner",
-            hint: `Show the owner the cost and protection. If they agree, call execute_plan with planId ${plan.planId} and their reason.`,
-          });
+      : noPrices !== null
+        ? ok([noPrices, ...reasons], { actor: "agent", hint: NO_PRICES_HINT })
+        : plan.orders.length === 0
+          ? ok(
+              [...reasons, ...plan.warnings.slice(0, 2).map((w) => reason(w.code.toUpperCase(), w.message))],
+              {
+                actor: "agent",
+                hint: "Tell the owner why nothing can be planned, and ask whether to change the floor, cost cap or horizon.",
+              },
+            )
+          : ok(reasons, {
+              actor: "owner",
+              hint: `Show the owner the cost and protection. If they agree, call execute_plan with planId ${plan.planId} and their reason.`,
+            });
 
-    const summary = `${ctx.planner.summarize(plan)}${plan.orders.length > 0 ? ` Plan ${plan.planId}, ${plan.orders.length} orders${holds > 0 ? `, ${holds} need the owner's approval` : ""}.` : ""}`;
+    const summary = `${noPrices === null ? "" : `${noPrices.message} `}${ctx.planner.summarize(plan)}${plan.orders.length > 0 ? ` Plan ${plan.planId}, ${plan.orders.length} orders${holds > 0 ? `, ${holds} need the owner's approval` : ""}.` : ""}`;
     return {
       structured: {
         ...v,
         plan: {
           planId: plan.planId,
           status: plan.status,
+          marketEnvironment: environment,
           cover: plan.cover === undefined ? null : coverView(plan.cover),
           asset: plan.asset,
           eventTicker: plan.eventTicker,

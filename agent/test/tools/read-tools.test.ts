@@ -19,6 +19,7 @@ import {
   LADDER_TICKER,
   ladderSymbol,
   SPORTS_SYMBOL,
+  unquotedLadder,
   type Harness,
 } from "../fakes";
 
@@ -217,6 +218,34 @@ describe("get_ladder", () => {
     expect(summary).toMatch(/^BTC weekly ladder BTC2611202200 settles Nov 20, 2026 22:00 UTC; spot \$64,000/);
   });
 
+  it("says plainly when nobody quotes the ladder on Gemini's sandbox", async () => {
+    const h = harness({ env: { EXECUTOR_VENUE: "gemini" } });
+    h.markets.ladder = unquotedLadder();
+    const { structured, summary } = await getLadder.run({ asset: "BTC" }, h.ctx);
+    expect(structured).toMatchObject({
+      status: "ok",
+      reasons: [
+        {
+          code: "NO_PRICES",
+          message:
+            "No one offers NO on any of the 11 strikes of BTC2611202200 on Gemini's sandbox right now: its " +
+            "order books are empty, so nothing can be planned or filled on this ladder. The sandbox's test " +
+            "market maker quotes only some ladders, and not all the time.",
+        },
+      ],
+      nextAction: { actor: "agent", hint: expect.stringContaining("otherLadders") as unknown },
+      ladder: { rungCount: 11, pricedRungCount: 0, marketEnvironment: "sandbox" },
+    });
+    expect(summary).toContain("No one offers NO on any of the 11 strikes");
+
+    // A quoted ladder carries no such reason, and names production when the venue is simulated.
+    const quoted = await getLadder.run({ asset: "BTC" }, harness().ctx);
+    expect(quoted.structured).toMatchObject({
+      reasons: [],
+      ladder: { pricedRungCount: 11, marketEnvironment: "production" },
+    });
+  });
+
   it("keeps the rungs nearest spot when a ladder is long", () => {
     const kept = rungsNearSpot(fakeLadder().rungs, 6_400_000, 3).map((r) => r.strikeCents);
     expect(kept).toEqual([6_350_000, 6_400_000, 6_450_000]);
@@ -262,6 +291,24 @@ describe("plan_hedge", () => {
     expect(h.ctx.plans.get(plan["planId"] as string, h.ctx.clock.now())).toBeDefined();
     expect(summary).toContain(`Plan ${plan["planId"] as string}`);
     expect(structured["nextAction"]).toMatchObject({ actor: "owner" });
+  });
+
+  it("puts the real reason first when nobody quotes the ladder: no prices, not a list of skipped strikes", async () => {
+    const h = harness({ env: { EXECUTOR_VENUE: "gemini" } });
+    h.markets.ladder = unquotedLadder();
+    const { structured, summary } = await planHedge.run(args, h.ctx);
+    expect(structured).toMatchObject({
+      status: "ok",
+      reasons: [
+        { code: "NO_PRICES", message: expect.stringContaining("on Gemini's sandbox right now") as unknown },
+      ],
+      nextAction: { actor: "agent", hint: expect.stringContaining("no protection is on sale") as unknown },
+      plan: { status: "empty", marketEnvironment: "sandbox", orders: [] },
+    });
+    expect(summary).toMatch(
+      /^No one offers NO on any of the 11 strikes of BTC2611202200 on Gemini's sandbox/,
+    );
+    expect(summary).toContain("No hedge is planned for your 0.05 BTC.");
   });
 
   it("refuses a receipt id it has no signal for instead of planning without it", async () => {

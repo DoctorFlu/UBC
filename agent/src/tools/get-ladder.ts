@@ -6,6 +6,7 @@ import { ok, reason, summarizeVerdict, verdictSchema, type Reason } from "../mcp
 import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
+import { NO_PRICES_HINT, noPricesReason, pricedRungCount } from "../support/no-prices";
 
 const MAX_RUNGS = 25;
 const MAX_OTHER_LADDERS = 8;
@@ -34,6 +35,12 @@ const LadderViewSchema = z.object({
   spotCents: z.int().describe("Gemini spot mid price; the ladder settles on settlementIndex"),
   settlementIndex: z.string().nullable(),
   rungCount: z.int(),
+  pricedRungCount: z
+    .int()
+    .describe("Strikes someone sells NO on now; 0 means nothing can be planned or filled on this ladder"),
+  marketEnvironment: z
+    .enum(["sandbox", "production"])
+    .describe("Which Gemini these prices come from: the sandbox when the executor trades there"),
   rungs: z.array(RungSchema).describe("The strikes nearest spot, lowest first"),
   truncated: z.boolean(),
   otherLadders: z.array(z.object({ eventTicker: z.string(), kind: z.string(), expiry: z.string() })),
@@ -103,15 +110,20 @@ export const getLadder = defineTool({
         );
       }
     }
+    const environment = ctx.config.marketData.environment;
+    const noPrices = noPricesReason(ladder, environment);
+    if (noPrices !== null) reasons.unshift(noPrices);
     const rungs = rungsNearSpot(ladder.rungs, ladder.spot.midCents, MAX_RUNGS);
     const v = ok(
       reasons,
-      reasons.length > 0
+      reasons.some((r) => r.code === "CATEGORY_NOT_ALLOWED")
         ? { actor: "owner", hint: "Only the owner can allow the Crypto category, in the console." }
-        : {
-            actor: "agent",
-            hint: "Call plan_hedge with the asset, a floor or drop, and the most the owner wants to spend.",
-          },
+        : noPrices !== null
+          ? { actor: "agent", hint: NO_PRICES_HINT }
+          : {
+              actor: "agent",
+              hint: "Call plan_hedge with the asset, a floor or drop, and the most the owner wants to spend.",
+            },
     );
     const view = {
       eventTicker: ladder.eventTicker,
@@ -122,6 +134,8 @@ export const getLadder = defineTool({
       spotCents: ladder.spot.midCents,
       settlementIndex: ladder.settlementIndex,
       rungCount: ladder.rungs.length,
+      pricedRungCount: pricedRungCount(ladder),
+      marketEnvironment: environment,
       rungs: rungs.map((r) => ({
         strikeCents: r.strikeCents,
         instrumentSymbol: r.instrumentSymbol,

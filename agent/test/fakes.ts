@@ -297,11 +297,22 @@ export function fakeLadder(): Ladder {
   return ladder;
 }
 
+/** The fixture ladder as Gemini's sandbox often shows it: every strike listed, nobody quoting any. */
+export function unquotedLadder(): Ladder {
+  const ladder = fakeLadder();
+  return {
+    ...ladder,
+    rungs: ladder.rungs.map((rung) => ({ ...rung, noBuyCents: null, yesBidCents: null, yesAskCents: null })),
+  };
+}
+
 export class FakeMarkets implements MarketsClient {
   readonly venue = "gemini" as const;
   events: MarketEvent[] = [ladderEvent(), sportsEvent()];
   /** Thrown by every call while set. */
   error: GeminiError | undefined;
+  /** What getLadder answers instead of the fixture, while set. */
+  ladder: Ladder | undefined;
   calls: string[] = [];
 
   async #check(call: string): Promise<void> {
@@ -367,7 +378,7 @@ export class FakeMarkets implements MarketsClient {
 
   async getLadder(): Promise<Ladder> {
     await this.#check("getLadder");
-    return fakeLadder();
+    return this.ladder ?? fakeLadder();
   }
 
   async getSpot(): Promise<SpotPrice> {
