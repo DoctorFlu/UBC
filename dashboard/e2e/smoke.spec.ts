@@ -13,7 +13,7 @@ import { describeMarket } from "../src/lib/markets";
 
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
 import { suitePaths } from "./support/chain";
-import { DEMO_RECEIPT, reportSignalBudget, snapshot } from "./support/console";
+import { DEMO_RECEIPT, ownerHeaders, reportSignalBudget, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
 
 const ADVANCED_COOKIE = "mandate-advanced";
@@ -190,6 +190,7 @@ test.describe("seeded demo", () => {
     const market = (await (
       await fetch(
         `${baseURL ?? ""}/api/console/hedge/market?asset=${stored.asset}&event=${stored.plan.eventTicker}`,
+        { headers: ownerHeaders(baseURL ?? "") },
       )
     ).json()) as HedgeMarketResponse;
     if (!market.quotes) throw new Error("the fake Gemini served no ladder");

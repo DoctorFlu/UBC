@@ -22,6 +22,8 @@ import {
 } from "./support/chain";
 import {
   E2E_SERVICE_TOKEN,
+  ownerHeaders,
+  waitForConsole,
   agentApi,
   decisionContext,
   sealReason,
@@ -35,6 +37,7 @@ import {
   recordedPlanRequest,
   startFakeGemini,
 } from "./support/fake-gemini";
+import { claimOwnerOnce, forgetOwner, ownerStatePath } from "./support/session";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first rules, watch
@@ -53,7 +56,7 @@ const baseURL = `http://localhost:${PORT.toString()}`;
 const UNLISTED_MARKET = "GEMI-NOPE2611202200-X";
 
 test.describe.configure({ mode: "serial" });
-test.use({ baseURL, viewport: { width: 1440, height: 900 } });
+test.use({ baseURL, viewport: { width: 1440, height: 900 }, storageState: ownerStatePath(baseURL) });
 
 let chain: TestChain;
 let gemini: FakeGemini;
@@ -106,10 +109,13 @@ async function startConsole(): Promise<void> {
       NEXT_DEV_CACHE: "off",
     },
   });
+  await waitForConsole(baseURL);
+  // The first start claims the first workspace on /claim, as its owner would; a restart keeps the session.
+  await claimOwnerOnce(baseURL, paths.dataDir);
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
   // `next dev` compiles a route on its first request; compile every route now, so no test waits on it.
   for (const path of LIVE_ROUTES) {
-    const response = await fetch(new URL(path, baseURL));
+    const response = await fetch(new URL(path, baseURL), { headers: ownerHeaders(baseURL) });
     await response.arrayBuffer();
   }
   for (const path of LIVE_API_ROUTES) {
@@ -157,6 +163,7 @@ function toast(page: Page) {
 test.beforeAll(async () => {
   test.setTimeout(240_000);
   freshSuiteDir("live");
+  forgetOwner(baseURL);
   gemini = await startFakeGemini(GEMINI_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
   await startConsole();

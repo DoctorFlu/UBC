@@ -9,8 +9,10 @@ import {
   type DecisionContext,
   type PolicyClient,
   type ProposeResult,
+  AGENT_ID_HEADER,
   CONSOLE_AGENT_ROUTES,
   Category,
+  ENV_AGENT_ID,
   hashContext,
 } from "@mandate/shared";
 import type { Hex } from "viem";
@@ -20,11 +22,21 @@ import { formatUsdCents } from "../../src/lib/format";
 import { newNonce, ownerRequestMessage } from "../../src/lib/owner-request";
 
 import type { ConsoleSnapshot } from "../../src/lib/live/types";
+import { ownerCookie } from "./session";
 
 /** A test-only token: the e2e servers are local and short-lived. Never a real secret. */
 export const E2E_SERVICE_TOKEN = "e2e-console-service-token-for-local-tests-only";
 
+/** A test-only master key for the consoles the suites start in production mode. Never a real secret. */
+export const E2E_MASTER_KEY = "e2e0".repeat(16);
+
 export const AGENT_NAME = "Grok Bot";
+
+/** The owner's session for the console at `baseURL`, once the first workspace is claimed (session.ts). */
+export function ownerHeaders(baseURL: string): Record<string, string> {
+  const cookie = ownerCookie(baseURL);
+  return cookie === null ? {} : { cookie };
+}
 
 export async function agentApi(
   baseURL: string,
@@ -36,6 +48,8 @@ export async function agentApi(
     method,
     headers: {
       authorization: `Bearer ${E2E_SERVICE_TOKEN}`,
+      // The first workspace's agent: the one the MCP server holds the key of.
+      [AGENT_ID_HEADER]: ENV_AGENT_ID,
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -47,9 +61,25 @@ export async function agentApi(
 }
 
 export async function snapshot(baseURL: string): Promise<ConsoleSnapshot> {
-  const response = await fetch(new URL("/api/console/snapshot", baseURL));
+  const response = await fetch(new URL("/api/console/snapshot", baseURL), { headers: ownerHeaders(baseURL) });
   if (!response.ok) throw new Error(`snapshot answered ${response.status.toString()}`);
   return (await response.json()) as ConsoleSnapshot;
+}
+
+/** Polls the public health check until the console answers, before anyone has signed in. */
+export async function waitForConsole(baseURL: string, timeoutMs = 180_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL("/api/health", baseURL));
+      await response.arrayBuffer();
+      if (response.ok) return;
+    } catch {
+      // Not listening yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`the console at ${baseURL} did not start`);
 }
 
 /** Polls the snapshot until `ready` accepts it. */
@@ -190,7 +220,11 @@ export async function saveHoldingsAsOwner(baseURL: string, holdings: ConsoleHold
   });
   const response = await fetch(new URL("/api/console/holdings", baseURL), {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: {
+      ...ownerHeaders(baseURL),
+      origin: new URL(baseURL).origin,
+      "content-type": "application/json",
+    },
     body: JSON.stringify({ payload, auth: { issuedAt, nonce, signature } }),
   });
   if (!response.ok)
