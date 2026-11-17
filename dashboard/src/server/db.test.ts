@@ -40,6 +40,8 @@ describe("console database migrations", () => {
   it("upgrades a version 5 database with data in it: the rows survive and settlements exist", () => {
     const dir = mkdtempSync(join(tmpdir(), "mandate-console-v5-"));
     const old = new DatabaseSync(join(dir, "console.sqlite"));
+    // As the hosted console keeps it: write-ahead log mode.
+    old.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;");
     for (const [index, migration] of MIGRATIONS.slice(0, 5).entries()) {
       old.exec(migration);
       old.exec(`PRAGMA user_version = ${String(index + 1)}`);
