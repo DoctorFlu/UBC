@@ -95,7 +95,12 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 - **Limits.** Bodies over 256 KiB get `413`.
   Each token has an in-memory token bucket of tool calls (burst 60, 1 call per second sustained), and failed authentication attempts share a stricter bucket; both answer `429` with `Retry-After`.
   Only `tools/call` requests count, because a stateless client spends three or four protocol requests on the handshake before every call.
-  Each tool call has a time budget (20 s by default, `timeoutMs` per tool), after which its abort signal fires and the call returns `TIMEOUT`.
+  Each tool call has one deadline (`MCP_TOOL_DEADLINE_MS`, 25 s by default; a tool's `timeoutMs` can only shorten it).
+  When it passes, or the client goes away, the call's abort signal aborts every Gemini, chain and console request in its path, and the tool answers `unavailable` with reason `TIMED_OUT`, naming what was slow.
+  The server logs one line, `tool.deadline_exceeded` or `tool.client_gone`, with the slow step (a fixed name such as `gemini.ladder`) and the durations, never the arguments.
+  A proposal is broadcast only while enough of the deadline is left for its receipt (`src/mcp/deadline.ts`).
+  Once broadcast, neither the deadline nor the client going away cuts it: it waits for its receipt up to 3 s past the deadline, and is otherwise reported `TX_UNCONFIRMED`, which is recorded so the order is never sent again.
+  So an answer comes at most about 3 s after the deadline, and a stopped call never forgets an order it may have sent.
 - **Secrets.** Tokens, the agent key and the RPC URL (hosted RPC URLs embed an API key) are wrapped in `Secret`, which renders as `[redacted]` in `String()`, templates, `JSON.stringify` and `util.inspect`.
   Read the value only with `.reveal()` at the point of use.
   `whoami` returns the agent's address, never its key.
@@ -110,6 +115,7 @@ The HTTP layer is [Hono](https://hono.dev) on `@hono/node-server`, because the S
 | `MCP_HOST` | `127.0.0.1` | keep it when the tunnel runs on the same machine |
 | `MCP_ALLOWED_ORIGINS` | empty | browser clients other than localhost (comma-separated hostnames) |
 | `MCP_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+| `MCP_TOOL_DEADLINE_MS` | `25000` | most one tool call may take, 1000 to 40000 |
 | `ARC_RPC_URL` | `https://rpc.testnet.arc.io` | policy reads and trades |
 | `POLICY_ADDRESS` | unset | policy reads and trades |
 | `AGENT_PRIVATE_KEY` | unset | trades |

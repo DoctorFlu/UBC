@@ -5,6 +5,8 @@ import {
   type PolicyClient,
   type PolicyViewState,
 } from "@mandate/shared";
+import { SharedWork } from "../support/shared-work";
+import { withSignal } from "./rpc-scope";
 
 /**
  * How far back to scan when the deploy block is unknown. On Arc testnet this is about a day of
@@ -23,7 +25,8 @@ export class EventIndex {
   readonly #deployBlock: bigint | undefined;
   #state: PolicyViewState = emptyPolicyViewState();
   #nextBlock: bigint | undefined;
-  #syncing: Promise<void> | undefined;
+  /** One scan at a time, under its own signal: aborted only when no caller waits for it any more. */
+  readonly #scan = new SharedWork<void>((signal) => withSignal(signal, () => this.#catchUp()));
 
   constructor(client: Pick<PolicyClient, "getEvents" | "publicClient">, deployBlock?: bigint) {
     this.#client = client;
@@ -33,25 +36,23 @@ export class EventIndex {
   /**
    * Intents seen in the scanned blocks, by id, up to at least the block that was latest when this call
    * started. A transaction confirmed before the call is therefore always in the answer, even when the
-   * call joins a scan that another caller started earlier.
+   * call joins a scan that another caller started earlier. `signal` stops this caller's wait; a scan
+   * that was cut short changes nothing, so the next call simply scans those blocks again.
    */
-  async intents(): Promise<ReadonlyMap<number, IntentView>> {
+  async intents(signal?: AbortSignal): Promise<ReadonlyMap<number, IntentView>> {
     const latest = await this.#latest();
     // A node behind a load balancer can answer with an older block; a few rounds catch up with it.
     for (let round = 0; this.#nextBlock === undefined || this.#nextBlock <= latest; round++) {
       if (round === MAX_SYNC_ROUNDS)
         throw new Error(`The chain node did not reach block ${latest.toString()}`);
-      await this.sync();
+      await this.sync(signal);
     }
     return new Map(Object.values(this.#state.intents).map((intent) => [intent.id, intent]));
   }
 
   /** Catches up to the latest block. Concurrent callers share one scan. */
-  sync(): Promise<void> {
-    this.#syncing ??= this.#catchUp().finally(() => {
-      this.#syncing = undefined;
-    });
-    return this.#syncing;
+  sync(signal?: AbortSignal): Promise<void> {
+    return this.#scan.join(signal);
   }
 
   #latest(): Promise<bigint> {

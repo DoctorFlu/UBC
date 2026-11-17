@@ -66,7 +66,27 @@ export interface PaidResponse<T> {
 export interface PayRequestOptions extends PayOptions {
   /** Most this one call may pay, in USDC as a decimal string, for example `"0.001"`. */
   maxPrice: string;
+  /**
+   * Stops the call while nothing is signed: it rejects with `PaymentNotSentError` and the abandoned
+   * request can never sign later. Once the authorization is signed, the signal no longer stops it;
+   * `paidRequestTimeoutMs` bounds it instead.
+   */
+  signal?: AbortSignal | undefined;
+  /**
+   * Called right before the authorization is signed. If it throws, nothing is signed. It may return a
+   * bound for the paid request, which then ends at that signal or `paidRequestTimeoutMs`, whichever
+   * comes first.
+   */
+  beforeSigning?: (() => AbortSignal | undefined) | undefined;
+  /**
+   * Most the paid request may take once the authorization is signed. After it, the call rejects with
+   * `PaymentOutcomeUnknownError`: the payment may still settle. Defaults to `PAID_REQUEST_TIMEOUT_MS`.
+   */
+  paidRequestTimeoutMs?: number | undefined;
 }
+
+/** Default bound on the paid request; measured paid retries take 320 to 370 ms (docs/x402.md). */
+export const PAID_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface EnsureDepositOptions {
   /** Deposit when the Gateway available balance is below this many USDC. */
@@ -120,13 +140,20 @@ export class PaymentRejectedError extends Error {
 
 /** The request failed before any authorization was signed (for example the seller refused the unpaid request). */
 export class PaymentNotSentError extends Error {
+  /**
+   * True when the caller stopped it (its signal, or `beforeSigning`), not the seller; `cause` then
+   * holds the caller's reason.
+   */
+  readonly stopped: boolean;
+
   constructor(
     readonly url: string,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { stopped?: boolean },
   ) {
     const cause = options?.cause instanceof Error ? `: ${options.cause.message}` : "";
     super(`Nothing was paid for ${url}${cause}`, options);
     this.name = "PaymentNotSentError";
+    this.stopped = options?.stopped ?? false;
   }
 }
 
@@ -162,6 +189,16 @@ export class InsufficientWalletBalanceError extends Error {
 interface CallState {
   url: string;
   maxAmount: bigint;
+  /** Checked right before signing; throws to stop the call. */
+  beforeSigning?: () => AbortSignal | undefined;
+  /** What `beforeSigning` returned: the most the paid request may take. */
+  bound?: AbortSignal | undefined;
+  /** Set when the caller stopped waiting before anything was signed: the call must never sign. */
+  abandoned?: boolean;
+  /** Why `beforeSigning` stopped the call. */
+  blocked?: unknown;
+  /** Called once the authorization is signed. */
+  onSigned?: () => void;
   refused?: PriceAboveMaximumError;
   requirements?: { network: string; asset: string; payTo: string; amount: string };
   authorization?: { from: string; to: string; value: string; validBefore: string; nonce: string };
@@ -207,10 +244,18 @@ export class X402Buyer {
     client.onBeforePaymentCreation((ctx) => {
       const call = this.calls.getStore();
       if (!call) return Promise.resolve({ abort: true, reason: "payment attempted outside X402Buyer.pay" });
+      if (call.abandoned === true)
+        return Promise.resolve({ abort: true, reason: "the caller stopped waiting" });
       const requested = BigInt(ctx.selectedRequirements.amount);
       if (requested > call.maxAmount) {
         call.refused = new PriceAboveMaximumError(call.url, requested, call.maxAmount);
         return Promise.resolve({ abort: true, reason: call.refused.message });
+      }
+      try {
+        call.bound = call.beforeSigning?.();
+      } catch (error) {
+        call.blocked = error;
+        return Promise.resolve({ abort: true, reason: "stopped before signing" });
       }
       return Promise.resolve();
     });
@@ -220,6 +265,7 @@ export class X402Buyer {
       if (call && authorization) {
         call.requirements = ctx.selectedRequirements;
         call.authorization = authorization;
+        call.onSigned?.();
       }
       return Promise.resolve();
     });
@@ -277,16 +323,34 @@ export class X402Buyer {
 
   /** Pays for `url` if the seller's price is at most `maxPrice`, and returns the response with a receipt. */
   async pay<T = unknown>(url: string, options: PayRequestOptions): Promise<PaidResponse<T>> {
-    const { maxPrice, ...payOptions } = options;
-    const state: CallState = { url, maxAmount: parseUnits(maxPrice, USDC_DECIMALS) };
+    const { maxPrice, signal, beforeSigning, paidRequestTimeoutMs, ...payOptions } = options;
+    const state: CallState = {
+      url,
+      maxAmount: parseUnits(maxPrice, USDC_DECIMALS),
+      ...(beforeSigning === undefined ? {} : { beforeSigning }),
+    };
     const started = performance.now();
     let result: PayResult<T>;
     try {
-      result = await this.calls.run(state, () => this.client.pay<T>(url, payOptions));
+      if (signal?.aborted === true) {
+        state.abandoned = true;
+        throw signal.reason;
+      }
+      result = await this.#bounded(
+        this.calls.run(state, () => this.client.pay<T>(url, payOptions)),
+        state,
+        signal,
+        paidRequestTimeoutMs ?? PAID_REQUEST_TIMEOUT_MS,
+      );
     } catch (error) {
       if (state.refused) throw state.refused;
+      if (state.blocked !== undefined) {
+        throw new PaymentNotSentError(url, { cause: state.blocked, stopped: true });
+      }
       // Nothing was signed, so nothing can be charged: the 402 request itself failed.
-      if (!state.authorization) throw new PaymentNotSentError(url, { cause: error });
+      if (!state.authorization) {
+        throw new PaymentNotSentError(url, { cause: error, stopped: state.abandoned === true });
+      }
       // Signed and answered but not served: the seller or Gateway turned the payment down
       // (verify or settle failed, or the seller refused the paid retry).
       const fromHeader = state.settlement?.success === false ? state.settlement.errorReason : undefined;
@@ -322,6 +386,46 @@ export class X402Buyer {
         latencyMs,
       },
     };
+  }
+
+  /**
+   * Settles like `pay`, but gives up when `signal` aborts while nothing is signed (and marks the call
+   * so it never signs later), and when the paid request outlasts `paidTimeoutMs` after signing.
+   */
+  #bounded<T>(
+    pay: Promise<T>,
+    state: CallState,
+    signal: AbortSignal | undefined,
+    paidTimeoutMs: number,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+      const onAbort = () => {
+        if (state.authorization !== undefined) return;
+        state.abandoned = true;
+        reject(signal?.reason as Error);
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const onBound = () => {
+        reject(new Error("the paid request did not answer within the time the caller had"));
+      };
+      state.onSigned = () => {
+        signal?.removeEventListener("abort", onAbort);
+        timer = setTimeout(() => {
+          reject(new Error(`the paid request did not answer within ${String(paidTimeoutMs)} ms`));
+        }, paidTimeoutMs);
+        if (state.bound?.aborted === true) onBound();
+        else state.bound?.addEventListener("abort", onBound, { once: true });
+      };
+      const done = () => {
+        signal?.removeEventListener("abort", onAbort);
+        state.bound?.removeEventListener("abort", onBound);
+        clearTimeout(timer);
+      };
+      void pay.then(resolve, reject).finally(() => {
+        done();
+      });
+    });
   }
 
   /** Looks up the Gateway transfer for a receipt: status `received`, then `batched`, `confirmed`, `completed` (or `failed`). */
