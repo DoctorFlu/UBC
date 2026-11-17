@@ -138,7 +138,7 @@ describe.skipIf(!hasBash)("deploy/set-secret.sh", () => {
     const result = run([name], "some-value-here\n");
     expect(result.status).toBe(2);
     expect(result.output).toContain(
-      "NAME is one of: GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY",
+      "NAME is one of: GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY QUICKNODE_STREAM_SECURITY_TOKEN",
     );
     expect(read()).toBe(before);
   });
@@ -226,6 +226,19 @@ describe.skipIf(!hasBash)("deploy/set-secret.sh", () => {
     writeFileSync(envFile, "AGENT_PRIVATE_KEY=\n", { mode: 0o600 });
     const before = read();
     expectRefused(run(["AGENT_PRIVATE_KEY"], `${value}\n`), "0x and 64 hex digits", before, value);
+  });
+
+  it("takes the Stream's security token of 32 characters or more, and refuses a shorter one", () => {
+    writeFileSync(envFile, "QUICKNODE_STREAM_SECURITY_TOKEN=\n", { mode: 0o600 });
+    const before = read();
+    expectRefused(
+      run(["QUICKNODE_STREAM_SECURITY_TOKEN"], `${"t".repeat(31)}\n`),
+      "at least 32 characters",
+      before,
+      "t".repeat(31),
+    );
+    expect(run(["QUICKNODE_STREAM_SECURITY_TOKEN"], `${"t".repeat(64)}\n`).status).toBe(0);
+    expect(read()).toBe(`QUICKNODE_STREAM_SECURITY_TOKEN='${"t".repeat(64)}'\n`);
   });
 
   it("refuses a file with the name twice", () => {

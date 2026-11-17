@@ -10,7 +10,8 @@
 # (deploy/init-env.sh) are never set by hand.
 # The value must be printable ASCII without a single quote, with no space at either end; GROK_WEBHOOK_URL
 # must also start with https:// and hold no space, and AGENT_PRIVATE_KEY and EXECUTOR_PRIVATE_KEY must be
-# 0x and 64 hex digits. Anything else is refused and nothing changes.
+# 0x and 64 hex digits, and QUICKNODE_STREAM_SECURITY_TOKEN at least 32 characters. Anything else is
+# refused and nothing changes.
 #
 # The line is written as NAME='value': single quotes make docker compose take the value literally (no "$"
 # interpolation, no " #" comment). The file is rebuilt next to itself (mode 600) by bash alone and moved over
@@ -25,7 +26,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 env_file="${MANDATE_ENV_FILE:-$here/.env}"
 umask 077
 
-ALLOWED="GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY"
+ALLOWED="GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY QUICKNODE_STREAM_SECURITY_TOKEN"
 MAX_BYTES=8192
 
 usage() {
@@ -106,6 +107,9 @@ case "$name" in
     case "${value#0x}" in
       *[!0-9a-fA-F]*) refuse "a private key is 0x and 64 hex digits." ;;
     esac
+    ;;
+  QUICKNODE_STREAM_SECURITY_TOKEN)
+    if [ "${#value}" -lt 32 ]; then refuse "the Stream's security token is at least 32 characters."; fi
     ;;
 esac
 
