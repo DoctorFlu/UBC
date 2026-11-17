@@ -33,9 +33,11 @@ import {
 import type { Intent, PolicyClient, PolicyRules } from "@mandate/shared";
 import { createMandateServer, type MandateServer } from "../src/app";
 import { parseConfig } from "../src/config";
+import type { Clock } from "../src/context";
 import { silentLogger, type Logger } from "../src/logger";
-import type { MarketsClient } from "../src/services";
+import type { MarketsClient, PaymentsClient } from "../src/services";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
+import { coverFromPlans } from "../testing/fake-cover";
 import { FakeMarkets, LADDER_TICKER, ladderEvent } from "./fakes";
 
 export type Structured = Record<string, unknown>;
@@ -146,6 +148,18 @@ export class MovingMarkets extends FakeMarkets {
     };
   }
 
+  /**
+   * The ladder of `eventTicker` as Gemini quotes it now, for the console's cover (issue #97): no drift,
+   * no call counted. Throws for an event Gemini does not list as a ladder (a settled one).
+   */
+  quote(eventTicker: string): Ladder {
+    const event = this.events.find((candidate) => candidate.ticker === eventTicker);
+    const ladder =
+      event === undefined ? null : buildLadder(event, this.#spot(), { fetchedAt: new Date().toISOString() });
+    if (ladder === null) throw new Error(`no ladder ${eventTicker}`);
+    return ladder;
+  }
+
   override async getLadder(): Promise<Ladder> {
     await super.getLadder();
     const ladder = buildLadder(this.current, this.#spot(), { fetchedAt: new Date().toISOString() });
@@ -210,6 +224,12 @@ export async function startStack(options: {
   rules?: PolicyRules;
   /** The market data the MCP server reads, for example the real Gemini client on a fake Gemini. */
   marketsClient?: MarketsClient;
+  /** A signal wallet for the MCP server, for example a fake with payments on record. None by default. */
+  payments?: PaymentsClient;
+  /** The MCP server's clock, for example one a test moves a day ahead. The system clock by default. */
+  clock?: Clock;
+  /** The console's public address, which links are built on. */
+  consoleUrl?: string;
   /** More server settings, for example `MCP_TOOL_DEADLINE_MS`. */
   env?: Record<string, string>;
   logger?: Logger;
@@ -240,10 +260,20 @@ export async function startStack(options: {
     const consoleToken = randomBytes(24).toString("base64url");
     const fake = createFakeConsole({
       token: consoleToken,
+      ...(options.consoleUrl === undefined ? {} : { publicUrl: options.consoleUrl }),
       holdings: options.holdings,
       isContractAgent: async (address) =>
         (await reader.getRoles()).agent.toLowerCase() === address.toLowerCase(),
       executorAddress: devAccount("executor").address,
+      // The cover the console measures on Gemini's quotes and the chain's intents (issue #97).
+      cover: coverFromPlans({
+        ladder: (_asset, eventTicker) => Promise.resolve(markets.quote(eventTicker)),
+        intents: async () => {
+          const count = await reader.getIntentCount();
+          const read = await Promise.all(Array.from({ length: count }, (_, id) => reader.getIntent(id)));
+          return read.filter((intent): intent is Intent => intent !== null);
+        },
+      }),
     });
     const gate = options.consoleGate;
     const consoleHttp = await listen(
@@ -311,7 +341,13 @@ export async function startStack(options: {
         ...options.env,
       }),
       options.logger ?? silentLogger,
-      { services: { markets: options.marketsClient ?? markets } },
+      {
+        services: {
+          markets: options.marketsClient ?? markets,
+          ...(options.payments === undefined ? {} : { payments: options.payments }),
+        },
+        ...(options.clock === undefined ? {} : { clock: options.clock }),
+      },
     );
     const mcpHttp = await listen(server.fetch);
     servers.push(mcpHttp.server);

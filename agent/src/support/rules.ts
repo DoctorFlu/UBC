@@ -10,6 +10,7 @@ import {
   formatCents,
   type PolicyRules,
   type PolicyState,
+  type ProposedRules,
 } from "@mandate/shared";
 import { reason, type Reason } from "../mcp/envelope";
 
@@ -25,6 +26,35 @@ export const RULE_NAMES = [
   "owner",
 ] as const;
 export type RuleName = (typeof RULE_NAMES)[number];
+
+/** The rules a change request can change, as the owner reads them. */
+export const PROPOSED_RULE_TEXT: Record<keyof ProposedRules, string> = {
+  budgetCents: "budget",
+  maxTradeCents: "max trade size",
+  allowedCategories: "allowed categories",
+  approvalAboveCents: "approval threshold",
+  dailyLossCents: "daily loss limit",
+};
+
+/** A rule's value as the owner reads it: dollars, "off", or category names. */
+export function proposedRuleValue(rule: keyof ProposedRules, value: number): string {
+  if (rule === "allowedCategories") {
+    const names = categoriesFromMask(value).map(categoryLabel);
+    return names.length === 0 ? "none" : names.join(", ");
+  }
+  if (value === 0 && (rule === "approvalAboveCents" || rule === "dailyLossCents")) return "off";
+  return formatCents(value);
+}
+
+/** "max trade size to $50.00, daily loss limit to off": what a change request asks for, from the server's own words. */
+export function proposedChangesText(proposed: ProposedRules): string {
+  return (Object.keys(PROPOSED_RULE_TEXT) as (keyof ProposedRules)[])
+    .flatMap((rule) => {
+      const value = proposed[rule];
+      return value === undefined ? [] : [`${PROPOSED_RULE_TEXT[rule]} to ${proposedRuleValue(rule, value)}`];
+    })
+    .join(", ");
+}
 
 const RULE_OF_REASON: Readonly<Record<string, RuleName>> = {
   "agent paused": "paused",

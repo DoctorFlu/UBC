@@ -39,6 +39,7 @@ import type {
   PutSignalPaymentRequest,
   Roles,
   SettlementsResponse,
+  SummaryResponse,
   SignalBudgetResponse,
   SignalPaymentResponse,
   RuleInput,
@@ -186,6 +187,12 @@ export interface ConsoleClient {
    * (issue #92). Null when the console has no such route yet (404).
    */
   getSettlements(signal?: AbortSignal): Promise<SettlementsResponse | null>;
+  /**
+   * What the owner sees that the agent reads nowhere else: the console's public address, pending change
+   * requests and the cover held now against each current goal (issue #97). Null when the console has no
+   * such route yet (404).
+   */
+  getSummary(signal?: AbortSignal): Promise<SummaryResponse | null>;
 }
 
 /**
