@@ -1,8 +1,43 @@
 # The Policy contract on Arc testnet, layered on compose.yml (COMPOSE_FILE=compose.yml:compose.arc.yml).
 #
-# No anvil and no simulated executor: the contract, its deploy block and the agent's key come from
-# deploy/.env, and `docker compose` refuses to start while any of them is missing. The owner signs in the
-# console with their own browser wallet; this console build has no dev signer.
+# No anvil: the contract, its deploy block and the agent's and executor's keys come from deploy/.env, and
+# `docker compose` refuses to start while any of them is missing. The keys come from `npm run arc:keygen`
+# and reach the machine through deploy/set-secret.sh (docs/hosting.md, Arc testnet); the services refuse
+# anvil's published keys here. The owner signs in the console with their own browser wallet; this console
+# build has no dev signer.
+#
+# The console keeps its database in a volume of its own here, `console-data-arc`, never the demo chain's
+# `console-data`: the first mandate's offchain records (holdings, hedge plans, change requests, wake-ups)
+# are kept per mandate, not per contract, so the demo chain's would otherwise show up against the Arc
+# contract. Switching COMPOSE_FILE back to the demo chain finds its database as it was left.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-node-service: &node-service
+  image: mandate-services:latest
+  pull_policy: never
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging: *logging
+  networks:
+    - mandate
+
+# One Gemini for the whole stack (docs/configuration.md): every service that reads market data reads the
+# environment the executor trades on.
+x-market-data: &market-data
+  EXECUTOR_VENUE: ${EXECUTOR_VENUE:-simulated}
+  GEMINI_ENV: ${GEMINI_ENV:-sandbox}
 
 services:
   console:
@@ -14,6 +49,9 @@ services:
       POLICY_ADDRESS: ${POLICY_ADDRESS:?the Arc testnet setup needs POLICY_ADDRESS, the deployed Policy contract, in deploy/.env}
       POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
       ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
+      <<: *market-data
+    volumes:
+      - console-data-arc:/data/console
 
   mcp:
     environment:
@@ -21,3 +59,63 @@ services:
       POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
       ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
       AGENT_PRIVATE_KEY: ${AGENT_PRIVATE_KEY:?the Arc testnet setup needs AGENT_PRIVATE_KEY, the agent account's key, in deploy/.env}
+      <<: *market-data
+
+  signals:
+    environment:
+      <<: *market-data
+
+  # Fills approved intents and settles filled positions, with a key of its own. Until the contract's
+  # executor() is that key it waits, logging the setExecutor call the owner must make, and reads the role
+  # again every 30 s, so it never restarts in a loop.
+  executor:
+    <<: *node-service
+    command: ["node", "--import", "tsx", "devchain/scripts/executor.ts"]
+    environment:
+      POLICY_ADDRESS: ${POLICY_ADDRESS:?the Arc testnet setup needs POLICY_ADDRESS, the deployed Policy contract, in deploy/.env}
+      POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
+      ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
+      EXECUTOR_PRIVATE_KEY: ${EXECUTOR_PRIVATE_KEY:?the Arc testnet setup needs EXECUTOR_PRIVATE_KEY, the executor account's key, in deploy/.env (npm run arc:keygen)}
+      # How often it asks the chain for new approvals: two RPC calls each time (docs/configuration.md, Arc
+      # testnet, for what that costs on a provider; the public RPC costs nothing).
+      SIM_EXECUTOR_POLL_MS: ${SIM_EXECUTOR_POLL_MS:-1000}
+      # Where it records orders and settlements: the console's executor API, on the private network.
+      CONSOLE_URL: http://console:3000
+      EXECUTOR_SETTLE_MS: ${EXECUTOR_SETTLE_MS:-60000}
+      # How often it asks the console for mandate contracts that name it as their executor (#95).
+      EXECUTOR_DISCOVERY_MS: ${EXECUTOR_DISCOVERY_MS:-15000}
+      # simulated (default, places nothing) or gemini (Gemini's sandbox only: production is refused by the
+      # executor, and no GEMINI_LIVE_TRADING is passed here).
+      <<: *market-data
+      EXECUTOR_ORDER_TTL_MS: ${EXECUTOR_ORDER_TTL_MS:-600000}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_API_SECRET: ${GEMINI_API_SECRET:-}
+      NODE_OPTIONS: --max-old-space-size=192
+    depends_on:
+      console:
+        condition: service_started
+    # No HTTP port; the check is that the chain it acts on answers. The URL is read from the environment
+    # inside the container, so a provider key in it never appears in the container's command.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch(process.env.ARC_RPC_URL, { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId' }) })
+          .then(async (r) => process.exit(r.ok && (await r.json()).result === '0x4cef52' ? 0 : 1), () => process.exit(1))
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  # The console's database on Arc testnet: workspaces, passkeys and agent tokens start empty, so the first
+  # workspace is claimed again (docs/hosting.md, Arc testnet).
+  console-data-arc: {}

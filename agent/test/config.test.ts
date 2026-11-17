@@ -70,6 +70,25 @@ describe("parseConfig", () => {
     ]);
   });
 
+  it("refuses one of anvil's published keys for Arc testnet, and takes it for a loopback devchain", () => {
+    const anvilAgent = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+    const problems = problemsOf({ MCP_AUTH_TOKEN: TEST_TOKEN, AGENT_PRIVATE_KEY: anvilAgent });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/^AGENT_PRIVATE_KEY is one of anvil's published test keys/);
+    expect(problems[0]).toContain("rpc.testnet.arc.io");
+    expect(problems.join("\n")).not.toContain(anvilAgent.slice(2, 14));
+    expect(
+      problemsOf({
+        MCP_AUTH_TOKEN: TEST_TOKEN,
+        AGENT_PRIVATE_KEY: anvilAgent,
+        ARC_RPC_URL: "https://arc-testnet.example.quiknode.pro/abc/",
+      }),
+    ).toHaveLength(1);
+    expect(
+      testConfig({ AGENT_PRIVATE_KEY: anvilAgent, ARC_RPC_URL: "http://127.0.0.1:8545" }).agentAddress,
+    ).toBe("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
+  });
+
   it("parses allowed origins as a lowercase list", () => {
     expect(testConfig({ MCP_ALLOWED_ORIGINS: " Console.Example.com, ,b.example " }).allowedOrigins).toEqual([
       "console.example.com",

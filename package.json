@@ -30,6 +30,8 @@
     "plan": "tsx planner/scripts/plan.ts",
     "signals:start": "npm run start -w @mandate/signals",
     "x402:keygen": "npm run x402:keygen -w @mandate/agent",
+    "arc:keygen": "npm run arc:keygen -w @mandate/agent --",
+    "arc:doctor": "tsx devchain/scripts/arc-doctor.ts",
     "x402:hello": "npm run x402:hello -w @mandate/agent --",
     "x402:status": "npm run x402:status -w @mandate/agent",
     "dev:mcp": "npm run dev:mcp -w @mandate/agent --",

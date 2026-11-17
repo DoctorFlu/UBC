@@ -1,7 +1,12 @@
 /**
- * `npm run dev:executor`: THE EXECUTOR, DEVELOPMENT AND DEMO CHAIN ONLY.
+ * `npm run dev:executor`: the executor, for the local devchain, the hosted demo chain and Arc testnet.
  *
- * Watches the devchain Policy contract for `IntentApproved`. Before acting it checks the intent the way a
+ * Which contract and key (`src/executor-target.ts`): the devchain's deployment file with anvil's executor
+ * account, or the contract in `POLICY_ADDRESS` with `EXECUTOR_PRIVATE_KEY` (`npm run arc:keygen`), which may
+ * not be one of anvil's published keys off a loopback RPC. Until the contract's `executor()` is this key it
+ * waits, saying which `setExecutor` call the owner must make, and reads the role again every 30 s.
+ *
+ * Watches the Policy contract for `IntentApproved`. Before acting it checks the intent the way a
  * real executor must (see `src/executor.ts`): a market Gemini does not list, a category Gemini disagrees
  * with, an outcome other than YES or NO, or a limit price outside 1 to 99 is refused and recorded as not
  * filled. When Gemini cannot be reached it waits and tries again rather than act blindly.
@@ -9,14 +14,15 @@
  * EXECUTOR_VENUE picks what fills the order:
  * - simulated (default): nothing is placed; every order fills in full at once, with zero profit and loss.
  * - gemini (issue #93): the order is placed on Gemini Prediction Markets with GEMINI_API_KEY and
- *   GEMINI_API_SECRET, on the sandbox (test funds) unless GEMINI_ENV=production and GEMINI_LIVE_TRADING=on.
- *   Live trading is refused here all the same: the devchain's keys are public. Run `npm run gemini:doctor`
+ *   GEMINI_API_SECRET, on the sandbox (test funds). Production is refused here whatever GEMINI_ENV and
+ *   GEMINI_LIVE_TRADING say: the devchain's keys are public, and on Arc testnet trading stays on the
+ *   sandbox. Run `npm run gemini:doctor`
  *   first. The order is journaled in the console (`CONSOLE_URL`) before it is sent, so it is never placed
  *   twice, and its id and state show in the console's Advanced view.
  *
  * Once a filled position's market has expired and its outcome is published, it records what the position
- * paid in the console, signed with the executor key (issue #92; see docs/order-lifecycle.md). It refuses to
- * run against anything but the local devchain. Keys are never printed.
+ * paid in the console, signed with the executor key (issue #92; see docs/order-lifecycle.md). Keys are
+ * never printed, and of the RPC URL only its host.
  *
  * Settings come from the environment, then from `ENV_FILE` (or the repository's `.env`) for what the
  * environment leaves unset, as `npm run gemini:doctor` reads them; the containers have no such file.
@@ -34,20 +40,23 @@ import {
   type GeminiPrivateClient,
 } from "@mandate/gemini/private";
 import { type ExecutorContract, type ExecutorVenue, loadEnv, PolicyClient, WriteLane } from "@mandate/shared";
-import { resolvePolicyDeployment } from "@mandate/shared/node";
+import { type ResolvedDeployment, resolvePolicyDeployment } from "@mandate/shared/node";
 import {
   announceVenue,
   consoleContractDiscovery,
   consoleOrderJournal,
   consoleSettlementSink,
   devGeminiClient,
-  devPolicyClient,
+  executorPolicyClient,
+  executorTarget,
   geminiVenue,
   simulatedVenue,
   startExecutor,
   startExecutorFleet,
   venueDeployment,
+  waitForExecutorRole,
   type Executor,
+  type ExecutorTarget,
   type RecordSigner,
   type Venue,
 } from "../src";
@@ -71,20 +80,34 @@ try {
 }
 const { fillDelayMs, pollingIntervalMs, settleIntervalMs, consoleUrl, orderTtlMs } = settings;
 
-const deployment = resolvePolicyDeployment();
-if (deployment.source !== "devchain") {
-  fail("The executor only runs against the local devchain. Unset POLICY_ADDRESS.");
+let deployment: ResolvedDeployment;
+let target: ExecutorTarget;
+try {
+  deployment = resolvePolicyDeployment();
+  target = executorTarget(process.env, deployment);
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
 }
+/** The RPC URL may carry a provider key: only its host is ever printed. */
+const rpcHost = new URL(target.rpcUrl).host;
+const redact = (text: string): string => text.replaceAll(target.rpcUrl, rpcHost);
 
-const client = devPolicyClient(deployment.rpcUrl, deployment.address, "executor");
-const roles = await client.getRoles();
+const client = executorPolicyClient(target);
 const wallet = client.walletClient;
-if (wallet === undefined || roles.executor.toLowerCase() !== client.account?.address.toLowerCase()) {
-  fail(`This contract's executor is ${roles.executor}, not the devchain executor account.`);
-}
+if (wallet === undefined) fail("The executor's client has no wallet.");
 // Narrowed once here: the functions below use it after the check above.
 const signer = wallet;
 const executorAddress = signer.account.address;
+// Waits, rather than exiting into a restart loop, until the owner has made this key the executor.
+await waitForExecutorRole({
+  readExecutor: async () => (await client.getRoles()).executor,
+  executor: executorAddress,
+  policy: target.policy,
+  log: (line) => {
+    console.log(line);
+  },
+  redact,
+});
 const sign: RecordSigner = (hash) => wallet.signMessage({ account: wallet.account, message: { raw: hash } });
 const chainId = client.publicClient.chain.id;
 /** Every contract's writes go through this one lane: one key, one transaction at a time (#95). */
@@ -103,8 +126,11 @@ if (settings.venue === "gemini") {
     const gemini = geminiTradingSettings(process.env);
     if (gemini.environment === "production") {
       fail(
-        "Live trading is refused on the devchain: its owner and agent keys are public test keys, so anyone " +
-          "could approve an order. Use GEMINI_ENV=sandbox.",
+        target.local
+          ? "Live trading is refused on the devchain: its owner and agent keys are public test keys, so " +
+              "anyone could approve an order. Use GEMINI_ENV=sandbox."
+          : "Live trading is refused on Arc testnet: this executor trades on Gemini's sandbox only. Use " +
+              "GEMINI_ENV=sandbox.",
       );
     }
     if (gemini.credentials === null) {
@@ -182,11 +208,11 @@ if (settings.venue === "gemini") {
         announcedAt: new Date().toISOString(),
       },
     });
-  describeVenue = `SIMULATED executor (dev only): places nothing, fills after ${String(fillDelayMs)} ms`;
+  describeVenue = `SIMULATED executor${target.local ? " (dev only)" : ""}: places nothing, fills after ${String(fillDelayMs)} ms`;
 }
 
 console.log(
-  `[executor] ${describeVenue}; serving ${deployment.address} and every mandate's contract that names this ` +
+  `[executor] ${describeVenue}; on ${target.network} as ${executorAddress}; serving ${target.policy} and every mandate's contract that names this ` +
     `executor (listed by the console at ${consoleUrl}), polling every ${String(pollingIntervalMs ?? 1_000)} ms; ` +
     `checks every approved intent against Gemini's ${marketData.environment} first (${marketData.settings}); ` +
     `settles expired positions every ${String(settleIntervalMs / 1_000)} s into the console`,
@@ -248,8 +274,8 @@ const discover = consoleContractDiscovery({
 });
 const own: ExecutorContract = {
   chainId,
-  policy: deployment.address.toLowerCase(),
-  deployBlock: Number(deployment.fromBlock ?? 0n),
+  policy: target.policy.toLowerCase(),
+  deployBlock: Number(target.deployBlock),
 };
 // The server's own contract is served at once, whether or not the console answers yet.
 const fleet = startExecutorFleet({
