@@ -734,14 +734,14 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   const planRequest = card.getByTestId("request-text");
   await expectClamped(planRequest);
   expect(await overflowsViewport(page)).toBe(false);
-  await shoot(page, testInfo, "hedge-request-clamped", card);
+  await shoot(page, testInfo, "hedge-request-clamped", planRequest.locator(".."));
   await planRequest.getByRole("button", { name: "Show more" }).click();
   await expect(planRequest.getByRole("button", { name: "Show less" })).toHaveAttribute(
     "aria-expanded",
     "true",
   );
   expect(await overflowsViewport(page)).toBe(false);
-  await shoot(page, testInfo, "hedge-request-expanded", card);
+  await shoot(page, testInfo, "hedge-request-expanded");
   await page.setViewportSize({ width: 390, height: 844 });
 
   // The public scorecard stays phone-wide with the hostile intent on it.
