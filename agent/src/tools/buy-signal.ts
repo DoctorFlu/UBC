@@ -60,6 +60,19 @@ const SignalSchema = z.object({
   asOf: z.string(),
   spotCents: z.number().int(),
   realizedVolBps: z.number().int().describe("Annualized realised volatility, in basis points (4500 = 45 %)"),
+  realizedVolWindow: z
+    .object({
+      from: z.string().describe("Open time of the first hourly candle in the window"),
+      to: z.string().describe("Close time of the last hourly candle in the window"),
+      returns: z.number().int().describe("Hourly returns the estimate rests on"),
+      missingHours: z
+        .number()
+        .int()
+        .describe(
+          "Hours in the window that Gemini's candle data lacked; they were left out, not filled in, so the estimate rests on fewer returns",
+        ),
+    })
+    .describe("The price history behind realizedVolBps"),
   fairBandBps: z
     .number()
     .int()
@@ -325,6 +338,13 @@ function compact(signal: HedgeSignal): z.input<typeof SignalSchema> {
     asOf: signal.asOf,
     spotCents: signal.spot.midCents,
     realizedVolBps: signal.volatility.annualizedBps,
+    realizedVolWindow: {
+      from: signal.volatility.from,
+      to: signal.volatility.to,
+      returns: signal.volatility.returns,
+      // Signals sold before issue #98 have no such field; they only ever used an unbroken run of candles.
+      missingHours: signal.volatility.missingHours ?? 0,
+    },
     fairBandBps: signal.model.fairBandBps,
     counts: signal.counts,
     strikes: signal.strikes.map((s) => ({
@@ -338,9 +358,17 @@ function compact(signal: HedgeSignal): z.input<typeof SignalSchema> {
   };
 }
 
-/** "Realised volatility 59.09 %. Protection is cheap at $61,500 to $64,000 (best +3c at $63,000) and expensive at 11 strikes from $66,000." */
+/**
+ * "Realised volatility 59.09 % a year from 168 hourly returns to 2026-11-15T20:00:00.000Z. Protection is
+ * cheap at $61,500 to $64,000 (best +3c at $63,000) and expensive at 11 strikes from $66,000."
+ */
 function describeSignal(signal: z.input<typeof SignalSchema>): string {
-  const vol = `Realised volatility ${Math.floor(signal.realizedVolBps / 100)}.${(signal.realizedVolBps % 100).toString().padStart(2, "0")} % a year.`;
+  const window = signal.realizedVolWindow;
+  const gap =
+    window.missingHours === 0
+      ? ""
+      : ` (Gemini's candles lacked ${window.missingHours} hours of the window; they were left out, not filled in)`;
+  const vol = `Realised volatility ${Math.floor(signal.realizedVolBps / 100)}.${(signal.realizedVolBps % 100).toString().padStart(2, "0")} % a year from ${window.returns} hourly returns to ${window.to}${gap}.`;
   const cheap = signal.strikes.filter((s) => s.verdict === "cheap");
   const expensive = signal.strikes.filter((s) => s.verdict === "expensive");
   const parts: string[] = [];

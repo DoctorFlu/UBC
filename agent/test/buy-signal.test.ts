@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { verifyHedgeSignal } from "@mandate/shared";
-import { recordedSignalsApp } from "@mandate/signals/testing";
+import { GAP_RECORDED_AT, gappedCandlesBody, recordedSignalsApp } from "@mandate/signals/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpConsoleClient } from "../src/console/client";
 import { Secret } from "../src/secret";
@@ -33,9 +33,14 @@ async function setup(
     dataDir?: string;
     /** Wire an in-memory console, as the server does when CONSOLE_SERVICE_TOKEN is set. */
     console?: boolean;
+    /** Serve the hourly candles recorded with a 14-hour gap (issue #98), at the time they were recorded. */
+    gappedCandles?: boolean;
   } = {},
 ) {
-  const seller = recordedSignalsApp({ priceUsd: options.priceUsd ?? "0.0005" });
+  const seller = recordedSignalsApp({
+    priceUsd: options.priceUsd ?? "0.0005",
+    ...(options.gappedCandles === true ? { now: () => GAP_RECORDED_AT, candles: [gappedCandlesBody()] } : {}),
+  });
   const seen: { url: string; paymentSignature: string | null }[] = [];
   const network = { down: false };
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -92,7 +97,12 @@ async function setup(
         nextAction?: { actor: string; hint: string };
         receiptId: string | null;
         budget: { dailyUsdc: string; spentTodayUsdc: string; remainingUsdc: string; resetsAt: string };
-        signal: { strikes: unknown[]; eventTicker: string; counts: Record<string, number> } | null;
+        signal: {
+          strikes: unknown[];
+          eventTicker: string;
+          counts: Record<string, number>;
+          realizedVolWindow: { from: string; to: string; returns: number; missingHours: number };
+        } | null;
         paymentRecorded: boolean | null;
       },
       text: content?.[0]?.text ?? "",
@@ -141,6 +151,34 @@ describe("buy_signal", () => {
     expect(stored?.receipt).toMatchObject({ amount: "500", payer: TEST_BUYER_ADDRESS });
     expect(stored && verifyHedgeSignal(stored.signal)).toBe(true);
     expect(stored?.signal.signalId).toBe(structured["signalId"]);
+  });
+
+  it("states the price history behind the volatility", async () => {
+    const { structured, text } = await (await setup()).buy();
+    expect(structured.signal?.realizedVolWindow).toEqual({
+      from: "2026-11-08T19:00:00.000Z",
+      to: "2026-11-15T20:00:00.000Z",
+      returns: 168,
+      missingHours: 0,
+    });
+    expect(text).toMatch(/% a year from 168 hourly returns to 2026-11-15T20:00:00\.000Z\. Protection/);
+  });
+
+  it("buys a signal when Gemini's candles have a gap, and says how much of the window is missing", async () => {
+    // Issue #98: before the fix the seller refused this for free with insufficient_history.
+    const { buy, seller } = await setup({ gappedCandles: true });
+    const { structured, text } = await buy();
+    expect(structured.status).toBe("approved");
+    expect(structured.signal?.realizedVolWindow).toEqual({
+      from: "2026-11-10T03:00:00.000Z",
+      to: "2026-11-17T04:00:00.000Z",
+      returns: 153,
+      missingHours: 14,
+    });
+    expect(text).toContain(
+      "from 153 hourly returns to 2026-11-17T04:00:00.000Z (Gemini's candles lacked 14 hours of the window; they were left out, not filled in).",
+    );
+    expect(seller.facilitator.settleCalls).toHaveLength(1);
   });
 
   it("refuses a request beyond the daily budget before any signature is produced", async () => {
