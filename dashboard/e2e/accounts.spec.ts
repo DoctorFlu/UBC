@@ -160,7 +160,9 @@ test.describe("a second workspace", () => {
   });
 
   test("sees his own empty mandate and nothing of the first workspace", async ({ baseURL }) => {
-    await expect(page.getByText("No Policy contract yet", { exact: true })).toBeVisible();
+    // Home lists his one mandate, with no contract yet (#95).
+    await expect(page.getByTestId("mandate-row")).toHaveCount(1);
+    await expect(page.getByTestId("mandate-row").getByText("No contract yet")).toBeVisible();
     const his = (await (await page.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
     expect(his.contract).toBeNull();
     expect(his.chain).toBeNull();
@@ -183,6 +185,12 @@ test.describe("a second workspace", () => {
       for (const path of ["/api/console/snapshot", "/api/console/events"]) {
         const response = await page.request.get(`${path}?mandate=${encodeURIComponent(id)}`);
         expect(response.status(), `${path} for ${id}`).toBe(404);
+      }
+      // Its pages: the same not-found page as for a mandate that does not exist.
+      for (const view of ["", "/approvals", "/setup"]) {
+        const opened = await page.goto(`/m/${encodeURIComponent(id)}${view}`);
+        expect(opened?.status(), `/m/${id}${view}`).toBe(404);
+        await expect(page.getByText("Nothing at this address", { exact: true })).toBeVisible();
       }
     }
     // Making a token for the first workspace's agent is refused, and its tokens stay as they were.
@@ -216,7 +224,8 @@ test.describe("a second workspace", () => {
       (response) =>
         response.request().method() === "POST" && /\/tokens$/.test(new URL(response.url()).pathname),
     );
-    await agents.getByRole("button", { name: "Create token" }).click();
+    // A new token is a credential: his passkey confirms it, in one prompt the button names (#95).
+    await agents.getByRole("button", { name: "Create token with passkey" }).click();
     expect((await made).status()).toBe(201);
     const dialog = page.getByRole("dialog", { name: "Copy your token now" });
     await expect(dialog).toBeVisible();
@@ -297,7 +306,8 @@ test.describe("a second workspace", () => {
     expect(out.status()).toBe(200);
     await elsewhere.close();
     // The stream's reconnect gets 401: the page asks the console once, and goes to sign in.
-    await page.waitForURL(/\/sign-in\?next=%2Factivity$/);
+    // Back to the page it was on: his mandate's Activity (#95).
+    await page.waitForURL(/\/sign-in\?next=%2Fm%2Fmnd_[a-z0-9]+%2Factivity$/);
     await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toBeVisible();
   });
 

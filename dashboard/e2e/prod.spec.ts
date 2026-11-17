@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+import { firstMandatePath } from "./support/console";
 import { watchConsole } from "./support/problems";
 
 /**
@@ -16,9 +17,10 @@ test.beforeAll(() => {
 test.describe("route loading fallback", () => {
   test("shows while a page is on its way, keeps the shell usable, and gives way to the page", async ({
     page,
+    baseURL,
   }) => {
     const problems = watchConsole(page);
-    await page.goto("/");
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
     // Let the sidebar's links prefetch their routes' loading states, as they do for the owner.
     await page.waitForLoadState("networkidle");

@@ -23,6 +23,7 @@ import {
   snapshot,
   waitForConsole,
   waitForSnapshot,
+  firstMandatePath,
 } from "./support/console";
 import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
 import { type FakeGemini, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
@@ -139,7 +140,8 @@ async function settled() {
 }
 
 async function open(page: Page, path: string): Promise<void> {
-  await page.goto(path);
+  // `/` is the workspace Home (#95); the owner acts on the first mandate's Overview.
+  await page.goto(path === "/" ? await firstMandatePath(baseURL) : path);
   await expect(page.getByTestId("owner-address").filter({ visible: true })).toBeVisible();
 }
 

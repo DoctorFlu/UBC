@@ -12,6 +12,7 @@ import type { HedgeMarketResponse } from "../src/lib/hedge/types";
 import { describeMarket } from "../src/lib/markets";
 
 import { AGENT_ADDRESS, OWNER_ADDRESS, routePath, routes, schemes, viewports } from "./routes";
+import { firstMandatePath } from "./support/console";
 import { suitePaths } from "./support/chain";
 import { DEMO_RECEIPT, ownerHeaders, reportSignalBudget, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
@@ -82,9 +83,9 @@ for (const scheme of schemes) {
         });
       }
 
-      test("the dev signer shows the connected owner", async ({ page }) => {
+      test("the dev signer shows the connected owner", async ({ page, baseURL }) => {
         const problems = watchConsole(page);
-        await page.goto("/");
+        await page.goto(await firstMandatePath(baseURL ?? ""));
         if (viewport.name === "phone") {
           await page.getByRole("button", { name: "Open menu" }).click();
         }
@@ -353,7 +354,7 @@ test.describe("seeded demo", () => {
         .getByRole("row")
         .filter({ has: page.getByRole("link", { name: "Intent #5", exact: true }) })
         .filter({ visible: true });
-    await page.goto("/");
+    await page.goto(await firstMandatePath(baseURL ?? ""));
     await expect(sports()).toContainText("Sports market");
     await expect(sports()).not.toContainText("GEMI-");
     await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
