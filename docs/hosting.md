@@ -196,7 +196,8 @@ export MCP_AUTH_TOKEN="$(sed -n 's/^MCP_AUTH_TOKEN=//p' .env)"
 ./smoke.sh https://<host>
 ```
 
-Without `MCP_AUTH_TOKEN` it skips the MCP checks that need a token, so it can run from a machine that should not hold one; set `SMOKE_AGENT_ADDRESS` to the agent's address then, for the scorecard check.
+Without `MCP_AUTH_TOKEN` it skips the MCP checks that need a token, so it can run from a machine that should not hold one; set `SMOKE_AGENT_ADDRESS` to the first mandate's agent address then, for the scorecard check.
+Only the first mandate's agent has a public scorecard, so with another mandate's token set `SMOKE_AGENT_ADDRESS` too; otherwise the check uses the token's agent.
 With `CONSOLE_SESSION`, the value of the console's session cookie copied from a signed-in browser (`read -rs CONSOLE_SESSION && export CONSOLE_SESSION`), it also checks the signed-in routes.
 
 It checks both health endpoints, that `/mcp` refuses a request without a token or with an unknown one and answers `initialize`, `tools/list` and a read-only `whoami` call with the token, that member APIs answer 401 without a session or with a wrong one and pages send the browser to `/sign-in`, that nothing asks for a password, that cross-site writes and sign-ins are refused, that the account pages, the scorecard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs a session.
