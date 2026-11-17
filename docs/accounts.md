@@ -97,6 +97,7 @@ User verification is required, and passkeys are discoverable, so signing in asks
   The operator runs the admin command's `claim-code` on the server; it prints a one-time code once and stores only its hash.
   Whoever enters the code and registers a passkey becomes that workspace's member.
   Until then nobody can see the workspace's data.
+  Once it is claimed, `/claim` sends visitors to sign in, since no claim code can work again.
 - **Sign-up** (`/sign-up`): creates a new workspace with one mandate (no contract yet) and its agent.
   In production it needs an invite code from the admin command's `invite`; in local development it is open unless `CONSOLE_SIGNUP=invite`.
 - **Sign-in** (`/sign-in`): one button, which asks the browser for a passkey of this site.

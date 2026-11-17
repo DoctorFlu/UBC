@@ -117,6 +117,8 @@ function AgentCard({
           body: JSON.stringify({ name }),
         }),
       );
+      // The next token is for another app: start it with an empty name.
+      setName("");
       onChange();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -199,13 +201,22 @@ function AgentCard({
           rowTone={(token) => (token.revokedAt ? "muted" : undefined)}
           empty={<p className={styles.muted}>No tokens yet. Create one to connect Grok Bot.</p>}
         />
-        <form className={styles.tokenForm} onSubmit={(event) => void create(event)} noValidate>
+        <form onSubmit={(event) => void create(event)} noValidate>
           <Field label="New token" hint="Name it after the app that will use it." error={error}>
-            <Input name="token-name" autoComplete="off" value={name} onValueChange={setName} maxLength={60} />
+            {/* The button sits on the input's row, so the hint reads under both. */}
+            <div className={styles.tokenForm}>
+              <Input
+                name="token-name"
+                autoComplete="off"
+                value={name}
+                onValueChange={setName}
+                maxLength={60}
+              />
+              <Button type="submit" variant="secondary" icon={<Plus aria-hidden />} loading={creating}>
+                Create token
+              </Button>
+            </div>
           </Field>
-          <Button type="submit" variant="secondary" icon={<Plus aria-hidden />} loading={creating}>
-            Create token
-          </Button>
         </form>
       </div>
 

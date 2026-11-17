@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { BrandMark } from "@/components/shell/Brand";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { PageHydrationBeacon } from "@/lib/page-hydration";
 
 import styles from "./auth.module.css";
 
@@ -16,6 +17,8 @@ export function AuthFrame({ children }: { children: ReactNode }) {
         <ThemeToggle />
       </header>
       <main id="main" tabIndex={-1} className={styles.main}>
+        {/* Says when the form has hydrated, so a code typed or a button pressed is never lost. */}
+        <PageHydrationBeacon />
         {children}
       </main>
     </div>
