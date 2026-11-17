@@ -74,15 +74,33 @@ export interface CandleClose {
   closeCents: number;
 }
 
-export interface VolatilityOptions {
+export interface ReturnWindowOptions {
   /** Candle width. Default one hour. */
   intervalMs?: number;
-  /** Use at most this many of the most recent returns. */
+  /**
+   * Length of the window in candle intervals, ending at the close of the newest closed candle, so at most
+   * this many returns.
+   */
   maxReturns: number;
-  /** Below this many usable returns there is no estimate. At least 2. */
-  minReturns: number;
   /** Only candles that closed at or before this instant count; the one still forming is ignored. */
   nowMs: number;
+}
+
+export interface VolatilityOptions extends ReturnWindowOptions {
+  /** Below this many usable returns there is no estimate. At least 2. */
+  minReturns: number;
+}
+
+/** The log returns inside the volatility window, and how much of the window the data covers. */
+export interface ReturnWindow {
+  /** Log returns between candles exactly one interval apart, oldest first. None spans a gap. */
+  logReturns: number[];
+  /** Open time of the first candle in the window. */
+  fromMs: number;
+  /** Close time of the newest closed candle. */
+  toMs: number;
+  /** Intervals between `fromMs` and `toMs` that have no candle. */
+  missingIntervals: number;
 }
 
 export interface VolatilityEstimate {
@@ -90,62 +108,88 @@ export interface VolatilityEstimate {
   annualizedBps: number;
   /** Number of log returns used. */
   returns: number;
-  /** Open time of the first candle used. */
+  /** Open time of the first candle in the window. */
   fromMs: number;
-  /** Close time of the last candle used. */
+  /** Close time of the last candle in the window. */
   toMs: number;
+  /** Intervals between `fromMs` and `toMs` that had no candle. */
+  missingIntervals: number;
 }
 
 /**
- * Close-to-close realised volatility: the sample standard deviation (n - 1) of log returns between
- * consecutive closed candles, annualized by the square root of the number of intervals in a year.
+ * The window a volatility estimate uses: the `maxReturns` intervals up to the close of the newest closed
+ * candle (shorter when the series starts later), with the log return of every pair of candles in it that
+ * are exactly one interval apart.
  *
- * It uses the most recent unbroken run of candles: walking back from the newest closed candle, it stops
- * at the first missing interval, so a gap in the data never becomes one oversized "hourly" return.
+ * A missing candle removes the returns on either side of it and nothing else: no return ever spans a gap,
+ * because a two-hour move counted as one hour would overstate volatility, and no candle is filled in.
+ * Returns null when there is no closed candle at all.
+ */
+export function returnWindow(
+  candles: readonly CandleClose[],
+  options: ReturnWindowOptions,
+): ReturnWindow | null {
+  const intervalMs = options.intervalMs ?? HOUR_MS;
+  requireInteger(intervalMs, "intervalMs", 1);
+  requireInteger(options.maxReturns, "maxReturns", 2);
+  const closed = candles
+    .filter((c) => c.openTimeMs + intervalMs <= options.nowMs && c.closeCents > 0)
+    .sort((a, b) => a.openTimeMs - b.openTimeMs);
+  const newest = closed.at(-1);
+  if (newest === undefined) return null;
+  const windowStart = newest.openTimeMs - options.maxReturns * intervalMs;
+  const inWindow = closed.filter((c) => c.openTimeMs >= windowStart);
+  const first = inWindow[0] ?? newest;
+
+  const logReturns: number[] = [];
+  let missingIntervals = 0;
+  for (let i = 1; i < inWindow.length; i++) {
+    const previous = inWindow[i - 1];
+    const current = inWindow[i];
+    if (previous === undefined || current === undefined) continue;
+    const step = current.openTimeMs - previous.openTimeMs;
+    if (step === intervalMs) {
+      logReturns.push(Math.log(current.closeCents / previous.closeCents));
+    } else {
+      missingIntervals += Math.max(0, Math.round(step / intervalMs) - 1);
+    }
+  }
+  return { logReturns, fromMs: first.openTimeMs, toMs: newest.openTimeMs + intervalMs, missingIntervals };
+}
+
+/**
+ * Annualized volatility in basis points from log returns over intervals `intervalMs` wide: their sample
+ * standard deviation (n - 1) times the square root of the number of intervals in a year. Needs at least
+ * two returns.
+ */
+export function annualizedVolatilityBps(logReturns: readonly number[], intervalMs: number = HOUR_MS): number {
+  requireInteger(intervalMs, "intervalMs", 1);
+  if (logReturns.length < 2) throw new RangeError("annualizedVolatilityBps needs at least two returns");
+  const mean = logReturns.reduce((sum, r) => sum + r, 0) / logReturns.length;
+  const variance = logReturns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (logReturns.length - 1);
+  return Math.round(Math.sqrt(variance * (YEAR_MS / intervalMs)) * 10_000);
+}
+
+/**
+ * Close-to-close realised volatility over `returnWindow`: the sample standard deviation of the log
+ * returns between adjacent closed candles in the window, annualized by the square root of the number
+ * of intervals in a year. Each return is a real one-interval move, so the hourly variance they estimate
+ * is unbiased by gaps; a gap only leaves fewer of them, which the estimate reports.
  * Returns null when fewer than `minReturns` returns are available.
  */
 export function realizedVolatility(
   candles: readonly CandleClose[],
   options: VolatilityOptions,
 ): VolatilityEstimate | null {
-  const intervalMs = options.intervalMs ?? HOUR_MS;
-  requireInteger(intervalMs, "intervalMs", 1);
-  requireInteger(options.maxReturns, "maxReturns", 2);
   requireInteger(options.minReturns, "minReturns", 2);
-  const closed = candles
-    .filter((c) => c.openTimeMs + intervalMs <= options.nowMs && c.closeCents > 0)
-    .sort((a, b) => a.openTimeMs - b.openTimeMs);
-
-  // Newest first: walk back while the candles are exactly one interval apart.
-  const run: CandleClose[] = [];
-  for (let i = closed.length - 1; i >= 0 && run.length <= options.maxReturns; i--) {
-    const candle = closed[i];
-    if (candle === undefined) break;
-    const newer = run.at(-1);
-    if (newer !== undefined && newer.openTimeMs - candle.openTimeMs !== intervalMs) break;
-    run.push(candle);
-  }
-  run.reverse();
-  const returnsCount = run.length - 1;
-  const first = run[0];
-  const last = run.at(-1);
-  if (returnsCount < options.minReturns || first === undefined || last === undefined) return null;
-
-  const logReturns: number[] = [];
-  for (let i = 1; i < run.length; i++) {
-    const previous = run[i - 1];
-    const current = run[i];
-    if (previous === undefined || current === undefined) continue;
-    logReturns.push(Math.log(current.closeCents / previous.closeCents));
-  }
-  const mean = logReturns.reduce((sum, r) => sum + r, 0) / logReturns.length;
-  const variance = logReturns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (logReturns.length - 1);
-  const annualized = Math.sqrt(variance * (YEAR_MS / intervalMs));
+  const window = returnWindow(candles, options);
+  if (window === null || window.logReturns.length < options.minReturns) return null;
   return {
-    annualizedBps: Math.round(annualized * 10_000),
-    returns: returnsCount,
-    fromMs: first.openTimeMs,
-    toMs: last.openTimeMs + intervalMs,
+    annualizedBps: annualizedVolatilityBps(window.logReturns, options.intervalMs ?? HOUR_MS),
+    returns: window.logReturns.length,
+    fromMs: window.fromMs,
+    toMs: window.toMs,
+    missingIntervals: window.missingIntervals,
   };
 }
 

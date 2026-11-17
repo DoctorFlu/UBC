@@ -128,11 +128,19 @@ export const hedgeSignalSchema = z.strictObject({
     annualizedBps: z.int().nonnegative(),
     method: z.literal("close-to-close"),
     candle: z.literal("1hr"),
-    /** Number of hourly log returns the estimate used. */
+    /**
+     * Number of hourly log returns the estimate used: one per pair of candles in the window that are
+     * exactly one hour apart. Below the window's length when Gemini's candles have gaps.
+     */
     returns: z.int().positive(),
-    /** Open time of the first candle and close time of the last candle used. */
+    /** The window: open time of its first candle and close time of its last. */
     from: isoDateTime,
     to: isoDateTime,
+    /**
+     * Hours between `from` and `to` that Gemini's candle data lacked. They are left out, never filled in,
+     * and no return spans them. Absent only in documents sold before issue #98, which never had a gap.
+     */
+    missingHours: z.int().nonnegative().optional(),
     source: z.string().min(1),
   }),
   model: z.strictObject({
@@ -181,7 +189,10 @@ export const SIGNAL_ERROR_CODES = [
   "no_ladder",
   /** 422: the ladder settles too soon to model. */
   "expired",
-  /** 503: not enough recent price history to estimate volatility. Retry later. */
+  /**
+   * 503: too few hourly returns in the volatility window, even after skipping Gemini's gaps; the message
+   * gives the count, the window and the missing hours. Retry later.
+   */
   "insufficient_history",
   /** 503: Gemini could not be reached. Retry later. */
   "market_data_unavailable",

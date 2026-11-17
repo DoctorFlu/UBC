@@ -11,20 +11,25 @@ import {
   type SignalErrorCode,
 } from "@mandate/shared";
 import {
+  annualizedVolatilityBps,
   bookState,
   HOUR_MS,
   impliedYesBps,
   judgeProtection,
   probabilityAtOrAboveBps,
-  realizedVolatility,
+  returnWindow,
+  type ReturnWindow,
 } from "./math";
 
 export interface SignalModelConfig {
   /** Edge, in basis points of a dollar, before a strike is called cheap or expensive. At least 1. */
   fairBandBps: number;
-  /** Most hourly returns the volatility estimate uses (168 is one week). */
+  /**
+   * Hours in the volatility window, ending at the newest closed candle (168 is one week), so at most
+   * this many hourly returns.
+   */
   volWindowHours: number;
-  /** Fewest hourly returns that still give an estimate. */
+  /** Fewest hourly returns in the window that still give an estimate, gaps or not. */
   minVolReturns: number;
   /** A ladder settling sooner than this is refused as expired. */
   minSecondsToExpiry: number;
@@ -40,6 +45,7 @@ export const DEFAULT_SIGNAL_MODEL: SignalModelConfig = {
 export const MODEL_ASSUMPTIONS = [
   "The settlement price is lognormal around today's spot with no drift (zero rates, no carry).",
   "Volatility is the close-to-close realised volatility of hourly Gemini spot candles, annualized over 365 days of trading.",
+  "Hours missing from Gemini's candles are left out: no return spans a gap and no candle is filled in, so a gap means fewer returns, as volatility.returns and volatility.missingHours state.",
   "Spot is the Gemini exchange mid, which tracks but is not the index the ladder settles on.",
   "Book prices are the event's best YES bid and ask, the top of each strike's order book.",
   "A NO contract pays one dollar when the settlement price is below the strike; fees are ignored.",
@@ -73,19 +79,25 @@ export function buildHedgeSignal(input: {
     return { ok: false, code: "no_ladder", message: `Event ${ladder.eventTicker} has no strikes.` };
   }
 
-  const volatility = realizedVolatility(input.candles, {
+  const window = returnWindow(input.candles, {
     intervalMs: HOUR_MS,
     maxReturns: config.volWindowHours,
-    minReturns: config.minVolReturns,
     nowMs,
   });
-  if (volatility === null) {
+  if (window === null || window.logReturns.length < Math.max(2, config.minVolReturns)) {
     return {
       ok: false,
       code: "insufficient_history",
-      message: `Fewer than ${config.minVolReturns} consecutive hourly ${ladder.asset} candles are available to estimate volatility.`,
+      message: insufficientHistoryMessage(ladder.asset, window, config.minVolReturns),
     };
   }
+  const volatility = {
+    annualizedBps: annualizedVolatilityBps(window.logReturns, HOUR_MS),
+    returns: window.logReturns.length,
+    fromMs: window.fromMs,
+    toMs: window.toMs,
+    missingHours: window.missingIntervals,
+  };
 
   const spotCents = ladder.spot.midCents;
   const strikes = [...ladder.rungs]
@@ -135,6 +147,7 @@ export function buildHedgeSignal(input: {
       returns: volatility.returns,
       from: new Date(volatility.fromMs).toISOString(),
       to: new Date(volatility.toMs).toISOString(),
+      missingHours: volatility.missingHours,
       source: `gemini:${ladder.spot.symbol}`,
     },
     model: {
@@ -151,4 +164,20 @@ export function buildHedgeSignal(input: {
     },
   };
   return { ok: true, signal: { ...body, signalId: hedgeSignalId(body) } };
+}
+
+/**
+ * Why there is no estimate, in numbers: how many hourly returns the window holds, how long it is and how
+ * many of its hours Gemini's candles lack.
+ */
+function insufficientHistoryMessage(asset: string, window: ReturnWindow | null, minReturns: number): string {
+  const needed = `At least ${minReturns} are needed to estimate volatility.`;
+  if (window === null) return `Gemini returned no closed hourly ${asset} candles. ${needed}`;
+  const hours = Math.round((window.toMs - window.fromMs) / HOUR_MS);
+  const to = new Date(window.toMs).toISOString();
+  const missing =
+    window.missingIntervals === 0
+      ? ""
+      : `; Gemini's candles are missing ${window.missingIntervals} of those hours, and none is filled in`;
+  return `Only ${window.logReturns.length} hourly ${asset} returns are available in the ${hours} hours to ${to}${missing}. ${needed}`;
 }
