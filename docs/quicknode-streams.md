@@ -325,7 +325,7 @@ Our complete create request (from `npm run stream -w @mandate/streams -- upsert 
 }
 ```
 
-It is sent with headers `x-api-key: <QUICKNODE_API_KEY>`, `content-type: application/json` and `idempotency-key: mandate-policy-logs-arc-testnet`.
+It is sent with headers `x-api-key: <QUICKNODE_API_KEY>`, `content-type: application/json` and `idempotency-key: mandate-policy-logs-arc-testnet-<milliseconds>`, a new key for each create, because each demo window deletes its Stream and creates a new one (the lookup by `external_id` keeps a second run from making a duplicate).
 `start_range` is absent, so the Stream starts at the latest block; it is added only when `QUICKNODE_STREAM_START_BLOCK` is set, after the script prices the backfill.
 The Stream is created paused; `activate` starts it.
 
@@ -507,13 +507,33 @@ It runs only after the owner's yes on the budget.
 The month's 80M covers 23 days of nonstop streaming at most, before any RPC use, so the Stream is never left on unattended.
 The console's RPC poll in stream mode, every 15 s, is on Arc's public RPC and costs no credits ([configuration.md](configuration.md#which-rpc-each-service-uses-and-what-it-costs)); on QuickNode it would add 576,000 a day.
 
-**The pause rule.**
+**The window rule.**
 
-- The Stream exists only paused, except during a demo window the owner has named.
+- A paused Stream keeps its cursor, and `activate` resumes from it (see "Pause and resume" above).
+  So a Stream paused on Thursday and activated on Friday delivers, and bills, every block in between first: about 3.4M credits a day of pause, the same as never pausing.
+- Therefore no Stream exists between windows.
+  Each window starts with `upsert`, which creates a new Stream at the chain tip, and ends with `pause` and then `delete --yes`.
 - Before each window: `status` shows the credits left for the period; the window's hours times 144,000, plus the period's other use, must fit with a wide margin.
-- At the end of every window, and before the hosted console is stopped or switched back to the demo chain, `pause`.
+- At the end of every window, and before the hosted console is stopped or switched back to the demo chain, `pause` and `delete --yes`.
 - At once, `pause` if `status` shows overages above zero, or credits left below the days left in the period times the expected daily use.
-- QuickNode pauses the Stream itself after 5 failed deliveries (`max_retry`), for example while the console is down; `activate` resumes at the failed batch.
+- QuickNode pauses the Stream itself after 5 failed deliveries (`max_retry`), for example while the console is down.
+  Within a window, `activate` resumes at the failed batch, which is cheap for a gap of minutes; after a longer gap, `delete --yes` and `upsert` instead, because the console's RPC poll fills the gap at no cost.
+
+**This week's windows (UTC), for the owner's yes.**
+The submission deadline is Friday 2026-11-20 12:00 CST (18:00 UTC), and the finals are in Austin on Saturday 2026-11-21.
+The finals' hours were not published when this was written, so that window is a placeholder to move to them; its length is what the yes is for.
+
+| Window | UTC | CST | Hours | Credits at 144,000 an hour |
+| --- | --- | --- | --- | --- |
+| Demo recording | Thu 2026-11-19 16:00 to 19:00 | 10:00 to 13:00 | 3 | 432,000 |
+| Submission checks, ending at the deadline | Fri 2026-11-20 14:00 to 18:00 | 08:00 to 12:00 | 4 | 576,000 |
+| Finals | Sat 2026-11-21 14:00 to 22:00 | 08:00 to 16:00 | 8 | 1,152,000 |
+| Total | | | 15 | 2,160,000 |
+
+The yes asked for is **up to 2,500,000 credits**: the 2,160,000 above, plus margin for `test-filter` calls and the few blocks between `upsert` and `activate`.
+That is about 3% of the 80M month.
+144,000 an hour is the upper figure (0.5 s blocks); at the measured 0.508 s it is about 141,700.
+A window that is shortened or skipped simply costs less; a window that runs longer than planned costs 2,400 credits a minute until `pause`.
 
 **Before the yes** (no QuickNode call): the hosted console runs on Arc ([hosting.md](hosting.md#arc-testnet)), and the token is in both env files:
 
@@ -526,13 +546,14 @@ sed -n 's/^QUICKNODE_STREAM_SECURITY_TOKEN=//p' .env | instabox ssh mandate -- '
 `POLICY_ADDRESS` in the laptop's `.env` is the Arc contract, and `QUICKNODE_STREAM_START_BLOCK` is unset.
 Then set `CONSOLE_EVENT_SOURCE=stream` in the machine's env file and recreate the console (`docker compose --env-file /data/mandate/mandate.env up -d --no-deps --no-build console`); its RPC poll fills any gap every 15 s, so nothing is lost while the Stream is still paused.
 
-**After the yes**, one command creates the Stream paused, checks the filter on the test block and starts delivery:
+**After the yes**, at the start of each window, one command creates the Stream paused at the tip, checks the filter on the test block and starts delivery:
 
 ```sh
 npm run stream -w @mandate/streams -- status && npm run stream -w @mandate/streams -- upsert --yes-i-checked-the-budget && npm run stream -w @mandate/streams -- test-filter --block 72740419 && npm run stream -w @mandate/streams -- activate --yes-i-checked-the-budget
 ```
 
 The off switch is `npm run stream -w @mandate/streams -- pause`.
+At the end of each window, after `pause`, `npm run stream -w @mandate/streams -- delete --yes` removes the Stream and its cursor, so the next window's `upsert` starts at the tip again.
 Outside a window, `CONSOLE_EVENT_SOURCE=rpc` makes the console's feed report its 1 s poll as live again instead of a late Stream.
 
 ## What a person must do
@@ -554,6 +575,7 @@ Outside a window, `CONSOLE_EVENT_SOURCE=rpc` makes the console's feed report its
 6. Check the filter against a block that contains a Policy event: `... -- test-filter --block <n>`.
 7. Create the Stream paused with `... -- upsert --yes-i-checked-the-budget`, start the webhook receiver, then `... -- activate --yes-i-checked-the-budget`.
 8. Run `... -- pause` (the off switch) whenever the console is not running, and run `status` daily to watch the remaining credits; if `status` ever shows overages above zero, pause immediately.
+   A paused Stream resumes at its cursor and bills the blocks it missed, so between demo windows run `... -- delete --yes` after `pause`, and `upsert` again at the next window (see "The window rule" in the Arc plan above).
 9. Save the first real delivery (headers and raw body) as a fixture and confirm the three open points: whether a filtered body is the bare return value, whether retries are re-signed, and the observed delivery latency.
 
 `.env.example` should list these variables; this branch does not change it because the file was not readable from the agent session that wrote this spike.

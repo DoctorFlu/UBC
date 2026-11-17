@@ -348,8 +348,11 @@ async function upsert(ctx: Context): Promise<void> {
 
   if (existing === undefined) {
     if (ctx.dryRun) console.log("[dry-run] If no Stream exists yet, the script creates it (paused):");
+    // One key per create: each demo window deletes its Stream and creates a new one at the tip, and a key
+    // reused after a delete could be answered with the deleted Stream. The lookup by external_id above is
+    // what keeps a second run from creating a duplicate.
     const created = await ctx.client.send("POST", `${STREAMS}/streams`, buildCreateBody(inputs), {
-      "idempotency-key": externalIdFor(ctx.network),
+      "idempotency-key": `${externalIdFor(ctx.network)}-${Date.now()}`,
     });
     if (ctx.dryRun) {
       console.log("[dry-run] If it exists, the script pauses it if active, then updates it:");
@@ -435,7 +438,10 @@ async function setStatus(ctx: Context, action: "activate" | "pause"): Promise<vo
   if (ctx.dryRun) return;
   print(`${action} ${id}`, result);
   console.log(
-    action === "activate" ? `${dailyBurnText()} Run \`pause\` to stop.` : "Paused: spending nothing.",
+    action === "activate"
+      ? `${dailyBurnText()} Run \`pause\` to stop.`
+      : "Paused: spending nothing. The cursor is kept, so a later `activate` first delivers and bills " +
+          "every block since now; at the end of a window run `delete --yes`, and `upsert` at the next one.",
   );
 }
 
