@@ -224,13 +224,15 @@ cd mandate
 git pull
 cd deploy
 ./build-site.sh                                  # only with compose.site.yml
-docker compose up -d --build --remove-orphans
+docker compose build
+docker compose up -d --remove-orphans
 docker compose up -d --force-recreate --no-deps caddy
 docker image prune -f
 docker builder prune -f --filter until=24h
 ```
 
-Compose rebuilds the images, replaces only the containers whose image or settings changed, and keeps every volume.
+`docker compose build` builds the new images while the old version keeps serving; only the two `up` lines interrupt it, for about 20 seconds.
+`up` replaces only the containers whose image or settings changed, and keeps every volume.
 Caddy's configuration files are mounted one by one, and a mounted file that is replaced (as `git pull` does) stays the old file inside a running container, so the second `up` recreates Caddy to load the new routes; it takes a second.
 The last two lines keep the disk from filling: a full build caches about 4 GB, and each build whose dependencies changed adds about as much again.
 After changing `deploy/.env`, `docker compose up -d` applies it.
@@ -441,13 +443,31 @@ rm -rf repo.old
 mv repo repo.old
 mkdir repo
 tar -xzf mandate-src.tgz -C repo
-cd repo/deploy
+grep -o '^[A-Z0-9_]*=' repo/deploy/mandate.env.template | grep -vxF -f <(grep -o '^[A-Z0-9_]*=' mandate.env)
+```
+
+The last line prints the names of settings the new version's template has and the env file does not (it prints no values).
+Read each one's comment in `repo/deploy/mandate.env.template`, and add it to `/data/mandate/mandate.env` if it is required or wanted; `NEXT_PUBLIC_SITE_URL` is required for the landing page in gateway mode.
+Then build, while the old version keeps serving:
+
+```sh
+cd /data/mandate/repo/deploy
 MANDATE_ENV_FILE=/data/mandate/mandate.env ./build-site.sh    # only with compose.site.yml
-docker compose --env-file /data/mandate/mandate.env up -d --build --remove-orphans
+docker compose --env-file /data/mandate/mandate.env build
+```
+
+Then swap to the new version, which is the only interruption, and clean up:
+
+```sh
+docker compose --env-file /data/mandate/mandate.env up -d --remove-orphans
 docker compose --env-file /data/mandate/mandate.env up -d --force-recreate --no-deps caddy
 docker image prune -f
 docker builder prune -f --filter until=24h
 ```
+
+Measured on the free machine, the swap took 25 seconds: the console answered 502 for about 15 seconds and `/mcp` for about 8, while the containers were recreated in order, and both for a second more while Caddy was recreated.
+Pick a moment when nothing is scheduled to call the app, such as a Grok Bot routine at the top of the hour.
+The landing page keeps serving the previous build until Caddy is recreated, then the new one.
 
 The env file and the volumes are outside `repo`, so they are kept, and `repo.old` holds the previous version until the next update.
 The update never writes the env file, so a password the owner sets in the meantime stays.
