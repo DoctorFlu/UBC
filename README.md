@@ -4,7 +4,7 @@ An AI agent that hedges your crypto on prediction markets, inside rules it canno
 
 Built for the UBC 2026 Hackathon: track **Agentic Payments & AI**, **Best use of Arc**, and the **Gemini Prediction Markets**, **Grok Bot** and **QuickNode Streams** bounties.
 
-![The owner's console](dashboard/docs/screenshots/overview-1440-light.png)
+![The owner's console](dashboard/docs/screenshots/home-1440-light.png)
 
 ## The idea
 

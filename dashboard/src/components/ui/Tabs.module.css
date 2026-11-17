@@ -37,7 +37,10 @@
   font-stretch: var(--stretch-semi);
   font-weight: var(--weight-semibold);
   white-space: nowrap;
-  transition: color var(--duration-fast) ease-out;
+  transition-property: color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+  cursor: pointer;
 }
 
 .tab:focus-visible {
@@ -46,11 +49,11 @@
 }
 
 /* The selected tab sits on a 2px ink rule; selection also changes the text color, not color alone. */
-.tab[aria-selected="true"] {
+.tab[data-selected] {
   color: var(--color-text);
 }
 
-.tab[aria-selected="true"]::after {
+.tab[data-selected]::after {
   content: "";
   position: absolute;
   inset: auto var(--space-2) -1px;
@@ -76,7 +79,7 @@
   text-align: center;
 }
 
-.tab[aria-selected="true"] .count {
+.tab[data-selected] .count {
   background: var(--color-ink);
   color: var(--color-on-ink);
 }

@@ -16,7 +16,8 @@ export interface RouteCase {
 }
 
 export const routes: readonly RouteCase[] = [
-  { name: "overview", path: "/", heading: "Overview", console: true },
+  { name: "home", path: "/", heading: "Home", console: true },
+  { name: "approvals", path: "/approvals", heading: "Approvals", console: true },
   { name: "activity", path: "/activity", heading: "Activity", console: true },
   { name: "intent", path: "/activity/0", heading: "Intent #0", console: true },
   { name: "mandate", path: "/mandate", heading: "Mandate", console: true },

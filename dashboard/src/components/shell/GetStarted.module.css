@@ -1,0 +1,172 @@
+/* Sits in the panel door above its footer, so it never covers the content. */
+.dock {
+  margin-bottom: var(--space-2);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-border);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+}
+
+.trigger {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.5rem;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.count {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  width: 1rem;
+  height: 1rem;
+  margin-inline-start: auto;
+  color: var(--color-text-muted);
+  transition-property: rotate;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+.trigger[data-closed] .chevron {
+  rotate: 180deg;
+}
+
+.hide {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-inline-end: var(--space-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition-property: background-color, color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+.hide svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (hover: hover) {
+  .trigger:hover .title {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .hide:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+  }
+}
+
+.meter {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.track {
+  height: 0.25rem;
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-rule);
+}
+
+.fill {
+  height: 100%;
+  background: var(--color-ink);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-rule);
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.step[data-done] {
+  color: var(--color-text-muted);
+}
+
+.marker {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.0625rem;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-round);
+}
+
+.step[data-done] .marker {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+}
+
+.marker svg {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+.link {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-link);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}

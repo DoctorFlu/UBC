@@ -107,7 +107,8 @@ export function LiveLadder({
   }
   if (market.status === "loading") {
     return (
-      <div className={styles.ladderLoading} aria-busy="true" aria-label="Loading live quotes">
+      <div className={styles.ladderLoading} role="status" data-testid="ladder-loading">
+        <span className="visually-hidden">Loading live quotes</span>
         {Array.from({ length: SKELETON_ROWS }, (_, index) => (
           <Skeleton key={index} height="1.25rem" />
         ))}

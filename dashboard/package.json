@@ -20,6 +20,8 @@
     "@mandate/shared": "*",
     "@mandate/streams": "*",
     "@tanstack/react-query": "^5.107.1",
+    "@ui-sdk/core": "0.1.0-beta.6",
+    "@ui-sdk/react": "0.1.0-beta.6",
     "lucide-react": "^1.73.0",
     "next": "^16.4.6",
     "react": "^19.3.1",

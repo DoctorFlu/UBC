@@ -95,6 +95,11 @@ const columns: readonly Column<AuditRow>[] = [
   },
 ];
 
+const ORDER_OPTIONS = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+] as const satisfies readonly { value: AuditOrder; label: string }[];
+
 const GROUPS: readonly (AuditGroup | "all")[] = ["all", "mandate", "pause", "verdict", "owner", "result"];
 
 const emptyText: Record<AuditGroup | "all", string> = {
@@ -198,12 +203,10 @@ export function AuditView({ preview }: { preview?: ConsoleSnapshot }) {
             <Select
               className={styles.order}
               value={order}
-              onChange={(event) => setOrder(event.target.value === "oldest" ? "oldest" : "newest")}
+              onChange={setOrder}
+              options={ORDER_OPTIONS}
               aria-label="Order of events"
-            >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </Select>
+            />
           }
         >
           <Tabs

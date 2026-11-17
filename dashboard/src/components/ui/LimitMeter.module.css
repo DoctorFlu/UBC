@@ -46,9 +46,7 @@
 
 .fill {
   height: 100%;
-  width: var(--load);
   background: var(--meter-fill);
-  transition: width var(--duration-slow) var(--ease-out);
 }
 
 /* Graduations every 10%, a longer mark at 50% and at the rating. */

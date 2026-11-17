@@ -12,7 +12,7 @@ export default function NotFound() {
         title="Nothing at this address"
         action={
           <ButtonLink href="/" variant="primary" icon={<ArrowLeft aria-hidden />}>
-            Back to the overview
+            Back to Home
           </ButtonLink>
         }
       >

@@ -4,7 +4,10 @@ import { expect, test } from "@playwright/test";
 
 import { routePath, routes, schemes, viewports } from "./routes";
 
-/** Writes docs/screenshots/<route>-<width>-<scheme>.png for every route. Run with `npm run screenshots`. */
+/**
+ * Writes docs/screenshots/<route>-<width>-<scheme>.png for every route, and <...>-advanced.png for every
+ * console route in Advanced view. Run with `npm run screenshots`.
+ */
 const outDir = fileURLToPath(new URL("../docs/screenshots/", import.meta.url));
 
 for (const scheme of schemes) {
@@ -17,8 +20,14 @@ for (const scheme of schemes) {
         hasTouch: viewport.name === "phone",
       });
 
-      for (const route of routes) {
-        test(route.name, async ({ page, baseURL }) => {
+      const cases = [
+        ...routes.map((route) => ({ route, advanced: false })),
+        ...routes.filter((route) => route.console).map((route) => ({ route, advanced: true })),
+      ];
+      for (const { route, advanced } of cases) {
+        test(`${route.name}${advanced ? ", Advanced view" : ""}`, async ({ page, context, baseURL }) => {
+          if (advanced)
+            await context.addCookies([{ name: "mandate-advanced", value: "on", url: baseURL ?? "" }]);
           await page.goto(await routePath(route, baseURL ?? ""));
           await expect(page.getByRole("heading", { level: 1, name: route.heading })).toBeVisible();
           if (route.console) {
@@ -30,7 +39,7 @@ for (const scheme of schemes) {
           await page.waitForLoadState("networkidle");
           await page.evaluate(() => document.fonts.ready);
           await page.screenshot({
-            path: `${outDir}${route.name}-${viewport.width.toString()}-${scheme}.png`,
+            path: `${outDir}${route.name}-${viewport.width.toString()}-${scheme}${advanced ? "-advanced" : ""}.png`,
             fullPage: true,
             animations: "disabled",
           });

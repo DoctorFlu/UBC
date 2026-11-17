@@ -1,0 +1,125 @@
+"use client";
+
+import { useState } from "react";
+
+import { IntentLink, IntentVerdict, MarketName, amountLabel } from "@/components/domain/Intent";
+import { ChainUnavailable } from "@/components/states/ChainStates";
+import { Card } from "@/components/ui/Card";
+import { HexValue } from "@/components/ui/HexValue";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { EmptyState } from "@/components/ui/States";
+import { type Column, Table } from "@/components/ui/Table";
+import { Tabs } from "@/components/ui/Tabs";
+import { useAdvanced } from "@/lib/advanced/Advanced";
+import { formatDateUtc, formatTimeUtc, formatUsdCents } from "@/lib/format";
+import { type HeldDecision, decidedAfterHold, needsOwner } from "@/lib/live/attention";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import { isoFromUnix } from "@/lib/live/derive";
+import type { ConsoleSnapshot } from "@/lib/live/types";
+
+import styles from "./approvals.module.css";
+import { NeedsYou } from "./NeedsYou";
+
+export type ApprovalsTab = "waiting" | "decided";
+
+function decidedAt({ decidedAt: at }: HeldDecision): string {
+  if (at === null) return "Not recorded";
+  const iso = isoFromUnix(at);
+  return `${formatDateUtc(iso)}, ${formatTimeUtc(iso)}`;
+}
+
+const baseColumns: readonly Column<HeldDecision>[] = [
+  { key: "id", header: "Intent", cell: ({ intent }) => <IntentLink id={intent.id} />, nowrap: true },
+  {
+    key: "market",
+    header: "Market",
+    cell: ({ intent }) => <MarketName symbol={intent.market} />,
+    role: "primary",
+  },
+  { key: "amount", header: "Amount", cell: ({ intent }) => amountLabel(intent), align: "end", nowrap: true },
+  { key: "verdict", header: "Outcome", cell: ({ intent }) => <IntentVerdict intent={intent} /> },
+  { key: "when", header: "Decided", cell: decidedAt, nowrap: true },
+];
+
+const txColumn: Column<HeldDecision> = {
+  key: "tx",
+  header: "Decision",
+  cell: ({ intent }) => (intent.decidedTxHash ? <HexValue value={intent.decidedTxHash} kind="tx" /> : "None"),
+  nowrap: true,
+};
+
+/** What waits for the owner's signature, and the held intents already decided. */
+export function ApprovalsView({ tab, preview }: { tab: ApprovalsTab; preview?: ConsoleSnapshot }) {
+  const live = useSnapshot();
+  const snapshot = preview ?? live;
+  const { advanced } = useAdvanced();
+  const [shown, setShown] = useState<ApprovalsTab>(tab);
+  const chain = snapshot.chain;
+  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Approvals" />;
+
+  const attention = needsOwner(snapshot);
+  const decided = decidedAfterHold(chain);
+  const threshold = chain.rules?.approvalAboveCents ?? 0;
+  const columns = advanced ? [...baseColumns, txColumn] : baseColumns;
+
+  return (
+    <div className={styles.view}>
+      <PageHeader
+        title="Approvals"
+        description={
+          threshold > 0
+            ? `Intents above ${formatUsdCents(threshold)} wait here for your signature.`
+            : "Intents above the approval threshold wait here for your signature."
+        }
+      />
+      <Tabs
+        label="Approvals"
+        selected={shown}
+        onSelect={(id) => {
+          const next: ApprovalsTab = id === "decided" ? "decided" : "waiting";
+          setShown(next);
+          const url = new URL(window.location.href);
+          if (next === "decided") url.searchParams.set("show", "decided");
+          else url.searchParams.delete("show");
+          window.history.replaceState(null, "", url);
+        }}
+        tabs={[
+          {
+            id: "waiting",
+            label: "Waiting",
+            count: attention.total,
+            content:
+              attention.total === 0 ? (
+                <EmptyState title="Nothing waiting for you">
+                  Held intents, rule change requests and pairings appear here.
+                </EmptyState>
+              ) : (
+                <NeedsYou snapshot={snapshot} attention={attention} />
+              ),
+          },
+          {
+            id: "decided",
+            label: "Decided",
+            count: decided.length,
+            content: (
+              <Card padding="flush">
+                <Table
+                  caption="Held intents you decided"
+                  captionHidden
+                  columns={columns}
+                  rows={decided}
+                  rowKey={({ intent }) => intent.id.toString()}
+                  empty={
+                    <EmptyState plain title="Nothing decided yet">
+                      Intents you approve or reject appear here.
+                    </EmptyState>
+                  }
+                />
+              </Card>
+            ),
+          },
+        ]}
+      />
+    </div>
+  );
+}

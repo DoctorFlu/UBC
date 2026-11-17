@@ -113,13 +113,14 @@ export function WalletButton({ block = false }: { block?: boolean }) {
           data-testid="owner-address"
           data-address={state.address}
           data-owner={notOwner ? "false" : "true"}
-          aria-label={`${notOwner ? "Connected wallet, not the owner," : "Owner wallet"} ${state.address}. Show details`}
+          title={state.address}
         >
           <span className={styles.walletLamp} data-owner={notOwner ? "false" : undefined} aria-hidden />
-          <span className={styles.walletRole}>{notOwner ? "Not owner" : "Owner"}</span>
+          <span className={styles.walletRole}>{notOwner ? "Not owner" : "Owner"}</span>{" "}
           <span className={styles.walletAddress} translate="no">
             {shortenHex(state.address)}
           </span>
+          <span className="visually-hidden">, wallet details</span>
         </button>
       );
       break;

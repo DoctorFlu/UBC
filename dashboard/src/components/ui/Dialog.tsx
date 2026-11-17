@@ -1,33 +1,51 @@
 "use client";
 
+import {
+  Dialog as DialogRoot,
+  DialogBackdrop,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@ui-sdk/react/dialog";
+import {
+  Drawer,
+  DrawerBackdrop,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+} from "@ui-sdk/react/drawer";
 import { X } from "lucide-react";
-import { type ReactNode, useEffect, useEffectEvent, useId, useRef } from "react";
+import type { ReactNode } from "react";
 
 import { cx } from "@/lib/cx";
+import { usePageHydrated } from "@/lib/page-hydration";
 
 import styles from "./Dialog.module.css";
 
 export interface DialogProps {
   open: boolean;
-  /** Called for Escape, the close button, a backdrop click, and `<form method="dialog">` buttons. */
+  /** Called for Escape, the close button, and a press outside when `lightDismiss` allows it. */
   onClose: () => void;
   title: ReactNode;
   description?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
-  /** "dialog" is centered; "sheet" rises from the bottom on phones; "drawer" slides from the left. */
+  /** "dialog" is centered; "sheet" rises from the bottom on phones; "drawer" slides from the start edge. */
   variant?: "dialog" | "sheet" | "drawer";
-  /** Close on a click outside the panel. Off for anything with unsaved input. */
+  /** Close on a press outside the panel. Off for anything with unsaved input. */
   lightDismiss?: boolean;
   className?: string;
 }
 
 /**
- * A native modal <dialog>: the browser handles focus containment, the inert page, Escape,
- * and returning focus to the opener. Use it only for tasks that need protected focus.
+ * A modal for tasks that need protected focus: the page goes inert and focus returns to the opener.
+ * One asked to open before the page below has hydrated (the phone menu, the wallet details) opens as
+ * soon as it has, never earlier: see lib/page-hydration.ts.
  */
 export function Dialog({
-  open,
+  open: wanted,
   onClose,
   title,
   description,
@@ -37,81 +55,53 @@ export function Dialog({
   lightDismiss = true,
   className,
 }: DialogProps) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
-  const descriptionId = useId();
-  const handleClose = useEffectEvent(onClose);
+  const pageHydrated = usePageHydrated();
+  const open = wanted && pageHydrated;
+  const onOpenChange = (next: boolean) => {
+    if (!next) onClose();
+  };
 
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return undefined;
-    const onCloseEvent = () => handleClose();
-    // Light dismiss for browsers without `closedby`: a press and release both outside the panel.
-    let pressedOutside = false;
-    const outside = (event: PointerEvent) => {
-      const rect = dialog.getBoundingClientRect();
-      return (
-        event.clientX < rect.left ||
-        event.clientX > rect.right ||
-        event.clientY < rect.top ||
-        event.clientY > rect.bottom
-      );
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      pressedOutside = lightDismiss && outside(event);
-    };
-    const onPointerUp = (event: PointerEvent) => {
-      if (pressedOutside && outside(event)) dialog.close();
-      pressedOutside = false;
-    };
-    dialog.addEventListener("close", onCloseEvent);
-    dialog.addEventListener("pointerdown", onPointerDown);
-    dialog.addEventListener("pointerup", onPointerUp);
-    return () => {
-      dialog.removeEventListener("close", onCloseEvent);
-      dialog.removeEventListener("pointerdown", onPointerDown);
-      dialog.removeEventListener("pointerup", onPointerUp);
-    };
-  }, [lightDismiss]);
+  if (variant === "drawer") {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange} side="start" closeOnOutsidePress={lightDismiss}>
+        <DrawerBackdrop className={styles.backdrop} />
+        <DrawerContent className={cx(styles.dialog, styles.drawer, className)}>
+          <header className={styles.header}>
+            <div>
+              <DrawerTitle className={styles.title}>{title}</DrawerTitle>
+              {description !== undefined ? (
+                <DrawerDescription className={styles.description}>{description}</DrawerDescription>
+              ) : null}
+            </div>
+            <DrawerClose className={styles.close} aria-label="Close">
+              <X aria-hidden strokeWidth={2} />
+            </DrawerClose>
+          </header>
+          {children !== undefined ? <div className={styles.body}>{children}</div> : null}
+          {footer !== undefined ? <footer className={styles.footer}>{footer}</footer> : null}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
 
   return (
-    <dialog
-      ref={ref}
-      className={cx(styles.dialog, variant !== "dialog" && styles[variant], className)}
-      aria-labelledby={titleId}
-      aria-describedby={description !== undefined ? descriptionId : undefined}
-    >
-      <div className={styles.inner}>
+    <DialogRoot open={open} onOpenChange={onOpenChange} closeOnOutsidePress={lightDismiss}>
+      <DialogBackdrop className={styles.backdrop} />
+      <DialogContent className={cx(styles.dialog, variant === "sheet" && styles.sheet, className)}>
         <header className={styles.header}>
           <div>
-            <h2 id={titleId} className={styles.title}>
-              {title}
-            </h2>
+            <DialogTitle className={styles.title}>{title}</DialogTitle>
             {description !== undefined ? (
-              <p id={descriptionId} className={styles.description}>
-                {description}
-              </p>
+              <DialogDescription className={styles.description}>{description}</DialogDescription>
             ) : null}
           </div>
-          <button
-            type="button"
-            className={styles.close}
-            aria-label="Close"
-            onClick={() => ref.current?.close()}
-          >
+          <DialogClose className={styles.close} aria-label="Close">
             <X aria-hidden strokeWidth={2} />
-          </button>
+          </DialogClose>
         </header>
         {children !== undefined ? <div className={styles.body}>{children}</div> : null}
         {footer !== undefined ? <footer className={styles.footer}>{footer}</footer> : null}
-      </div>
-    </dialog>
+      </DialogContent>
+    </DialogRoot>
   );
 }

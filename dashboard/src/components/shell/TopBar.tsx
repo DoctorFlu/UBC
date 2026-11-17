@@ -13,17 +13,16 @@ import { DevSignerBadge } from "./DevSignerBadge";
 import { Isolator } from "./Isolator";
 import { NavLinks } from "./NavLinks";
 import styles from "./Shell.module.css";
-import { ThemeToggle } from "./ThemeToggle";
 import { WalletButton } from "./WalletButton";
 
 export interface TopBarProps {
   navCounts: Partial<Record<string, number>>;
-  /** The schedule of limits, rendered on the server and shown in the phone drawer. */
-  schedule: ReactNode;
+  /** The sidebar's footer (scorecard link, Advanced view, theme), repeated in the phone drawer. */
+  foot: ReactNode;
 }
 
-/** The status strip: the live feed, dev signer, wallet and the isolator. On phones, also the menu. */
-export function TopBar({ navCounts, schedule }: TopBarProps) {
+/** The status strip: the live lamp, dev signer, wallet and the isolator. On phones, also the menu. */
+export function TopBar({ navCounts, foot }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { snapshot, connection } = useLiveConsole();
   const { feed } = snapshot;
@@ -77,8 +76,7 @@ export function TopBar({ navCounts, schedule }: TopBarProps) {
             <WalletButton block />
           </div>
           <NavLinks counts={navCounts} onNavigate={() => setMenuOpen(false)} />
-          {schedule}
-          <ThemeToggle />
+          {foot}
         </div>
       </Dialog>
     </header>
