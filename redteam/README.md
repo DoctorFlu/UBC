@@ -52,7 +52,7 @@ It signs only with the public anvil keys from `devPrivateKey`.
 
 It leaves the demo usable:
 
-- It skips the attacks that cannot be undone or would stop the demo: draining the budget, reaching the daily loss limit, planting numbers too large for offchain code, and flooding the rate limit.
+- It skips the attacks that cannot be undone or would stop the demo: draining the budget, reaching the daily loss limit, planting numbers too large for offchain code, flooding the rate limit, and the repeated hedge runs (they plan on a fixture ladder and would buy protection the owner did not ask for).
 - It plants an inert canary instead of a working prompt injection in the onchain market text, and a 1 KiB market instead of 16 KiB, because a demo agent may read them.
 - It pauses the mandate as the owner for the two paused attacks and resumes it in a `finally` (also on Ctrl+C).
 - After every attack it re-reads the roles and rules, and stops at once if anything owner-only changed.
