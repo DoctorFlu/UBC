@@ -130,6 +130,8 @@ export function createHttpApp(
       const token = bearerToken(c.req.header("authorization"));
       if (token === undefined) return refuse();
 
+      // Its own bound (`RESOLVE_TIMEOUT_MS`): the tool call's deadline starts only after it.
+      const lookupStarted = performance.now();
       const resolution = await tenancy.resolver.resolve(token, c.req.raw.signal);
       switch (resolution.kind) {
         case "agent":
@@ -143,12 +145,19 @@ export function createHttpApp(
           return tooMany(resolution.retryAfter);
         case "unavailable":
           // Fail closed: without the console's answer no token is accepted, not even the env-file one.
-          logger.warn("http.auth_unavailable", { requestId, reason: resolution.reason });
+          logger.warn("http.auth_unavailable", {
+            requestId,
+            reason: resolution.reason,
+            ...(resolution.timedOut === true ? { timedOut: true } : {}),
+            durationMs: Math.round(performance.now() - lookupStarted),
+          });
           return jsonRpcError(
             c,
             503,
             -32000,
-            "The MCP server cannot check tokens right now. Try again shortly.",
+            resolution.timedOut === true
+              ? "The MCP server could not check the token in time: the console did not answer. Try again shortly."
+              : "The MCP server cannot check tokens right now. Try again shortly.",
             {
               "Retry-After": "5",
             },

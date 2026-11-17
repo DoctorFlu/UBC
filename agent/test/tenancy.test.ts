@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { encodeFunctionData, parseTransaction, recoverTransactionAddress } from "viem";
 import { policyBaseAbi } from "@mandate/shared";
 import { createMandateServer, type MandateServer } from "../src/app";
+import { withSignal } from "../src/chain/rpc-scope";
+import { HttpConsoleClient } from "../src/console/client";
 import { FAILED_AUTH_LIMIT } from "../src/http/app";
 import { scrubText } from "../src/logger";
 import { Secret } from "../src/secret";
 import { ConsoleSigner } from "../src/tenancy/console-signer";
-import { ConsoleTokenResolver, createTokenResolver } from "../src/tenancy/resolver";
+import { ConsoleTokenResolver, createTokenResolver, type FetchLike } from "../src/tenancy/resolver";
 import { CONSOLE_TOKEN, harness } from "./fakes";
 import {
   TEST_BUYER_KEY,
@@ -56,6 +58,26 @@ const initialize = {
   method: "initialize",
   params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } },
 };
+
+/** A console that never answers: each request hangs until its signal aborts, or for good without one. */
+const silentConsole: FetchLike = (_input, init) =>
+  new Promise((_resolve, reject) => {
+    init.signal?.addEventListener("abort", () => {
+      reject(init.signal?.reason as Error);
+    });
+  });
+
+/** A console that never answers and ignores the abort signal too. */
+const deafConsole: FetchLike = () => new Promise<Response>(() => undefined);
+
+/** A console that sends the answer's headers, then never the body. */
+const stalledConsole: FetchLike = () =>
+  Promise.resolve(
+    new Response(new ReadableStream({ start: () => undefined }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
 
 function resolveCount(fake: { state: { requests: string[] } }): number {
   return fake.state.requests.filter((r) => r === "POST /api/agent/v1/auth/resolve").length;
@@ -117,6 +139,44 @@ describe("token resolution", () => {
     expect(await unreachable.resolve(TEST_TOKEN)).toMatchObject({ kind: "unavailable" });
   });
 
+  it("gives up on a console that does not answer within its own bound, headers or body", async () => {
+    for (const fetch of [silentConsole, deafConsole, stalledConsole]) {
+      const slow = new ConsoleTokenResolver({
+        baseUrl: "http://console.test",
+        serviceToken: new Secret(CONSOLE_TOKEN),
+        legacyToken: new Secret(TEST_TOKEN),
+        fetch,
+        timeoutMs: 100,
+      });
+      const started = performance.now();
+      expect(await slow.resolve(TEST_TOKEN)).toEqual({
+        kind: "unavailable",
+        reason: "the console did not answer within 100 ms",
+        timedOut: true,
+      });
+      expect(performance.now() - started).toBeLessThan(1_000);
+    }
+  });
+
+  it("stops asking when the client goes away", async () => {
+    const slow = new ConsoleTokenResolver({
+      baseUrl: "http://console.test",
+      serviceToken: new Secret(CONSOLE_TOKEN),
+      legacyToken: new Secret(TEST_TOKEN),
+      fetch: deafConsole,
+    });
+    const gone = new AbortController();
+    setTimeout(() => {
+      gone.abort();
+    }, 50);
+    const started = performance.now();
+    expect(await slow.resolve(TEST_TOKEN, gone.signal)).toEqual({
+      kind: "unavailable",
+      reason: "the client went away",
+    });
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
   it("passes on the console's limit on failed lookups", async () => {
     const limited = new ConsoleTokenResolver({
       baseUrl: "http://console.test",
@@ -173,6 +233,26 @@ describe("the MCP endpoint with several workspaces", () => {
     const response = await post(server, initialize, { authorization: `Bearer ${TEST_TOKEN}` });
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).toBe("5");
+  });
+
+  it("answers 503 within the lookup's bound when the console is slow, and logs it once", async () => {
+    const h = harness();
+    const { logger, lines } = captureLogs();
+    const server = createMandateServer(h.ctx.config, logger, {
+      clock: fixedClock,
+      resolver: createTokenResolver(h.ctx.config, deafConsole, { timeoutMs: 150 }),
+    });
+    const started = performance.now();
+    const response = await post(server, initialize, { authorization: `Bearer ${TEST_TOKEN}` });
+    expect(performance.now() - started).toBeLessThan(1_500);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    expect(JSON.stringify(await response.json())).toContain("could not check the token in time");
+    const logged = lines.filter((line) => line.includes('"http.auth_unavailable"'));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain('"timedOut":true');
+    expect(logged[0]).toContain("did not answer within 150 ms");
+    expect(logged.join("")).not.toContain(TEST_TOKEN);
   });
 
   it("limits failed tokens per client before asking the console, and keeps good tokens working", async () => {
@@ -258,7 +338,65 @@ describe("the MCP endpoint with several workspaces", () => {
   });
 });
 
+describe("a workspace agent's call under its deadline", () => {
+  it("lists its own setup steps when the console is too slow to answer", async () => {
+    const h = harness();
+    const fake = h.console;
+    const other = fake.addAgent();
+    const { logger, lines } = captureLogs();
+    const config = { ...h.ctx.config, limits: { ...h.ctx.config.limits, toolDeadlineMs: 300 } };
+    // Tokens resolve at once; every other console request hangs until the call's deadline aborts it.
+    const slowConsole = new HttpConsoleClient({
+      baseUrl: "http://console.test",
+      token: new Secret(CONSOLE_TOKEN),
+      fetch: silentConsole,
+    });
+    const server = createMandateServer(config, logger, {
+      clock: fixedClock,
+      resolver: createTokenResolver(config, fake.clientFetch),
+      services: { console: slowConsole },
+    });
+    const started = performance.now();
+    const result = await call(server, other.token, "get_setup_state");
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(result.structuredContent).toMatchObject({ status: "unavailable", ready: false });
+    const hints = JSON.stringify(result.structuredContent?.steps);
+    expect(hints).toContain("The console holds this agent's key.");
+    expect(hints).not.toContain("AGENT_PRIVATE_KEY");
+    expect(lines.some((line) => line.includes('"tool.deadline_exceeded"'))).toBe(true);
+    expect(lines.some((line) => line.includes('"tool.abandoned"'))).toBe(false);
+  });
+});
+
 describe("the console-held signer", () => {
+  it("stops when the proposing call's deadline does, not after its own timeout", async () => {
+    const signer = new ConsoleSigner({
+      address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      agentId: "agt_slow",
+      baseUrl: "http://console.test",
+      serviceToken: new Secret(CONSOLE_TOKEN),
+      fetch: silentConsole,
+    });
+    const deadline = AbortSignal.timeout(100);
+    const started = performance.now();
+    await expect(
+      withSignal(deadline, () =>
+        signer.signTransaction({
+          type: "eip1559",
+          chainId: 5_042_002,
+          nonce: 0,
+          gas: 300_000n,
+          maxFeePerGas: 2n,
+          maxPriorityFeePerGas: 1n,
+          value: 0n,
+          to: TEST_POLICY,
+          data: "0x",
+        }),
+      ),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
   it("gets a proposeTrade to the mandate's contract signed, and nothing else", async () => {
     const { fake } = setup();
     const other = fake.addAgent({

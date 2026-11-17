@@ -5,6 +5,11 @@
  * Nothing is cached, so a token revoked in the console stops working on its next call. When the console
  * cannot answer, the MCP server refuses the call (503) rather than guess, and it keeps no local copy of
  * `MCP_AUTH_TOKEN` to fall back on: a revoked env-file token must stay revoked.
+ *
+ * The lookup runs before a tool call's deadline (`MCP_TOOL_DEADLINE_MS`) starts, so it has its own bound,
+ * `RESOLVE_TIMEOUT_MS`, covering the answer's headers and its body: a slow console makes a request wait
+ * at most that long, then answer 503. The most a call can take is this bound, the tool deadline and the
+ * unwind grace, 5 + 40 + 3 seconds at the largest deadline, under the 60 seconds MCP clients wait.
  */
 import {
   CONSOLE_AGENT_ROUTES,
@@ -27,14 +32,42 @@ export type Resolution =
   | { kind: "unknown" }
   /** The console limits failed lookups and asks to wait this many seconds. */
   | { kind: "limited"; retryAfter: number }
-  /** The console did not answer usefully (down, timed out, misconfigured): refuse the call. */
-  | { kind: "unavailable"; reason: string };
+  /**
+   * The console did not answer usefully (down, timed out, misconfigured): refuse the call. `timedOut`
+   * when it did not answer within the lookup's bound.
+   */
+  | { kind: "unavailable"; reason: string; timedOut?: true };
 
 export interface TokenResolver {
   resolve(token: string, signal?: AbortSignal): Promise<Resolution>;
 }
 
+/** How long one token lookup may take, headers and body, before the request is refused with 503. */
 export const RESOLVE_TIMEOUT_MS = 5_000;
+
+/**
+ * Settles with `work`, or rejects as soon as `signal` aborts, even when `work` ignores the signal (a
+ * fetch that does not honour it, or a body that stops arriving).
+ */
+function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason as Error);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(signal.reason as Error);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -67,20 +100,36 @@ export class ConsoleTokenResolver implements TokenResolver {
       legacy: constantTimeEqual(token, this.#legacyToken.reveal()),
     });
     const timeout = AbortSignal.timeout(this.#timeoutMs);
+    const bound = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+    // Why the lookup stopped, when it did: the bound, or the client going away first.
+    const stopped = (): Resolution | undefined => {
+      if (timeout.aborted) {
+        return {
+          kind: "unavailable",
+          reason: `the console did not answer within ${String(this.#timeoutMs)} ms`,
+          timedOut: true,
+        };
+      }
+      if (signal?.aborted) return { kind: "unavailable", reason: "the client went away" };
+      return undefined;
+    };
     let response: Response;
     try {
-      response = await this.#fetch(`${this.#baseUrl}${CONSOLE_AGENT_ROUTES.resolveToken}`, {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-          authorization: `Bearer ${this.#serviceToken.reveal()}`,
-        },
-        body: JSON.stringify(body),
-        signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
-      });
+      response = await bounded(
+        this.#fetch(`${this.#baseUrl}${CONSOLE_AGENT_ROUTES.resolveToken}`, {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "content-type": "application/json",
+            authorization: `Bearer ${this.#serviceToken.reveal()}`,
+          },
+          body: JSON.stringify(body),
+          signal: bound,
+        }),
+        bound,
+      );
     } catch {
-      return { kind: "unavailable", reason: "the console did not answer" };
+      return stopped() ?? { kind: "unavailable", reason: "the console could not be reached" };
     }
     if (response.status === 404) return { kind: "unknown" };
     if (response.status === 429) {
@@ -96,7 +145,15 @@ export class ConsoleTokenResolver implements TokenResolver {
             : `the console answered HTTP ${String(response.status)}`,
       };
     }
-    const parsed = resolveTokenResponseSchema.safeParse(await response.json().catch(() => undefined));
+    let payload: unknown;
+    try {
+      payload = await bounded(response.json(), bound);
+    } catch {
+      const why = stopped();
+      if (why !== undefined) return why;
+      payload = undefined;
+    }
+    const parsed = resolveTokenResponseSchema.safeParse(payload);
     if (!parsed.success)
       return { kind: "unavailable", reason: "the console's answer does not match the wire contract" };
     return { kind: "agent", agent: parsed.data };
@@ -113,13 +170,18 @@ export const noConsoleResolver: TokenResolver = {
 };
 
 /** The resolver for this configuration. */
-export function createTokenResolver(config: Config, fetchImpl?: FetchLike): TokenResolver {
+export function createTokenResolver(
+  config: Config,
+  fetchImpl?: FetchLike,
+  options: { timeoutMs?: number } = {},
+): TokenResolver {
   if (config.consoleServiceToken === undefined) return noConsoleResolver;
   return new ConsoleTokenResolver({
     baseUrl: config.consoleUrl,
     serviceToken: config.consoleServiceToken,
     legacyToken: config.authToken,
     ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
 }
 
