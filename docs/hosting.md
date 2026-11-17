@@ -152,6 +152,20 @@ Every other variable has a one-line explanation in the file, and [configuration.
 Leave `X402_BUYER_PRIVATE_KEY` empty unless the agent should buy signals; without it, `buy_signal` answers `unavailable` and everything else works.
 `deploy/.env` is git-ignored and is never copied into an image.
 
+Secrets copied from another product, such as Grok Bot's webhook URL and key for [event wake-ups](event-wake.md), go in with `set-secret.sh` rather than an editor, so the value is never shown, kept in shell history or put on a command line:
+
+```sh
+pbpaste | ./set-secret.sh GROK_WEBHOOK_URL    # from the clipboard (xclip -o or wl-paste on Linux)
+./set-secret.sh GROK_WEBHOOK_KEY              # or typed or pasted at its prompt, which shows nothing
+```
+
+It accepts only `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, `GEMINI_API_KEY` and `GEMINI_API_SECRET`; the console password has its own script, and the tokens are generated.
+It drops one trailing newline and refuses an empty value, a line break or other control character, a character outside printable ASCII (a non-breaking space from a web page), a space at either end and a single quote; the URL must start with `https://`.
+It writes the line as `NAME='value'`, because docker compose would otherwise expand a `$` in the value and cut it at ` #`.
+The file is rebuilt next to itself with mode 600 and moved over the old one, so it is never half written, and a failure leaves no temporary file; run it as the file's owner, so the owner stays.
+It prints only the name, the value's length and the first 12 hex digits of its SHA-256, which the owner can compare with `printf %s "$(pbpaste)" | shasum -a 256 | cut -c1-12` on their own computer.
+Nothing reads `GEMINI_API_KEY` or `GEMINI_API_SECRET` yet; they are on the list for the Gemini sandbox keys to come.
+
 For the Arc testnet mode, set `COMPOSE_FILE=compose.yml:compose.arc.yml` and fill `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and `AGENT_PRIVATE_KEY`, and `ARC_RPC_URL` if you use a provider.
 Nothing executes approved intents in this mode yet: there is no executor for Arc testnet in this setup.
 
@@ -419,6 +433,33 @@ The owner sets it from their own terminal; the command asks twice, shows nothing
 ```sh
 instabox ssh mandate -- -t 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-console-password.sh && cd /data/mandate/repo/deploy && docker compose --env-file /data/mandate/mandate.env up -d caddy'
 ```
+
+### Secrets from other products
+
+`instabox ssh` passes its standard input to the remote command (checked by hash on the machine), so the owner copies a value in the other product and sends it from the clipboard, one value at a time:
+
+```sh
+pbpaste | instabox ssh mandate -- 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-secret.sh GROK_WEBHOOK_URL'
+pbpaste | instabox ssh mandate -- 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-secret.sh GROK_WEBHOOK_KEY'
+```
+
+Without a pipe, add `-t` after `--` so the remote prompt hides what is pasted; with neither, the remote side has no terminal and the laptop's terminal shows what is typed.
+Each run prints the name, the length and the start of the SHA-256; compare it with `printf %s "$(pbpaste)" | shasum -a 256 | cut -c1-12` on the laptop while the same value is on the clipboard.
+
+Only the console reads the two Grok Bot settings, so after both are set, recreate the console alone:
+
+```sh
+instabox ssh mandate -- 'cd /data/mandate/repo/deploy && docker compose --env-file /data/mandate/mandate.env up -d --no-deps --no-build console'
+```
+
+The console answers 502 for about 15 seconds while it restarts.
+Then check that wake-ups are on, without showing either value: the console's Setup page says so in Advanced view, or from the laptop:
+
+```sh
+instabox ssh mandate -- 'docker exec mandate-mcp-1 node --input-type=module -e "const w = (await (await fetch(\"http://console:3000/api/console/snapshot\")).json()).wake; console.log(\"wake-ups enabled:\", w.enabled, \"| off because:\", w.offReason)"'
+```
+
+`enabled: true` means both values are set and the URL parses; whether Grok Bot accepts them shows on the Setup page after the first wake-up, as its result.
 
 ### Smoke test
 
