@@ -13,12 +13,14 @@ function parseIntentId(value: string): number | null {
   return Number.isSafeInteger(id) ? id : null;
 }
 
-export async function generateMetadata({ params }: PageProps<"/activity/[id]">): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: PageProps<"/m/[mandate]/activity/[id]">): Promise<Metadata> {
   const { id } = await params;
   return { title: `Intent #${id}` };
 }
 
-export default async function IntentPage({ params, searchParams }: PageProps<"/activity/[id]">) {
+export default async function IntentPage({ params, searchParams }: PageProps<"/m/[mandate]/activity/[id]">) {
   const { id } = await params;
   const intentId = parseIntentId(id);
   if (intentId === null) notFound();

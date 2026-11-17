@@ -7,7 +7,7 @@ import { previewState } from "@/lib/preview";
 
 export const metadata: Metadata = { title: "Approvals" };
 
-export default async function ApprovalsPage({ searchParams }: PageProps<"/approvals">) {
+export default async function ApprovalsPage({ searchParams }: PageProps<"/m/[mandate]/approvals">) {
   const params = await searchParams;
   const preview = previewState(params);
   if (preview === "loading") return <ViewSkeleton title="Approvals" />;

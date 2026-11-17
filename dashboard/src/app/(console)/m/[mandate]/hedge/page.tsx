@@ -7,7 +7,7 @@ import { previewState } from "@/lib/preview";
 
 export const metadata: Metadata = { title: "Hedge" };
 
-export default async function HedgePage({ searchParams }: PageProps<"/hedge">) {
+export default async function HedgePage({ searchParams }: PageProps<"/m/[mandate]/hedge">) {
   const params = await searchParams;
   const preview = previewState(params);
   const asset = typeof params.asset === "string" ? params.asset.slice(0, 16).toUpperCase() : undefined;

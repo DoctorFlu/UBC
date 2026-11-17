@@ -3,11 +3,12 @@
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { Meter, MeterIndicator, MeterTrack } from "@ui-sdk/react/meter";
 import { Check, ChevronUp, X } from "lucide-react";
-import Link from "next/link";
+import { ViewLink } from "@/components/ui/ViewLink";
 import { usePathname } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
 
 import { useSnapshot } from "@/lib/live/LiveConsole";
+import { isActive } from "@/lib/nav";
 import { useOwnerAccess } from "@/lib/owner/access";
 import { setupSteps } from "@/lib/setup";
 
@@ -56,7 +57,7 @@ export function GetStarted() {
   );
   const steps = setupSteps(snapshot, access.kind === "owner");
   const done = steps.filter((step) => step.done).length;
-  if (hidden || access.kind === "loading" || done === steps.length || pathname.startsWith("/setup")) {
+  if (hidden || access.kind === "loading" || done === steps.length || isActive(pathname, "/setup")) {
     return null;
   }
   const next = steps.find((step) => !step.done);
@@ -102,9 +103,9 @@ export function GetStarted() {
               </li>
             ))}
           </ol>
-          <Link href="/setup" className={styles.link} onClick={() => setOpen(false)}>
+          <ViewLink href="/setup" className={styles.link} onClick={() => setOpen(false)}>
             {next ? `Next: ${next.title}` : "Open setup"}
-          </Link>
+          </ViewLink>
         </CollapsiblePanel>
       </Collapsible>
     </section>

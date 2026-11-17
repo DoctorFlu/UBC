@@ -8,7 +8,7 @@ import {
   isMarketSymbol,
 } from "@mandate/shared";
 import { ArrowLeft, SearchX, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
-import Link from "next/link";
+import { ViewLink } from "@/components/ui/ViewLink";
 import { Fragment } from "react";
 import type { Hex } from "viem";
 
@@ -216,9 +216,9 @@ function PaidSignals({ receipts, payments }: { receipts: readonly string[]; paym
       {receipts.map((receipt) => (
         <li key={receipt}>
           {payments.has(receipt.toLowerCase()) ? (
-            <Link href={paymentHref(receipt)} className={styles.receipt}>
+            <ViewLink href={paymentHref(receipt)} className={styles.receipt}>
               {shortenHex(receipt, 10, 6)}
-            </Link>
+            </ViewLink>
           ) : (
             <>
               <span className={styles.receipt}>{shortenHex(receipt, 10, 6)}</span>{" "}
@@ -291,7 +291,7 @@ function SealedReasonCard({
               <HexValue label="Hash" value={sealed.hash} kind="hash" />
             </Advanced>
             {sealed.claims.planId ? (
-              <ArrowLink href={evidenceHref(sealed.claims.planId)}>
+              <ArrowLink view href={evidenceHref(sealed.claims.planId)}>
                 Evidence chain of the plan it claims
               </ArrowLink>
             ) : null}
@@ -314,7 +314,8 @@ function SealedReasonCard({
             <dd>{doc.requestText ? <RequestText text={doc.requestText} /> : "None given"}</dd>
             <dt>Plan</dt>
             <dd className="mono">
-              <Link href={evidenceHref(doc.planId)}>{doc.planId}</Link>, rung {(doc.rungIndex + 1).toString()}
+              <ViewLink href={evidenceHref(doc.planId)}>{doc.planId}</ViewLink>, rung{" "}
+              {(doc.rungIndex + 1).toString()}
             </dd>
             <dt>Paid signals</dt>
             <dd>
@@ -572,7 +573,11 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
         <EmptyState
           icon={<SearchX strokeWidth={1.75} />}
           title="No such intent yet"
-          action={<ArrowLink href="/activity">All activity</ArrowLink>}
+          action={
+            <ArrowLink view href="/activity">
+              All activity
+            </ArrowLink>
+          }
         >
           The contract has {formatCount(chain.intents.length)}{" "}
           {chain.intents.length === 1 ? "intent" : "intents"}, and ids start at 0. If the agent is proposing
@@ -590,10 +595,10 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
 
   return (
     <div className={styles.view}>
-      <Link href="/activity" className={styles.back}>
+      <ViewLink href="/activity" className={styles.back}>
         <ArrowLeft aria-hidden className={styles.backIcon} strokeWidth={2} />
         Activity
-      </Link>
+      </ViewLink>
       <PageHeader
         title={title}
         description={`${market?.title ?? "Unknown market"}. ${statusDescriptions[intent.status]}`}

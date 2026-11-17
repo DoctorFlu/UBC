@@ -7,7 +7,7 @@ import { previewState } from "@/lib/preview";
 
 export const metadata: Metadata = { title: "Rules" };
 
-export default async function RulesPage({ searchParams }: PageProps<"/rules">) {
+export default async function RulesPage({ searchParams }: PageProps<"/m/[mandate]/rules">) {
   const params = await searchParams;
   const preview = previewState(params);
   if (preview === "loading") return <ViewSkeleton title="Rules" />;

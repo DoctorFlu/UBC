@@ -25,8 +25,11 @@ function storedPlan(mandate: MandateScope, planId: string) {
  * One plan's evidence chain. The plan is read once here, by id, so a plan a newer one replaced on the
  * hedge page still has its chain; the chain itself follows the live snapshot in the browser.
  */
-export default async function PlanEvidencePage({ params, searchParams }: PageProps<"/hedge/plans/[planId]">) {
-  const { mandate } = await pageScope();
+export default async function PlanEvidencePage({
+  params,
+  searchParams,
+}: PageProps<"/m/[mandate]/hedge/plans/[planId]">) {
+  const { mandate } = await pageScope((await params).mandate);
   const { planId } = await params;
   const preview = previewState(await searchParams);
   if (preview === "loading") return <ViewSkeleton title="Evidence chain" />;

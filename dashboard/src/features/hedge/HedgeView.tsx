@@ -2,7 +2,7 @@
 
 import type { HedgePlan } from "@mandate/planner";
 import { MessageSquareText, ShieldQuestion } from "lucide-react";
-import Link from "next/link";
+import { ViewLink } from "@/components/ui/ViewLink";
 import { useState } from "react";
 
 import { IntentLink } from "@/components/domain/Intent";
@@ -235,7 +235,11 @@ function AgentPlanCard({
             {expired ? ", for a ladder that has expired" : null}.
           </>
         }
-        actions={<ArrowLink href={evidenceHref(view.planId)}>Evidence chain</ArrowLink>}
+        actions={
+          <ArrowLink view href={evidenceHref(view.planId)}>
+            Evidence chain
+          </ArrowLink>
+        }
         headingLevel={2}
         className={styles.planCard}
       >
@@ -265,7 +269,9 @@ function AgentPlanCard({
                     {snapshot.offchain.signalPayments.some(
                       (payment) => payment.receiptId === signal.receiptId.toLowerCase(),
                     ) ? (
-                      <Link href={paymentHref(signal.receiptId)}>{shortenHex(signal.receiptId, 10, 6)}</Link>
+                      <ViewLink href={paymentHref(signal.receiptId)}>
+                        {shortenHex(signal.receiptId, 10, 6)}
+                      </ViewLink>
                     ) : (
                       <code>{shortenHex(signal.receiptId, 10, 6)}</code>
                     )}

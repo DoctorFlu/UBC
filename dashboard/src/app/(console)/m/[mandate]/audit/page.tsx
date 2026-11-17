@@ -7,7 +7,7 @@ import { previewState } from "@/lib/preview";
 
 export const metadata: Metadata = { title: "Audit" };
 
-export default async function AuditPage({ searchParams }: PageProps<"/audit">) {
+export default async function AuditPage({ searchParams }: PageProps<"/m/[mandate]/audit">) {
   const preview = previewState(await searchParams);
   if (preview === "loading") return <ViewSkeleton title="Audit" />;
   if (preview === "error") return <ViewError title="Audit" view="The audit trail" />;

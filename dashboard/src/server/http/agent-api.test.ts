@@ -786,14 +786,15 @@ describe("agent API: the owner's view (#97)", () => {
     return policyChangeRequestSchema.parse(await response.json());
   };
 
-  it("gives the console's address and only the change requests still waiting for the owner", async () => {
+  it("gives the mandate's console address and only the change requests still waiting for the owner", async () => {
     const service = makeService();
     const dismissed = await fileRequest(service, 5_000);
     const pending = await fileRequest(service, 6_000);
     service.offchain.resolveChangeRequest(envMandate(service).id, dismissed.id, { status: "dismissed" });
 
     const summary = await summaryOf(service, quotes);
-    expect(summary.consoleUrl).toBe("http://console.test");
+    // The mandate's own pages (#95), so the agent's links open the mandate it acts for.
+    expect(summary.consoleUrl).toBe(`http://console.test/m/${envMandate(service).id}`);
     expect(summary.changeRequests.map((request) => request.id)).toEqual([pending.id]);
     expect(summary.cover).toEqual([]);
   });

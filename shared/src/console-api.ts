@@ -440,7 +440,10 @@ export const coverNowSchema = z.strictObject({
 export type CoverNowView = z.infer<typeof coverNowSchema>;
 
 export const summaryResponseSchema = z.strictObject({
-  /** The console's public address: links for the owner are built on it. */
+  /**
+   * The mandate's pages on the console (`<console>/m/<mandate id>`, #95): links for the owner are built on
+   * it (`/approvals`, `/hedge`), so each opens the mandate this agent acts for.
+   */
   consoleUrl: z.url(),
   /** The agent's change requests still waiting for the owner, newest first. */
   changeRequests: z.array(policyChangeRequestSchema),

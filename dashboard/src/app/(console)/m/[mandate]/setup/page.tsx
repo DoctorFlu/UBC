@@ -7,7 +7,7 @@ import { previewState } from "@/lib/preview";
 
 export const metadata: Metadata = { title: "Setup" };
 
-export default async function SetupPage({ searchParams }: PageProps<"/setup">) {
+export default async function SetupPage({ searchParams }: PageProps<"/m/[mandate]/setup">) {
   const preview = previewState(await searchParams);
   if (preview === "loading") return <ViewSkeleton title="Setup" />;
   if (preview === "error") return <ViewError title="Setup" view="Setup" />;
