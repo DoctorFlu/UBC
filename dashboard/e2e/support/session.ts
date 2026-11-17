@@ -60,7 +60,10 @@ export async function adminCommand(dataDir: string, command: "claim-code" | "inv
  * Gives the page's browser context a platform authenticator that always verifies the user, like a
  * device unlocked with a fingerprint. Its passkeys live as long as the context.
  */
-export async function addVirtualPasskey(page: Page): Promise<VirtualPasskey> {
+export async function addVirtualPasskey(
+  page: Page,
+  { answers = true }: { answers?: boolean } = {},
+): Promise<VirtualPasskey> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("WebAuthn.enable");
   const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
@@ -70,7 +73,8 @@ export async function addVirtualPasskey(page: Page): Promise<VirtualPasskey> {
       hasResidentKey: true,
       hasUserVerification: true,
       isUserVerified: true,
-      automaticPresenceSimulation: true,
+      // Off: a prompt waits, as one does for a person who never touches the sensor.
+      automaticPresenceSimulation: answers,
     },
   });
   return {
