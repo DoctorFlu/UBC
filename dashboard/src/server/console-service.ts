@@ -19,6 +19,7 @@ import {
   intentsMissingDetails,
   reduceEvents,
   settlementSchema,
+  type AgentOrder,
   type StoredSettlement,
   toSafeNumber,
   venueOrderRecordSchema,
@@ -779,6 +780,25 @@ export class ConsoleService {
       if (view) views[row.intentId] = view;
     }
     return views;
+  }
+
+  /**
+   * The orders the executor placed for the deployment `mandate` follows, as the agent API serves them
+   * (issue #117): the latest verified version of each, by intent id, without order ids.
+   */
+  verifiedVenueOrders(mandate: MandateScope): AgentOrder[] {
+    return Object.entries(this.venueOrderViews(mandate))
+      .map(([intentId, view]) => ({
+        intentId: Number(intentId),
+        venue: view.venue,
+        environment: view.environment,
+        state: view.state,
+        quantityHundredths: view.quantityHundredths,
+        filledHundredths: view.filledHundredths,
+        filledCents: view.filledCents,
+        feeCents: view.feeCents,
+      }))
+      .sort((a, b) => a.intentId - b.intentId);
   }
 
   /**

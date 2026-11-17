@@ -41,6 +41,7 @@ import {
   putSettlementRequestSchema,
   settlementMessage,
   settlementProblems,
+  type AgentOrder,
   type StoredSettlement,
   postPlanRequestSchema,
   postPolicyChangeRequestSchema,
@@ -79,6 +80,8 @@ export interface FakeConsoleState {
   signalBudget: SignalBudgetResponse | null;
   /** Settlements by intent id, as the executor first recorded them (the first mandate's only). */
   settlements: Map<number, StoredSettlement>;
+  /** The executor's venue orders by intent id, as the agent API serves them (the first mandate's only). */
+  orders: Map<number, AgentOrder>;
   /** Every request seen, as `METHOD path`, for assertions (on the first agent's state: all agents'). */
   requests: string[];
 }
@@ -204,6 +207,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     signalPayments: new Map(),
     signalBudget: null,
     settlements: new Map(),
+    orders: new Map(),
     requests: [],
   });
   const state = newState(options.holdings);
@@ -464,6 +468,10 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
         (a, b) => b.storedAt.localeCompare(a.storedAt) || b.intentId - a.intentId,
       ),
     }),
+  );
+
+  api.get("/orders", (c) =>
+    c.json({ orders: [...tenant(c).orders.values()].sort((a, b) => a.intentId - b.intentId) }),
   );
 
   api.get("/summary", async (c) => {

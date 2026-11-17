@@ -1132,3 +1132,68 @@ describe("the daily digest's fields (issue #97)", () => {
     expect(JSON.stringify(structured).length + summary.length).toBeLessThan(4_000);
   });
 });
+
+describe("the order placed on Gemini, in get_intent and get_activity (issue #117)", () => {
+  /** A filled buy of NO for $9.73 at 97c, whose order the executor sized for the fee: 10 contracts. */
+  function placed(h: Harness, withOrder: boolean): number {
+    const id = h.policy.intents.length;
+    h.policy.intents.push({
+      id,
+      market: ladderSymbol(64_100),
+      category: Category.Crypto,
+      outcome: "NO",
+      isBuy: true,
+      amountCents: 973,
+      limitPrice: 97,
+      status: "executed",
+      proposedAt: 0,
+      filledCents: 970,
+      pnlCents: 0,
+    });
+    if (withOrder) {
+      h.console.state.orders.set(id, {
+        intentId: id,
+        venue: "gemini",
+        environment: "sandbox",
+        state: "filled",
+        quantityHundredths: 1_000,
+        filledHundredths: 1_000,
+        filledCents: 970,
+        feeCents: 3,
+      });
+    }
+    return id;
+  }
+
+  it("reports the contracts placed, not what the amount buys at the limit alone", async () => {
+    const h = harness();
+    const id = placed(h, true);
+    const one = await getIntent.run({ intentId: id }, h.ctx);
+    expect((one.structured["intent"] as Row)["order"]).toEqual({
+      venue: "gemini",
+      environment: "sandbox",
+      state: "filled",
+      contractsHundredths: 1_000,
+      filledContractsHundredths: 1_000,
+      feeCents: 3,
+    });
+    expect(one.summary).toContain(
+      "Placed 10 contracts on Gemini's sandbox, not the 10.03 the amount buys at the limit, so the cost and Gemini's fee fit it.",
+    );
+    expect(one.summary).not.toContain("10.03 contracts");
+
+    const { structured } = await getActivity.run({}, h.ctx);
+    const rows = structured["intents"] as Row[];
+    expect(rows.find((row) => row["id"] === id)?.["order"]).toMatchObject({ contractsHundredths: 1_000 });
+  });
+
+  it("says nothing about an order the console does not hold, or when it cannot say", async () => {
+    const h = harness();
+    const id = placed(h, false);
+    const one = await getIntent.run({ intentId: id }, h.ctx);
+    expect((one.structured["intent"] as Row)["order"]).toBeNull();
+    expect(one.summary).not.toContain("Placed");
+    h.console.setDown(true);
+    expect(((await getIntent.run({ intentId: id }, h.ctx)).structured["intent"] as Row)["order"]).toBeNull();
+  });
+});
