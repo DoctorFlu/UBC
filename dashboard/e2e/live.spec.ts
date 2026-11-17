@@ -1367,7 +1367,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
         limiter: unpacedLimiter(),
       }),
       journal: consoleOrderJournal({ consoleUrl: baseURL, sign }),
-      deployment: { chainId, policy },
+      deployment: { chainId, policy, deployBlockHash: `0x${"ab".repeat(32)}` },
     }),
     settlements: consoleSettlementSink({ consoleUrl: baseURL }),
     fromBlock: 0n,

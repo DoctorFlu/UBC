@@ -99,7 +99,7 @@ function record(intentId: number, patch: Partial<VenueOrderRecord> = {}): VenueO
     revision: 1,
     venue: "gemini",
     environment: "sandbox",
-    clientOrderId: clientOrderIdFor(chainId, policy, intentId),
+    clientOrderId: clientOrderIdFor({ chainId, policy, deployBlockHash: `0x${"ab".repeat(32)}` }, intentId),
     market: BTC_ABOVE_65K,
     side: "buy",
     outcome: "NO",
@@ -261,6 +261,7 @@ describe("the executor's order journal in the console", () => {
       deployment: {
         chainId: chain.executor.publicClient.chain.id,
         policy: chain.address.toLowerCase() as `0x${string}`,
+        deployBlockHash: `0x${"ab".repeat(32)}`,
       },
     });
     const order = {

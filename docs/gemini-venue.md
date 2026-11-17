@@ -14,7 +14,10 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
   It never follows a redirect, because fetch keeps custom headers across hosts and would hand the key, payload and signature to whatever host the answer names; a redirect is reported as `redirected`, an unknown outcome.
   The executor's market checks, and the rest of the stack's market data, read the public data of the environment its orders go to, because the sandbox lists other strikes than production (see below).
 - **One order per intent, whatever fails.**
-  Every order carries our client order id, `mandate-<chain id>-<first 8 hex digits of the contract>-<intent id>`, but safety does not depend on Gemini honouring it (see below).
+  Every order carries our client order id, `mandate-<chain id>-<first 8 hex digits of the contract>-<first 8 hex digits of its deploy block's hash>-<intent id>`, but safety does not depend on Gemini honouring it (see below).
+  The deploy block tells apart two deployments at the same address (issue #117): a fresh local dev chain deploys the contract at the address the last one had, and without it a new stack would reuse an earlier stack's ids on the same sandbox account.
+  Each block carries the time it was mined, so two dev chains get different ids unless both were started and deployed within the same second.
+  An order journalled before this form (`mandate-<chain id>-<contract>-<intent id>`) keeps its id: a retry is always sent under its record's id.
   Before an order is sent, the executor writes a "placing" record to its journal in the console; when that write fails, nothing is sent.
   A placement that gets no answer is never sent again: the executor looks the order up among the account's active orders and order history, by client order id when Gemini returns it, otherwise by its exact terms (symbol, side, outcome, quantity, price, after the attempt) and only when exactly one order matches.
   Until it finds the order, or proves there is none, the intent is held and nothing is recorded onchain.

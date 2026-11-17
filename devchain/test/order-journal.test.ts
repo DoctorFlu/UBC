@@ -17,7 +17,10 @@ const record: VenueOrderRecord = {
   revision: 1,
   venue: "gemini",
   environment: "sandbox",
-  clientOrderId: clientOrderIdFor(5_042_002, POLICY, 17),
+  clientOrderId: clientOrderIdFor(
+    { chainId: 5_042_002, policy: POLICY, deployBlockHash: `0x${"ab".repeat(32)}` },
+    17,
+  ),
   market: "GEMI-ETH2611202200-HI2800",
   side: "buy",
   outcome: "NO",

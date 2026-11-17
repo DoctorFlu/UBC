@@ -24,6 +24,7 @@ const FIXTURES = fileURLToPath(new URL("../../gemini/test/fixtures/", import.met
 const KEY = "account-FAKEKEY000000000001";
 const SECRET = "fake-secret-for-tests";
 const POLICY = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const DEPLOY_BLOCK_HASH = `0xa1b2c3d4${"0".repeat(56)}` as const;
 
 function recorded(file: string): MarketEvent {
   return normalizeEvent(eventSchema.parse(JSON.parse(readFileSync(`${FIXTURES}${file}`, "utf8"))));
@@ -56,7 +57,7 @@ function venue(options: { orderTtlMs?: number } = {}): Venue {
     },
     trading,
     journal,
-    deployment: { chainId: 5_042_002, policy: POLICY },
+    deployment: { chainId: 5_042_002, policy: POLICY, deployBlockHash: DEPLOY_BLOCK_HASH },
     now,
     ...options,
   });
@@ -124,7 +125,7 @@ describe("placing an order", () => {
       price: "0.31",
       outcome: "no",
       timeInForce: "good-til-cancel",
-      clientOrderId: "mandate-5042002-5fbdb231-7",
+      clientOrderId: "mandate-5042002-5fbdb231-a1b2c3d4-7",
     });
     expect(placed.venueOrderId).toBe(fake.order(placed.venueOrderId).orderId);
     expect(journal.records.get(7)).toMatchObject({
@@ -265,6 +266,22 @@ describe("placing an order", () => {
     expect(journal.records.get(7)).toMatchObject({ state: "open", revision: 4 });
     // Never accepted from code: no request ever went to the accept route.
     expect(fake.requests.some((request) => request.path.endsWith("/terms/accept"))).toBe(false);
+  });
+
+  it("sends a retry under the id its record was journalled with, even one in the form before #117", async () => {
+    fake.termsAccepted = false;
+    await venue().placeOrder(order());
+    const record = journal.records.get(7);
+    if (!record) throw new Error("no record");
+    journal.records.set(7, { ...record, clientOrderId: "mandate-5042002-5fbdb231-7" });
+
+    fake.termsAccepted = true;
+    placedOf(await venue().placeOrder(order()));
+    expect(fake.callsTo(ORDER_ROUTE).map((call) => call.fields?.clientOrderId)).toEqual([
+      "mandate-5042002-5fbdb231-a1b2c3d4-7",
+      "mandate-5042002-5fbdb231-7",
+    ]);
+    expect(journal.records.get(7)?.clientOrderId).toBe("mandate-5042002-5fbdb231-7");
   });
 });
 
