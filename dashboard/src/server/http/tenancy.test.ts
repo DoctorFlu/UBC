@@ -123,6 +123,7 @@ describe("every console route", () => {
     "GET mandates/[mandateId]/deployment/route.ts",
     "POST mandates/[mandateId]/deployment/route.ts",
     "PATCH mandates/[mandateId]/route.ts",
+    "GET mcp-server/route.ts",
     "POST passkeys/route.ts",
     "POST step-up/route.ts",
   ]);
@@ -159,6 +160,7 @@ describe("every console route", () => {
         "GET mandates/[mandateId]/deployment/route.ts",
         "POST mandates/[mandateId]/deployment/route.ts",
         "PATCH mandates/[mandateId]/route.ts",
+        "GET mcp-server/route.ts",
         "GET owner-actions/route.ts",
         "POST owner-calls/route.ts",
         "POST pairing/confirm/route.ts",
