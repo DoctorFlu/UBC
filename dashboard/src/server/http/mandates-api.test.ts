@@ -11,6 +11,8 @@ import {
   type PolicyRules,
   type Settlement,
   type VenueOrderRecord,
+  type WakeEvent,
+  WakeTarget,
   clientOrderIdFor,
   consoleErrorSchema,
   contractsBought,
@@ -22,6 +24,7 @@ import {
   settlementsResponseSchema,
   signerAccount,
   summaryResponseSchema,
+  wakeEventSchema,
 } from "@mandate/shared";
 import {
   consoleContractDiscovery,
@@ -72,6 +75,9 @@ import { saveHoldings } from "./owner-api";
 const silent = { info: () => undefined, warn: () => undefined };
 const ORIGIN = "http://console.test";
 const SERVICE_TOKEN = "console-service-token-for-tests-0123456789";
+const WAKE_URL = "https://hooks.example.test/routines/secret-path-7/run";
+/** Every wake-up the env webhook was sent, for the last test: none may come from another mandate. */
+const woken: WakeEvent[] = [];
 const RULES: PolicyRules = {
   budgetCents: 10_000,
   maxTradeCents: 3_000,
@@ -198,9 +204,23 @@ describe("mandates on the demo chain", () => {
       testConsoleConfig(dataDir, {
         serviceToken: SERVICE_TOKEN,
         mandates: { ...readMandatesConfig({}), maxPerWorkspace: 3 },
+        wake: {
+          target: new WakeTarget(WAKE_URL, "routine-key-for-tests"),
+          offReason: null,
+          dailyCap: 50,
+          priceCheckMs: 60_000,
+          testClock: false,
+        },
       }),
       openDatabase(dataDir),
-      { env: chain.env, logger: silent },
+      {
+        env: chain.env,
+        logger: silent,
+        wakeFetch: (_url, init) => {
+          woken.push(wakeEventSchema.parse(JSON.parse(init.body as string)));
+          return Promise.resolve(new Response(null, { status: 200 }));
+        },
+      },
     );
     owner = claimFirstWorkspace(service);
     keys.set(owner.id, new SoftPasskey(ORIGIN));
@@ -900,5 +920,17 @@ describe("mandates on the demo chain", () => {
     expect(body.error.code).toBe("mandate_limit");
     expect(body.error.message).toContain("CONSOLE_MANDATES_PER_WORKSPACE");
     expect(service.accounts.store.mandates(carol.workspaceId)).toHaveLength(3);
+  });
+
+  it("sends the env webhook only what the first mandate's contract did (#112 adds one per agent)", async () => {
+    // Bob paused his "Approvals" mandate, and the twins' ladders settled: none of it may wake the env routine.
+    const env = envMandate(service);
+    await service.wake.settled();
+    expect(woken.filter((w) => w.kind === "mandate_changed" || w.kind === "ladder_settled")).toEqual([]);
+    for (const wake of woken) expect(wake.link).toContain(`/m/${env.id}`);
+    expect(service.snapshot(env).wake.enabled).toBe(true);
+    for (const mandate of service.accounts.store.contractMandates()) {
+      expect(service.snapshot(mandate).wake).toMatchObject({ enabled: false, recent: [] });
+    }
   });
 });
