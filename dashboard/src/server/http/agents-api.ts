@@ -1,5 +1,6 @@
 import "server-only";
 
+import { AGENT_TOKEN_PREFIX } from "@mandate/shared";
 import { z } from "zod";
 
 import type { AgentsResponse, CreatedToken } from "@/lib/accounts/types";
@@ -55,7 +56,12 @@ const createTokenSchema = z.strictObject({
     .trim()
     .min(1, "Name the token, for example after the app that will use it.")
     .max(60, "Use at most 60 characters.")
-    .refine(isPlainText, "Use letters, digits and punctuation only."),
+    .refine(isPlainText, "Use letters, digits and punctuation only.")
+    // A token pasted into the name would be shown in the Agents list for as long as the token exists.
+    .refine(
+      (name) => !name.includes(AGENT_TOKEN_PREFIX),
+      "That looks like a token. Name it after the app that will use it.",
+    ),
 });
 
 /** POST /api/console/agents/:agentId/tokens: a new token, returned this once. */
