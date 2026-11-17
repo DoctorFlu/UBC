@@ -117,3 +117,8 @@
     order: -1;
   }
 }
+
+/* Who confirmed each change in the console (#95). */
+.ownerActions .flushNote {
+  padding: var(--space-4) var(--space-5);
+}
