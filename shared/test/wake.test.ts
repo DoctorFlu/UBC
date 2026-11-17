@@ -10,6 +10,7 @@ import {
   WAKE_DEBOUNCE_MS,
   WAKE_RETRY_DELAYS_MS,
   WakeNotifier,
+  WakeRefused,
   WakeTarget,
   chainWakes,
   initialPriceMemory,
@@ -17,6 +18,7 @@ import {
   mergeWakeDetail,
   priceWakes,
   wakeEventSchema,
+  wakeGate,
   wakeId,
   wakeSummary,
   type ChainWakeContext,
@@ -598,5 +600,95 @@ describe("WakeNotifier", () => {
     notifier.noteAgentActivity();
     expect(notifier.runInProgress(time.now() + RUN_QUIET_MS - 1)).toBe(true);
     expect(notifier.runInProgress(time.now() + RUN_QUIET_MS)).toBe(false);
+  });
+
+  it("records a refused send with its fixed label, once, and never retries it (#112)", async () => {
+    const { time, notifier, store } = setup({ answer: () => new WakeRefused("refused: host not allowed") });
+    notifier.offer([rejected(1)]);
+    await time.advance(60 * 60_000);
+    const [only] = [...store.deliveries.values()];
+    expect(only).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      result: "refused: host not allowed, not retried",
+      countsTowardCap: false,
+    });
+  });
+
+  it("sends to the new webhook after setTarget, and never what was waiting for the old one (#112)", async () => {
+    const { time, rx, notifier, store } = setup();
+    notifier.offer([rejected(1)]);
+    await time.advance(0);
+    // The second waits for the debounce window when the webhook changes.
+    notifier.offer([rejected(2)]);
+    notifier.setTarget(new WakeTarget("https://other.example.test/hook", "other-key"));
+    await time.advance(WAKE_DEBOUNCE_MS.intent_rejected);
+    expect(rx.calls()).toBe(1);
+    expect([...store.deliveries.values()].map((d) => [d.status, d.result])).toEqual([
+      ["sent", "HTTP 200"],
+      ["failed", "not sent: the webhook changed"],
+    ]);
+    // The next trigger goes to the new webhook with its key.
+    notifier.offer([rejected(3)]);
+    await time.advance(WAKE_DEBOUNCE_MS.intent_rejected);
+    expect(rx.headers.at(-1)).toBe("Bearer other-key");
+
+    notifier.setTarget(null);
+    expect(notifier.enabled).toBe(false);
+    notifier.offer([rejected(4)]);
+    await time.advance(WAKE_DEBOUNCE_MS.intent_rejected);
+    expect(store.deliveries.size).toBe(3);
+    expect(rx.calls()).toBe(2);
+  });
+
+  it("starts sending when a webhook is set on a notifier that began without one (#112)", async () => {
+    const time = simulatedTime();
+    const rx = receiver();
+    const notifier = new WakeNotifier({
+      target: null,
+      dailyCap: 12,
+      store: new MemoryWakeStore(),
+      fetch: rx.fetch,
+      now: time.now,
+      schedule: time.schedule,
+    });
+    notifier.start();
+    notifier.setTarget(new WakeTarget(URL_WITH_SECRET, KEY));
+    notifier.offer([rejected(1)]);
+    await time.advance(0);
+    expect(rx.calls()).toBe(1);
+  });
+});
+
+describe("wakeGate", () => {
+  it("runs at most `limit` tasks at once and the rest in order", async () => {
+    const gate = wakeGate(2);
+    let running = 0;
+    let peak = 0;
+    const order: number[] = [];
+    const releases: (() => void)[] = [];
+    const tasks = [1, 2, 3, 4].map((n) =>
+      gate(async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        order.push(n);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        running -= 1;
+        return n;
+      }),
+    );
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(order).toEqual([1, 2]);
+    while (releases.length > 0) {
+      releases.shift()?.();
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    }
+    expect(await Promise.all(tasks)).toEqual([1, 2, 3, 4]);
+    expect(order).toEqual([1, 2, 3, 4]);
+    expect(peak).toBe(2);
+    // A failing task frees its slot as well.
+    await expect(gate(() => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
+    await expect(gate(() => Promise.resolve("next"))).resolves.toBe("next");
+    expect(() => wakeGate(0)).toThrow(RangeError);
   });
 });

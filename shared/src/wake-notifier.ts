@@ -200,13 +200,54 @@ export interface WakeStatus {
 
 export type WakeFetch = (url: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * Thrown by a `WakeFetch` that refuses to send at all (for example an address outside the allowlist,
+ * issue #112): the wake-up fails at once, is never retried, and records `label`, which must be a fixed
+ * phrase that quotes nothing of the address or of any answer.
+ */
+export class WakeRefused extends Error {
+  override readonly name = "WakeRefused";
+  constructor(readonly label: string) {
+    super(label);
+  }
+}
+
+/** Runs one request when a slot is free: the bound on requests in flight across notifiers. */
+export type WakeGate = <T>(task: () => Promise<T>) => Promise<T>;
+
+/** A `WakeGate` that runs at most `limit` tasks at once, the rest in the order they came. */
+export function wakeGate(limit: number): WakeGate {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new RangeError("limit must be a whole number of at least 1");
+  }
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (running >= limit) {
+      await new Promise<void>((resolve) => {
+        waiting.push(resolve);
+      });
+    } else {
+      running += 1;
+    }
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      // The slot passes to the next task as it is; otherwise it is freed.
+      if (next) next();
+      else running -= 1;
+    }
+  };
+}
+
 export interface WakeLogger {
   info: (message: string) => void;
   warn: (message: string) => void;
 }
 
 export interface WakeNotifierOptions {
-  /** Null turns the notifier off. */
+  /** Null turns the notifier off. `setTarget` changes it later. */
   target: WakeTarget | null;
   dailyCap: number;
   store: WakeStore;
@@ -225,6 +266,8 @@ export interface WakeNotifierOptions {
   maxQueued?: number;
   /** Called after the record changed (a wake-up was queued, sent, failed or capped). */
   onChange?: () => void;
+  /** Shared by every notifier of a process, so many webhooks never mean unbounded requests at once. */
+  gate?: WakeGate;
 }
 
 const DAY_MS = 86_400_000;
@@ -273,8 +316,10 @@ export class WakeNotifier {
   private timerAt: number | null = null;
   private pumping: Promise<void> | null = null;
   private stopped = true;
+  private target: WakeTarget | null;
 
   constructor(private readonly options: WakeNotifierOptions) {
+    this.target = options.target;
     this.store = options.store;
     this.now = options.now ?? Date.now;
     this.fetch = options.fetch ?? ((url, init) => fetch(url, init));
@@ -289,7 +334,36 @@ export class WakeNotifier {
   }
 
   get enabled(): boolean {
-    return this.options.target !== null;
+    return this.target !== null;
+  }
+
+  /**
+   * Points the notifier at another webhook, or turns it off (null). Wake-ups still waiting are never sent
+   * to the new address: they were offered for the old one, so they fail as "not sent". A request in flight
+   * finishes against the address it started with.
+   */
+  setTarget(target: WakeTarget | null): void {
+    const wasEnabled = this.enabled;
+    this.target = target;
+    const waiting = wasEnabled ? this.store.queued() : [];
+    if (waiting.length > 0) {
+      const at = this.now();
+      this.store.transaction(() => {
+        for (const delivery of waiting) {
+          this.store.update({
+            ...delivery,
+            status: "failed",
+            dueAt: at,
+            result: "not sent: the webhook changed",
+          });
+        }
+      });
+      this.options.onChange?.();
+    }
+    this.cancelTimer?.();
+    this.cancelTimer = null;
+    this.timerAt = null;
+    this.arm();
   }
 
   /**
@@ -541,19 +615,22 @@ export class WakeNotifier {
   private async post(
     body: WakeEvent,
   ): Promise<{ kind: "sent" | "refused" | "failed" | "unknown"; label: string }> {
-    const target = this.options.target;
+    const target = this.target;
     if (!target) return { kind: "refused", label: "off" };
     wakeEventSchema.parse(body);
     const { url, key } = target.reveal();
-    try {
-      const response = await this.fetch(url, {
+    const send = () =>
+      this.fetch(url, {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
         body: JSON.stringify(body),
         // A redirect is never followed: the key must not travel to an address nobody configured.
         redirect: "manual",
+        // Started inside the slot, so waiting for one never eats into the request's own time.
         signal: AbortSignal.timeout(this.timeoutMs),
       });
+    try {
+      const response = await (this.options.gate ? this.options.gate(send) : send());
       await response.body?.cancel().catch(() => undefined);
       const label = `HTTP ${String(response.status)}`;
       if (response.status >= 200 && response.status < 300) return { kind: "sent", label };
@@ -561,6 +638,7 @@ export class WakeNotifier {
       // 4xx, and a redirect: the request is wrong as configured, and the same request would fail again.
       return { kind: "refused", label };
     } catch (error) {
+      if (error instanceof WakeRefused) return { kind: "refused", label: error.label };
       const name = error instanceof Error ? error.name : "";
       if (name === "TimeoutError" || name === "AbortError") return { kind: "unknown", label: "timed out" };
       return { kind: "failed", label: "network error" };

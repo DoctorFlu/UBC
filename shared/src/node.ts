@@ -12,6 +12,7 @@ import { deploymentFileSchema, type DeploymentFile } from "./deployment";
 import { addressSchema } from "./types";
 
 export { clientKey, isPrivateAddress } from "./client-key";
+export * from "./wake-webhook";
 
 /**
  * A path relative to this file. Built with `node:path` rather than `new URL(relative, import.meta.url)`,
