@@ -33,7 +33,9 @@ import {
   type PolicyContractKind,
 } from "@mandate/devchain";
 import { devchain, policyAbi, verifyContext } from "@mandate/shared";
-import { ENV_KEYS } from "../src/config";
+import { DEFAULT_LIMITS, ENV_KEYS } from "../src/config";
+import { COMMIT_GRACE_MS } from "../src/mcp/deadline";
+import { UNWIND_GRACE_MS } from "../src/mcp/tool";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
 
 const AGENT_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -151,6 +153,32 @@ function stop(child: ChildProcess): Promise<void> {
   });
 }
 
+/** A tool call that got no answer at all: the client gave up, or the connection failed. */
+class CallFailed extends Error {
+  constructor(
+    readonly tool: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CallFailed";
+  }
+}
+
+/**
+ * Says how long a call waited, and when that is far past the server's deadline, that the server was
+ * not what it waited for. Node's timers count the time a Mac sleeps, so a client timeout can fire on
+ * wake for a call the server never got to run, which looks just like a hung server (issue #105).
+ */
+function waited(startedAt: number): string {
+  const ms = performance.now() - startedAt;
+  const limit = DEFAULT_LIMITS.toolDeadlineMs + COMMIT_GRACE_MS + UNWIND_GRACE_MS;
+  const beyond =
+    ms > limit + 5_000
+      ? `, far past the server's ${String(DEFAULT_LIMITS.toolDeadlineMs / 1000)} s deadline, so something outside the server held it (did the machine sleep? see \`pmset -g log\`)`
+      : "";
+  return `after ${(ms / 1000).toFixed(1)} s${beyond}`;
+}
+
 /** One tool call in a fresh MCP session, as Grok Bot makes every call. */
 async function call(base: string, token: string, name: string, args: Structured = {}): Promise<CallResult> {
   const client = new Client({ name: "mandate-e2e", version: "0.0.0" });
@@ -159,8 +187,17 @@ async function call(base: string, token: string, name: string, args: Structured 
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     }),
   );
+  const startedAt = performance.now();
   try {
-    const result = (await client.callTool({ name, arguments: args })) as CallResult;
+    let result: CallResult;
+    try {
+      result = (await client.callTool({ name, arguments: args })) as CallResult;
+    } catch (error) {
+      throw new CallFailed(
+        name,
+        `${name} got no answer ${waited(startedAt)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     const text = (result.content ?? []).map((block) => block.text ?? "").join(" ");
     const status = field(result.structuredContent, "status");
     const label = result.isError === true ? "ERROR" : typeof status === "string" ? status : "-";
@@ -447,12 +484,44 @@ async function runOne(contract: PolicyContractKind): Promise<void> {
   } catch (error) {
     failures += 1;
     process.stdout.write(`  FAIL ${error instanceof Error ? error.message : String(error)}\n`);
+    if (error instanceof CallFailed) {
+      // The client has closed the call: give the server a moment to log how it ended.
+      await sleep(1_500);
+      process.stdout.write(
+        `  what the server logged for ${error.tool}:\n${describeCallLogs(server.logs, error.tool)}\n`,
+      );
+    }
     process.stdout.write(`  last server log lines:\n${server.logs.slice(-15).join("\n")}\n`);
   } finally {
     await stop(server.child);
     consoleServer.close();
     await chain.stop();
   }
+}
+
+/**
+ * The server's own account of a call that got no answer: which step was slow when its deadline
+ * passed, whether it saw the client go away, and how the call ended.
+ */
+function describeCallLogs(logs: readonly string[], tool: string): string {
+  const events = ["tool.deadline_exceeded", "tool.client_gone", "tool.abandoned", "tool.call"];
+  const lines = logs.filter(
+    (line) => line.includes(`"tool":"${tool}"`) && events.some((e) => line.includes(`"${e}"`)),
+  );
+  if (lines.length === 0) {
+    return "    nothing: the request never reached the tool, or the server did not get to answer it";
+  }
+  return lines
+    .slice(-6)
+    .map((line) => {
+      const entry = JSON.parse(line) as Partial<Record<string, string | number>>;
+      const { event, step, stepMs, outcome, errorCode, durationMs } = entry;
+      const slow = step === undefined ? "" : ` step=${step} (${String(stepMs)} ms)`;
+      const ended = outcome === undefined ? "" : ` outcome=${outcome}`;
+      const code = errorCode === undefined ? "" : ` ${errorCode}`;
+      return `    ${String(event)}${slow}${ended}${code} after ${String(durationMs)} ms`;
+    })
+    .join("\n");
 }
 
 async function main(): Promise<void> {
