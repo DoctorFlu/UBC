@@ -18,6 +18,7 @@ export * from "./fees";
 export * from "./reasons";
 export * from "./reducer";
 export * from "./settlement";
+export * from "./venue-order";
 export * from "./signal-api";
 export * from "./types";
 export * from "./units";
