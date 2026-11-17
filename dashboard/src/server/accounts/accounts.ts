@@ -113,20 +113,12 @@ export class Accounts {
 
   /** A new claim code for the first workspace, valid for a day. Only its hash is stored. */
   issueClaimCode(): { code: string; workspace: Workspace } {
-    const workspace = this.store.firstWorkspace();
-    if (workspace.claimedAt !== null) {
-      throw new AccountError(409, "already_claimed", "The first workspace is already claimed.");
-    }
-    const code = newHumanCode();
-    this.store.createAccessCode("claim", normalizeHumanCode(code) ?? code, CLAIM_CODE_TTL_MS, workspace.id);
-    return { code, workspace };
+    return issueClaimCode(this.store);
   }
 
   /** A new single-use invite code for creating a workspace, valid for a week. Only its hash is stored. */
   issueInviteCode(): string {
-    const code = newHumanCode();
-    this.store.createAccessCode("invite", normalizeHumanCode(code) ?? code, INVITE_CODE_TTL_MS, null);
-    return code;
+    return issueInviteCode(this.store);
   }
 
   /** The hash of a typed code, or an error that says nothing about whether such a code exists. */
@@ -415,6 +407,27 @@ export class Accounts {
     if (requested === null || requested === "") return mandates[0] ?? null;
     return mandates.find((mandate) => mandate.id === requested) ?? null;
   }
+}
+
+/**
+ * A new claim code for the first workspace, valid for a day; only its hash is stored. The operator's
+ * command calls this on the server, so the code never crosses the network until the operator shares it.
+ */
+export function issueClaimCode(store: AccountStore): { code: string; workspace: Workspace } {
+  const workspace = store.firstWorkspace();
+  if (workspace.claimedAt !== null) {
+    throw new AccountError(409, "already_claimed", "The first workspace is already claimed.");
+  }
+  const code = newHumanCode();
+  store.createAccessCode("claim", normalizeHumanCode(code) ?? code, CLAIM_CODE_TTL_MS, workspace.id);
+  return { code, workspace };
+}
+
+/** A new single-use invite code for creating a workspace, valid for a week; only its hash is stored. */
+export function issueInviteCode(store: AccountStore): string {
+  const code = newHumanCode();
+  store.createAccessCode("invite", normalizeHumanCode(code) ?? code, INVITE_CODE_TTL_MS, null);
+  return code;
 }
 
 function expired(): AccountError {

@@ -29,8 +29,7 @@ function secure(config: Pick<AccountsConfig, "origin">): boolean {
   return config.origin.startsWith("https:");
 }
 
-/** Every session cookie name, for code that must recognise one before it knows the settings. */
-export const SESSION_COOKIE_NAMES = ["__Host-mandate_session", "mandate_session"] as const;
+export { SESSION_COOKIE_NAMES } from "@/lib/accounts/cookies";
 
 function cookieAttributes(
   config: Pick<AccountsConfig, "origin">,

@@ -3,6 +3,8 @@ import "server-only";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { z } from "zod";
 
+import { safeNext } from "@/lib/accounts/next";
+
 import { AccountError, CEREMONY_TTL_MS } from "../accounts/accounts";
 import type { RateLimit } from "../accounts/rate-limit";
 import { clientKey } from "../accounts/rate-limit";
@@ -216,12 +218,6 @@ function isNavigation(request: Request, uri: string): boolean {
   return method === "GET" && !uri.startsWith("/api/") && accept.includes("text/html");
 }
 
-/** A path on this site to return to after signing in, or `/`. Never another site. */
-export function returnPath(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return "/";
-  return value;
-}
-
 /**
  * GET /api/auth/forward: the reverse proxy's `forward_auth` check for every path that is not public.
  * 204 lets the request through; otherwise a navigation is sent to the sign-in page and anything else gets
@@ -232,7 +228,7 @@ export const forwardAuth = authRoute((request, service) => {
   if (access) return new Response(null, { status: 204 });
   const uri = request.headers.get("x-forwarded-uri") ?? "/";
   if (isNavigation(request, uri)) {
-    const next = returnPath(uri);
+    const next = safeNext(uri);
     const location = next === "/" ? "/sign-in" : `/sign-in?next=${encodeURIComponent(next)}`;
     return new Response(null, { status: 303, headers: { Location: location } });
   }

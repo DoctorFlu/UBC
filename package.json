@@ -48,7 +48,8 @@
     "e2e": "npm run e2e -w @mandate/dashboard && npm run e2e -w @mandate/site",
     "screenshots": "npm run screenshots -w @mandate/dashboard",
     "e2e:site": "npm run e2e -w @mandate/site",
-    "dev:site": "npm run dev -w @mandate/site"
+    "dev:site": "npm run dev -w @mandate/site",
+    "console:admin": "npm run admin -w @mandate/dashboard --"
   },
   "overrides": {
     "minimatch": "^11.0.8"

@@ -360,7 +360,10 @@ export function openDatabase(dataDir: string): Database {
     path = join(dataDir, "console.sqlite");
   }
   const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;");
+  // busy_timeout: the operator's admin command writes to the same file while the console runs.
+  db.exec(
+    "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
+  );
   migrate(db);
   return db;
 }
