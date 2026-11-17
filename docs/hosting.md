@@ -902,7 +902,7 @@ Compose refuses to start while `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_P
 
 Put `COMPOSE_FILE` back to `compose.yml:compose.demo.yml:compose.gateway.yml` and run the same `up -d --build --remove-orphans`.
 The demo chain, its contract and its database are as they were left; the Arc lines in the env file are ignored by the demo compose file.
-If the QuickNode Stream is active, pause it first ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
+If a QuickNode Stream exists, pause and delete it first, because a paused one bills every block it missed when it resumes ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
 
 ## Limits
 
