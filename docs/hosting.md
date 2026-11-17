@@ -726,7 +726,9 @@ It is an update that changes the console's database, run exactly as in [Updates 
   Then claim the first workspace as in [Claim the first workspace](#claim-the-first-workspace-1); until then the console shows nobody its data.
   Under **Setup**, **Agents**, the first workspace's agent lists the env file's token, with when Grok Bot last used it.
 - **A rollback restores the backup**: run all three blocks of the rollback, the second one included.
-  The previous console cannot read the upgraded tables, whose rows now carry a mandate.
+  The previous console cannot read the upgraded tables, whose rows now carry a mandate, and it does not notice: it opens a version 8 file without an error and its health check passes, but reading or saving the holdings fails (`no such column: id`).
+  So the health check is no sign that a rollback worked; the restored backup is.
+  From this version on, a console refuses to start on a file that a newer console upgraded, and says to restore the backup.
   Passkeys made after the swap stay on their devices unused.
 
 ### Pauses and the free plan's limits

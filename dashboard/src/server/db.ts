@@ -494,7 +494,12 @@ export function openDatabase(dataDir: string): Database {
   db.exec(
     "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
   );
-  migrate(db);
+  try {
+    migrate(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   return db;
 }
 
@@ -502,6 +507,13 @@ export function openDatabase(dataDir: string): Database {
 export function migrate(db: Database, target = MIGRATIONS.length): void {
   const row = db.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
   const current = row?.user_version ?? 0;
+  // A newer console upgraded this file: this one would read tables whose shape it does not know, so it
+  // refuses to start instead of half working. A rollback restores the backup taken before the update.
+  if (current > MIGRATIONS.length) {
+    throw new Error(
+      `The console's database is at schema version ${String(current)}, newer than this console's ${String(MIGRATIONS.length)}. Restore the backup taken before the update (docs/hosting.md).`,
+    );
+  }
   for (let version = current; version < target; version += 1) {
     const step = MIGRATIONS[version];
     transaction(db, () => {
