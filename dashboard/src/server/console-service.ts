@@ -13,8 +13,11 @@ import {
   decisionContextSchema,
   decodePolicyLogs,
   emptyPolicyViewState,
+  hashSettlement,
   intentsMissingDetails,
   reduceEvents,
+  settlementSchema,
+  type StoredSettlement,
   toSafeNumber,
   verifyContext,
 } from "@mandate/shared";
@@ -33,6 +36,7 @@ import type {
   PairingView,
   SealedReason,
   SealedSource,
+  SettlementView,
 } from "@/lib/live/types";
 import { readClaims } from "@/lib/evidence/claims";
 import { readHedgePlan } from "@/lib/hedge/plan-schema";
@@ -53,6 +57,7 @@ import {
   type StoredPairing,
   type StoredPlan,
 } from "./store/offchain";
+import { type SettlementRow, SettlementStore } from "./store/settlements";
 
 export interface Logger {
   info: (message: string) => void;
@@ -101,6 +106,8 @@ const STREAM_STALE_MS = 30_000;
 export class ConsoleService {
   readonly events: EventStore;
   readonly offchain: OffchainStore;
+  /** What filled positions paid at settlement, as the executor signed it (#92). */
+  readonly settlements: SettlementStore;
   readonly stream: StreamReceiver;
   /** Gemini's listing of each intent's market, when the console has a way to ask Gemini. */
   readonly listings: ListingChecker | null;
@@ -138,6 +145,7 @@ export class ConsoleService {
   ) {
     this.events = new EventStore(db);
     this.offchain = new OffchainStore(db);
+    this.settlements = new SettlementStore(db);
     this.stream = new StreamReceiver(config.streamSecurityToken);
     this.listings = options.marketLookup
       ? new ListingChecker({
@@ -612,7 +620,51 @@ export class ConsoleService {
   private chainView(head: { blockNumber: number; timestamp: number }): ChainView {
     const view = buildChainView(this.state, head, this.details);
     const intents = this.withListings(view.intents);
-    return { ...view, intents, sealed: this.sealedReasons(intents) };
+    return {
+      ...view,
+      intents,
+      sealed: this.sealedReasons(intents),
+      settlements: this.settlementViews(),
+    };
+  }
+
+  /**
+   * Each stored settlement of the live deployment, checked the way decision contexts are: the document
+   * must still hash to the hash it was stored under. Its signature was checked when it was stored.
+   */
+  private settlementViews(): Record<number, SettlementView> {
+    const session = this.session;
+    const views: Record<number, SettlementView> = {};
+    if (!session) return views;
+    for (const row of this.settlements.list(session.id)) views[row.intentId] = checkSettlement(row);
+    return views;
+  }
+
+  /** The verified settlements of the live deployment, newest first, as the agent API serves them. */
+  verifiedSettlements(): StoredSettlement[] {
+    const session = this.session;
+    if (!session) return [];
+    return this.settlements.list(session.id).flatMap((row) => {
+      const view = checkSettlement(row);
+      return view.status === "verified"
+        ? [
+            {
+              intentId: row.intentId,
+              hash: view.hash,
+              document: view.document,
+              signature: view.signature,
+              signer: view.signer,
+              storedAt: view.storedAt,
+            },
+          ]
+        : [];
+    });
+  }
+
+  /** The chain id and address of the live deployment, or null while there is none. */
+  get deployment(): { chainId: number; address: Address } | null {
+    const session = this.session;
+    return session ? { chainId: session.deployment.chain.id, address: session.deployment.address } : null;
   }
 
   /**
@@ -696,6 +748,21 @@ function toPlanView(stored: StoredPlan): AgentPlanView | null {
         plan,
       }
     : null;
+}
+
+/** A stored settlement, verified when its document still hashes to the hash it was stored under. */
+function checkSettlement(row: SettlementRow): SettlementView {
+  const document = settlementSchema.safeParse(row.document);
+  return document.success && hashSettlement(document.data).toLowerCase() === row.hash.toLowerCase()
+    ? {
+        status: "verified",
+        hash: row.hash,
+        signer: row.signer,
+        signature: row.signature,
+        storedAt: row.storedAt,
+        document: document.data,
+      }
+    : { status: "tampered", hash: row.hash, storedAt: row.storedAt };
 }
 
 /** Reads `signal.aborted` afresh: it can flip during any await, which control-flow narrowing ignores. */
