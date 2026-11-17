@@ -10,11 +10,12 @@ Built for the UBC 2026 Hackathon: track **Agentic Payments & AI**, **Best use of
 
 ## Hosted demo
 
-- Console: https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech
-- Landing page: https://8081-agq6mxapjuxoy3aavoouae6yri.instabox.tech
+- App: https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech, the console, and the MCP server at `/mcp`.
+- Site: https://8081-agq6mxapjuxoy3aavoouae6yri.instabox.tech, the landing page.
 
 The hosted demo runs the demo chain in gateway mode, as described in [docs/hosting.md](docs/hosting.md#instabox).
-The console asks for a passkey sign-in; a workspace there is opened with a code from the operator ([docs/accounts.md](docs/accounts.md#sign-in)).
+The console needs a passkey sign-in, and a workspace there is opened with a code from the operator ([docs/accounts.md](docs/accounts.md#sign-in)).
+Two pages need no sign-in: the landing page, and the agent's public scorecard at [`/agent/0x70997970C51812dc3A010C7d01b50e0d17dc79C8`](https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech/agent/0x70997970C51812dc3A010C7d01b50e0d17dc79C8), which the landing page links to.
 
 <!-- #96 (members, roles and hosted sign-up): when it is merged, say here how a visitor signs up on the hosted demo. -->
 
