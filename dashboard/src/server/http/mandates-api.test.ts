@@ -64,6 +64,7 @@ import {
   createMandate,
   listMandates,
   listOwnerActions,
+  patchMandate,
   postDeployment,
   postOwnerCall,
   startStepUp,
@@ -994,5 +995,79 @@ describe("mandates on the demo chain", () => {
     for (const mandate of service.accounts.store.contractMandates()) {
       expect(service.snapshot(mandate).wake).toMatchObject({ enabled: false, recent: [] });
     }
+  });
+
+  it("renames a mandate on an admin's session, records it, and the agent's next lookup names it so", async () => {
+    const hedge = service.accounts.store.mandates(bob.workspaceId).find((m) => m.name === "Hedge");
+    if (!hedge) throw new Error("bob has no Hedge mandate");
+    function rename(who: Member, mandateId: string, name: unknown) {
+      return patchMandate(
+        new Request(`${ORIGIN}/api/console/mandates/${mandateId}`, {
+          method: "PATCH",
+          headers: consoleHeaders(service, who),
+          body: JSON.stringify({ name }),
+        }),
+        service,
+        { mandateId },
+      );
+    }
+    const { token } = service.accounts.store.createToken(service.accounts.store.agentOf(hedge.id).id, "Bot");
+    async function resolvedName(): Promise<string> {
+      const response = await resolveToken(
+        new Request(`${ORIGIN}${CONSOLE_AGENT_ROUTES.resolveToken}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${SERVICE_TOKEN}`, "content-type": "application/json" },
+          body: JSON.stringify({ tokenHash: hashAgentToken(token), legacy: false }),
+        }),
+        service,
+      );
+      return resolveTokenResponseSchema.parse(await response.json()).mandate.name;
+    }
+    expect(await resolvedName()).toBe("Hedge");
+    const actionsBefore = service.accounts.store.ownerActions(hedge.id, 100).length;
+
+    // A passkey prompt confirms the mandate id and its contract, never its name: one answered before the
+    // rename still signs the same call after it.
+    const setPolicy: OwnerCall = { functionName: "setPolicy", rules: RULES };
+    const stepUp = await confirm(bob, { kind: "owner-call", mandateId: hedge.id, call: setPolicy });
+
+    // Another workspace's member cannot rename it, nor learn it exists; a blank or unprintable name is refused.
+    expect((await rename(carol, hedge.id, "Mine now")).status).toBe(404);
+    for (const bad of ["   ", "x".repeat(61), "Tab\there", 7]) {
+      const refused = await rename(bob, hedge.id, bad);
+      expect(refused.status, JSON.stringify(bad)).toBe(422);
+    }
+    expect(service.accounts.store.mandate(hedge.id)?.name).toBe("Hedge");
+
+    const renamed = await rename(bob, hedge.id, "  Hedge BTC  ");
+    expect(renamed.status).toBe(200);
+    const view = (await renamed.json()) as MandateView;
+    expect(view).toMatchObject({ id: hedge.id, name: "Hedge BTC", deployment: "server" });
+    expect(view.contract?.address.toLowerCase()).toBe(hedge.contract?.address.toLowerCase());
+    // The same name again changes and records nothing.
+    expect((await rename(bob, hedge.id, "Hedge BTC")).status).toBe(200);
+
+    const recorded = service.accounts.store.ownerActions(hedge.id, 100);
+    expect(recorded).toHaveLength(actionsBefore + 1);
+    expect(recorded[0]).toMatchObject({
+      functionName: "mandate.rename",
+      memberName: "Bob",
+      credentialId: null,
+      status: "sent",
+      detail: 'from "Hedge" to "Hedge BTC"',
+    });
+    const listed = await listOwnerActions(get(bob, `owner-actions?mandate=${hedge.id}`), service);
+    const { actions } = (await listed.json()) as { actions: { functionName: string }[] };
+    expect(actions[0]?.functionName).toBe("mandate.rename");
+
+    // The agent's next token lookup names the new name: the MCP server caches nothing, so whoami does too.
+    expect(await resolvedName()).toBe("Hedge BTC");
+    const listedMandates = (await (
+      await listMandates(get(bob, "mandates"), service)
+    ).json()) as MandatesResponse;
+    expect(listedMandates.mandates.find((m) => m.id === hedge.id)?.name).toBe("Hedge BTC");
+
+    const signed = await call(bob, hedge.id, setPolicy, stepUp);
+    expect(signed.status).toBe(201);
   });
 });

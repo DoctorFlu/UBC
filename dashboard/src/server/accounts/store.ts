@@ -285,6 +285,31 @@ export class AccountStore {
   }
 
   /**
+   * Renames a mandate, and records it in the mandate's owner actions with the old and the new name, in one
+   * transaction. Unchanged (and nothing recorded) when the name is already this one; null when there is no
+   * such mandate. A name is only a label: no contract, key or passkey binding names it.
+   */
+  renameMandate(input: { mandateId: string; memberId: string; name: string }): Mandate | null {
+    return transaction(this.db, () => {
+      const before = this.mandate(input.mandateId);
+      if (!before) return null;
+      if (before.name === input.name) return before;
+      this.db.prepare("UPDATE mandates SET name = ? WHERE id = ?").run(input.name, input.mandateId);
+      this.recordOwnerAction({
+        mandateId: input.mandateId,
+        memberId: input.memberId,
+        credentialId: null,
+        functionName: "mandate.rename",
+        calldata: null,
+        status: "sent",
+        txHash: null,
+        detail: `from "${before.name}" to "${input.name}"`,
+      });
+      return this.mandate(input.mandateId);
+    });
+  }
+
+  /**
    * A `server` contract found again on a chain that lost it: the console deployed it again from the same
    * owner key, at the same address, in a later block.
    */

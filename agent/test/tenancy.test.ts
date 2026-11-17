@@ -227,6 +227,23 @@ describe("the MCP endpoint with several workspaces", () => {
     expect(unknown.status).toBe(401);
   });
 
+  it("names a renamed mandate on the next call, with no restart", async () => {
+    const { server, fake } = setup();
+    const other = fake.addAgent();
+    const before = await call(server, other.token, "whoami");
+    expect(before.structuredContent?.agent).toMatchObject({ mandateName: "Mandate" });
+    fake.renameMandate(other.agentId, "Hedge ETH");
+    fake.renameMandate("env", "Main book");
+    const after = await call(server, other.token, "whoami");
+    expect(after.structuredContent?.agent).toEqual({
+      id: other.agentId,
+      mandateId: other.mandateId,
+      mandateName: "Hedge ETH",
+    });
+    const first = await call(server, TEST_TOKEN, "whoami");
+    expect(first.structuredContent?.agent).toMatchObject({ id: "env", mandateName: "Main book" });
+  });
+
   it("stops a revoked token on its next call", async () => {
     const { server, fake } = setup();
     const other = fake.addAgent();

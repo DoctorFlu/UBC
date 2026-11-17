@@ -196,6 +196,30 @@ export const postDeployment = consoleRoute(async (request, service, scope, param
   return json(mandateView(service, attached));
 }, WORKSPACE);
 
+const renameSchema = z.strictObject({ name: mandateNameSchema });
+
+/**
+ * PATCH /api/console/mandates/:mandateId: renames the mandate, on an admin's session alone. The name is a
+ * label for people and the agent; nothing binds to it (a passkey confirms the mandate id and its contract,
+ * never its name), so it takes no passkey. Recorded in the owner actions with the old and the new name.
+ */
+export const patchMandate = consoleRoute(async (request, service, scope, params) => {
+  const denied = adminOnly(scope);
+  if (denied) return denied;
+  const mandate = pathMandate(service, scope, params.mandateId);
+  if (!mandate) return apiError(404, "not_found", "This workspace has no such mandate.");
+  const body = await readBody(request, renameSchema);
+  if (!body.ok) return body.response;
+  const renamed = service.accounts.store.renameMandate({
+    mandateId: mandate.id,
+    memberId: scope.access.member.id,
+    name: body.data.name,
+  });
+  if (!renamed) return apiError(404, "not_found", "This workspace has no such mandate.");
+  service.changed(renamed.id);
+  return json(mandateView(service, renamed));
+}, WORKSPACE);
+
 /** Where an action on `mandate` acts: its workspace and its contract, or null when it has none of its own. */
 function targetOf(mandate: Mandate): StepUpTarget | null {
   if (mandate.deployment !== "server" || !mandate.contract) return null;

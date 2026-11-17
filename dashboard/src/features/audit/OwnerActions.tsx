@@ -30,6 +30,7 @@ const ACTION_LABELS: Record<string, string> = {
   approveIntent: "Approved an intent",
   rejectIntent: "Rejected an intent",
   "mandate.create": "Created the mandate",
+  "mandate.rename": "Renamed the mandate",
   "token.create": "Created an agent token",
   "holdings.save": "Saved holdings",
   "pairing.confirm": "Confirmed the agent",
@@ -41,6 +42,14 @@ function actionText(action: OwnerAction): string {
   return action.detail ? `${label}: ${action.detail}` : label;
 }
 
+/** How it was confirmed: a passkey, or a session alone for the two actions that need none. */
+function confirmedBy(action: OwnerAction): string {
+  if (action.credentialId) return "Passkey";
+  if (action.functionName === "setPaused") return "Session (a pause needs no passkey)";
+  if (action.functionName === "mandate.rename") return "Session (a name needs no passkey)";
+  return "Session";
+}
+
 const COLUMNS: Column<OwnerAction>[] = [
   { key: "when", header: "When", nowrap: true, cell: (action) => <When at={action.createdAt} /> },
   { key: "action", header: "Action", role: "primary", cell: actionText },
@@ -48,7 +57,7 @@ const COLUMNS: Column<OwnerAction>[] = [
   {
     key: "how",
     header: "Confirmed by",
-    cell: (action) => (action.credentialId ? "Passkey" : "Session (a pause needs no passkey)"),
+    cell: confirmedBy,
   },
   {
     key: "status",

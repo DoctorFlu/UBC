@@ -146,6 +146,8 @@ export interface FakeConsole {
   readonly issueToken: (agentId: string) => { token: string; tokenId: string };
   /** Revokes a token at once, like the owner does in Setup. */
   readonly revokeToken: (token: string) => void;
+  /** Renames the agent's mandate, like an admin does in Setup: the next resolve names it so. */
+  readonly renameMandate: (agentId: string, name: string) => void;
   /** The records of an agent. */
   readonly stateOf: (agentId: string) => FakeConsoleState;
 }
@@ -181,6 +183,8 @@ interface AgentRecord {
   agentId: string;
   workspaceId: string;
   mandateId: string;
+  /** The mandate's name, which an admin can change at any time (`renameMandate`). */
+  mandateName: string;
   address: Address | null;
   signer: "env" | "console";
   deployment: MandateDeploymentKind | null;
@@ -222,6 +226,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
         agentId: ENV_AGENT_ID,
         workspaceId: "wsp_first",
         mandateId: "mnd_first",
+        mandateName: "Mandate",
         address: null,
         signer: "env",
         deployment: "env",
@@ -283,7 +288,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
       tokenId: record.tokenId,
       agent: { address: agent.address, signer: agent.signer },
       mandate: {
-        name: "Mandate",
+        name: agent.mandateName,
         deployment: agent.deployment,
         contract:
           agent.deployment === "server" && agent.contract !== null && agent.deployBlock !== null
@@ -563,6 +568,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
         agentId,
         workspaceId: `wsp_${base32(26)}`,
         mandateId: `mnd_${base32(26)}`,
+        mandateName: "Mandate",
         address,
         signer: "console",
         deployment: agentOptions.contract === undefined ? null : agentOptions.own ? "server" : "env",
@@ -587,6 +593,11 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     revokeToken: (token) => {
       const record = tokens.get(hashAgentToken(token));
       if (record !== undefined) record.revoked = true;
+    },
+    renameMandate: (agentId, name) => {
+      const agent = agents.get(agentId);
+      if (agent === undefined) throw new Error(`no agent ${agentId}`);
+      agent.mandateName = name;
     },
     stateOf: (agentId) => {
       const agent = agents.get(agentId);

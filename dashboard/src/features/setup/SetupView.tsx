@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/States";
 import { formatCount } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
+import { useMandateScope } from "@/lib/mandate/MandateContext";
 import { useOwnerAccess } from "@/lib/owner/access";
 import { setupSteps } from "@/lib/setup";
 import { Advanced } from "@/lib/advanced/Advanced";
@@ -18,6 +19,7 @@ import { When } from "@/components/ui/When";
 
 import { AgentsSection } from "./AgentsSection";
 import { DeployCard } from "./DeployCard";
+import { RenameCard } from "./RenameCard";
 import styles from "./setup.module.css";
 import { WakeUpsCard } from "./WakeUps";
 
@@ -26,6 +28,7 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
   const access = useOwnerAccess();
+  const scope = useMandateScope();
   const steps = setupSteps(snapshot, access.kind === "owner");
   const done = steps.filter((step) => step.done).length;
   const next = steps.find((step) => !step.done);
@@ -67,6 +70,8 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
         </Card>
 
         <div className={styles.side}>
+          {/* Keyed by mandate: the switcher opens another mandate's Setup with its own name. */}
+          {preview ? null : <RenameCard key={scope?.mandate.id} />}
           <Card
             title="Agent pairing"
             description="The agent's MCP server announces itself here; you confirm it with the owner wallet."

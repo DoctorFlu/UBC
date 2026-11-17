@@ -209,6 +209,12 @@
   min-width: 0;
 }
 
+.rename {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 .tokenReveal {
   display: flex;
   flex-direction: column;
