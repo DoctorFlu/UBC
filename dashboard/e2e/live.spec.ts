@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { closeSync, openSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { type Locator, type Page, type TestInfo, expect, test } from "@playwright/test";
 
@@ -94,12 +96,27 @@ const LIVE_API_ROUTES = [
   "/api/executor/v1/settlements/0",
 ];
 
-async function startConsole(): Promise<void> {
+const suiteStartedAt = Date.now();
+
+/** A line about the console's start, timed from the suite's start, so a slow or stuck start names its step. */
+function setupLog(line: string): void {
+  process.stderr.write(`[live setup +${((Date.now() - suiteStartedAt) / 1_000).toFixed(1)}s] ${line}\n`);
+}
+
+/** `next dev`'s own output (what it compiles, and when), kept beside the suite's data. */
+const consoleLog = join(paths.dir, "next-dev.log");
+
+/** Starts `next dev` and compiles every route; fails before `budgetMs`, naming the step that did not finish. */
+async function startConsole(budgetMs = 225_000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  const remaining = () => Math.max(1, deadline - Date.now());
+  const output = openSync(consoleLog, "a");
+  setupLog(`starting next dev on port ${PORT.toString()} (its output: ${consoleLog})`);
   server = spawn("npx", ["next", "dev", "--port", PORT.toString()], {
     cwd: DASHBOARD_DIR,
     // Its own process group, so stopping it stops next's workers too.
     detached: true,
-    stdio: ["ignore", "ignore", "inherit"],
+    stdio: ["ignore", output, "inherit"],
     env: {
       ...process.env,
       NEXT_PUBLIC_DEV_SIGNER: "1",
@@ -116,18 +133,44 @@ async function startConsole(): Promise<void> {
       NEXT_DEV_CACHE: "off",
     },
   });
-  await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
+  closeSync(output);
+  const step = async (label: string, run: (signal: AbortSignal) => Promise<unknown>) => {
+    const startedAt = Date.now();
+    const signal = AbortSignal.timeout(remaining());
+    const aborted = new Promise<never>((_, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
+    });
+    try {
+      await Promise.race([run(signal), aborted]);
+    } catch (error) {
+      setupLog(`${label}: failed after ${((Date.now() - startedAt) / 1_000).toFixed(1)}s`);
+      const lines = readFileSync(consoleLog, "utf8").trimEnd().split("\n");
+      process.stderr.write(`last lines of next dev's output:\n${lines.slice(-30).join("\n")}\n`);
+      throw new Error(`the console did not start: ${label} did not finish`, { cause: error });
+    }
+    const seconds = (Date.now() - startedAt) / 1_000;
+    if (seconds >= 5) setupLog(`${label}: ${seconds.toFixed(1)}s`);
+  };
+  await step("waiting for a live feed", () =>
+    waitForSnapshot(baseURL, (current) => current.feed.health === "live", Math.min(180_000, remaining())),
+  );
   // `next dev` compiles a route on its first request; compile every route now, so no test waits on it.
   for (const path of LIVE_ROUTES) {
-    const response = await fetch(new URL(path, baseURL));
-    await response.arrayBuffer();
+    await step(`compiling ${path}`, async (signal) => {
+      const response = await fetch(new URL(path, baseURL), { signal });
+      await response.arrayBuffer();
+    });
   }
   for (const path of LIVE_API_ROUTES) {
-    const response = await fetch(new URL(path, baseURL), {
-      method: path.endsWith("/snapshot") ? "GET" : "POST",
+    await step(`compiling ${path}`, async (signal) => {
+      const response = await fetch(new URL(path, baseURL), {
+        method: path.endsWith("/snapshot") ? "GET" : "POST",
+        signal,
+      });
+      await response.arrayBuffer();
     });
-    await response.arrayBuffer();
   }
+  setupLog("the console is ready");
 }
 
 async function stopConsole(): Promise<void> {
@@ -166,10 +209,12 @@ function toast(page: Page) {
 
 test.beforeAll(async () => {
   test.setTimeout(240_000);
+  // The console's start gets what is left, minus a margin, so a stuck start fails with its own message.
+  const deadline = Date.now() + 230_000;
   freshSuiteDir("live");
   gemini = await startFakeGemini(GEMINI_PORT);
   chain = await startTestChain({ port: CHAIN_PORT, deploymentFile: paths.deploymentFile });
-  await startConsole();
+  await startConsole(deadline - Date.now());
 });
 
 test.afterAll(async () => {
