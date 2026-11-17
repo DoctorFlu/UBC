@@ -6,7 +6,10 @@ import {
   startAuthentication,
   startRegistration,
 } from "@simplewebauthn/browser";
-import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+} from "@simplewebauthn/browser";
 
 /** A failure to show as it is: one plain sentence. */
 export class AuthFailure extends Error {

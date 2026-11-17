@@ -28,7 +28,9 @@ function main(argv: readonly string[]): number {
   switch (command) {
     case "claim-code": {
       const { code } = issueClaimCode(store);
-      console.error("Claim code for the first workspace. It works once, for 24 hours, and is not shown again:");
+      console.error(
+        "Claim code for the first workspace. It works once, for 24 hours, and is not shown again:",
+      );
       console.log(code);
       console.error("Open the console's /claim page and enter it there.");
       return 0;
@@ -42,7 +44,9 @@ function main(argv: readonly string[]): number {
     }
     case "status": {
       const workspace = store.firstWorkspace();
-      console.log(`first workspace: ${workspace.claimedAt ? `claimed ${workspace.claimedAt}` : "not claimed"}`);
+      console.log(
+        `first workspace: ${workspace.claimedAt ? `claimed ${workspace.claimedAt}` : "not claimed"}`,
+      );
       console.log(`open claim codes: ${String(store.openAccessCodes("claim"))}`);
       console.log(`open invite codes: ${String(store.openAccessCodes("invite"))}`);
       return 0;

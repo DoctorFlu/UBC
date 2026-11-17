@@ -150,7 +150,14 @@ function RegisterForm({
       <form className={styles.form} onSubmit={(event) => void submit(event)} noValidate>
         {children}
         <Alert message={error} />
-        <Button type="submit" variant="primary" size="lg" block icon={<KeyRound aria-hidden />} loading={busy}>
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          block
+          icon={<KeyRound aria-hidden />}
+          loading={busy}
+        >
           {action}
         </Button>
       </form>
@@ -178,7 +185,13 @@ export function SignUpView({ inviteRequired }: { inviteRequired: boolean }) {
     >
       {inviteRequired ? (
         <Field label="Invite code" hint="From the person who runs this console.">
-          <Input name="invite" autoComplete="off" spellCheck={false} value={invite} onValueChange={setInvite} />
+          <Input
+            name="invite"
+            autoComplete="off"
+            spellCheck={false}
+            value={invite}
+            onValueChange={setInvite}
+          />
         </Field>
       ) : null}
       <Field label="Your name">

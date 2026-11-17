@@ -110,7 +110,12 @@ describe("event wake-ups from the console's pipeline", () => {
   it("never wakes for the history read on first start", () => {
     // The deployment's setPolicy happened before the console first read the chain.
     expect(rx.bodies).toEqual([]);
-    expect(envSnapshot(service).wake).toMatchObject({ enabled: true, usedToday: 0, leftToday: 6, recent: [] });
+    expect(envSnapshot(service).wake).toMatchObject({
+      enabled: true,
+      usedToday: 0,
+      leftToday: 6,
+      recent: [],
+    });
   });
 
   it("wakes once for an owner pause, and holds the resume until the debounce window ends", async () => {

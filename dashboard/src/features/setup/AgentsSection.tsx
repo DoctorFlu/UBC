@@ -89,7 +89,15 @@ export function AgentsSection() {
   );
 }
 
-function AgentCard({ agent, mcpUrl, onChange }: { agent: AgentView; mcpUrl: string | null; onChange: () => void }) {
+function AgentCard({
+  agent,
+  mcpUrl,
+  onChange,
+}: {
+  agent: AgentView;
+  mcpUrl: string | null;
+  onChange: () => void;
+}) {
   const toast = useToast();
   const [name, setName] = useState("Grok Bot");
   const [creating, setCreating] = useState(false);
@@ -262,7 +270,9 @@ function ConnectSteps({ mcpUrl }: { mcpUrl: string | null }) {
           {mcpUrl ? (
             <code translate="no">{mcpUrl}</code>
           ) : (
-            <>the MCP server&apos;s public address (set <code>MCP_PUBLIC_URL</code> to show it here)</>
+            <>
+              the MCP server&apos;s public address (set <code>MCP_PUBLIC_URL</code> to show it here)
+            </>
           )}
         </li>
         <li>Authentication: bearer token. Paste the token above.</li>

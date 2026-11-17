@@ -60,9 +60,9 @@ const SCOPED_TABLES = [
 const hex = (byte: string) => `0x${byte.repeat(32)}`;
 
 function tables(db: Database): string[] {
-  const rows = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-    .all() as { name: string }[];
+  const rows = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as {
+    name: string;
+  }[];
   return rows.map((row) => row.name);
 }
 
@@ -131,7 +131,16 @@ function hostedDatabase(): string {
     null,
     null,
   );
-  run("INSERT INTO pairings VALUES (?, ?, ?, ?, ?, ?, ?)", AGENT, "Grok Bot", "0.1.0", "confirmed", T, T, OWNER);
+  run(
+    "INSERT INTO pairings VALUES (?, ?, ?, ?, ?, ?, ?)",
+    AGENT,
+    "Grok Bot",
+    "0.1.0",
+    "confirmed",
+    T,
+    T,
+    OWNER,
+  );
   run("INSERT INTO intent_context_links VALUES (?, ?, ?, ?, ?)", DEPLOYMENT, 0, hex("aa"), hex("11"), T);
   run("INSERT INTO signal_payments VALUES (?, ?, ?, ?)", hex("7c"), T, "{}", T);
   run("INSERT INTO signal_budget VALUES (1, ?, ?, ?)", T, "{}", T);
@@ -152,7 +161,12 @@ function hostedDatabase(): string {
     "200",
     1,
   );
-  run("INSERT INTO wake_sources VALUES (?, ?, ?)", `chain:${DEPLOYMENT}:${hex("2e")}:0`, `wk_${"0".repeat(24)}`, MS);
+  run(
+    "INSERT INTO wake_sources VALUES (?, ?, ?)",
+    `chain:${DEPLOYMENT}:${hex("2e")}:0`,
+    `wk_${"0".repeat(24)}`,
+    MS,
+  );
   run(
     "INSERT INTO wake_price_memory VALUES (?, ?, ?)",
     "plan_2",
@@ -252,6 +266,8 @@ describe("migration to accounts (after the hosted version)", () => {
   it("refuses an offchain or wake-up row for a mandate that does not exist", () => {
     const db = openDatabase(":memory:");
     expect(() => new OffchainStore(db).saveHoldings("mnd_missing", [])).toThrow(/FOREIGN KEY/);
-    expect(() => new SqliteWakeStore(db, "mnd_missing").addSource("chain:x", "wk_x", 1)).toThrow(/FOREIGN KEY/);
+    expect(() => new SqliteWakeStore(db, "mnd_missing").addSource("chain:x", "wk_x", 1)).toThrow(
+      /FOREIGN KEY/,
+    );
   });
 });

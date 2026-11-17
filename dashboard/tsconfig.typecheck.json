@@ -8,5 +8,13 @@
     "types": ["node", "next", "next/image-types/global"],
     "tsBuildInfoFile": ".next/cache/typecheck.tsbuildinfo"
   },
-  "include": ["src", "e2e", "test", "scripts", "next.config.ts", "playwright.config.ts", ".next/types/**/*.ts"]
+  "include": [
+    "src",
+    "e2e",
+    "test",
+    "scripts",
+    "next.config.ts",
+    "playwright.config.ts",
+    ".next/types/**/*.ts"
+  ]
 }
