@@ -17,6 +17,9 @@
  * Once a filled position's market has expired and its outcome is published, it records what the position
  * paid in the console, signed with the executor key (issue #92; see docs/order-lifecycle.md). It refuses to
  * run against anything but the local devchain. Keys are never printed.
+ *
+ * Settings come from the environment, then from `ENV_FILE` (or the repository's `.env`) for what the
+ * environment leaves unset, as `npm run gemini:doctor` reads them; the containers have no such file.
  */
 import {
   createGeminiClient,
@@ -30,7 +33,7 @@ import {
   isGeminiPrivateError,
   type GeminiPrivateClient,
 } from "@mandate/gemini/private";
-import type { ExecutorVenue } from "@mandate/shared";
+import { loadEnv, type ExecutorVenue } from "@mandate/shared";
 import { resolvePolicyDeployment } from "@mandate/shared/node";
 import {
   announceVenue,
@@ -50,6 +53,8 @@ function fail(message: string): never {
   console.error(`[executor] ${message}`);
   process.exit(1);
 }
+
+loadEnv();
 
 let settings: ReturnType<typeof executorSettings>;
 // Which Gemini the checks, outcomes and (on Gemini) orders read: the rule the whole stack follows.
