@@ -84,6 +84,9 @@ It is not: approving or rejecting an intent, setting rules, resuming the agent, 
 - Pausing needs the session only, and so does revoking a token: both are the safe direction, and a pause must never wait for a device.
 - Every owner action is recorded with the member and the passkey that confirmed it (none for a pause), and the Audit page lists them as "Owner actions".
 - The page asks once per action, the button names what the passkey confirms ("Approve with passkey"), and a closed or failed prompt leaves the page as it was, with one plain sentence.
+- An admin renames a mandate in Setup on the session alone (`PATCH /api/console/mandates/<mandate>`, the same rules as a new mandate's name), and the Audit page lists it as `mandate.rename` with the old and the new name.
+  The passkey prompt's binding is the mandate id and contract, never the name, so a rename changes nothing a passkey confirmed, and an answer given before it still confirms the same action after it.
+  The agent sees the new name on its next call (`whoami`), since the MCP server caches nothing; wake-up links name the mandate by id, so they need no change.
 
 On a `wallet` contract (Arc, and the first mandate's demo contract, whose owner is the dev signer) the wallet signs owner calls as before, and the passkey is not asked.
 
@@ -273,6 +276,12 @@ The hosted stack passes `CONSOLE_MASTER_KEY` from its env file, which `deploy/in
 - **Logs, errors, the snapshot and the event stream** carry no token, key, code or session id; a test (`dashboard/src/server/accounts/redaction.test.ts`) proves it.
 - **The demo chain's owner key is public** (anvil account 0, the dev signer), so on the demo chain the session is what protects the first mandate's owner routes and `/rpc`, not the wallet.
   Mandates the console deploys have owner keys of their own, which never leave the console.
+  The "Dev signer" badge shows only on a mandate whose owner is a wallet (the first mandate, or one an owner's wallet deployed), never on a mandate whose owner key the console holds, nor on Home or New mandate.
+- **`/rpc` on the hosted demo** is anvil itself, behind Caddy's `forward_auth` (`GET /api/auth/forward/rpc`).
+  A member of another workspace gets 403 there, and anvil has no other route from outside, so they cannot send a transaction signed with the public key at all, to the first mandate's contract or any other.
+  A member of the first workspace, a viewer included, reaches all of anvil, with its test methods (`anvil_impersonateAccount`, `anvil_setStorageAt`, `anvil_setBalance`): they can act as any address on the chain, including the owner keys the console holds for other workspaces' contracts and the shared executor.
+  On the demo chain that is by design, since nothing on it has value.
+  **This blocks real funds**: real funds run on a `wallet` contract on Arc, where `/rpc` does not exist; a hosted stack that keeps the demo chain must not hold anything of value on it.
 - **The console's owner keys** are sealed like agent keys, under labels of their own, so a sealed owner key never opens as an agent key or for another mandate; with the master key and the database together they are as exposed as the agent keys.
 - **One Gemini account fills every mandate's orders**, so mandates share its balance, its positions and its rate limits.
   A client order id tells their orders apart, and the executor never guesses by terms, but the money is not separated at the venue.
