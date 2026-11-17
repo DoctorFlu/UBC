@@ -40,8 +40,7 @@ function authRoute(handler: Handler) {
     try {
       return privateHeaders(await handler(request, service));
     } catch (error) {
-      if (AccountError.is(error))
-        return privateHeaders(apiError(error.status, error.code, error.message));
+      if (AccountError.is(error)) return privateHeaders(apiError(error.status, error.code, error.message));
       if (error instanceof z.ZodError)
         return privateHeaders(apiError(422, "invalid_body", describeIssues(error)));
       console.error(

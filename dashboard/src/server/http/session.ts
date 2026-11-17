@@ -149,8 +149,7 @@ export function consoleRoute(handler: ConsoleHandler) {
     try {
       return privateHeaders(await handler(request, service, scope, params));
     } catch (error) {
-      if (AccountError.is(error))
-        return privateHeaders(apiError(error.status, error.code, error.message));
+      if (AccountError.is(error)) return privateHeaders(apiError(error.status, error.code, error.message));
       console.error(
         `[console] ${request.method} ${new URL(request.url).pathname} failed: ${describe(error)}`,
       );
