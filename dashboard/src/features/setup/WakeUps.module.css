@@ -66,11 +66,6 @@
   color: var(--color-rejected-text);
 }
 
-.result {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
-
 .muted {
   color: var(--color-text-muted);
 }

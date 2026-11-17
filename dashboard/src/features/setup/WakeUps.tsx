@@ -37,9 +37,9 @@ function WakeRow({ wake }: { wake: WakeDeliveryView }) {
             until <When inSentence at={wake.dueAt} />
           </span>
         ) : (
-          <When inSentence at={wake.attemptedAt ?? wake.occurredAt} />
+          <When inSentence at={wake.attemptedAt ?? wake.dueAt ?? wake.occurredAt} />
         )}
-        {wake.result ? <span className={styles.result}>{wake.result}</span> : null}
+        {wake.result ? <span>{wake.result}</span> : null}
       </span>
     </li>
   );

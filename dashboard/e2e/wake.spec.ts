@@ -281,7 +281,8 @@ test("the Setup page shows wake-ups in Advanced view only", async ({ page, conte
   await expect(rows).toHaveCount(5);
   await expect(rows.first()).toHaveAttribute("data-status", "capped");
   await expect(rows.first()).toContainText("The owner approved");
-  await expect(rows.first()).toContainText("not sent: today's cap was reached");
+  await expect(rows.first().getByText("Not sent", { exact: true })).toBeVisible();
+  await expect(rows.first()).toContainText("today's cap was reached");
   await expect(card.locator('[data-kind="price_below_floor"]')).toContainText("HTTP 200");
   await expect(card).toContainText("Spot is checked against the current goal every 1 s");
   const text = await page.locator("main").innerText();

@@ -184,7 +184,7 @@ export interface WakeDeliveryView {
   occurredAt: string;
   /** When it was last tried, or null. */
   attemptedAt: string | null;
-  /** While queued: when it will be tried. */
+  /** While queued: when it will be tried. Once capped: when it was due. */
   dueAt: string | null;
 }
 
@@ -376,7 +376,7 @@ export class WakeNotifier {
       attempts: 0,
       attemptedAt: null,
       sentAt: null,
-      result: full ? "not sent: too many wake-ups waiting" : null,
+      result: full ? "too many wake-ups were waiting" : null,
       countsTowardCap: false,
     });
     this.store.addSource(candidate.sourceId, id, at);
@@ -438,7 +438,7 @@ export class WakeNotifier {
       result: delivery.result,
       occurredAt: new Date(delivery.occurredAt).toISOString(),
       attemptedAt: iso(delivery.attemptedAt),
-      dueAt: delivery.status === "queued" ? iso(delivery.dueAt) : null,
+      dueAt: delivery.status === "queued" || delivery.status === "capped" ? iso(delivery.dueAt) : null,
     };
   }
 
@@ -491,7 +491,7 @@ export class WakeNotifier {
 
   private async deliver(delivery: WakeDelivery, at: number): Promise<void> {
     if (this.usedToday(at) >= this.options.dailyCap) {
-      this.store.update({ ...delivery, status: "capped", result: "not sent: today's cap was reached" });
+      this.store.update({ ...delivery, status: "capped", result: "today's cap was reached" });
       this.log("warn", `wake-up ${delivery.id} (${delivery.kind}) not sent: today's cap was reached`);
       return;
     }
