@@ -206,7 +206,13 @@ test.describe("seeded demo", () => {
     expect(cover.assessment.heldPayoutCents).toBeGreaterThan(0);
     expect(cover.assessment.state).not.toBe("nothing_to_cover");
 
+    // Cover is measured once the page's own quotes arrive, which it asks for after it hydrates: wait for
+    // that answer, not a fixed time, so a busy machine cannot run the check out before the page asks.
+    const quotesArrive = () =>
+      page.waitForResponse((response) => new URL(response.url()).pathname === "/api/console/hedge/market");
+    let quotes = quotesArrive();
     await page.goto("/hedge");
+    await quotes;
     const card = page.getByTestId("cover-now");
     await expect(card).toHaveAttribute("data-state", cover.assessment.state);
     const settles = stored.plan.rungs[0]?.instrumentSymbol ?? "";
@@ -217,7 +223,9 @@ test.describe("seeded demo", () => {
     // The numbers per strike are Advanced detail.
     await expect(card.getByRole("table")).toHaveCount(0);
     await context.addCookies([{ name: "mandate-advanced", value: "on", url: baseURL ?? "" }]);
+    quotes = quotesArrive();
     await page.reload();
+    await quotes;
     await expect(card.getByRole("table", { name: /Cover per strike/ }).locator("tbody tr")).toHaveCount(
       cover.assessment.rungs.length,
     );

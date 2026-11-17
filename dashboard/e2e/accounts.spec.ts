@@ -257,13 +257,14 @@ test.describe("a second workspace", () => {
 
   test("signs out, is kept out, and signs back in with the same passkey", async () => {
     await page.getByRole("button", { name: "Sign out" }).click();
-    await expect(page).toHaveURL(/\/sign-in$/);
+    await page.waitForURL(/\/sign-in$/);
     expect((await page.request.get("/api/console/snapshot")).status()).toBe(401);
     await page.goto("/setup");
     await expect(page).toHaveURL(/\/sign-in\?next=%2Fsetup$/);
     await hydrated(page);
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();
-    await expect(page).toHaveURL(/\/setup$/);
+    // The passkey prompt, its check and the page load: wait for the navigation, not a fixed time.
+    await page.waitForURL(/\/setup$/);
     await expect(page.getByRole("region", { name: "Agents" })).toBeVisible();
   });
 
