@@ -15,12 +15,12 @@ import { buildLadder, type Ladder, type SpotPrice } from "@mandate/gemini";
 import {
   devPolicyClient,
   devPrivateKey,
-  geminiVenue,
+  simulatedVenue,
   startDevchain,
-  startSimulatedExecutor,
+  startExecutor,
   type Devchain,
   type PolicyContractKind,
-  type SimulatedExecutor,
+  type Executor,
 } from "@mandate/devchain";
 import type { Intent, PolicyClient, PolicyRules } from "@mandate/shared";
 import { createMandateServer, type MandateServer } from "../src/app";
@@ -138,15 +138,15 @@ export async function startStack(options: {
     ...(options.rules === undefined ? {} : { rules: options.rules }),
   });
   const servers: ServerType[] = [];
-  let executor: SimulatedExecutor | undefined;
+  let executor: Executor | undefined;
   try {
     const policy = chain.deployment.address;
     const reader = devPolicyClient(chain.rpcUrl, policy, "outsider");
     const markets = new MovingMarkets(options.spotCents);
 
-    executor = startSimulatedExecutor({
+    executor = startExecutor({
       client: devPolicyClient(chain.rpcUrl, policy, "executor"),
-      venue: geminiVenue(new FakeMarkets()),
+      venue: simulatedVenue(new FakeMarkets()),
       fromBlock: chain.deployment.blockNumber,
       fillDelayMs: 0,
       pollingIntervalMs: 100,

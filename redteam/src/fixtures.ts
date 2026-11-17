@@ -45,6 +45,7 @@ function contract(
       lastTradeCents: null,
     },
     resolutionSide: null,
+    resolvedAt: null,
     settlementValue: null,
   };
 }
