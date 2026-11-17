@@ -18,6 +18,95 @@ Scripts that create secrets write them straight into `.env` without printing the
 Switching the console, the agent and the scripts from the local devchain to Arc testnet is configuration only: set `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and, if you use a provider, `ARC_RPC_URL`.
 The browser never receives `ARC_RPC_URL`, because it may carry a provider key; it uses Arc's public RPC.
 
+## Arc testnet
+
+The Policy contract on Arc testnet is in [contracts/README.md](../contracts/README.md): `POLICY_ADDRESS=0x571D8ea7C86c80a230C10818743f8861084F82f3`, `POLICY_DEPLOY_BLOCK=72740419`.
+Moving to it is configuration: two keys of the stack's own, three roles the owner sets on the contract, gas for two addresses, and the variables below.
+The hosted machine's switch is in [hosting.md](hosting.md#arc-testnet).
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `AGENT_PRIVATE_KEY` | yes | The agent's key: it proposes trades. Made by `npm run arc:keygen`. |
+| `EXECUTOR_PRIVATE_KEY` | for the executor | The executor's key: it records fills (`recordResult`). Made by `npm run arc:keygen`. The executor's Arc support (reading this key) comes with the executor change after #118; until then nothing executes approved intents on Arc. |
+| `ARC_OWNER_ADDRESS` | no | The owner's wallet address, for `npm run arc:doctor` only (or `--owner 0x...`). Never a key: the owner signs in their own browser wallet. |
+
+### Keys
+
+`npm run arc:keygen` writes a new `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY` into the env file (`ENV_FILE`, default the root `.env`) with mode 600, and prints only the two addresses and the next steps.
+It keeps keys that are already there; `-- --replace` replaces them.
+It refuses, changing nothing, a value that is not a key, the same key for both roles, and any of anvil's published test keys (from the mnemonic `test test ... junk`, which anyone can sign with).
+The owner role is not a key the stack holds: it is the owner's browser wallet.
+
+The services refuse anvil's published keys too, wherever they would sign on a chain that is not the devchain.
+The devchain uses Arc testnet's chain id, 5042002, so the chain id cannot tell them apart; where the process signs does.
+For the MCP server the devchain is a loopback RPC (`127.0.0.1`, `localhost`, `[::1]`), or a deployment file (`POLICY_DEPLOYMENT_FILE`) whose RPC is loopback or a bare compose service name without a dot, as the hosted demo chain's `http://anvil:8545`.
+A name is not resolved to decide this: `ARC_RPC_URL=http://anvil:8545` typed in by hand is refused like any other host, because only the deployment file the devchain writes marks a chain as local, and that mark is not an environment variable.
+A deployment file that names `rpc.testnet.arc.io`, a QuickNode host or a private IP address is refused as well.
+
+### The doctor
+
+`npm run arc:doctor -- --owner 0x<owner wallet>` checks everything before the stack runs against Arc, and ends `READY` or with the one next step (exit codes 0, 1, and 2 when Arc did not answer).
+Run it after every change of keys, gas or roles: the owner can change the three roles at any time (`setUser`, `setAgent`, `setExecutor`).
+It sends nothing to Arc and prints no key, and of `ARC_RPC_URL` only the host.
+It reports, in order:
+
+1. the RPC and the chain id it serves, and the head block;
+2. whether the code at `POLICY_ADDRESS` is the `contracts/src/Policy.sol` of this checkout (compiled by `npm run dev:chain`), and whether it was deployed in exactly `POLICY_DEPLOY_BLOCK`;
+3. the contract's `user`, `agent` and `executor`, each against the address of the configured key (the user against the owner you name);
+4. the rules, the budget used and left, today's loss, whether it is paused, and the number of intents;
+5. the gas a proposal, an owner approval and a `recordResult` use, and how many of its costliest call each address's balance covers.
+
+The gas is measured, not guessed: the doctor starts a local anvil that forks Arc at the head block through Arc's public RPC, sets known rules as the contract's user, proposes twice (once held for the owner, once approved by the rules), approves and records a result, each as the role's current holder (impersonated, unsigned).
+Nothing done on the fork reaches Arc, and the fork never uses the configured `ARC_RPC_URL`, so it spends no provider credits; `--no-fork` skips it.
+Measured on 2026-11-17 at 29 gwei: a proposal held for the owner 215,852 gas (0.0063 USDC), one approved by the rules 205,689 (0.0060), an owner approval 82,684 (0.0024), a `recordResult` 131,229 (0.0038).
+Arc pays gas in USDC, so 1 USDC from the faucet covers about 130 proposals, with the doctor's 20% headroom.
+
+### Which RPC each service uses, and what it costs
+
+Every service reads the same `ARC_RPC_URL`, so one env file decides for the console, the MCP server and the executor together; the browser always uses the public RPC.
+The default, Arc's public `https://rpc.testnet.arc.io`, costs no credits.
+A QuickNode endpoint on our account costs 20 credits per call on Arc, from the Build plan's 80M credits a month (2.67M a day on average), and overage must never be incurred.
+
+Calls at the default settings, with Arc's blocks every 0.5 s (QuickNode's budget basis; 0.508 s measured over the 11,407 blocks after the deploy block):
+
+| Service | What it calls | Calls a minute | Calls a day | QuickNode credits a day |
+| --- | --- | --- | --- | --- |
+| Console, `CONSOLE_EVENT_SOURCE=rpc`, poll 1 s | each poll: the latest block and `eth_getLogs`; the three roles every 10 s | up to 138 | up to 198,720 | up to 3,974,400 |
+| Console, `CONSOLE_EVENT_SOURCE=stream` | the same poll every 15 s, roles included | 20 | 28,800 | 576,000, plus the Stream's 3,456,000 |
+| Executor, `SIM_EXECUTOR_POLL_MS=1000` | each poll: `eth_blockNumber` and `eth_getLogs` | 120 | 172,800 | 3,456,000 |
+| MCP server | only during a tool call: about 10 calls for a proposal (fees, simulation, nonce, gas, send, receipt, the event index), 2 to 5 for a read | 0 when idle | about 2,000 at 200 tool calls | about 40,000 |
+
+So the three at their defaults on QuickNode would spend about 7.5M credits a day and use up the month's 80M in 11 days.
+**Run all three on the public RPC**, and spend QuickNode credits only on the Stream, in demo windows ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
+If a service must use QuickNode, these settings bound it (credits a day, `I` in seconds):
+
+- the console's poll, `CONSOLE_POLL_INTERVAL_MS`: 20 x 86,400 x (2/I + the roles, 0.3 or 3/I when I is 10 s or more), so 1.21M at 5 s, 864,000 at 10 s, 288,000 at 30 s;
+- `CONSOLE_EVENT_SOURCE=stream`, which slows the poll to 15 s at least;
+- the executor's poll, `SIM_EXECUTOR_POLL_MS`: 20 x 86,400 x 2/I, so 691,200 at 5 s, 230,400 at 15 s, 115,200 at 30 s;
+- the MCP server spends only on tool calls, so its use follows the agent's activity.
+
+Catching up from the deploy block costs a one-time scan, measured read-only on the public RPC: it answers `eth_getLogs` over at most 10,000 blocks (10,001 is refused with `-32012 requested range too large`).
+The console reads 5,000 blocks a call and keeps its cursor in its database, so it scans once per new database: 3 calls at 11,407 blocks, about 35 more for each day since the deploy, about 1,040 (20,800 credits on QuickNode) a month after it.
+The executor and the MCP server read 10,000 blocks a call and keep no cursor, so each start scans again: 2 calls now, about 18 more a day, about 520 (10,400 credits) a month after the deploy.
+Without `POLICY_DEPLOY_BLOCK` the console would look for the deploy block itself and the MCP server would scan only the last 200,000 blocks; always set it.
+QuickNode's own `eth_getLogs` range limit was not measured (no call to our account); the console halves its range on a range error, down to 50 blocks, while the executor and the MCP server use 10,000 blocks and would fail on an endpoint with a smaller limit.
+
+### The local stack against Arc testnet
+
+`npm run dev:stack` always starts its own anvil, so it is for the devchain only.
+Against Arc, set in the root `.env` `POLICY_ADDRESS=0x571D8ea7C86c80a230C10818743f8861084F82f3` and `POLICY_DEPLOY_BLOCK=72740419` (and `ARC_RPC_URL` only for a provider), then:
+
+```sh
+npm run arc:keygen                        # once; prints the agent and executor addresses
+npm run arc:doctor -- --owner 0x<owner>   # until it says READY: faucet, then the owner's setAgent and setExecutor
+npm run dev -w @mandate/dashboard         # the console on http://localhost:3000; the owner signs with their wallet
+npm run dev:mcp                           # the MCP server on 127.0.0.1:8787
+```
+
+Leave `NEXT_PUBLIC_DEV_SIGNER` unset: its signer is anvil's account 0, whose key is public.
+The executor joins once its Arc support is in (see `EXECUTOR_PRIVATE_KEY` above); until then intents are proposed and approved but not filled.
+Run one stack per key at a time: a laptop and the hosted machine signing with the same agent key would race for its nonces.
+
 ## Agent (MCP server)
 
 | Variable | Required | Meaning |

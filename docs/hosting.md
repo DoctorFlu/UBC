@@ -27,6 +27,7 @@ The chain is chosen by `COMPOSE_FILE` in `deploy/.env`.
 - `compose.yml:compose.arc.yml` uses a Policy contract already deployed on Arc testnet.
   There is no anvil and no executor, and the owner signs with a real browser wallet.
   It refuses to start until `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and `AGENT_PRIVATE_KEY` are set.
+  The console keeps a database of its own in this mode; the switch is in [Arc testnet](#arc-testnet).
 
 Two optional files go after the chain's:
 
@@ -69,7 +70,7 @@ Compose prefixes each name with the project name, `mandate`.
 
 | Volume | Files | Used by |
 | --- | --- | --- |
-| `mandate_console-data` | `console.sqlite` (with its `-wal` and `-shm`): workspaces, members, passkeys, sessions, agent tokens (as hashes) and the agents' keys (sealed with `CONSOLE_MASTER_KEY`), and each mandate's event cache, holdings, decision contexts, hedge plans, pairing, change requests and signal payments. | `console` |
+| `mandate_console-data` (`mandate_console-data-arc` on Arc testnet) | `console.sqlite` (with its `-wal` and `-shm`): workspaces, members, passkeys, sessions, agent tokens (as hashes) and the agents' keys (sealed with `CONSOLE_MASTER_KEY`), and each mandate's event cache, holdings, decision contexts, hedge plans, pairing, change requests and signal payments. | `console` |
 | `mandate_agent-data` | The MCP server's signal spend ledger and purchased signals. | `mcp` |
 | `mandate_chain` (demo chain only) | `anvil-state.json`, the chain itself, saved every 60 seconds (`ANVIL_STATE_INTERVAL`) and on shutdown, and `deployment.json`, the contract the other services use. | `anvil`, `chain-init`; read only for `console`, `mcp`, `executor` |
 | `mandate_caddy-data` | The HTTPS certificate and its key, and Caddy's account with Let's Encrypt. | `caddy` |
@@ -160,14 +161,14 @@ pbpaste | ./set-secret.sh GROK_WEBHOOK_URL    # from the clipboard (xclip -o or 
 ./set-secret.sh GROK_WEBHOOK_KEY              # or typed or pasted at its prompt, which shows nothing
 ```
 
-It accepts only `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, `GEMINI_API_KEY` and `GEMINI_API_SECRET`; the tokens and the master key are generated.
-It drops one trailing newline and refuses an empty value, a line break or other control character, a character outside printable ASCII (a non-breaking space from a web page), a space at either end and a single quote; the URL must start with `https://`.
+It accepts only `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, `GEMINI_API_KEY`, `GEMINI_API_SECRET`, `QUICKNODE_STREAM_SECURITY_TOKEN`, and the Arc testnet keys `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY` (see [Arc testnet](#arc-testnet)); the tokens and the master key are generated.
+It drops one trailing newline and refuses an empty value, a line break or other control character, a character outside printable ASCII (a non-breaking space from a web page), a space at either end and a single quote; the URL must start with `https://`, a key must be `0x` and 64 hex digits, and the Stream's token at least 32 characters.
 It writes the line as `NAME='value'`, because docker compose would otherwise expand a `$` in the value and cut it at ` #`.
 The file is rebuilt next to itself with mode 600 and moved over the old one, so it is never half written, and a failure leaves no temporary file; run it as the file's owner, so the owner stays.
 It prints only the name, the value's length and the first 12 hex digits of its SHA-256, which the owner can compare with `printf %s "$(pbpaste)" | shasum -a 256 | cut -c1-12` on their own computer.
 The executor reads `GEMINI_API_KEY` and `GEMINI_API_SECRET` when `EXECUTOR_VENUE=gemini` ([gemini-venue.md](gemini-venue.md)); it trades on Gemini's sandbox only, and the demo chain refuses production.
 
-For the Arc testnet mode, set `COMPOSE_FILE=compose.yml:compose.arc.yml` and fill `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` and `AGENT_PRIVATE_KEY`, and `ARC_RPC_URL` if you use a provider.
+For the Arc testnet mode, follow [Arc testnet](#arc-testnet): keys from `npm run arc:keygen`, gas and roles until `npm run arc:doctor` says `READY`, then `COMPOSE_FILE=compose.yml:compose.arc.yml` with `POLICY_ADDRESS` and `POLICY_DEPLOY_BLOCK`.
 Nothing executes approved intents in this mode yet: there is no executor for Arc testnet in this setup.
 
 ## 5. Start
@@ -282,7 +283,7 @@ for v in console-data agent-data chain caddy-data; do docker run --rm -v "mandat
 docker compose start
 ```
 
-`mandate_chain` exists only in the demo mode; skip it otherwise.
+`mandate_chain` exists only in the demo mode; skip it otherwise, and on Arc testnet add `console-data-arc` to the list.
 Archive each volume whole: the console's SQLite file runs in WAL mode, so `console.sqlite` alone, without its `-wal` file, can be almost empty.
 To back it up without stopping anything, as before an update that changes its schema, see [Updates that change the console's database](#updates-that-change-the-consoles-database).
 Copy the archives off the VM, together with `deploy/.env`, which holds the tokens and keys and must stay private.
@@ -794,6 +795,87 @@ instabox ssh mandate -- "sed -n 's/^MCP_AUTH_TOKEN=/Bearer /p' /data/mandate/man
 ```
 
 Wake the machine before a session (`instabox wake mandate`): a connector call that has to wake it waits for the resume, and during a cooldown it fails.
+
+## Arc testnet
+
+This switches a running demo-chain stack to the Policy contract on Arc testnet, `0x571D8ea7C86c80a230C10818743f8861084F82f3` (deploy block 72740419, [contracts/README.md](../contracts/README.md)).
+The commands are for the InstaBox machine (env file `/data/mandate/mandate.env`, code in `/data/mandate/repo`); on a plain VM, drop `--env-file ...` and edit `deploy/.env` instead.
+What each setting means, the doctor, and the RPC budget are in [configuration.md](configuration.md#arc-testnet).
+
+What changes:
+
+- `COMPOSE_FILE` takes `compose.arc.yml` instead of `compose.demo.yml`: no anvil, no `chain-init`, no demo executor, and a console image (`mandate-console:arc`) without the test signer, so the owner signs with their own browser wallet.
+- The env file gains `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY`; `ARC_RPC_URL` stays empty, so every service uses Arc's public RPC and spends no QuickNode credits.
+- The console uses a database of its own, in the volume `mandate_console-data-arc`, and leaves the demo chain's `mandate_console-data` as it is.
+  Chain events are kept per deployment, but the first mandate's offchain records (holdings, hedge plans, change requests, wake-ups) are kept per mandate, so in one database the demo chain's would show against the Arc contract.
+  So on Arc the first workspace is claimed again, with new passkeys; `MCP_AUTH_TOKEN` keeps working for Grok Bot (the console registers it on first use), but tokens made in the Agents section belong to the demo database.
+  Switching back to the demo chain finds its database, its chain and its tokens as they were.
+- Nothing executes approved intents on Arc yet: the executor's Arc support (its key, its role check, the simulated venue as the default) comes after #118, with an `executor` service in `compose.arc.yml`.
+
+### 1. Keys, gas and roles (before touching the machine)
+
+On the laptop, in the clone whose `.env` holds the Arc settings:
+
+```sh
+npm run arc:keygen                        # prints the agent and executor addresses, never the keys
+npm run arc:doctor -- --owner 0x<owner>   # lists what is missing
+```
+
+Then, in this order, until the doctor says `READY`:
+
+1. **Faucet** (the owner has approved it; a person does it in a browser): open https://faucet.circle.com, choose **Arc Testnet** and USDC, paste the agent address and request; repeat for the executor address.
+   Arc pays gas in USDC: one faucet drip covers hundreds of proposals and `recordResult` calls (the doctor prints how many).
+2. **Roles**: the owner calls `setAgent(<agent address>)` and `setExecutor(<executor address>)` on the contract from their wallet, exactly as the doctor prints them.
+3. `npm run arc:doctor -- --owner 0x<owner>` again: it must end `READY`.
+
+Run the doctor again after any later `setUser`, `setAgent` or `setExecutor`: the roles can change at any time.
+
+### 2. Back up the demo database
+
+The demo database is not touched by the switch, but back it up first anyway, as in step 2 of [Updates that change the console's database](#updates-that-change-the-consoles-database) (SQLite's online backup inside the running console, never a file copy).
+
+### 3. Put the keys on the machine
+
+The keys go from the laptop's env file to the machine's through a pipe into `set-secret.sh`, so they are never on a command line, in shell history, on a screen or in a log; `set-secret.sh` checks that each is `0x` and 64 hex digits and prints only its length and a hash:
+
+```sh
+sed -n 's/^AGENT_PRIVATE_KEY=//p' .env | instabox ssh mandate -- 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-secret.sh AGENT_PRIVATE_KEY'
+sed -n 's/^EXECUTOR_PRIVATE_KEY=//p' .env | instabox ssh mandate -- 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-secret.sh EXECUTOR_PRIVATE_KEY'
+```
+
+Compare each printed hash with `sed -n 's/^AGENT_PRIVATE_KEY=//p' .env | tr -d '\n' | shasum -a 256 | cut -c1-12` on the laptop.
+The demo compose file ignores both lines (its agent key is in `compose.demo.yml`), so setting them changes nothing until the switch.
+After the switch, the laptop must not run its own stack against Arc with the same keys: two processes signing with one key race for its nonces.
+
+### 4. Switch
+
+In `/data/mandate/mandate.env`, with an editor (none of these is a secret):
+
+- `COMPOSE_FILE=compose.yml:compose.arc.yml:compose.gateway.yml` (add `:compose.site.yml` if the landing page is served);
+- `POLICY_ADDRESS=0x571D8ea7C86c80a230C10818743f8861084F82f3` and `POLICY_DEPLOY_BLOCK=72740419`;
+- `ARC_RPC_URL=` (empty: Arc's public RPC) and `CONSOLE_EVENT_SOURCE=rpc`.
+
+Then build the Arc console image, start, and remove the demo chain's containers (their volumes stay):
+
+```sh
+cd /data/mandate/repo/deploy
+docker compose --env-file /data/mandate/mandate.env up -d --build --remove-orphans
+```
+
+Compose refuses to start while `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK` or `AGENT_PRIVATE_KEY` is missing, and the MCP server refuses to start with one of anvil's published keys.
+
+### 5. Claim and check
+
+1. Claim the first workspace again, as in [Claim the first workspace](#claim-the-first-workspace-1), and connect the owner's wallet in the console.
+2. `/api/health` reports the feed; the console reads the contract's history from block 72740419 once (a few `eth_getLogs` calls of 5,000 blocks), then polls every second.
+3. The Setup page and the MCP server's `get_setup_state` show the agent's address and gas, and the contract's roles.
+4. Before any trade, `npm run arc:doctor -- --owner 0x<owner>` on the laptop ends `READY`.
+
+### Back to the demo chain
+
+Put `COMPOSE_FILE` back to `compose.yml:compose.demo.yml:compose.gateway.yml` and run the same `up -d --build --remove-orphans`.
+The demo chain, its contract and its database are as they were left; the Arc lines in the env file are ignored by the demo compose file.
+If the QuickNode Stream is active, pause it first ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
 
 ## Limits
 

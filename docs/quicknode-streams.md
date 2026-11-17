@@ -485,6 +485,56 @@ A test asserts it equals viem's `formatLog` output for the same RPC logs and tha
 - **#14** asks for an intent to reach the browser within two seconds on the local chain.
   That path is the RPC poller; Streams cannot read the devchain, and QuickNode publishes no latency figure for Arc.
 
+## Plan for the Arc deployment (#19)
+
+Everything below is prepared and checked with `--dry-run`, which sends nothing; no QuickNode API call has been made for it.
+It runs only after the owner's yes on the budget.
+
+**The Stream.**
+
+| | Value |
+| --- | --- |
+| Network, dataset, region | `arc-testnet`, `logs`, `usa_east` |
+| Filter | `streams/filter.js` rendered with `POLICY_ADDRESSES = ["0x571d8ea7c86c80a230c10818743f8861084f82f3"]` and no topic allowlist (every Policy event) |
+| Start block | The chain tip: no `start_range`. The console reads the history before it over the RPC from `POLICY_DEPLOY_BLOCK` (72740419). A Stream from the deploy block would cost 20 credits per block behind the tip (228,000 at the 11,407 blocks of 2026-11-17, and about 3.46M more for each day after), and the script refuses a start more than 10,000 blocks back without `--allow-backfill`. |
+| Destination | `https://<host>/api/webhooks/quicknode`; on the InstaBox machine `https://8080-<machine id>.instabox.tech/api/webhooks/quicknode` |
+| Signature | `QUICKNODE_STREAM_SECURITY_TOKEN`, at least 32 characters, the same value in the laptop's `.env` (the script sends it to QuickNode) and on the machine (the console checks it) |
+| Batching | 5 blocks, elastic; no reorg handling, no distance from the tip |
+| Test block | 72740419: the deploy transaction emitted five Policy events in it |
+
+**Credits a day.**
+20 credits per block, whatever the filter returns: 3,456,000 a day (144,000 an hour) at 0.5 s blocks, about 3.40M at the 0.508 s measured over the 11,407 blocks after the deploy block.
+The month's 80M covers 23 days of nonstop streaming at most, before any RPC use, so the Stream is never left on unattended.
+The console's RPC poll in stream mode, every 15 s, is on Arc's public RPC and costs no credits ([configuration.md](configuration.md#which-rpc-each-service-uses-and-what-it-costs)); on QuickNode it would add 576,000 a day.
+
+**The pause rule.**
+
+- The Stream exists only paused, except during a demo window the owner has named.
+- Before each window: `status` shows the credits left for the period; the window's hours times 144,000, plus the period's other use, must fit with a wide margin.
+- At the end of every window, and before the hosted console is stopped or switched back to the demo chain, `pause`.
+- At once, `pause` if `status` shows overages above zero, or credits left below the days left in the period times the expected daily use.
+- QuickNode pauses the Stream itself after 5 failed deliveries (`max_retry`), for example while the console is down; `activate` resumes at the failed batch.
+
+**Before the yes** (no QuickNode call): the hosted console runs on Arc ([hosting.md](hosting.md#arc-testnet)), and the token is in both env files:
+
+```sh
+printf 'QUICKNODE_STREAM_SECURITY_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+printf 'QUICKNODE_STREAM_WEBHOOK_URL=%s\n' 'https://8080-<machine id>.instabox.tech/api/webhooks/quicknode' >> .env
+sed -n 's/^QUICKNODE_STREAM_SECURITY_TOKEN=//p' .env | instabox ssh mandate -- 'MANDATE_ENV_FILE=/data/mandate/mandate.env /data/mandate/repo/deploy/set-secret.sh QUICKNODE_STREAM_SECURITY_TOKEN'
+```
+
+`POLICY_ADDRESS` in the laptop's `.env` is the Arc contract, and `QUICKNODE_STREAM_START_BLOCK` is unset.
+Then set `CONSOLE_EVENT_SOURCE=stream` in the machine's env file and recreate the console (`docker compose --env-file /data/mandate/mandate.env up -d --no-deps --no-build console`); its RPC poll fills any gap every 15 s, so nothing is lost while the Stream is still paused.
+
+**After the yes**, one command creates the Stream paused, checks the filter on the test block and starts delivery:
+
+```sh
+npm run stream -w @mandate/streams -- status && npm run stream -w @mandate/streams -- upsert --yes-i-checked-the-budget && npm run stream -w @mandate/streams -- test-filter --block 72740419 && npm run stream -w @mandate/streams -- activate --yes-i-checked-the-budget
+```
+
+The off switch is `npm run stream -w @mandate/streams -- pause`.
+Outside a window, `CONSOLE_EVENT_SOURCE=rpc` makes the console's feed report its 1 s poll as live again instead of a late Stream.
+
 ## What a person must do
 
 1. Done: the account exists on the Build plan.
