@@ -106,6 +106,7 @@ The URL and the key are secrets: some products put a secret in the URL's path, s
 | `GROK_WEBHOOK_KEY` | for wake-ups | The routine's webhook key, sent as `Authorization: Bearer <key>`. Empty: wake-ups are off. |
 | `GROK_WAKE_DAILY_CAP` | no | Most wake-ups the console sends per UTC day, from 0 to 1000. Defaults to `12`, half again the 24 runs of an hourly schedule. |
 | `GROK_WAKE_PRICE_CHECK_MS` | no | Least time between two checks of Gemini's spot against the current goal, at least `1000`. Defaults to `300000` (5 minutes). The check rides on the console's chain poll, so it adds no timer. |
+| `GROK_WAKE_TEST_CLOCK` | no | `on` runs the wake-ups on a clock the end-to-end tests move forward through `POST /api/dev/wake-clock` (with the service token), so a debounce window ends when a test says so. For tests only: the console refuses to start with it in production. Defaults to `off`. |
 
 ## Landing page
 

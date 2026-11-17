@@ -26,6 +26,7 @@ import {
   settlementsResponseSchema,
   signalBudgetResponseSchema,
   signalPaymentResponseSchema,
+  summaryResponseSchema,
   type ContextResponse,
   type DecisionContext,
   type HoldingsResponse,
@@ -42,6 +43,7 @@ import {
   type SettlementsResponse,
   type SignalBudgetResponse,
   type SignalPaymentResponse,
+  type SummaryResponse,
 } from "@mandate/shared";
 import type { Config } from "../config";
 import type { Secret } from "../secret";
@@ -210,6 +212,13 @@ export class HttpConsoleClient implements ConsoleClient {
 
   async getSettlements(signal?: AbortSignal): Promise<SettlementsResponse | null> {
     return this.#call("GET", CONSOLE_AGENT_ROUTES.settlements, settlementsResponseSchema, {
+      signal,
+      notFoundAsNull: true,
+    });
+  }
+
+  async getSummary(signal?: AbortSignal): Promise<SummaryResponse | null> {
+    return this.#call("GET", CONSOLE_AGENT_ROUTES.summary, summaryResponseSchema, {
       signal,
       notFoundAsNull: true,
     });

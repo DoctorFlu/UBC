@@ -18,6 +18,7 @@ import {
   policyChangeRequestSchema,
   signalBudgetResponseSchema,
   signalPaymentResponseSchema,
+  summaryResponseSchema,
 } from "@mandate/shared";
 import type { EnvVars } from "@mandate/shared/node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -30,12 +31,14 @@ import { testConsoleConfig } from "../config";
 import { setConsoleServiceForTests } from "../console";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
+import type { LadderSource } from "../wake";
 import {
   getContext,
   getHoldings,
   getIntentContext,
   getPairing,
   getPolicyChangeRequest,
+  getSummary,
   postPlan,
   postPolicyChangeRequest,
   putContext,
@@ -107,10 +110,12 @@ const context: DecisionContext = {
   createdAt: "2026-11-14T15:51:00.000Z",
 };
 
-function examplePlan() {
+/** A three-rung BTC ladder, expiring at `expiry`. */
+function exampleLadder(expiry = "2026-11-20T22:00:00.000Z") {
+  const eventTicker = `BTC${expiry.slice(2, 4)}${expiry.slice(5, 7)}${expiry.slice(8, 10)}2200`;
   const rung = (strike: number, noBuyCents: number) => ({
     strikeCents: strike * 100,
-    instrumentSymbol: `GEMI-BTC2611202200-HI${String(strike)}`,
+    instrumentSymbol: `GEMI-${eventTicker}-HI${String(strike)}`,
     label: `$${strike.toLocaleString("en-US")} or above`,
     marketState: "open" as const,
     yesBidCents: 100 - noBuyCents,
@@ -120,27 +125,31 @@ function examplePlan() {
     lastTradeCents: null,
   });
   const spot = 6_558_600;
-  return planHedge({
-    holding: { asset: "BTC", quantity: "0.05" },
-    ladder: {
+  return {
+    asset: "BTC",
+    eventTicker,
+    title: "BTC price on expiry",
+    kind: "weekly" as const,
+    expiry,
+    settlementIndex: "LS-LRRR-XBTUSD",
+    spot: {
       asset: "BTC",
-      eventTicker: "BTC2611202200",
-      title: "BTC price on November 20",
-      kind: "weekly",
-      expiry: "2026-11-20T22:00:00.000Z",
-      settlementIndex: "LS-LRRR-XBTUSD",
-      spot: {
-        asset: "BTC",
-        symbol: "btcusd",
-        bidCents: spot,
-        askCents: spot,
-        lastCents: spot,
-        midCents: spot,
-        fetchedAt: "2026-11-14T15:50:00.000Z",
-      },
-      rungs: [rung(64_000, 34), rung(65_000, 43), rung(66_000, 53)],
+      symbol: "btcusd",
+      bidCents: spot,
+      askCents: spot,
+      lastCents: spot,
+      midCents: spot,
       fetchedAt: "2026-11-14T15:50:00.000Z",
     },
+    rungs: [rung(64_000, 34), rung(65_000, 43), rung(66_000, 53)],
+    fetchedAt: "2026-11-14T15:50:00.000Z",
+  };
+}
+
+function examplePlan(expiry?: string) {
+  return planHedge({
+    holding: { asset: "BTC", quantity: "0.05" },
+    ladder: exampleLadder(expiry),
     goal: { floorCents: 6_400_000, ceilingCents: 6_600_000 },
     maxCostCents: 4_500,
     limits: { maxTradeCents: 10_000, remainingBudgetCents: 100_000, categoryAllowed: true },
@@ -738,5 +747,122 @@ describe("agent API: intent to context links", () => {
       503,
       "chain_unavailable",
     );
+  });
+});
+
+describe("agent API: the owner's view (#97)", () => {
+  // A ladder that expires next week, whenever the test runs: only goals not expired yet are current.
+  const expiry = new Date(Date.now() + 7 * 86_400_000).toISOString().replace(/T.*/, "T22:00:00.000Z");
+  const plan = examplePlan(expiry);
+  const quotes: LadderSource = () => Promise.resolve({ ok: true, ladder: exampleLadder(expiry) });
+  const down: LadderSource = () => Promise.reject(new Error("Gemini did not answer"));
+  const summaryOf = async (service: ConsoleService, ladder: LadderSource) => {
+    const response = await getSummary(call("GET", CONSOLE_AGENT_ROUTES.summary), service, ladder);
+    expect(response.status).toBe(200);
+    return summaryResponseSchema.parse(await response.json());
+  };
+  const postGoal = async (service: ConsoleService) => {
+    const response = await postPlan(
+      call("POST", CONSOLE_AGENT_ROUTES.plans, {
+        planId: plan.planId,
+        asset: "BTC",
+        requestText: "Protect my 0.05 BTC below $64,000 this week.",
+        createdAt: new Date().toISOString(),
+        plan,
+      }),
+      service,
+    );
+    expect(response.status).toBe(201);
+  };
+  const fileRequest = async (service: ConsoleService, maxTradeCents: number) => {
+    const response = await postPolicyChangeRequest(
+      call("POST", CONSOLE_AGENT_ROUTES.policyChangeRequests, {
+        agentAddress: AGENT,
+        proposed: { maxTradeCents },
+        reason: "The top rung costs more than the max trade size.",
+      }),
+      service,
+    );
+    return policyChangeRequestSchema.parse(await response.json());
+  };
+
+  it("gives the console's address and only the change requests still waiting for the owner", async () => {
+    const service = makeService();
+    const dismissed = await fileRequest(service, 5_000);
+    const pending = await fileRequest(service, 6_000);
+    service.offchain.resolveChangeRequest(envMandate(service).id, dismissed.id, { status: "dismissed" });
+
+    const summary = await summaryOf(service, quotes);
+    expect(summary.consoleUrl).toBe("http://console.test");
+    expect(summary.changeRequests.map((request) => request.id)).toEqual([pending.id]);
+    expect(summary.cover).toEqual([]);
+  });
+
+  it("says unavailable, never not covered, when the console cannot read the chain", async () => {
+    const service = makeService();
+    await postGoal(service);
+    const [cover] = (await summaryOf(service, quotes)).cover;
+    expect(cover).toEqual({
+      asset: "BTC",
+      eventTicker: plan.eventTicker,
+      expiresAt: expiry,
+      planId: plan.planId,
+      floorCents: 6_400_000,
+      state: "unavailable",
+      spotCents: null,
+      measuredBelowCents: null,
+      targetPayoutCents: null,
+      heldPayoutCents: null,
+      heldByState: null,
+      coverBps: null,
+      missingPayoutCents: null,
+    });
+  });
+
+  it("refuses a call without the service token", async () => {
+    const service = makeService();
+    const response = await getSummary(
+      call("GET", CONSOLE_AGENT_ROUTES.summary, undefined, null),
+      service,
+      quotes,
+    );
+    await expectError(response, 401, "unauthorized");
+  });
+
+  describe("with the chain", () => {
+    let chain: TestChain;
+    let service: ConsoleService;
+
+    beforeAll(async () => {
+      chain = await startTestChain();
+      service = makeService({ env: chain.env });
+      service.start();
+      if (!(await service.whenSynced(15_000))) throw new Error("the console did not sync");
+      await postGoal(service);
+    }, 60_000);
+
+    afterAll(async () => {
+      await service.stop();
+      await chain.stop();
+    });
+
+    it("measures each current goal as the Hedge page's Cover now does", async () => {
+      const [cover] = (await summaryOf(service, quotes)).cover;
+      expect(cover).toMatchObject({
+        planId: plan.planId,
+        state: "not_met",
+        heldPayoutCents: 0,
+        heldByState: { filledCents: 0, awaitingFillCents: 0, awaitingOwnerCents: 0 },
+        coverBps: 0,
+      });
+      expect(cover?.targetPayoutCents).toBeGreaterThan(0);
+      expect(cover?.missingPayoutCents).toBe(cover?.targetPayoutCents);
+      expect(cover?.measuredBelowCents).toBe(6_400_000);
+    });
+
+    it("says unavailable when Gemini's quotes do not answer", async () => {
+      const [cover] = (await summaryOf(service, down)).cover;
+      expect(cover).toMatchObject({ planId: plan.planId, state: "unavailable", heldPayoutCents: null });
+    });
   });
 });

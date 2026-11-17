@@ -109,6 +109,7 @@ function scopedConsole(client: ConsoleClient, deadline: CallDeadline): ConsoleCl
       deadline.step("console.signal_budget", (signal) => client.putSignalBudget(request, both(signal, own))),
     getSettlements: (own) =>
       deadline.step("console.settlements", (signal) => client.getSettlements(both(signal, own))),
+    getSummary: (own) => deadline.step("console.summary", (signal) => client.getSummary(both(signal, own))),
   };
 }
 

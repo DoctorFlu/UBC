@@ -14,6 +14,7 @@ describe("readWakeConfig", () => {
       offReason: "Set GROK_WEBHOOK_URL and GROK_WEBHOOK_KEY on the console to the routine's webhook.",
       dailyCap: WAKE_DEFAULT_DAILY_CAP,
       priceCheckMs: DEFAULT_PRICE_CHECK_MS,
+      testClock: false,
     });
   });
 
@@ -44,5 +45,24 @@ describe("readWakeConfig", () => {
     });
     expect(() => readWakeConfig({ GROK_WAKE_DAILY_CAP: "-1" })).toThrow(/GROK_WAKE_DAILY_CAP/);
     expect(() => readWakeConfig({ GROK_WAKE_PRICE_CHECK_MS: "10" })).toThrow(/GROK_WAKE_PRICE_CHECK_MS/);
+  });
+
+  it("runs on the test clock only when asked, and never in production", () => {
+    expect(readWakeConfig({ GROK_WAKE_TEST_CLOCK: "on" }).testClock).toBe(true);
+    expect(readWakeConfig({ GROK_WAKE_TEST_CLOCK: "off" }).testClock).toBe(false);
+    expect(() => readWakeConfig({ GROK_WAKE_TEST_CLOCK: "yes" })).toThrow(/GROK_WAKE_TEST_CLOCK/);
+    expect(
+      readConsoleConfig({ CONSOLE_MODE: "development", GROK_WAKE_TEST_CLOCK: "on" }).wake.testClock,
+    ).toBe(true);
+    expect(() =>
+      readConsoleConfig({
+        CONSOLE_MODE: "production",
+        GROK_WAKE_TEST_CLOCK: "on",
+        CONSOLE_URL: "https://console.example",
+      }),
+    ).toThrow(/GROK_WAKE_TEST_CLOCK=on is refused in production/);
+    expect(() => readConsoleConfig({ NODE_ENV: "production", GROK_WAKE_TEST_CLOCK: "on" })).toThrow(
+      /refused in production/,
+    );
   });
 });

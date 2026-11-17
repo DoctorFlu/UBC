@@ -53,6 +53,8 @@ import {
   signTransactionRequestSchema,
   type ConsoleHolding,
   type ContextResponse,
+  type CoverNowView,
+  type SummaryResponse,
   type IntentContextResponse,
   type PairingResponse,
   type PolicyChangeRequest,
@@ -90,6 +92,11 @@ export interface FakeConsoleOptions {
   isContractAgent?: (address: string) => boolean | Promise<boolean>;
   /** The contract's executor: a settlement signed by anyone else is refused (403). Any signer when unset. */
   executorAddress?: Address;
+  /**
+   * The cover held now against each current goal, which the real console measures on Gemini's quotes
+   * (`GET /summary`). None when unset.
+   */
+  cover?: (state: FakeConsoleState) => CoverNowView[] | Promise<CoverNowView[]>;
   now?: () => Date;
   /** Which Gemini its public `GET /api/health` says it reads. Production by default. */
   marketEnvironment?: GeminiEnvironment;
@@ -458,6 +465,17 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
       ),
     }),
   );
+
+  api.get("/summary", async (c) => {
+    const t = tenant(c);
+    const answer: SummaryResponse = {
+      consoleUrl: publicUrl,
+      changeRequests: [...t.changeRequests.values()].filter((r) => r.status === "pending").reverse(),
+      cover: (await options.cover?.(t)) ?? [],
+      asOf: now().toISOString(),
+    };
+    return c.json(answer);
+  });
 
   const executor = new Hono();
   executor.put("/settlements/:intentId", async (c) => {

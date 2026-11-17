@@ -124,6 +124,33 @@ test.describe("public pages", () => {
 });
 
 test.describe("seeded demo", () => {
+  test("on a phone, each label of the pairing card stays on one line beside its value", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/setup");
+    const card = page.getByTestId("pairing-card");
+    await expect(card.locator("dt")).toHaveText(["Agent", "Address", "Status", "Can propose"]);
+    const rows = await card.locator("dt").evaluateAll((labels) =>
+      labels.map((label) => {
+        const value = label.nextElementSibling;
+        if (!value) throw new Error(`"${label.textContent}" has no value`);
+        const box = label.getBoundingClientRect();
+        const beside = value.getBoundingClientRect();
+        return {
+          label: label.textContent,
+          lines: Math.round(box.height / parseFloat(getComputedStyle(label).lineHeight)),
+          besideValue: beside.left >= box.right && beside.top < box.bottom,
+        };
+      }),
+    );
+    expect(rows).toEqual(
+      ["Agent", "Address", "Status", "Can propose"].map((label) => ({ label, lines: 1, besideValue: true })),
+    );
+    // The longest value wraps inside the card instead of pushing it wider.
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+    ).toBeLessThanOrEqual(0);
+  });
+
   test("the tag beside the logo names the chain the console resolved", async ({ page }) => {
     await page.goto("/setup");
     await expect(page.getByTestId("network-tag").filter({ visible: true })).toHaveText("Local");
