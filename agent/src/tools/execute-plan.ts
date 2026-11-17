@@ -17,10 +17,11 @@ import {
 } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import type { AgentPolicy } from "../services";
-import { PLAN_EXECUTABLE_FOR_MS, type OrderOutcome, type StoredPlan } from "../state/plans";
-import { notConfigured, unavailableFor, type Failure } from "../support/failures";
+import { ladderLockKey, PLAN_EXECUTABLE_FOR_MS, type OrderOutcome, type StoredPlan } from "../state/plans";
+import { describeFailure, notConfigured, unavailableFor, type Failure } from "../support/failures";
 import { AFTER_REJECTION } from "../support/rules";
 import { linkPending, relinkContext } from "../trading/context";
+import { heldPositions } from "../trading/positions";
 import { proposeIntent } from "../trading/propose";
 import { decisionReasonArg, signalReceiptIdsArg } from "./propose-trade";
 
@@ -58,10 +59,20 @@ const ExecutionSchema = z.object({
     .describe("Decision-context hashes are onchain (null before any order)"),
   orders: z.array(OrderRowSchema),
   ordersTruncated: z.boolean(),
+  coverChangedBy: z
+    .array(z.int())
+    .nullable()
+    .describe(
+      "Intents that added protection on this ladder after the plan was made, so the rest of the plan was not sent. Plan again",
+    ),
 });
 type Execution = z.infer<typeof ExecutionSchema>;
 
-function executionView(stored: StoredPlan, recorded: boolean | null): Execution {
+function executionView(
+  stored: StoredPlan,
+  recorded: boolean | null,
+  coverChangedBy: number[] | null = null,
+): Execution {
   const total = stored.plan.orders.length;
   const rows = stored.outcomes.slice(-MAX_ROWS);
   return {
@@ -74,8 +85,27 @@ function executionView(stored: StoredPlan, recorded: boolean | null): Execution 
     contextHashRecorded: recorded,
     orders: rows,
     ordersTruncated: rows.length < stored.outcomes.length,
+    coverChangedBy,
   };
 }
+
+/**
+ * Intents on the plan's ladder that hold protection the plan did not count when it was made: neither in
+ * its basis nor one of its own orders. Empty when the plan is still exactly the missing part.
+ */
+async function newerPositions(policy: AgentPolicy, stored: StoredPlan): Promise<number[]> {
+  const own = new Set(stored.outcomes.map((o) => o.intentId));
+  const positions = await heldPositions(policy, { rungs: stored.strikes });
+  return positions
+    .map((p) => p.intentId)
+    .filter((id) => !own.has(id) && !stored.basis.has(id))
+    .sort((a, b) => a - b);
+}
+
+type OrderStep =
+  | { kind: "proposed"; outcome: Awaited<ReturnType<typeof proposeIntent>> }
+  | { kind: "cover_changed"; intentIds: number[] }
+  | { kind: "unreadable"; failure: Failure };
 
 /**
  * Receipts every order of the plan cites: the signal the plan was built with, when it was actually
@@ -93,14 +123,21 @@ async function runOrders(
   policy: AgentPolicy,
   stored: StoredPlan,
   input: { reason: string; signalReceiptIds: string[] },
-): Promise<{ failure: Failure | null; recorded: boolean | null; outOfTime: boolean }> {
+): Promise<{
+  failure: Failure | null;
+  recorded: boolean | null;
+  outOfTime: boolean;
+  coverChangedBy: number[] | null;
+}> {
   const started = Date.now();
   let recorded: boolean | null = null;
   // Once the console failed to take a link, later orders only queue theirs instead of waiting again.
   let consoleDown = false;
   const { plan } = stored;
   while (stored.stoppedAt === null && stored.outcomes.length < plan.orders.length) {
-    if (Date.now() - started > EXECUTION_BUDGET_MS) return { failure: null, recorded, outOfTime: true };
+    if (Date.now() - started > EXECUTION_BUDGET_MS) {
+      return { failure: null, recorded, outOfTime: true, coverChangedBy: null };
+    }
     const orderIndex = stored.outcomes.length;
     const order = plan.orders[orderIndex];
     if (order === undefined) break;
@@ -108,27 +145,45 @@ async function runOrders(
       0,
       plan.rungs.findIndex((r) => r.instrumentSymbol === order.instrumentSymbol),
     );
-    const outcome = await proposeIntent(
-      ctx,
-      policy,
-      {
-        market: order.instrumentSymbol,
-        outcome: "NO",
-        isBuy: true,
-        amountCents: order.amountCents,
-        limitPrice: order.limitPriceCents,
-        categoryId: stored.categoryId,
-      },
-      {
-        requestText: stored.requestText,
-        planId: plan.planId,
-        rungIndex,
-        ladderSummary: stored.ladderSummary,
-        signalReceiptIds: citedReceipts(plan.signal, input.signalReceiptIds),
-        reason: input.reason,
-      },
-      { linkContext: !consoleDown },
-    );
+    // Reading the positions and adding one is a single step per ladder, so two runs at the same
+    // moment, or a stale plan, can never both count the same gap and fill it twice.
+    const step = await ctx.plans.exclusive(ladderLockKey(plan.eventTicker), async (): Promise<OrderStep> => {
+      let newer: number[];
+      try {
+        newer = await newerPositions(policy, stored);
+      } catch (error) {
+        return { kind: "unreadable", failure: describeFailure(error, ctx) };
+      }
+      if (newer.length > 0) return { kind: "cover_changed", intentIds: newer };
+      const proposed = await proposeIntent(
+        ctx,
+        policy,
+        {
+          market: order.instrumentSymbol,
+          outcome: "NO",
+          isBuy: true,
+          amountCents: order.amountCents,
+          limitPrice: order.limitPriceCents,
+          categoryId: stored.categoryId,
+        },
+        {
+          requestText: stored.requestText,
+          planId: plan.planId,
+          rungIndex,
+          ladderSummary: stored.ladderSummary,
+          signalReceiptIds: citedReceipts(plan.signal, input.signalReceiptIds),
+          reason: input.reason,
+        },
+        { linkContext: !consoleDown },
+      );
+      return { kind: "proposed", outcome: proposed };
+    });
+    if (step.kind === "unreadable")
+      return { failure: step.failure, recorded, outOfTime: false, coverChangedBy: null };
+    if (step.kind === "cover_changed") {
+      return { failure: null, recorded, outOfTime: false, coverChangedBy: step.intentIds };
+    }
+    const outcome = step.outcome;
     const base: Omit<OrderOutcome, "decision" | "intentId" | "reason" | "txHash" | "contextLinked"> = {
       orderIndex,
       rungIndex,
@@ -151,7 +206,7 @@ async function runOrders(
         });
         stored.stoppedAt = orderIndex;
       }
-      return { failure: outcome.failure, recorded, outOfTime: false };
+      return { failure: outcome.failure, recorded, outOfTime: false, coverChangedBy: null };
     }
     recorded = outcome.result.contextHashRecorded;
     const contextLinked = outcome.proposal.context?.contextLinked ?? null;
@@ -166,7 +221,7 @@ async function runOrders(
     });
     if (outcome.result.verdict === "rejected") stored.stoppedAt = orderIndex;
   }
-  return { failure: null, recorded, outOfTime: false };
+  return { failure: null, recorded, outOfTime: false, coverChangedBy: null };
 }
 
 /**
@@ -186,8 +241,24 @@ function verdictFor(
   failure: Failure | null,
   outOfTime: boolean,
   replayed: boolean,
+  coverChangedBy: number[] | null,
 ): Verdict {
   const outcomes = stored.outcomes;
+  if (coverChangedBy !== null) {
+    const sent = outcomes.length;
+    return ok(
+      [
+        reason(
+          "COVER_CHANGED",
+          `Since this plan was made, intent${coverChangedBy.length === 1 ? "" : "s"} ${coverChangedBy.map((id) => `#${id.toString()}`).join(", ")} added protection on this ladder that the plan did not count, so its remaining ${(stored.plan.orders.length - sent).toString()} order${stored.plan.orders.length - sent === 1 ? " was" : "s were"} not sent. Protection never goes beyond the goal.`,
+        ),
+      ],
+      {
+        actor: "agent",
+        hint: "Call plan_hedge again with the same goal: it counts every position and plans only what is still missing, often nothing. Tell the owner what this plan did send.",
+      },
+    );
+  }
   const stopped = stored.stoppedAt === null ? undefined : outcomes[stored.stoppedAt];
   if (stopped?.decision === "rejected") {
     return rejected(
@@ -247,7 +318,7 @@ export const executePlan = defineTool({
   name: "execute_plan",
   title: "Execute a hedge plan",
   description:
-    "Submits the orders of a plan from plan_hedge to the Policy contract, one intent per order, in order, and reports the mandate's answer for each. It stops at the first rejection and never sends the orders after it. Orders above the approval threshold wait for the owner. Calling it again with the same planId continues where it stopped or returns the recorded results; it never sends an order twice. Plans can be executed for 30 minutes after planning. Get the owner's agreement first.",
+    "Submits the orders of a plan from plan_hedge to the Policy contract, one intent per order, in order, and reports the mandate's answer for each. It stops at the first rejection and never sends the orders after it. Orders above the approval threshold wait for the owner. Calling it again with the same planId continues where it stopped or returns the recorded results; it never sends an order twice. Before each order it checks the positions on the ladder: if other orders added protection since the plan was made, it stops (COVER_CHANGED) so protection never goes beyond the goal; plan again then. Plans can be executed for 30 minutes after planning. Get the owner's agreement first.",
   inputSchema: z.object({
     planId: z.string().trim().min(1).max(128).describe("The planId plan_hedge returned"),
     reason: decisionReasonArg,
@@ -295,7 +366,7 @@ export const executePlan = defineTool({
       const already = stored.stoppedAt !== null || stored.outcomes.length === stored.plan.orders.length;
       const run =
         already || !fresh
-          ? { failure: null, recorded: null, outOfTime: false }
+          ? { failure: null, recorded: null, outOfTime: false, coverChangedBy: null }
           : await runOrders(ctx, policy, stored, input);
       const v =
         !already && !fresh
@@ -311,13 +382,13 @@ export const executePlan = defineTool({
                 hint: "Tell the owner which orders went through, then call plan_hedge again for the rest.",
               },
             )
-          : verdictFor(stored, run.failure, run.outOfTime, already);
+          : verdictFor(stored, run.failure, run.outOfTime, already, run.coverChangedBy);
       const recorded =
         run.recorded ??
         (stored.outcomes.length === 0
           ? null
           : (ctx.ledger.lookup(stored.outcomes[0]?.intentId ?? -1)?.contextHashRecorded ?? null));
-      const execution = executionView(stored, recorded);
+      const execution = executionView(stored, recorded, run.coverChangedBy);
       const tally = (d: OrderOutcome["decision"]) => stored.outcomes.filter((o) => o.decision === d).length;
       const spent = stored.outcomes
         .filter((o) => o.decision === "approved")

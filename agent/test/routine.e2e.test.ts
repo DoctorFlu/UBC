@@ -93,6 +93,16 @@ describe("the hedge routine against the real server, chain and executor (issue #
     await s.settled();
     expect(bought(await s.intents())).toEqual(once);
     expect(second.executions).toEqual([]);
+    // The server says so, with the numbers, so the agent never has to judge it.
+    expect(field(second.plan.structured, "reasons", 0, "code")).toBe("ALREADY_COVERED");
+    expect(field(second.plan.structured, "plan", "cover")).toMatchObject({
+      state: "met",
+      measuredBelowCents: 6_300_000,
+      heldPayoutCents: 5_700,
+      targetPayoutCents: 5_750,
+      heldByState: { filledCents: 5_700, awaitingFillCents: 0, awaitingOwnerCents: 0 },
+    });
+    expect(second.plan.text).toContain("already covered below $63,000");
   });
 
   it("buys once when two runs overlap and each retries execute_plan", async () => {
@@ -131,15 +141,18 @@ describe("the hedge routine against the real server, chain and executor (issue #
     // Executing the stale plan now must not add protection.
     const late = await s.call("execute_plan", { planId: staleId, reason: REASON });
     expect(late.isError).toBe(false);
+    expect(field(late.structured, "reasons", 0, "code")).toBe("COVER_CHANGED");
+    expect(field(late.structured, "execution", "submitted")).toBe(0);
+    expect(field(late.structured, "execution", "coverChangedBy")).toEqual([0, 1, 2]);
     await s.settled();
     expect(bought(await s.intents())).toEqual(covered);
   });
 
-  it("counts an order waiting for the owner as cover, and buys only the missing rung once it is rejected", async () => {
-    stack = await startStack({ holdings: [{ asset: "BTC", quantity: "0.12" }], spotCents: SPOT });
+  it("counts an order waiting for the owner as cover", async () => {
+    stack = await startStack({ holdings: [{ asset: "BTC", quantity: "0.105" }], spotCents: SPOT });
     const s = stack;
 
-    // 0.12 BTC: the $63,500 rung costs $24, above the $20 approval threshold, so it waits for the owner.
+    // 0.105 BTC: the $63,500 rung costs $21, above the $20 approval threshold, so it waits for the owner.
     await routineRun(s);
     await s.settled();
     const intents = await s.intents();
@@ -147,18 +160,38 @@ describe("the hedge routine against the real server, chain and executor (issue #
     expect(held.map((intent) => intent.market)).toEqual([ladderSymbol(63_500)]);
     const first = bought(intents);
 
-    await routineRun(s);
+    // The next run does not buy that slice again while the owner has not decided. (What happens once
+    // the owner rejects it is covered by the red team, which holds the owner's key; this package never
+    // names an owner function.)
+    const second = await routineRun(s);
+    expect(field(second.plan.structured, "plan", "cover", "state")).toBe("met");
+    expect(field(second.plan.structured, "plan", "cover", "heldByState", "awaitingOwnerCents")).toBe(5_250);
     await s.settled();
     expect(bought(await s.intents())).toEqual(first);
+  });
 
-    // The owner rejects it: that slice is now missing, and only that slice is bought again.
-    const heldId = held[0]?.id ?? -1;
-    await s.owner.rejectIntent(heldId);
-    const third = await routineRun(s);
-    const orders = (field(third.plan.structured, "plan", "orders") ?? []) as { instrumentSymbol: string }[];
-    expect(orders.map((order) => order.instrumentSymbol)).toEqual([ladderSymbol(63_500)]);
+  it("completes a plan the cost cap cut short with only the missing contracts", async () => {
+    stack = await startStack({ holdings: [{ asset: "BTC", quantity: "0.12" }], spotCents: SPOT });
+    const s = stack;
+
+    // 0.12 BTC needs $50.40 of protection; at most $45 per plan cuts the $63,000 rung to 42 contracts.
+    const first = await routineRun(s);
+    expect(field(first.plan.structured, "plan", "cover", "state")).toBe("not_met");
     await s.settled();
-    const after = bought(await s.intents());
-    expect(after).toEqual(first);
+
+    const second = await routineRun(s);
+    expect(field(second.plan.structured, "plan", "cover", "state")).toBe("partly_met");
+    const orders = (field(second.plan.structured, "plan", "orders") ?? []) as {
+      instrumentSymbol: string;
+      quantity: string;
+    }[];
+    expect(orders.map((o) => [o.instrumentSymbol, o.quantity])).toEqual([[ladderSymbol(63_000), "18.00"]]);
+    await s.settled();
+    const done = bought(await s.intents());
+
+    const third = await routineRun(s);
+    expect(field(third.plan.structured, "plan", "cover", "state")).toBe("met");
+    await s.settled();
+    expect(bought(await s.intents())).toEqual(done);
   });
 });

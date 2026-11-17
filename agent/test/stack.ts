@@ -92,8 +92,6 @@ export interface Stack {
   server: MandateServer;
   /** Reads the contract as anyone can. */
   reader: PolicyClient;
-  /** The owner, for approving or rejecting held intents. */
-  owner: PolicyClient;
   /** One tool call in a fresh MCP session. */
   call: (name: string, args?: Structured) => Promise<ToolResult>;
   /** Every intent the contract stores, oldest first. */
@@ -144,7 +142,6 @@ export async function startStack(options: {
   try {
     const policy = chain.deployment.address;
     const reader = devPolicyClient(chain.rpcUrl, policy, "outsider");
-    const owner = devPolicyClient(chain.rpcUrl, policy, "user");
     const markets = new MovingMarkets(options.spotCents);
 
     executor = startSimulatedExecutor({
@@ -235,7 +232,6 @@ export async function startStack(options: {
       console: fake,
       server,
       reader,
-      owner,
       call,
       intents,
       settled,

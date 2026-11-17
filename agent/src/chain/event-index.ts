@@ -11,6 +11,7 @@ import {
  * blocks; set POLICY_DEPLOY_BLOCK to scan the full history instead.
  */
 export const DEFAULT_LOOKBACK_BLOCKS = 200_000n;
+const MAX_SYNC_ROUNDS = 5;
 
 /**
  * Policy events kept by the long-lived server process and caught up incrementally, so each tool
@@ -29,9 +30,19 @@ export class EventIndex {
     this.#deployBlock = deployBlock;
   }
 
-  /** Intents seen in the scanned blocks, by id. */
+  /**
+   * Intents seen in the scanned blocks, by id, up to at least the block that was latest when this call
+   * started. A transaction confirmed before the call is therefore always in the answer, even when the
+   * call joins a scan that another caller started earlier.
+   */
   async intents(): Promise<ReadonlyMap<number, IntentView>> {
-    await this.sync();
+    const latest = await this.#latest();
+    // A node behind a load balancer can answer with an older block; a few rounds catch up with it.
+    for (let round = 0; this.#nextBlock === undefined || this.#nextBlock <= latest; round++) {
+      if (round === MAX_SYNC_ROUNDS)
+        throw new Error(`The chain node did not reach block ${latest.toString()}`);
+      await this.sync();
+    }
     return new Map(Object.values(this.#state.intents).map((intent) => [intent.id, intent]));
   }
 
@@ -43,8 +54,12 @@ export class EventIndex {
     return this.#syncing;
   }
 
+  #latest(): Promise<bigint> {
+    return this.#client.publicClient.getBlockNumber({ cacheTime: 0 });
+  }
+
   async #catchUp(): Promise<void> {
-    const latest = await this.#client.publicClient.getBlockNumber({ cacheTime: 0 });
+    const latest = await this.#latest();
     const from =
       this.#nextBlock ??
       this.#deployBlock ??
