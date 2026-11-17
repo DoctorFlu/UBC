@@ -77,6 +77,8 @@ for (const scheme of schemes) {
             await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toHaveCount(1);
           } else {
             await expect(page.getByTestId("owner-address")).toHaveCount(0);
+            // Outside a mandate (Home, New mandate) the dev signer signs nothing, so it is not shown.
+            await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
           }
           await page.waitForLoadState("networkidle");
           expect(problems).toEqual([]);
