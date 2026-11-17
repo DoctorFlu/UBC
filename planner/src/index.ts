@@ -1,10 +1,12 @@
 export {
   assessCover,
   COVER_TOLERANCE_BPS,
+  coverOfPlan,
   positionsFromIntents,
   type CoverInput,
   type CoverLadder,
   type IntentPosition,
+  type PlanGoal,
   type RecordedIntent,
 } from "./cover";
 export { hedgePayoutCents, planHedge } from "./plan";

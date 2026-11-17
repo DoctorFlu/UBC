@@ -58,6 +58,7 @@ export const STEPS = {
   "console.signal_payment": ["console", "the signal payment report"],
   "console.signal_budget": ["console", "the signal budget report"],
   "console.settlements": ["console", "the settlements"],
+  "console.summary": ["console", "the owner's view"],
   "signals.buy": ["signals", "the signal purchase"],
   "lock.plan": ["lock", "plan"],
   "lock.ladder": ["lock", "ladder"],

@@ -37,7 +37,7 @@ import { toolContext } from "../src/mcp/tool";
 import { createHedgePlanner } from "../src/planning/planner";
 import { Secret } from "../src/secret";
 import type { AgentPolicy, MarketsClient, Services } from "../src/services";
-import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
+import { createFakeConsole, type FakeConsole, type FakeConsoleOptions } from "../testing/fake-console";
 import { fixedClock, TEST_ADDRESS, TEST_POLICY, TEST_PRIVATE_KEY, testConfig } from "./helpers";
 
 /** The devchain's demo rules: $10 approved, $22 held, $30 over max trade, Sports not allowed. */
@@ -412,6 +412,8 @@ export function harness(
     console?: boolean;
     holdings?: { asset: string; quantity: string; note?: string }[];
     payments?: Services["payments"];
+    /** The cover the console reports for current goals (`GET /summary`). */
+    cover?: FakeConsoleOptions["cover"];
   } = {},
 ): Harness {
   const env = {
@@ -427,6 +429,7 @@ export function harness(
     token: CONSOLE_TOKEN,
     holdings: options.holdings ?? [{ asset: "BTC", quantity: "0.05", note: "cold wallet" }],
     now: () => fixedClock.now(),
+    ...(options.cover === undefined ? {} : { cover: options.cover }),
     isContractAgent: (address) =>
       policy !== undefined && address.toLowerCase() === policy.contractAgent.toLowerCase(),
   });

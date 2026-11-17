@@ -72,6 +72,8 @@ export class ConsoleWake {
       onChange: () => void;
       fetch?: WakeFetch;
       now?: () => number;
+      /** Runs a task after some time on the same clock as `now` (`test-clock.ts`). */
+      schedule?: (task: () => void, ms: number) => () => void;
     },
   ) {
     this.store = new SqliteWakeStore(db, mandateId);
@@ -84,6 +86,7 @@ export class ConsoleWake {
       onChange: options.onChange,
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.now ? { now: options.now } : {}),
+      ...(options.schedule ? { schedule: options.schedule } : {}),
     });
   }
 

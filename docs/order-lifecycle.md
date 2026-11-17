@@ -94,7 +94,7 @@ The console (all from the verified records only):
 
 The agent (no tool input changed):
 
-- `get_activity` returns `settlements`: totals and the last few settled ladders, and each intent's `settlement`.
+- `get_activity` returns `settlements`: totals and the last few settled ladders, and each intent's `settlement`; its `last24h.settled` counts the ones the console stored in the last 24 hours, for the daily digest ([grok-bot.md](grok-bot.md#daily-digest-issue-97)).
 - `get_portfolio` returns `settled`, with the last settled ladder, and says that ladder is over.
 - `plan_hedge` never offers an expired ladder, so the next plan rolls to the next one by itself.
 - The console wakes the routine once per settled ladder (`ladder_settled`, [event-wake.md](event-wake.md)), with the ladder's cost, payout and net.

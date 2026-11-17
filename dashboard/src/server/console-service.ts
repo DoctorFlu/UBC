@@ -56,6 +56,7 @@ import {
   type StoredPairing,
   type StoredPlan,
 } from "./store/offchain";
+import { TestClock } from "./test-clock";
 import { ConsoleWake, type LadderSource, NO_WAKE_TARGET_REASON, wakeOffStatus } from "./wake";
 import { type SettlementRow, SettlementStore } from "./store/settlements";
 import { type SignedRow, type VenueOrderRow, VenueOrderStore } from "./store/venue-orders";
@@ -112,6 +113,8 @@ export class ConsoleService {
   readonly mandates: MandateManager;
   /** Passkey confirmation of each owner action the console signs (#95). */
   readonly stepUp: StepUp;
+  /** The wake-ups' clock when `GROK_WAKE_TEST_CLOCK=on`, which the end-to-end tests move; otherwise null. */
+  readonly wakeClock: TestClock | null;
 
   /** The server's configured contract. */
   private readonly envFollower: ContractFollower;
@@ -167,11 +170,14 @@ export class ConsoleService {
     this.mandates = new MandateManager(this);
     this.stepUp = new StepUp(config.accounts, this.accounts.store);
     this.envMandateId = this.accounts.store.envMandate().id;
+    this.wakeClock = config.wake.testClock ? new TestClock() : null;
+    // One webhook, from the settings, for the mandate on the server's contract (docs/accounts.md).
     this.wake = new ConsoleWake(config, db, this.envMandateId, {
       logger: this.log,
       onChange: () => {
         this.changed(this.envMandateId);
       },
+      ...(this.wakeClock ? { now: this.wakeClock.now, schedule: this.wakeClock.schedule } : {}),
       ...(options.ladder ? { ladder: options.ladder } : {}),
       ...(options.wakeFetch ? { fetch: options.wakeFetch } : {}),
     });

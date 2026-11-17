@@ -56,6 +56,12 @@ export const CONSOLE_AGENT_ROUTES = {
   signTransaction: `${CONSOLE_AGENT_API_BASE}/signer/transactions`,
   /** GET: the settlements the executor recorded for the agent's mandate, newest first. Issue #92. */
   settlements: `${CONSOLE_AGENT_API_BASE}/settlements`,
+  /**
+   * GET: what the owner sees in the console that the agent reads nowhere else: the console's public
+   * address for links, the agent's change requests still waiting for the owner, and the cover held now
+   * against each current goal. Issue #97.
+   */
+  summary: `${CONSOLE_AGENT_API_BASE}/summary`,
 } as const;
 
 /**
@@ -392,6 +398,57 @@ export const settlementsResponseSchema = z.strictObject({
   settlements: z.array(storedSettlementSchema),
 });
 export type SettlementsResponse = z.infer<typeof settlementsResponseSchema>;
+
+// The owner's view (#97)
+
+/**
+ * `unavailable`: the console could not measure it now (Gemini's quotes did not answer, or the planner
+ * refused the holding). The other states are the planner's (`docs/cover.md`).
+ */
+export const COVER_NOW_STATES = ["met", "partly_met", "not_met", "nothing_to_cover", "unavailable"] as const;
+
+/** The cover held now against one current goal: the agent's latest plan for an asset, not expired yet. */
+export const coverNowSchema = z.strictObject({
+  asset: z.string().min(1),
+  eventTicker: z.string().min(1),
+  /** When the goal's ladder expires. */
+  expiresAt: isoDateTime,
+  /** The plan that set the goal. */
+  planId: z.string().min(1),
+  floorCents: z.int().nullable(),
+  state: z.enum(COVER_NOW_STATES),
+  /** Spot the cover was measured from, or null when `unavailable`. */
+  spotCents: z.int().nullable(),
+  /** Cover is what the positions pay if the price ends below this. Null when there is nothing to cover. */
+  measuredBelowCents: z.int().nullable(),
+  /** What the goal calls for there. Null when `unavailable`. */
+  targetPayoutCents: z.int().nullable(),
+  /** What the positions held on the ladder (filled, waiting to fill, waiting for the owner) pay there. */
+  heldPayoutCents: z.int().nullable(),
+  /**
+   * `heldPayoutCents` split by how far each position has come: filled, approved and waiting to fill, and
+   * waiting for the owner's approval. Null when `unavailable`.
+   */
+  heldByState: z
+    .strictObject({ filledCents: z.int(), awaitingFillCents: z.int(), awaitingOwnerCents: z.int() })
+    .nullable(),
+  /** held / target in basis points (10000 is 100%), or null. */
+  coverBps: z.int().nullable(),
+  /** What a new plan would add below the floor: the shortfall, or 0 when met. */
+  missingPayoutCents: z.int().nullable(),
+});
+export type CoverNowView = z.infer<typeof coverNowSchema>;
+
+export const summaryResponseSchema = z.strictObject({
+  /** The console's public address: links for the owner are built on it. */
+  consoleUrl: z.url(),
+  /** The agent's change requests still waiting for the owner, newest first. */
+  changeRequests: z.array(policyChangeRequestSchema),
+  /** One entry per current goal, at most one per asset. Empty when the agent has no current goal. */
+  cover: z.array(coverNowSchema),
+  asOf: isoDateTime,
+});
+export type SummaryResponse = z.infer<typeof summaryResponseSchema>;
 
 // Venue orders and the executor's venue (#93)
 

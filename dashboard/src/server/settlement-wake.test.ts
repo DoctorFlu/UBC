@@ -39,7 +39,13 @@ function config(dataDir: string): ConsoleConfig {
   return testConsoleConfig(dataDir, {
     pollIntervalMs: 50,
     publicUrl: "http://localhost:3000",
-    wake: { target: new WakeTarget(SECRET_URL, KEY), offReason: null, dailyCap: 6, priceCheckMs: 60_000 },
+    wake: {
+      target: new WakeTarget(SECRET_URL, KEY),
+      offReason: null,
+      dailyCap: 6,
+      priceCheckMs: 60_000,
+      testClock: false,
+    },
   });
 }
 

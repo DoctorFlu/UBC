@@ -150,20 +150,23 @@
   font-size: var(--text-sm);
 }
 
+/* The label keeps its line and the value wraps beside it, its first line on the label's baseline. */
 .network > div {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--space-4);
 }
 
 .network dt {
+  flex: none;
   color: var(--color-text-muted);
 }
 
 .network dd {
   min-width: 0;
   text-align: end;
+  text-wrap: pretty;
   overflow-wrap: anywhere;
 }
 
