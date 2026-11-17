@@ -456,6 +456,13 @@ function VenueOrderFacts({ order }: { order: VenueOrderView }) {
           </span>
         )}
       </dd>
+      {/* The executor sizes the order so its cost and Gemini's fee fit the amount, so it buys fewer
+          contracts than the amount alone would at the limit (the Order row above). */}
+      <dt>Order size</dt>
+      <dd className="num" data-testid="intent-venue-size">
+        {formatContractsHundredths(order.quantityHundredths)}{" "}
+        {order.quantityHundredths === 100 ? "contract" : "contracts"}
+      </dd>
       <dt>Venue state</dt>
       <dd data-testid="intent-venue-state">
         {VENUE_ORDER_STATES[order.state]}

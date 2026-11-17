@@ -1379,7 +1379,8 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
       symbol: market,
       side: "buy",
       outcome: "no",
-      quantity: 967,
+      // $3.00 at 31c: 9.22 contracts cost $2.86, and with the worst-case fee $3.00 (9.23 would be $3.01).
+      quantity: 922,
       priceCents: 31,
     });
 
@@ -1388,6 +1389,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await expect(page.getByTestId("intent-venue-order")).toHaveCount(0);
     await page.getByRole("switch", { name: "Advanced view" }).click();
     await expect(page.getByTestId("intent-venue-order")).toHaveText(`Gemini sandbox #${order.orderId}`);
+    await expect(page.getByTestId("intent-venue-size")).toHaveText("9.22 contracts");
     await expect(page.getByTestId("intent-venue-state")).toHaveText("Open");
     await expect(page.getByTestId("intent-venue-note")).toHaveText("Resting on Gemini's sandbox at 31c");
 
@@ -1399,7 +1401,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
     expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
     const view = (await snapshot(baseURL)).chain?.venueOrders[intentId];
-    expect(view).toMatchObject({ state: "filled", venueOrderId: order.orderId, filledCents: 300 });
+    expect(view).toMatchObject({ state: "filled", venueOrderId: order.orderId, filledCents: 286 });
     await shoot(
       page,
       testInfo,
