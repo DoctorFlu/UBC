@@ -105,6 +105,11 @@ The executor also announces its venue at start (`PUT /api/executor/v1/venue`), w
   Nothing is shown for the simulated executor.
 - The intent page, in Advanced view: the Gemini order id, its state, how much filled, the executor's note, and our client order id.
 - A fill with a Gemini order in the journal is no longer marked as simulated; earlier simulated fills keep the marker.
+- The Order line, on the intent page, in Activity and on Home, gives the contracts the order was placed for, which [Fees](#fees) can make fewer than the amount buys at the limit (issue #117).
+  Advanced view adds what the amount buys at the limit when the two differ: "Buy NO, 10 at 97¢ (10.03 before the fee)".
+  Before an order is placed, and on the simulated venue, the line gives what the amount buys at the limit.
+
+The agent reads the same journal through the console's agent API (`GET /api/agent/v1/orders`, its own mandate only): `get_intent` and `get_activity` give each intent's `order` (venue, environment, state, contracts placed and filled, fee), and `get_intent` says when fewer contracts were placed than the amount buys at the limit.
 
 ## The doctor
 

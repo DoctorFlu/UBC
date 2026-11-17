@@ -301,6 +301,35 @@ describe("an attempt whose answer never came", () => {
     expect(journal.records.get(7)?.state).toBe("open");
   });
 
+  it("finds an order sent under an id journalled before #117 by that id, never by its terms alone", async () => {
+    // A record journalled before #117 keeps its id in the old form; the attempt under it got no answer.
+    const legacy = "mandate-5042002-5fbdb231-7";
+    fake.termsAccepted = false;
+    await venue().placeOrder(order());
+    const record = journal.records.get(7);
+    if (!record) throw new Error("no record");
+    journal.records.set(7, { ...record, clientOrderId: legacy });
+    fake.termsAccepted = true;
+    fake.failNextPlacement({ kind: "drop-after" });
+    expect(await venue().placeOrder(order())).toMatchObject({ status: "held" });
+    // The owner's own order on the same terms, after the attempt: only the id tells the two apart.
+    clock.now += 1_000;
+    await trading.placeOrder({
+      symbol: MARKET,
+      side: "buy",
+      outcome: "no",
+      quantity: "40",
+      price: "0.31",
+      clientOrderId: "owner-1",
+    });
+
+    const placed = placedOf(await restarted().placeOrder(order()));
+    const sent = [...fake.orders.values()].find((made) => made.clientOrderId === legacy);
+    expect(placed.venueOrderId).toBe(sent?.orderId);
+    expect(fake.callsTo(ORDER_ROUTE).filter((call) => call.fields?.clientOrderId === legacy)).toHaveLength(1);
+    expect(journal.records.get(7)).toMatchObject({ clientOrderId: legacy, state: "open" });
+  });
+
   it("treats a redirect as an unknown outcome, never a refusal: held, looked up, never sent again", async () => {
     fake.failNextPlacement({ kind: "redirect", status: 302, location: "https://elsewhere.example/order" });
     expect(await venue().placeOrder(order())).toMatchObject({
