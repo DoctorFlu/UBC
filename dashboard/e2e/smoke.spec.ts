@@ -198,6 +198,8 @@ test.describe("seeded demo", () => {
     );
     await expect(page.getByTestId("plan-signal")).toContainText("Used");
 
+    // The payoff and the live ladder are one click away in the default view.
+    await page.getByRole("button", { name: "Payoff and live ladder" }).click();
     // Every point of the planner's payoff table, in the chart's readout and in the table under it.
     const chart = page.getByRole("img", { name: /Payoff at settlement for BTC/ });
     const readout = page.getByTestId("payoff-readout");

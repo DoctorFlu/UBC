@@ -9,6 +9,7 @@ import { IntentLink } from "@/components/domain/Intent";
 import { Advanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
@@ -37,7 +38,7 @@ import { HoldingsEditor } from "./HoldingsEditor";
 import { LiveLadder, ladderCaption } from "./LiveLadder";
 import { PayoffChart } from "./PayoffChart";
 import { PlanDetails } from "./PlanDetails";
-import { useHedgeMarket } from "./useHedgeMarket";
+import { type HedgeMarketState, useHedgeMarket } from "./useHedgeMarket";
 
 const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 const at = (iso: string) => `${formatDateUtc(iso)} at ${formatTimeUtc(iso)}`;
@@ -377,27 +378,49 @@ function AssetHedge({
       ) : (
         <NoPlanCard asset={asset} holding={holding} preview={preview} agentName={agentName} />
       )}
-      {shown ? <Payoff plan={shown} label={agentPlan ? `${agentName}'s plan` : "The preview"} /> : null}
-      <Card
-        title="Live ladder"
-        description={
-          ladderCaption(quotes) ??
-          (agentPlan
-            ? `Gemini's quotes for ${agentPlan.plan.eventTicker}, the event the plan is on.`
-            : `Gemini's quotes for the soonest weekly ${asset} event.`)
-        }
-        padding="flush"
-        headingLevel={2}
+      <Disclosure
+        title={shown ? "Payoff and live ladder" : "Live ladder"}
+        summary={insideSummary(shown, market)}
+        data-testid="hedge-more"
       >
-        <LiveLadder
-          asset={asset}
-          market={market}
-          bought={boughtBySymbol(shown)}
-          planLabel={agentPlan ? "In the plan" : previewPlan ? "In the preview" : "Bought"}
-        />
-      </Card>
+        {shown ? <Payoff plan={shown} label={agentPlan ? `${agentName}'s plan` : "The preview"} /> : null}
+        <Card
+          title="Live ladder"
+          description={
+            ladderCaption(quotes) ??
+            (agentPlan
+              ? `Gemini's quotes for ${agentPlan.plan.eventTicker}, the event the plan is on.`
+              : `Gemini's quotes for the soonest weekly ${asset} event.`)
+          }
+          padding="flush"
+          headingLevel={2}
+        >
+          <LiveLadder
+            asset={asset}
+            market={market}
+            bought={boughtBySymbol(shown)}
+            planLabel={agentPlan ? "In the plan" : previewPlan ? "In the preview" : "Bought"}
+          />
+        </Card>
+      </Disclosure>
     </div>
   );
+}
+
+/**
+ * What the closed section holds, in one line: "Payoff: pays at most $161.77 · Live ladder: 21 strikes, spot
+ * $64,710.01". The default view keeps it closed; the plan above already says what it costs and covers.
+ */
+function insideSummary(plan: HedgePlan | null, market: HedgeMarketState): string {
+  const ladder =
+    market.status === "ready" && market.data.quotes
+      ? `Live ladder: ${market.data.quotes.rungs.length.toString()} strikes, spot ${usd(market.data.quotes.spotCents)}`
+      : market.status === "loading"
+        ? "Live ladder: quotes loading"
+        : "Live ladder: no quotes right now";
+  return [plan ? `Payoff: pays at most ${usd(plan.totals.maxPayoutCents)}` : null, ladder]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /**

@@ -1,0 +1,101 @@
+.disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The closed section reads like a card header: its title, then one line of what is inside. */
+.bar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.heading {
+  font-size: var(--text-md);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+/* The whole bar opens the section, while only the button is focusable and named. */
+.trigger::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.trigger:focus-visible {
+  outline: none;
+}
+
+.bar:has(.trigger:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.chevron {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-text-muted);
+  transition-property: rotate;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+.trigger[aria-expanded="true"] .chevron {
+  rotate: 90deg;
+}
+
+.summary {
+  padding-inline-start: calc(1rem + var(--space-2));
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+@media (hover: hover) {
+  .bar:hover {
+    background: var(--color-surface-hover);
+  }
+}
+
+@media (width < 40rem) {
+  .bar {
+    padding: var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}

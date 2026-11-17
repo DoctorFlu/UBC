@@ -181,6 +181,53 @@ test.describe("phone menu on a slow device", () => {
   });
 });
 
+test.describe("hedge disclosure", () => {
+  test("keeps the payoff and live ladder closed by default, says what is inside, and opens from the keyboard", async ({
+    page,
+  }) => {
+    const problems = watchConsole(page);
+    await page.goto("/hedge");
+    // What the owner needs first stays open: the plan, what it costs and covers, and its orders.
+    await expect(page.getByTestId("agent-plan")).toBeVisible();
+    await expect(page.getByTestId("plan-execution")).toBeVisible();
+
+    // A heading whose button says it is collapsed, described by the one-line summary.
+    const heading = page.getByRole("heading", { level: 2, name: "Payoff and live ladder" });
+    const trigger = heading.getByRole("button", { name: "Payoff and live ladder" });
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(trigger).toHaveAccessibleDescription(
+      /^Payoff: pays at most \$[\d,.]+ · Live ladder: \d+ strikes, spot \$[\d,.]+$/,
+    );
+    await expect(page.getByTestId("live-ladder")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: /Payoff at settlement/ })).toHaveCount(0);
+
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(trigger).toBeFocused();
+    await expect(page.getByTestId("live-ladder")).toBeVisible();
+    await expect(page.getByRole("img", { name: /Payoff at settlement/ })).toBeVisible();
+    // Open, the summary is gone: the section says it all.
+    await expect(trigger).toHaveAccessibleDescription("");
+
+    await page.keyboard.press("Space");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("live-ladder")).toHaveCount(0);
+    expect(problems).toEqual([]);
+  });
+
+  test("is open in Advanced view, and follows the switch", async ({ page, context, baseURL }) => {
+    await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
+    await page.goto("/hedge");
+    const trigger = page.getByRole("button", { name: "Payoff and live ladder" });
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("live-ladder")).toBeVisible();
+    await page.getByRole("switch", { name: "Advanced view" }).click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("live-ladder")).toHaveCount(0);
+  });
+});
+
 test.describe("layout", () => {
   for (const width of [1440, 1024, 768, 390]) {
     test(`a held approval card on Home is as tall as its content at ${width.toString()} px`, async ({
@@ -320,6 +367,7 @@ for (const scheme of schemes) {
       });
       await page.goto("/hedge");
       await expect(page.getByRole("heading", { level: 1, name: "Hedge" })).toBeVisible();
+      await page.getByRole("button", { name: "Payoff and live ladder" }).click();
       await expect(page.getByTestId("ladder-loading")).toBeVisible();
       await expect(page.getByRole("status").filter({ hasText: "Loading live quotes" })).toBeAttached();
       const results = await new AxeBuilder({ page })
