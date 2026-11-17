@@ -3,15 +3,33 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  AGENT_ID_HEADER,
+  CONSOLE_AGENT_ROUTES,
   Category,
   PolicyClient,
   WriteLane,
   type PolicyRules,
+  type Settlement,
+  type VenueOrderRecord,
+  clientOrderIdFor,
   consoleErrorSchema,
+  contractsBought,
+  hashAgentToken,
+  hashSettlement,
   policyAbi,
+  resolveTokenResponseSchema,
+  settlementMessage,
+  settlementsResponseSchema,
   signerAccount,
+  summaryResponseSchema,
 } from "@mandate/shared";
-import { consoleContractDiscovery, startExecutor, startExecutorFleet } from "@mandate/devchain";
+import {
+  consoleContractDiscovery,
+  consoleOrderJournal,
+  consoleSettlementSink,
+  startExecutor,
+  startExecutorFleet,
+} from "@mandate/devchain";
 import { type Address, createWalletClient, http } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -26,6 +44,7 @@ import {
   signUpWorkspace,
 } from "../../../test/support/accounts";
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
+import { exampleLadder, examplePlan } from "../../../test/support/hedge";
 import { SoftPasskey } from "../../../test/support/passkey";
 import { localAgentSigner } from "../accounts/keys";
 import type { StepUpAction } from "../accounts/step-up";
@@ -33,6 +52,11 @@ import type { Member } from "../accounts/store";
 import { readMandatesConfig, testConsoleConfig } from "../config";
 import { ConsoleService } from "../console-service";
 import { openDatabase } from "../db";
+import type { LadderSource } from "../wake";
+import { workspaceHome } from "../workspace-home";
+import { getSettlements, getSummary, postPlan, postPolicyChangeRequest } from "./agent-api";
+import { resolveToken } from "./agent-auth";
+import { putSettlement } from "./executor-api";
 import {
   createMandate,
   listMandates,
@@ -42,11 +66,12 @@ import {
   startStepUp,
 } from "./mandates-api";
 import { createToken, revokeToken } from "./agents-api";
-import { listExecutorContracts } from "./executor-orders-api";
+import { getVenueOrder, listExecutorContracts, putVenueOrder } from "./executor-orders-api";
 import { saveHoldings } from "./owner-api";
 
 const silent = { info: () => undefined, warn: () => undefined };
 const ORIGIN = "http://console.test";
+const SERVICE_TOKEN = "console-service-token-for-tests-0123456789";
 const RULES: PolicyRules = {
   budgetCents: 10_000,
   maxTradeCents: 3_000,
@@ -170,7 +195,10 @@ describe("mandates on the demo chain", () => {
     chain = await startTestChain();
     const dataDir = mkdtempSync(join(tmpdir(), "mandate-mandates-"));
     service = new ConsoleService(
-      testConsoleConfig(dataDir, { mandates: { ...readMandatesConfig({}), maxPerWorkspace: 3 } }),
+      testConsoleConfig(dataDir, {
+        serviceToken: SERVICE_TOKEN,
+        mandates: { ...readMandatesConfig({}), maxPerWorkspace: 3 },
+      }),
       openDatabase(dataDir),
       { env: chain.env, logger: silent },
     );
@@ -616,6 +644,249 @@ describe("mandates on the demo chain", () => {
     } finally {
       fleet.stop();
     }
+  });
+
+  it("keeps two mandates' journals, settlements, digests and Home rows apart, with the same intent id on each", async () => {
+    const executorWallet = chain.executor.walletClient;
+    if (!executorWallet) throw new Error("no executor wallet");
+    const chainId = chain.executor.publicClient.chain.id;
+    const twinA = await create(owner, "Twin A", { ...RULES, approvalAboveCents: 1_500 });
+    const twinB = await create(owner, "Twin B", { ...RULES, approvalAboveCents: 1_500 });
+    const [contractA, contractB] = [twinA.mandate.contract, twinB.mandate.contract];
+    if (!contractA || !contractB) throw new Error("no contracts");
+
+    // Each real token resolves to its own agent; agent routes then name no mandate at all.
+    const agentIdOf = async (token: string) => {
+      const response = await resolveToken(
+        new Request(`${ORIGIN}${CONSOLE_AGENT_ROUTES.resolveToken}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${SERVICE_TOKEN}`, "content-type": "application/json" },
+          body: JSON.stringify({ tokenHash: hashAgentToken(token), legacy: false }),
+        }),
+        service,
+      );
+      expect(response.status).toBe(200);
+      return resolveTokenResponseSchema.parse(await response.json());
+    };
+    const resolvedA = await agentIdOf(twinA.token.token);
+    const resolvedB = await agentIdOf(twinB.token.token);
+    expect([resolvedA.mandateId, resolvedB.mandateId]).toEqual([twinA.mandate.id, twinB.mandate.id]);
+    const asAgent = (agentId: string, method: string, path: string, body?: unknown) =>
+      new Request(`${ORIGIN}${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${SERVICE_TOKEN}`,
+          [AGENT_ID_HEADER]: agentId,
+          "content-type": "application/json",
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+
+    // Intent 0 on both contracts, at the same moment; B's waits for the owner.
+    const [a, b] = await Promise.all([
+      agentOf(twinA.mandate).proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_300 }),
+      agentOf(twinB.mandate).proposeTrade({ ...trade, market: BTC_ABOVE_65K, amountCents: 1_400 }),
+    ]);
+    const held = await agentOf(twinB.mandate).proposeTrade({
+      ...trade,
+      market: BTC_ABOVE_65K,
+      amountCents: 2_000,
+    });
+    expect([a.intentId, b.intentId, held.intentId]).toEqual([0, 0, 1]);
+    await until(() => snapshotOf(twinA.mandate.id).chain?.intents.length === 1, "A's intent");
+    await until(() => snapshotOf(twinB.mandate.id).chain?.intents.length === 2, "B's intents");
+
+    // The executor's journal: one record per contract for intent 0, each read back from its own contract.
+    const executorFetch = async (input: string, init: RequestInit): Promise<Response> => {
+      const url = new URL(input);
+      const request = new Request(url, init);
+      const order = /^\/api\/executor\/v1\/orders\/([^/]+)$/.exec(url.pathname);
+      if (order?.[1]) {
+        const params = { intentId: decodeURIComponent(order[1]) };
+        return request.method === "PUT"
+          ? putVenueOrder(request, service, params)
+          : getVenueOrder(request, service, params);
+      }
+      const settlement = /^\/api\/executor\/v1\/settlements\/([^/]+)$/.exec(url.pathname);
+      if (settlement?.[1]) return putSettlement(request, service, { intentId: settlement[1] });
+      return new Response("<html>Not found</html>", { status: 404 });
+    };
+    const sign = (hash: `0x${string}`) =>
+      executorWallet.signMessage({ account: executorWallet.account, message: { raw: hash } });
+    const journalOf = (policy: string) =>
+      consoleOrderJournal({
+        consoleUrl: ORIGIN,
+        sign,
+        fetch: executorFetch,
+        deployment: { chainId, policy },
+        retryDelaysMs: [50, 100, 200, 400, 800],
+      });
+    const policyA = contractA.address.toLowerCase() as `0x${string}`;
+    const policyB = contractB.address.toLowerCase() as `0x${string}`;
+    const recordFor = (policy: `0x${string}`, cents: number): VenueOrderRecord => ({
+      kind: "venue-order",
+      version: 1,
+      chainId,
+      policy,
+      intentId: 0,
+      revision: 1,
+      venue: "gemini",
+      environment: "sandbox",
+      clientOrderId: clientOrderIdFor(chainId, policy, 0),
+      market: BTC_ABOVE_65K,
+      side: "buy",
+      outcome: "YES",
+      quantityHundredths: contractsBought(cents, trade.limitPrice),
+      limitPrice: trade.limitPrice,
+      state: "placing",
+      venueOrderId: null,
+      filledHundredths: 0,
+      filledCents: 0,
+      detail: null,
+      placedAt: "2026-11-17T08:00:00.000Z",
+      updatedAt: "2026-11-17T08:00:00.000Z",
+    });
+    await journalOf(policyA).put(recordFor(policyA, 1_300));
+    expect(await journalOf(policyB).get(0)).toBeNull();
+    await journalOf(policyB).put(recordFor(policyB, 1_400));
+    const [readA, readB] = [await journalOf(policyA).get(0), await journalOf(policyB).get(0)];
+    expect(readA?.policy).toBe(policyA);
+    expect(readB?.policy).toBe(policyB);
+    expect(readA?.clientOrderId).not.toBe(readB?.clientOrderId);
+
+    // Both fill; each settlement goes through the executor's real sink to its own mandate.
+    const lane = new WriteLane();
+    const executorOn = (address: Address) =>
+      new PolicyClient({
+        address,
+        publicClient: chain.executor.publicClient,
+        walletClient: executorWallet,
+        lane,
+        minMaxFeePerGas: 0n,
+        receiptPollingMs: 50,
+      });
+    await executorOn(contractA.address).recordResult({
+      intentId: 0,
+      filled: true,
+      filledCents: 1_300,
+      pnlCents: 0,
+    });
+    await executorOn(contractB.address).recordResult({
+      intentId: 0,
+      filled: true,
+      filledCents: 1_400,
+      pnlCents: 0,
+    });
+    await until(
+      () => snapshotOf(twinA.mandate.id).chain?.intents[0]?.status === "executed",
+      "A's intent executed",
+    );
+    await until(
+      () => snapshotOf(twinB.mandate.id).chain?.intents.find((i) => i.id === 0)?.status === "executed",
+      "B's intent executed",
+    );
+    const settlementFor = (policy: `0x${string}`, costCents: number): Settlement => {
+      const contracts = contractsBought(costCents, trade.limitPrice);
+      return {
+        version: 1,
+        chainId,
+        policy,
+        intentId: 0,
+        market: BTC_ABOVE_65K,
+        eventTicker: "BTC2611202200",
+        strikeCents: 6_500_000,
+        expiresAt: "2026-11-20T22:00:00.000Z",
+        outcome: "YES",
+        costCents,
+        limitPrice: trade.limitPrice,
+        contractsHundredths: contracts,
+        resolution: "yes",
+        payoutCents: contracts,
+        pnlCents: contracts - costCents,
+        settlementValue: "65100.5",
+        resolvedAt: "2026-11-20T22:00:08.232Z",
+        venue: "gemini",
+      };
+    };
+    const sink = consoleSettlementSink({ consoleUrl: ORIGIN, fetch: executorFetch });
+    for (const document of [settlementFor(policyA, 1_300), settlementFor(policyB, 1_400)]) {
+      const signature = await executorWallet.signMessage({
+        account: executorWallet.account,
+        message: settlementMessage(hashSettlement(document)),
+      });
+      expect((await sink.record({ document, signature })).status).toBe("stored");
+    }
+    const settlementsOf = async (agentId: string) => {
+      const response = await getSettlements(
+        asAgent(agentId, "GET", CONSOLE_AGENT_ROUTES.settlements),
+        service,
+      );
+      expect(response.status).toBe(200);
+      return settlementsResponseSchema.parse(await response.json()).settlements;
+    };
+    expect((await settlementsOf(resolvedA.agentId)).map((s) => s.document.costCents)).toEqual([1_300]);
+    expect((await settlementsOf(resolvedB.agentId)).map((s) => s.document.costCents)).toEqual([1_400]);
+
+    // The digest: only A filed a change request and a goal; B's summary shows neither, and each link
+    // opens its own mandate.
+    const expiry = new Date(Date.now() + 7 * 86_400_000).toISOString().replace(/T.*/, "T22:00:00.000Z");
+    const plan = examplePlan(expiry);
+    const ladder: LadderSource = () => Promise.resolve({ ok: true, ladder: exampleLadder(expiry) });
+    const goal = await postPlan(
+      asAgent(resolvedA.agentId, "POST", CONSOLE_AGENT_ROUTES.plans, {
+        planId: plan.planId,
+        asset: "BTC",
+        requestText: "Protect my 0.05 BTC below $64,000 this week.",
+        createdAt: new Date().toISOString(),
+        plan,
+      }),
+      service,
+    );
+    expect(goal.status).toBe(201);
+    const filed = await postPolicyChangeRequest(
+      asAgent(resolvedA.agentId, "POST", CONSOLE_AGENT_ROUTES.policyChangeRequests, {
+        agentAddress: twinA.mandate.agent.address,
+        proposed: { maxTradeCents: 3_500 },
+        reason: "The top rung costs more than the max trade size.",
+      }),
+      service,
+    );
+    expect(filed.status).toBe(201);
+    const summaryOf = async (agentId: string) => {
+      const response = await getSummary(
+        asAgent(agentId, "GET", CONSOLE_AGENT_ROUTES.summary),
+        service,
+        ladder,
+      );
+      expect(response.status).toBe(200);
+      return summaryResponseSchema.parse(await response.json());
+    };
+    const [summaryA, summaryB] = [await summaryOf(resolvedA.agentId), await summaryOf(resolvedB.agentId)];
+    expect(summaryA.consoleUrl).toBe(`${service.config.publicUrl}/m/${twinA.mandate.id}`);
+    expect(summaryB.consoleUrl).toBe(`${service.config.publicUrl}/m/${twinB.mandate.id}`);
+    expect(summaryA.changeRequests).toHaveLength(1);
+    expect(summaryB.changeRequests).toEqual([]);
+    expect(summaryA.cover.map((c) => c.planId)).toEqual([plan.planId]);
+    expect(summaryB.cover).toEqual([]);
+
+    // Home: one row per mandate, each with its own waiting, spend and cover.
+    const access = service.accounts.access(service.accounts.openSession(owner));
+    if (!access) throw new Error("no access");
+    const home = await workspaceHome(access, service, ladder);
+    const rowOf = (id: string) => home.mandates.find((row) => row.mandate.id === id);
+    expect(home.mandates.map((row) => row.mandate.id)).toEqual(
+      service.accounts.store.mandates(owner.workspaceId).map((m) => m.id),
+    );
+    expect(rowOf(twinA.mandate.id)).toMatchObject({ waiting: 1, committedCents: 1_300 });
+    expect(rowOf(twinA.mandate.id)?.cover.goals).toBe(1);
+    expect(rowOf(twinB.mandate.id)).toMatchObject({ waiting: 1, committedCents: 1_400 });
+    expect(rowOf(twinB.mandate.id)?.cover.goals).toBe(0);
+    expect(home.canCreate).toBe(false);
+    // Nothing of another workspace's mandates is on this Home.
+    const others = new Set(
+      [bob, carol].flatMap((m) => service.accounts.store.mandates(m.workspaceId).map((x) => x.id)),
+    );
+    expect(home.mandates.some((row) => others.has(row.mandate.id))).toBe(false);
   });
 
   it("refuses a mandate past the workspace's cap, with what to do about it", async () => {

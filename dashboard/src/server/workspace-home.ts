@@ -5,25 +5,27 @@ import { needsOwner } from "@/lib/live/attention";
 
 import type { Access } from "./accounts/accounts";
 import { getConsoleService } from "./console";
+import type { ConsoleService } from "./console-service";
 import { coverOfSnapshot } from "./cover-summary";
 import { mandateView } from "./http/mandates-api";
 import { getMarketQuotes } from "./market/quotes";
+import type { LadderSource } from "./wake";
 
 /**
  * The workspace Home (#95): for each mandate, what waits for the owner, what is committed, and the cover
  * of its current goals. Each row is read from that mandate's own snapshot, so one mandate's numbers never
  * include another's.
  */
-export async function workspaceHome(access: Access): Promise<WorkspaceHomeData> {
-  const service = getConsoleService();
-  const quotes = getMarketQuotes();
+export async function workspaceHome(
+  access: Access,
+  service: ConsoleService = getConsoleService(),
+  ladder: LadderSource = (asset, eventTicker) => getMarketQuotes().ladder(asset, eventTicker),
+): Promise<WorkspaceHomeData> {
   const mandates = service.accounts.store.mandates(access.workspace.id);
   const rows = await Promise.all(
     mandates.map(async (mandate): Promise<MandateSummary> => {
       const snapshot = service.snapshot(mandate);
-      const cover = await coverOfSnapshot(snapshot, (asset, eventTicker) =>
-        quotes.ladder(asset, eventTicker),
-      );
+      const cover = await coverOfSnapshot(snapshot, ladder);
       return {
         mandate: mandateView(service, mandate),
         waiting: needsOwner(snapshot).total,
