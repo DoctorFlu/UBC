@@ -1157,6 +1157,23 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
 
   // The real executor, reading Gemini (the fake) and recording settlements in this console.
   const logs: string[] = [];
+  const waiting: { text: string; resolve: () => void }[] = [];
+  /**
+   * Resolves when the executor logs a line containing `text`: the event itself, not a time budget, so a
+   * slow pass under load only makes the test wait longer (the test's own timeout still bounds it).
+   */
+  const logged = (text: string) =>
+    new Promise<void>((resolve) => {
+      if (logs.some((line) => line.includes(text))) resolve();
+      else waiting.push({ text, resolve });
+    });
+  const log = (line: string) => {
+    logs.push(line);
+    for (const waiter of waiting.filter((candidate) => line.includes(candidate.text))) {
+      waiting.splice(waiting.indexOf(waiter), 1);
+      waiter.resolve();
+    }
+  };
   const begin = () =>
     startExecutor({
       client: chain.executor,
@@ -1168,15 +1185,19 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
       settleIntervalMs: 1_000,
       openRecheckMs: 1_000,
       settleBackoffMs: [1_000],
-      log: (line) => logs.push(line),
+      log,
     });
   let executor = begin();
   try {
     // It first fills what the earlier tests left approved, as the devchain's executor would have.
-    await waitForSnapshot(
+    const filled = await waitForSnapshot(
       baseURL,
       (current) => !(current.chain?.intents ?? []).some((intent) => intent.status === "approved"),
     );
+    const positions = (filled.chain?.intents ?? []).filter(
+      (intent) => intent.status === "executed" && intent.isBuy === true && onLadder(intent.market),
+    );
+    expect(positions.length).toBeGreaterThan(0);
 
     // The ladder expires, and Gemini has not published the outcome yet: nothing settles, nothing is guessed.
     gemini.settle(RECORDED_EVENT, "64250.4175", { published: false });
@@ -1187,20 +1208,16 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     await expect(expired).toContainText("Waiting for Gemini to publish the outcome");
     await expect(page.getByTestId("cover-now")).toHaveCount(0);
     await expect(page.getByText("for a ladder that has expired", { exact: false })).toBeVisible();
-    await expect.poll(() => logs.some((line) => line.includes("waiting for Gemini to publish"))).toBe(true);
+    await logged("waiting for Gemini to publish");
     expect(Object.keys((await snapshot(baseURL)).chain?.settlements ?? {})).toEqual([]);
     await shoot(page, testInfo, "hedge-expired-waiting", expired);
 
     // Gemini publishes it: BTC settled at $64,250.42, so NO below $65,000 pays and NO below $64,000 does not.
     gemini.settle(RECORDED_EVENT, "64250.4175");
-    const settled = await waitForSnapshot(baseURL, (current) => {
-      const filled = (current.chain?.intents ?? []).filter(
-        (intent) => intent.status === "executed" && intent.isBuy === true && onLadder(intent.market),
-      );
-      return (
-        filled.length > 0 && filled.every((intent) => current.chain?.settlements[intent.id] !== undefined)
-      );
-    });
+    // The executor logs each settlement once the console has stored it.
+    await Promise.all(positions.map((intent) => logged(`intent #${intent.id.toString()} SETTLED`)));
+    const settled = await snapshot(baseURL);
+    expect(positions.every((intent) => settled.chain?.settlements[intent.id] !== undefined)).toBe(true);
     const chainView = settled.chain;
     if (!chainView) throw new Error("no chain");
     const documents = Object.values(chainView.settlements).map((view) => {
