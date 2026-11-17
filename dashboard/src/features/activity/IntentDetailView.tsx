@@ -30,7 +30,7 @@ import { formatContractPrice, formatCount, formatUsdCents, shortenHex } from "@/
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
-import { categoryName, describeMarket } from "@/lib/markets";
+import { categoryName, describeMarket, namingCategory } from "@/lib/markets";
 import { evidenceHref } from "@/lib/evidence/chain";
 import { paymentHref } from "@/lib/payments/links";
 import { fillsAreSimulated } from "@/lib/network";
@@ -423,7 +423,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
       </div>
     );
   }
-  const market = intent.market ? describeMarket(intent.market) : null;
+  const market = intent.market ? describeMarket(intent.market, namingCategory(intent)) : null;
   const simulated = fillsAreSimulated(snapshot.network);
   const timeline = steps(chain, intent.id, simulated);
   const flags = intentFlags(intent);
@@ -455,7 +455,12 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
             <dl className={styles.facts}>
               <dt>Market</dt>
               <dd>
-                <MarketName symbol={intent.market} />
+                <MarketName
+                  symbol={intent.market}
+                  category={intent.category}
+                  listing={intent.listing}
+                  showCategory={false}
+                />
               </dd>
               <dt>Category</dt>
               <dd>{categoryName(intent.category)}</dd>

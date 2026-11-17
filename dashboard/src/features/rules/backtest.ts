@@ -18,12 +18,14 @@ import { type PolicyRules, evaluateIntent } from "@mandate/shared";
 
 import { utcDay } from "@/lib/live/derive";
 import type { ChainView } from "@/lib/live/types";
+import { namingCategory } from "@/lib/markets";
 
 export type Verdict = { kind: "approved" } | { kind: "held" } | { kind: "rejected"; reason: string };
 
 export interface ReplayedIntent {
   id: number;
   market: string | null;
+  category: number | null;
   amountCents: number | null;
   isBuy: boolean | null;
   /** The contract's answer when the intent was proposed. */
@@ -161,6 +163,7 @@ export function backtest(chain: Pick<ChainView, "events" | "intents">, draft: Po
       return {
         id,
         market: intent?.market ?? null,
+        category: intent ? namingCategory(intent) : null,
         amountCents: intent?.amountCents ?? null,
         isBuy: intent?.isBuy ?? null,
         actual: verdict,

@@ -10,7 +10,7 @@
     "serve": "tsx scripts/serve.ts",
     "og": "tsx scripts/render-og.ts",
     "typegen": "next typegen",
-    "typecheck": "npm run typegen && tsc --noEmit",
+    "typecheck": "npm run typegen && tsc --noEmit -p tsconfig.typecheck.json",
     "e2e": "playwright test --project=phone-light --project=phone-dark --project=desktop-light --project=desktop-dark --project=icons",
     "screenshots": "playwright test --project=screenshots"
   },

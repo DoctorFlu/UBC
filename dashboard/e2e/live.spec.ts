@@ -91,13 +91,13 @@ async function startConsole(): Promise<void> {
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
       GEMINI_API_URL: gemini.url,
+      // Never the compile cache an earlier run left (the smoke suite shares this folder's .next): with
+      // a stale one, every page reloads in a loop. See next.config.ts.
+      NEXT_DEV_CACHE: "off",
     },
   });
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 180_000);
-  // `next dev` compiles a route on its first request and then tells open pages to reload. With a
-  // Turbopack cache left by an earlier run (the smoke suite compiles every route), a page that connects
-  // before those routes are compiled again reloads over and over. Compiling every route first, as the
-  // smoke warm-up does, removes that.
+  // `next dev` compiles a route on its first request; compile every route now, so no test waits on it.
   for (const path of LIVE_ROUTES) {
     const response = await fetch(new URL(path, baseURL));
     await response.arrayBuffer();
@@ -178,6 +178,45 @@ test("the owner signs the first rules", async ({ page }) => {
   await expect(page.getByText(/^Version 1, set /)).toBeVisible();
   const rules = (await snapshot(baseURL)).chain?.rules;
   expect(rules).toMatchObject({ budgetCents: 20_000, maxTradeCents: 2_500, approvalAboveCents: 2_000 });
+});
+
+test("a rules change signed while the live stream is quiet still syncs, and every view shows it", async ({
+  page,
+}) => {
+  // Behind the public proxy the event stream can stall; the owner's own transaction must still sync.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/console/events", async (route) => {
+    await held;
+    await route.abort().catch(() => {});
+  });
+  const before = (await snapshot(baseURL)).chain?.rules;
+  if (!before) throw new Error("no rules");
+  await open(page, "/rules");
+  await expect(page.getByText(/^Version 1, set /)).toBeVisible();
+  const dailyLoss = page.getByRole("textbox", { name: "Daily loss limit" });
+
+  const sign = async (value: string, version: number) => {
+    await dailyLoss.fill(value);
+    await page.getByRole("button", { name: "Review and sign" }).click();
+    const review = page.getByRole("dialog", { name: "Review the new rules" });
+    await review.getByRole("button", { name: "Sign in wallet" }).click();
+    const status = review.getByTestId("owner-tx-status");
+    await expect(status).toHaveAttribute("data-phase", "done");
+    await expect(status).toContainText("Done. Every view now shows it.");
+    await review.getByRole("button", { name: "Done" }).click();
+    // The modal blocks the page until it has finished leaving, as it does for the owner.
+    await expect(review).toHaveCount(0);
+    await expect(page.getByText(new RegExp(`^Version ${version.toString()}, set `))).toBeVisible();
+    await expect(dailyLoss).toHaveValue(value);
+  };
+  await sign("41", 2);
+  // And back, so the tests after this one see the first rules' limits.
+  await sign((before.dailyLossCents / 100).toString(), 3);
+  expect((await snapshot(baseURL)).chain?.rules).toEqual(before);
+  release();
 });
 
 test("a proposal shows up within 2 seconds, without a refresh", async ({ page }) => {
@@ -413,6 +452,8 @@ test("the hedge view: an honest empty state and preview, then the agent's plan, 
   await expect(page.getByTestId("hedge-preview")).toHaveText(
     "No preview: Save your BTC holding to see a preview.",
   );
+  // The ladder is one click away in the default view, and stays open as the page changes.
+  await page.getByRole("button", { name: "Live ladder" }).click();
   await expect(page.getByTestId("live-ladder")).toBeVisible();
 
   // Save a holding through the UI: the preview follows at once, made by the same planner.
@@ -552,13 +593,15 @@ test("a signal payment the agent records appears live, linked to the intent that
     },
   });
   const payment = page.locator(`#payment-${receipt}`);
-  await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
+  await expect(payment).toContainText("BTC weekly hedge signal");
   await expect(payment).toContainText("3 cheap, 15 fair, 3 expensive");
   await expect(payment).toContainText("0.001 USDC");
   await expect(payment).toContainText("No intent cites it");
-  // The settlement reference is Advanced detail.
+  // The event ticker and the settlement reference are Advanced detail.
+  await expect(payment).not.toContainText("BTC2611202200");
   await expect(payment).not.toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
   await page.getByRole("switch", { name: "Advanced view" }).click();
+  await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
   await expect(payment).toContainText("9b1f2d1e-5d55-4c4e-8f61-0b2a3c4d5e6f");
 
   // An intent whose sealed reason cites the receipt links to it, and back.
@@ -919,6 +962,8 @@ test("a market Gemini lists elsewhere, or not at all, is flagged beside Approve 
   await open(page, "/");
   const card = page.getByTestId(`waiting-intent-${mislabelled.intentId.toString()}`);
   await expect(card.getByTestId("flagged-badge")).toBeVisible();
+  // Named by Gemini's own category, not the one the key claimed, beside the flag that says so.
+  await expect(card).toContainText("Sports market");
   await expect(card.getByTestId("approval-warning")).toContainText(
     "Gemini lists this market as Sports, the intent says Crypto",
   );

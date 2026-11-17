@@ -35,7 +35,9 @@ const columns: readonly Column<IntentView>[] = [
   {
     key: "market",
     header: "Market",
-    cell: (intent) => <MarketName symbol={intent.market} category={intent.category} />,
+    cell: (intent) => (
+      <MarketName symbol={intent.market} category={intent.category} listing={intent.listing} />
+    ),
     role: "primary",
   },
   {

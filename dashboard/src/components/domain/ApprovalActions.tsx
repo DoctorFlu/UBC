@@ -6,7 +6,7 @@ import { Check, X } from "lucide-react";
 import { HoldButton } from "@/components/ui/HoldButton";
 import { useToast } from "@/components/ui/Toast";
 import { formatUsdCents } from "@/lib/format";
-import { describeMarket } from "@/lib/markets";
+import { describeMarket, namingCategory } from "@/lib/markets";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 
@@ -35,7 +35,9 @@ export function ApprovalActions({
   const { state, send, working, access } = useOwnerTx();
   const blocked = ownerBlockedReason(access);
   const amount = intent.amountCents === null ? "this intent" : formatUsdCents(intent.amountCents);
-  const market = intent.market ? describeMarket(intent.market).title : `intent ${intent.id.toString()}`;
+  const market = intent.market
+    ? describeMarket(intent.market, namingCategory(intent)).title
+    : `intent ${intent.id.toString()}`;
   const subject = `${amount} on ${market}`;
   const flags = intentAnomalies(intent).map((anomaly) => anomaly.text);
 

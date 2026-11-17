@@ -35,7 +35,7 @@ const columnsFor = (subject: string): readonly Column<ReplayedIntent>[] => [
   {
     key: "market",
     header: "Market",
-    cell: (intent) => <MarketName symbol={intent.market} />,
+    cell: (intent) => <MarketName symbol={intent.market} category={intent.category} showCategory={false} />,
     role: "primary",
   },
   {

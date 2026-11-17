@@ -1,0 +1,12 @@
+// The typecheck, independent of any dev server: `next typegen` writes this app's route types to
+// .next/types right before tsc reads them, and .next/dev/types (a dev server's own copy, possibly from an
+// older checkout) and next-env.d.ts (rewritten by whichever of dev and typegen ran last) are left out.
+// Editors keep using tsconfig.json, which includes the dev server's types while one runs.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "next", "next/image-types/global"],
+    "tsBuildInfoFile": ".next/cache/typecheck.tsbuildinfo"
+  },
+  "include": ["src", "e2e", "test", "next.config.ts", "playwright.config.ts", ".next/types/**/*.ts"]
+}

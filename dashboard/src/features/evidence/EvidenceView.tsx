@@ -29,7 +29,7 @@ import type { AgentPlanView } from "@/lib/hedge/types";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { isoFromUnix } from "@/lib/live/derive";
 import type { ConsoleNetwork, ConsoleSnapshot } from "@/lib/live/types";
-import { describeMarket } from "@/lib/markets";
+import { describeMarket, namingCategory } from "@/lib/markets";
 import { paymentHref } from "@/lib/payments/links";
 import { formatUsdc } from "@/lib/payments/usdc";
 import { clip } from "@/lib/text";
@@ -323,7 +323,10 @@ function PlanLink({
 function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
   const { intent } = entry;
   // The title never quotes onchain text: a market that is not a Gemini symbol reads "Not a Gemini market".
-  const title = intent.market === null ? "Market not recorded" : describeMarket(intent.market).title;
+  const title =
+    intent.market === null
+      ? "Market not recorded"
+      : describeMarket(intent.market, namingCategory(intent)).title;
   const flags = intentFlags(intent);
   const seal = SEAL[entry.seal];
   const tone =
@@ -362,7 +365,7 @@ function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
         <dt>Order</dt>
         <dd className={styles.order}>
           <span className="num">{amountLabel(intent)}</span>
-          <MarketName symbol={intent.market} category={intent.category} />
+          <MarketName symbol={intent.market} category={intent.category} listing={intent.listing} />
         </dd>
         <dt>Proposed</dt>
         <dd>

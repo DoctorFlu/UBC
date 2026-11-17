@@ -13,6 +13,8 @@ import { SUITE_GEMINI_PORT } from "./e2e/support/fake-gemini";
  * - `smoke` runs against `next dev` (fast to start) on a chain seeded with the demo history.
  * - `screenshots` sets E2E_SERVER=prod and runs against `next build && next start` on the same seed,
  *   so the committed images show the production build.
+ * - `prod` (E2E_SERVER=prod) checks what only the production build does, such as prefetching a route's
+ *   loading state, on the screenshots seed.
  * - `live` (E2E_SUITE=live) starts and restarts its own chain and console from the spec, so Playwright
  *   starts no server for it. It runs after `smoke` in `npm run e2e`, never at the same time, because
  *   both use this folder's `.next`.
@@ -47,6 +49,7 @@ export default defineConfig({
   projects: [
     { name: "smoke", testMatch: /(smoke|shell|icons)\.spec\.ts/ },
     { name: "screenshots", testMatch: /screenshots\.spec\.ts/ },
+    { name: "prod", testMatch: /prod\.spec\.ts/ },
     { name: "live", testMatch: /live\.spec\.ts/, timeout: 240_000 },
   ],
   webServer: live
@@ -91,6 +94,8 @@ export default defineConfig({
             MCP_PUBLIC_URL: "https://mcp.example.test/mcp",
             // Never the real Gemini: the suite's quotes come from recorded responses.
             GEMINI_API_URL: `http://127.0.0.1:${GEMINI_PORT.toString()}`,
+            // `next dev` starts without the compile cache an earlier run left: see next.config.ts.
+            NEXT_DEV_CACHE: "off",
           },
         },
       ],

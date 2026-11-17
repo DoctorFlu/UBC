@@ -198,6 +198,8 @@ test.describe("seeded demo", () => {
     );
     await expect(page.getByTestId("plan-signal")).toContainText("Used");
 
+    // The payoff and the live ladder are one click away in the default view.
+    await page.getByRole("button", { name: "Payoff and live ladder" }).click();
     // Every point of the planner's payoff table, in the chart's readout and in the table under it.
     const chart = page.getByRole("img", { name: /Payoff at settlement for BTC/ });
     const readout = page.getByTestId("payoff-readout");
@@ -242,7 +244,9 @@ test.describe("seeded demo", () => {
     await reportSignalBudget(baseURL ?? "", AGENT_ADDRESS);
     await page.goto("/payments");
     const payment = page.locator(`#payment-${DEMO_RECEIPT}`);
-    await expect(payment).toContainText("BTC weekly hedge signal, BTC2611202200");
+    // What was bought, in words; the event ticker is Advanced detail.
+    await expect(payment).toContainText("BTC weekly hedge signal");
+    await expect(payment).not.toContainText("BTC2611202200");
     await expect(payment).toContainText("0.001 USDC");
     await expect(payment.getByRole("link", { name: "Intent #0", exact: true })).toBeVisible();
     await expect(page.getByRole("meter", { name: "Spent" })).toHaveAttribute(
@@ -251,6 +255,26 @@ test.describe("seeded demo", () => {
     );
     await expect(page.getByText("4.999 USDC")).toBeVisible();
     await expect(page.getByTestId("sample-data")).toHaveCount(0);
+  });
+
+  test("a market the console cannot read in words is named by its category, with the symbol in Advanced view", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // Gemini's sports symbols follow no one pattern and their team names live only in its listing.
+    const sports = () =>
+      page
+        .getByRole("row")
+        .filter({ has: page.getByRole("link", { name: "Intent #5", exact: true }) })
+        .filter({ visible: true });
+    await page.goto("/");
+    await expect(sports()).toContainText("Sports market");
+    await expect(sports()).not.toContainText("GEMI-");
+    await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
+    await page.reload();
+    await expect(sports()).toContainText("Sports market");
+    await expect(sports()).toContainText("GEMI-NBA2611200100-HILAL");
   });
 
   test("an intent without a link says no reason was recorded", async ({ page }) => {
