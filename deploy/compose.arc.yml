@@ -3,6 +3,11 @@
 # No anvil and no simulated executor: the contract, its deploy block and the agent's key come from
 # deploy/.env, and `docker compose` refuses to start while any of them is missing. The owner signs in the
 # console with their own browser wallet; this console build has no dev signer.
+#
+# The console keeps its database in a volume of its own here, `console-data-arc`, never the demo chain's
+# `console-data`: the first mandate's offchain records (holdings, hedge plans, change requests, wake-ups)
+# are kept per mandate, not per contract, so the demo chain's would otherwise show up against the Arc
+# contract. Switching COMPOSE_FILE back to the demo chain finds its database as it was left.
 
 services:
   console:
@@ -14,6 +19,8 @@ services:
       POLICY_ADDRESS: ${POLICY_ADDRESS:?the Arc testnet setup needs POLICY_ADDRESS, the deployed Policy contract, in deploy/.env}
       POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
       ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
+    volumes:
+      - console-data-arc:/data/console
 
   mcp:
     environment:
@@ -21,3 +28,8 @@ services:
       POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
       ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
       AGENT_PRIVATE_KEY: ${AGENT_PRIVATE_KEY:?the Arc testnet setup needs AGENT_PRIVATE_KEY, the agent account's key, in deploy/.env}
+
+volumes:
+  # The console's database on Arc testnet: workspaces, passkeys and agent tokens start empty, so the first
+  # workspace is claimed again (docs/hosting.md, Arc testnet).
+  console-data-arc: {}
