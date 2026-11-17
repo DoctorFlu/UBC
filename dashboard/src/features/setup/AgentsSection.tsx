@@ -99,7 +99,8 @@ function AgentCard({
   onChange: () => void;
 }) {
   const toast = useToast();
-  const [name, setName] = useState("Grok Bot");
+  // Named for the usual first app, until the agent has a live token.
+  const [name, setName] = useState(agent.tokens.some((token) => !token.revokedAt) ? "" : "Grok Bot");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [created, setCreated] = useState<CreatedToken | null>(null);

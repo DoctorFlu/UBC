@@ -43,10 +43,15 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: shotPath(testInfo, name), fullPage: true, animations: "disabled" });
 }
 
-/** One part of a console page: a full-page capture would draw the sticky bars wherever it scrolled. */
+/** One part of a console page: a full-page capture would draw the sticky bars wherever it scrolled to. */
 async function shotOf(locator: Locator, testInfo: TestInfo, name: string) {
   await locator.page().evaluate(() => document.fonts.ready);
-  await locator.screenshot({ path: shotPath(testInfo, name), animations: "disabled" });
+  // The sticky top bar would cover the part once it is scrolled into view; the capture leaves it out.
+  await locator.screenshot({
+    path: shotPath(testInfo, name),
+    animations: "disabled",
+    style: "header { visibility: hidden !important; }",
+  });
 }
 
 async function hydrated(page: Page) {
