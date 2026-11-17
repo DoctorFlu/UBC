@@ -147,6 +147,7 @@ services:
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in deploy/.env}
       MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
       MCP_ADVERTISE_OUTPUT_SCHEMAS: ${MCP_ADVERTISE_OUTPUT_SCHEMAS:-}
+      MCP_TOOL_DEADLINE_MS: ${MCP_TOOL_DEADLINE_MS:-}
       # The console's agent API, on the private network.
       CONSOLE_URL: http://console:3000
       CONSOLE_SERVICE_TOKEN: ${CONSOLE_SERVICE_TOKEN:?set CONSOLE_SERVICE_TOKEN in deploy/.env}
