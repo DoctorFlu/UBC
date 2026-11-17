@@ -21,7 +21,7 @@
     "site"
   ],
   "scripts": {
-    "lint": "npm run typegen --workspaces --if-present && eslint .",
+    "lint": "npm run typegen --workspaces --if-present && node --max-old-space-size=8192 node_modules/eslint/bin/eslint.js .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p deploy",
