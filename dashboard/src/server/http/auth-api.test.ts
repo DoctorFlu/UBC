@@ -6,11 +6,11 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { codeHash } from "../../../test/support/accounts";
 import { SoftPasskey } from "../../../test/support/passkey";
-import { Accounts, CLAIM_CODE_TTL_MS } from "../accounts/accounts";
+import { AccountError, Accounts, CLAIM_CODE_TTL_MS } from "../accounts/accounts";
 import { SESSION_IDLE_MS, SESSION_MAX_AGE_MS } from "../accounts/store";
 import { readAccountsConfig, testConsoleConfig } from "../config";
 import { ConsoleService } from "../console-service";
@@ -304,6 +304,23 @@ describe("signing in and out", () => {
     // The old code is spent.
     const reuse = await new Browser(service).call(startRecovery, "/api/auth/recover", { recoveryCode });
     expect(reuse.status).toBe(403);
+  });
+
+  it("answers a refusal thrown by another copy of the accounts module as that refusal, not a 500", async () => {
+    // Next.js may load a server module more than once; the shared service then throws the AccountError
+    // class of the copy that built it (seen in `next dev`: a spent recovery code answered 500).
+    vi.resetModules();
+    const copy = await import("../accounts/accounts");
+    expect(copy.AccountError).not.toBe(AccountError);
+    const service = newService();
+    vi.spyOn(service.accounts, "startRegistration").mockRejectedValue(
+      new copy.AccountError(403, "invalid_code", "That recovery code is not valid."),
+    );
+    const answer = await new Browser(service).call(startRecovery, "/api/auth/recover", {
+      recoveryCode: "AAAA-BBBB-CCCC-DDDD-EEEE-FFFF",
+    });
+    expect(answer.status).toBe(403);
+    expect(await answer.json()).toMatchObject({ error: { message: "That recovery code is not valid." } });
   });
 });
 

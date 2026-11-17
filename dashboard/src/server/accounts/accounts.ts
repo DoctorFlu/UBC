@@ -34,9 +34,13 @@ export const CEREMONY_TTL_MS = 5 * 60 * 1000;
 export const CLAIM_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 export const INVITE_CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Marks an AccountError across copies of this module (`AccountError.is`). */
+const ACCOUNT_ERROR = Symbol.for("mandate.account-error");
+
 /** A failure a person can act on: a stable code, an HTTP status and one plain sentence. */
 export class AccountError extends Error {
   override readonly name = "AccountError";
+  readonly [ACCOUNT_ERROR] = true;
 
   constructor(
     readonly status: number,
@@ -44,6 +48,19 @@ export class AccountError extends Error {
     message: string,
   ) {
     super(message);
+  }
+
+  /**
+   * True for an AccountError from any copy of this module. Next.js may load server modules more than
+   * once (console.ts), and the shared console service throws the class of the copy that built it, so
+   * `instanceof` would miss it in a route that loaded another copy and answer 500 for a refusal.
+   */
+  static is(error: unknown): error is AccountError {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      (error as Record<symbol, unknown>)[ACCOUNT_ERROR] === true
+    );
   }
 }
 
