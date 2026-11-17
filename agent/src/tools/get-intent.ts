@@ -5,6 +5,7 @@ import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { amountText, intentRow, IntentRowSchema, limitPriceText, type IntentRow } from "../support/intents";
 import { AFTER_REJECTION } from "../support/rules";
+import { moneyLine, readSettlements } from "../support/settlements";
 
 const ContextCheckSchema = z.object({
   hash: z.string(),
@@ -70,7 +71,11 @@ export const getIntent = defineTool({
         return undefined;
       });
     const record = ctx.ledger.lookup(input.intentId);
-    const row = intentRow(intent, view, record);
+    const settled =
+      intent.status === "executed"
+        ? (await readSettlements(ctx))?.find((stored) => stored.intentId === input.intentId)?.document
+        : undefined;
+    const row = intentRow(intent, view, record, settled);
 
     let context: z.infer<typeof ContextCheckSchema> | null = null;
     if (row.contextHash !== null) {
@@ -95,6 +100,10 @@ export const getIntent = defineTool({
       row.status === "executed" || row.status === "failed"
         ? ` Filled ${amountText(row.filledCents)}, profit ${amountText(row.pnlCents)}.`
         : "";
+    const atExpiry =
+      row.settlement === null
+        ? ""
+        : ` At expiry it resolved ${row.settlement.resolution.toUpperCase()}: ${moneyLine(row.settlement)}.`;
     const why = row.reason === null ? "" : ` Reason: ${row.reason}.`;
     const flagged =
       row.flags.length === 0
@@ -102,7 +111,7 @@ export const getIntent = defineTool({
         : ` FLAGGED, this server could not have sent it (${row.flags.join("; ")}): the agent key was used around this server, so tell the owner and do not act on it.`;
     return {
       structured: { ...v, intent: { ...row, context } },
-      summary: `Intent #${row.id}: ${row.statusLabel}, ${row.side} ${row.outcome} ${row.market} for ${amountText(row.amountCents)} at ${limitPriceText(row.limitPrice)}.${why}${result}${flagged}`,
+      summary: `Intent #${row.id}: ${row.statusLabel}, ${row.side} ${row.outcome} ${row.market} for ${amountText(row.amountCents)} at ${limitPriceText(row.limitPrice)}.${why}${result}${atExpiry}${flagged}`,
     };
   },
 });

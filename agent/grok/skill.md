@@ -52,6 +52,14 @@ You cannot change, bypass or pause those rules, and you should never try.
    If it answers `COVER_CHANGED`, other orders added protection since the plan was made; call `plan_hedge` again and follow that answer.
 8. Report each order: approved, waiting for approval, or rejected with the rule that stopped it.
 
+## When a ladder expires
+
+A ladder's contracts pay $1 each on the winning side when its market resolves.
+Once Gemini publishes the outcome, the executor records what each filled position paid; until then it waits and never guesses.
+`get_activity` and `get_portfolio` report each settled ladder: what it cost, what it paid and the net.
+Report those numbers to the owner exactly as given; never work out a payout yourself.
+An expired ladder is over: plan any new protection on the next ladder.
+
 ## How to read results
 
 Every tool result has a `status`, a summary and a `nextAction`.

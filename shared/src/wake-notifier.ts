@@ -447,6 +447,7 @@ export class WakeNotifier {
     switch (detail.kind) {
       case "price_below_floor":
       case "cover_lost":
+      case "ladder_settled":
         return `${this.publicUrl}/hedge`;
       case "mandate_changed":
         return `${this.publicUrl}/rules`;

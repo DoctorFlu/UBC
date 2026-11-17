@@ -65,6 +65,8 @@ export interface MarketContract {
   quote: ContractQuote;
   /** "yes" or "no" once settled. */
   resolutionSide: string | null;
+  /** When the outcome was published, once settled. */
+  resolvedAt: string | null;
   /** Observed settlement price, once settled. */
   settlementValue: string | null;
 }

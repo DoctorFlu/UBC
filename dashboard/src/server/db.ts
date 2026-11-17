@@ -14,12 +14,13 @@ import type { DatabaseSync } from "node:sqlite";
  *   repeated deliveries are ignored and a restart resumes instead of rescanning the chain;
  * - the offchain records the console is the system of record for: holdings, decision contexts, hedge
  *   plans, policy change requests, agent pairing and intent-to-context links;
- * - what Gemini said about each intent's market the first time the console checked it.
+ * - what Gemini said about each intent's market the first time the console checked it;
+ * - what each filled position paid at settlement, as the executor signed it (the contract cannot hold it).
  */
 export type Database = DatabaseSync;
 
 /** Each entry upgrades the schema by one version. Never edit a shipped entry; append a new one. */
-const MIGRATIONS: readonly string[] = [
+export const MIGRATIONS: readonly string[] = [
   `
   CREATE TABLE policy_events (
     deployment_id   TEXT    NOT NULL,
@@ -159,6 +160,19 @@ const MIGRATIONS: readonly string[] = [
     plan_id    TEXT    NOT NULL PRIMARY KEY,
     memory     TEXT    NOT NULL,
     updated_at INTEGER NOT NULL
+  ) STRICT;
+  `,
+  // 6: what each filled position paid at settlement, signed by the executor (#92). First record wins.
+  `
+  CREATE TABLE settlements (
+    deployment_id TEXT    NOT NULL,
+    intent_id     INTEGER NOT NULL,
+    hash          TEXT    NOT NULL,
+    document      TEXT    NOT NULL,
+    signature     TEXT    NOT NULL,
+    signer        TEXT    NOT NULL,
+    stored_at     TEXT    NOT NULL,
+    PRIMARY KEY (deployment_id, intent_id)
   ) STRICT;
   `,
 ];

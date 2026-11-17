@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GeminiError } from "@mandate/gemini";
-import { Category, categoryMask } from "@mandate/shared";
+import { Category, categoryMask, hashSettlement, type Settlement } from "@mandate/shared";
 import { ConsoleClientError } from "../../src/console/client";
 import type { Services } from "../../src/services";
 import { executePlan } from "../../src/tools/execute-plan";
@@ -12,7 +12,15 @@ import { getPortfolio, holdingValueCents } from "../../src/tools/get-portfolio";
 import { listMarkets } from "../../src/tools/list-markets";
 import { planHedge, samplePayoff } from "../../src/tools/plan-hedge";
 import { proposeTrade } from "../../src/tools/propose-trade";
-import { FakePolicy, fakeLadder, harness, ladderSymbol, SPORTS_SYMBOL } from "../fakes";
+import {
+  FakePolicy,
+  fakeLadder,
+  harness,
+  LADDER_TICKER,
+  ladderSymbol,
+  SPORTS_SYMBOL,
+  type Harness,
+} from "../fakes";
 
 type Row = Record<string, unknown>;
 
@@ -528,5 +536,116 @@ describe("get_activity", () => {
       harness({ policy: new FakePolicy({ agentAddress: null }) }).ctx,
     );
     expect(structured["status"]).toBe("ok");
+  });
+});
+
+describe("settlements in get_activity, get_intent and get_portfolio (issue #92)", () => {
+  /** A filled buy of NO on the fake ladder, and the settlement the executor recorded for it. */
+  function settled(h: Harness, strike: number, costCents: number, limitPrice: number, paid: boolean): void {
+    const id = h.policy.intents.length;
+    h.policy.intents.push({
+      id,
+      market: ladderSymbol(strike),
+      category: Category.Crypto,
+      outcome: "NO",
+      isBuy: true,
+      amountCents: costCents,
+      limitPrice,
+      status: "executed",
+      proposedAt: 0,
+      filledCents: costCents,
+      pnlCents: 0,
+    });
+    const contracts = Math.floor((costCents * 100) / limitPrice);
+    const document: Settlement = {
+      version: 1,
+      chainId: 31337,
+      policy: "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      intentId: id,
+      market: ladderSymbol(strike),
+      eventTicker: LADDER_TICKER,
+      strikeCents: strike * 100,
+      expiresAt: "2026-11-20T22:00:00.000Z",
+      outcome: "NO",
+      costCents,
+      limitPrice,
+      contractsHundredths: contracts,
+      resolution: paid ? "no" : "yes",
+      payoutCents: paid ? contracts : 0,
+      pnlCents: (paid ? contracts : 0) - costCents,
+      settlementValue: "64992.864",
+      resolvedAt: "2026-11-20T22:00:08.232Z",
+      venue: "simulated",
+    };
+    h.console.state.settlements.set(id, {
+      intentId: id,
+      hash: hashSettlement(document),
+      document,
+      signature: `0x${"11".repeat(65)}`,
+      signer: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      storedAt: `2026-11-20T22:01:0${String(id)}.000Z`,
+    });
+  }
+
+  it("reports each settled position and ladder, and says the expired ladder is over", async () => {
+    const h = harness();
+    settled(h, 65_000, 1_240, 31, true);
+    settled(h, 64_000, 2_160, 27, false);
+
+    const { structured, summary } = await getActivity.run({}, h.ctx);
+    const rows = structured["intents"] as Row[];
+    expect(rows[0]?.["settlement"]).toMatchObject({ resolution: "yes", payoutCents: 0, pnlCents: -2_160 });
+    expect(rows[1]?.["settlement"]).toMatchObject({ resolution: "no", payoutCents: 4_000, pnlCents: 2_760 });
+    expect(structured["settlements"]).toEqual({
+      positions: 2,
+      costCents: 3_400,
+      payoutCents: 4_000,
+      pnlCents: 600,
+      ladders: [
+        {
+          eventTicker: LADDER_TICKER,
+          expiresAt: "2026-11-20T22:00:00.000Z",
+          positions: 2,
+          costCents: 3_400,
+          payoutCents: 4_000,
+          pnlCents: 600,
+        },
+      ],
+    });
+    expect(summary).toContain(
+      `Ladder ${LADDER_TICKER} (expired 2026-11-20T22:00:00.000Z) settled: 2 positions, cost $34.00, paid $40.00, net +$6.00.`,
+    );
+    expect(structured["nextAction"]).toMatchObject({
+      actor: "agent",
+      hint: expect.stringContaining("plan any new protection on the next ladder") as unknown,
+    });
+
+    const intent = await getIntent.run({ intentId: 0 }, h.ctx);
+    expect(intent.summary).toContain("At expiry it resolved NO: cost $12.40, paid $40.00, net +$27.60.");
+
+    const portfolio = await getPortfolio.run({}, h.ctx);
+    expect(portfolio.structured["settled"]).toMatchObject({
+      positions: 2,
+      payoutCents: 4_000,
+      lastLadder: { eventTicker: LADDER_TICKER, pnlCents: 600 },
+    });
+    expect(portfolio.summary).toContain("That ladder is over; plan new protection on the next one.");
+  });
+
+  it("never reports a payout when the console cannot say, and stays quiet with nothing settled", async () => {
+    const h = harness();
+    settled(h, 65_000, 1_240, 31, true);
+    expect((await getActivity.run({}, harness().ctx)).structured["settlements"]).toMatchObject({
+      positions: 0,
+      ladders: [],
+    });
+    h.console.setDown(true);
+    const { structured, summary } = await getActivity.run({}, h.ctx);
+    expect(structured["settlements"]).toBeNull();
+    expect((structured["intents"] as Row[])[0]?.["settlement"]).toBeNull();
+    expect(summary).toContain("Settlements: the console cannot say right now, so do not report any payout.");
+    const offline = await getActivity.run({}, harness({ console: false }).ctx);
+    expect(offline.structured["settlements"]).toBeNull();
+    expect(offline.summary).not.toContain("Settlements");
   });
 });

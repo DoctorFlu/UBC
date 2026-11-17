@@ -1,4 +1,4 @@
-import { type PolicyEvent, reduceEvents } from "@mandate/shared";
+import { type PolicyEvent, type Settlement, reduceEvents } from "@mandate/shared";
 import { describe, expect, it } from "vitest";
 
 import { auditRows, blockedByRule } from "@/features/audit/audit-rows";
@@ -200,6 +200,63 @@ describe("buildScorecard", () => {
     const first = card.recent.find((intent) => intent.id === 0);
     expect(first?.market).toBe(huge);
     expect(first?.flags).toEqual(["market is not a Gemini symbol"]);
+  });
+
+  it("counts settled outcomes the executor signed, as totals only, and never a tampered one", () => {
+    expect(buildScorecard(fixture).settled).toEqual({
+      positions: 0,
+      costCents: 0,
+      payoutCents: 0,
+      pnlCents: 0,
+      paidOut: 0,
+    });
+    const document = (intentId: number, paid: boolean): Settlement => ({
+      version: 1,
+      chainId: 31337,
+      policy: "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      intentId,
+      market: "GEMI-BTC2611202200-HI65000",
+      eventTicker: "BTC2611202200",
+      strikeCents: 6_500_000,
+      expiresAt: "2026-11-20T22:00:00.000Z",
+      outcome: "NO",
+      costCents: 1_240,
+      limitPrice: 31,
+      contractsHundredths: 4_000,
+      resolution: paid ? "no" : "yes",
+      payoutCents: paid ? 4_000 : 0,
+      pnlCents: paid ? 2_760 : -1_240,
+      settlementValue: "64992.864",
+      resolvedAt: "2026-11-20T22:00:08.232Z",
+      venue: "simulated",
+    });
+    const verified = (doc: Settlement) =>
+      ({
+        status: "verified",
+        hash: `0x${"11".repeat(32)}`,
+        signer: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+        signature: `0x${"22".repeat(65)}`,
+        storedAt: "2026-11-20T22:01:00.000Z",
+        document: doc,
+      }) as const;
+    const card = buildScorecard({
+      ...fixture,
+      settlements: {
+        0: verified(document(0, true)),
+        1: verified(document(1, false)),
+        2: { status: "tampered", hash: `0x${"33".repeat(32)}`, storedAt: "2026-11-20T22:01:00.000Z" },
+      },
+    });
+    expect(card.settled).toEqual({
+      positions: 2,
+      costCents: 2_480,
+      payoutCents: 4_000,
+      pnlCents: 1_520,
+      paidOut: 1,
+    });
+    // Totals only: no hash, signature or document of a settlement reaches the public page.
+    expect(JSON.stringify(card)).not.toContain("11".repeat(32));
+    expect(JSON.stringify(card)).not.toContain("64992.864");
   });
 });
 

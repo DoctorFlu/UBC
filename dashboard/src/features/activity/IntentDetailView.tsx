@@ -26,10 +26,17 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip, statusDescriptions } from "@/components/ui/StatusChip";
 import { When } from "@/components/ui/When";
-import { formatContractPrice, formatCount, formatUsdCents, shortenHex } from "@/lib/format";
+import {
+  formatContractPrice,
+  formatContractsHundredths,
+  formatCount,
+  formatUsdCents,
+  shortenHex,
+} from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents } from "@/lib/live/derive";
-import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
+import type { ChainView, ConsoleSnapshot, SealedReason, SettlementView } from "@/lib/live/types";
+import { formatSettlementValue, totalsSentence } from "@/lib/settlement/settlement";
 import { categoryName, describeMarket, namingCategory } from "@/lib/markets";
 import { evidenceHref } from "@/lib/evidence/chain";
 import { paymentHref } from "@/lib/payments/links";
@@ -320,6 +327,94 @@ function SealedReasonCard({
   );
 }
 
+/**
+ * What the position paid when its market resolved. The Policy contract cannot record a payout, so the
+ * executor signs it and the console stores it; the console checks the document against its hash here and
+ * checked the signature against the contract's executor when it was stored.
+ */
+function SettlementCard({ settlement }: { settlement: SettlementView }) {
+  const badge = <span className={styles.sourceBadge}>Signed by the executor</span>;
+  if (settlement.status === "tampered") {
+    return (
+      <Card title="At expiry" headingLevel={2} tone="attention" actions={badge}>
+        <div className={styles.sealed} data-sealed="tampered" data-testid="intent-settlement">
+          <ShieldAlert aria-hidden className={styles.sealedIcon} />
+          <div className={styles.sealedBody}>
+            <p className={styles.sealedTitle}>Tampered</p>
+            <p className={styles.sealedText}>
+              The stored settlement no longer matches the hash it was stored under. It was changed after the
+              fact, so the console does not show or count it.
+            </p>
+            <Advanced>
+              <HexValue label="Hash" value={settlement.hash} kind="hash" />
+            </Advanced>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+  const doc = settlement.document;
+  const level = formatSettlementValue(doc.settlementValue);
+  const strike = doc.strikeCents === null ? null : formatUsdCents(doc.strikeCents);
+  return (
+    <Card title="At expiry" headingLevel={2} actions={badge}>
+      <div className={styles.sealed} data-sealed="verified" data-testid="intent-settlement">
+        <ShieldCheck aria-hidden className={styles.sealedIcon} />
+        <div className={styles.sealedBody}>
+          <p className={styles.sealedTitle}>
+            {doc.payoutCents > 0 ? `Paid ${formatUsdCents(doc.payoutCents)}` : "Paid nothing"}
+          </p>
+          <p className={styles.sealedText}>
+            {level ? `It settled at ${level}` : "It settled"}
+            {strike ? `, ${doc.resolution === "yes" ? "at or above" : "below"} the ${strike} strike` : ""}, so
+            the {doc.outcome} contracts {doc.payoutCents > 0 ? "paid $1 each" : "paid nothing"}.{" "}
+            {totalsSentence({
+              positions: 1,
+              costCents: doc.costCents,
+              payoutCents: doc.payoutCents,
+              pnlCents: doc.pnlCents,
+            })}
+          </p>
+          <dl className={styles.facts}>
+            <dt>Paid</dt>
+            <dd>
+              <Money cents={doc.payoutCents} />
+            </dd>
+            <dt>Net</dt>
+            <dd>
+              <Money cents={doc.pnlCents} sign="always" />
+            </dd>
+            <dt>Outcome published</dt>
+            <dd>
+              <When at={doc.resolvedAt} date />
+            </dd>
+            <Advanced>
+              <dt>Contracts</dt>
+              <dd className="num">
+                {formatContractsHundredths(doc.contractsHundredths)} {doc.outcome}, resolved{" "}
+                {doc.resolution.toUpperCase()}
+              </dd>
+              <dt>Recorded</dt>
+              <dd>
+                Offchain in the console, <When inSentence at={settlement.storedAt} date />; the Policy
+                contract cannot record a payout.
+              </dd>
+              <dt>Signer</dt>
+              <dd>
+                <HexValue value={settlement.signer} kind="address" />
+              </dd>
+              <dt>Hash</dt>
+              <dd>
+                <HexValue value={settlement.hash} kind="hash" />
+              </dd>
+            </Advanced>
+          </dl>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 const FIELD_LABELS: Record<string, string> = {
   amountCents: "Amount (cents)",
   limitPrice: "Limit price",
@@ -427,6 +522,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
   const simulated = fillsAreSimulated(snapshot.network);
   const timeline = steps(chain, intent.id, simulated);
   const flags = intentFlags(intent);
+  const settlement: SettlementView | undefined = chain.settlements[intent.id];
 
   return (
     <div className={styles.view}>
@@ -508,6 +604,8 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               </div>
             ) : null}
           </Card>
+
+          {settlement ? <SettlementCard settlement={settlement} /> : null}
 
           <SealedReasonCard
             sealed={chain.sealed[intent.id]}

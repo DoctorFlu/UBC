@@ -162,6 +162,7 @@ check "QuickNode webhook is public and checks its own signature (POST /api/webho
 
 echo "-- internal only"
 expect "the console's agent API is not public" none GET /api/agent/v1/holdings 404
+expect "the console's executor API is not public" none PUT /api/executor/v1/settlements/0 404
 
 if [ "$failures" -eq 0 ]; then
   echo "All checks passed."

@@ -6,18 +6,20 @@ import {
   mergeIntentDetails,
 } from "@mandate/shared";
 
-import type { ChainView, SealedReason } from "./types";
+import type { ChainView, SealedReason, SettlementView } from "./types";
 
 /**
  * The ChainView of a reduced event log at `head`. `details` fills intents no event described (a proposal
- * rejected on a contract without `IntentProposed`); `sealed` carries the checked decision contexts.
- * Pure, so the console service and the fixtures build views the same way.
+ * rejected on a contract without `IntentProposed`); `sealed` carries the checked decision contexts and
+ * `settlements` the checked settlement records. Pure, so the console service and the fixtures build
+ * views the same way.
  */
 export function buildChainView(
   state: PolicyViewState,
   head: { blockNumber: number; timestamp: number },
   details: ReadonlyMap<number, Intent> = new Map(),
   sealed: Record<number, SealedReason> = {},
+  settlements: Record<number, SettlementView> = {},
 ): ChainView {
   const intents = listIntents(state).map((intent) => {
     const stored = details.get(intent.id);
@@ -47,5 +49,6 @@ export function buildChainView(
         }
       : null,
     sealed,
+    settlements,
   };
 }

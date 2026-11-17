@@ -17,6 +17,7 @@ import {
   putPairingRequestSchema,
   putSignalBudgetRequestSchema,
   putSignalPaymentRequestSchema,
+  settlementsResponseSchema,
   signalBudgetResponseSchema,
   signalPaymentResponseSchema,
   verifyContext,
@@ -282,3 +283,10 @@ async function pairingResponse(service: ConsoleService, pairing: StoredPairing) 
     isContractAgent: roles ? isAddressEqual(roles.agent, pairing.agentAddress) : false,
   });
 }
+
+// ------------------------------------------------------------------ settlements (#92)
+
+/** The executor's settlements for the live deployment, newest first; only records that still verify. */
+export const getSettlements = agentRoute((_request, service) =>
+  Promise.resolve(json(settlementsResponseSchema.parse({ settlements: service.verifiedSettlements() }))),
+);

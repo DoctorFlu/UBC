@@ -136,7 +136,7 @@ Grok Bot is told the order of work in `src/instructions.ts`; every result carrie
 | `get_setup_state` | Each setup step with the actor who must do it and a hint: key, contract, console link, chain, agent role, gas, rules, pause switch, pairing, holdings. |
 | `request_pairing` | Asks the console to pair this agent and returns the claim link for the owner. |
 | `get_policy` | The owner's rules, today's usage and the headroom left, plus which contract extensions exist. |
-| `get_portfolio` | The holdings the owner entered in the console, valued at Gemini spot. |
+| `get_portfolio` | The holdings the owner entered in the console, valued at Gemini spot, and the last ladder that settled. |
 | `list_markets` | Open Gemini events in the categories the mandate allows, by volume. |
 | `get_ladder` | One asset's strike ladder for a horizon, the rungs nearest spot first. |
 | `plan_hedge` | A hedge plan of NO buys for a holding and a drop, with payoffs and the verdict each order is expected to get; the plan is kept in the server and posted to the console. |
@@ -144,7 +144,7 @@ Grok Bot is told the order of work in `src/instructions.ts`; every result carrie
 | `propose_trade` | Proposes one trade with its decision context; the contract approves, rejects with a reason, or holds it for the owner. Safe to retry. |
 | `execute_plan` | Proposes a plan's orders in order, stops at the first rejection, and reports each rung. Safe to retry and resumable. |
 | `get_intent` | One intent's status, reason, fill and decision context, checked against its hash. |
-| `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged. |
+| `get_activity` | The latest intents, newest first, with waiting and rejected older ones flagged, and what each settled position cost, paid and netted at expiry. |
 | `buy_signal` | Pays the signal API a fraction of a cent for a per-strike cheap, fair or expensive verdict, inside a daily budget; returns a `receiptId` that `plan_hedge` accepts. |
 | `request_policy_change` | Files a rule change with a reason for the owner to decide in the console; it can never touch the pause switch. |
 | `ping`, `whoami` | Liveness and the agent's address. |

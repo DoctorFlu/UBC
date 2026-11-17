@@ -6,7 +6,7 @@
  *   2. the paid signal API,
  *   3. the console,
  *   4. the MCP server, acting as the devchain agent account,
- *   5. the simulated executor, which fills approved intents,
+ *   5. the simulated executor, which fills approved intents and settles them at expiry,
  *   6. the landing page, which links to this console.
  *
  * Everything the processes must agree on (contract address, RPC, the console's service token, the
@@ -327,7 +327,11 @@ async function main(): Promise<void> {
   });
 
   if (!values["no-executor"]) {
-    start("executor", ["run", "executor", "-w", "@mandate/devchain"], localChain);
+    // It records settlements in this run's console.
+    start("executor", ["run", "executor", "-w", "@mandate/devchain"], {
+      ...localChain,
+      CONSOLE_URL: consoleUrl,
+    });
   }
 
   if (withSite) {
@@ -385,7 +389,7 @@ Mandate local stack is running (development only).
   Signal API  ${signalsUrl}
   Chain       ${record.rpcUrl}  Policy ${record.address} (${record.contract})
   Agent       ${record.agent}  (anvil account 1)
-  Executor    ${values["no-executor"] ? "not started" : "simulated: fills approved intents"}
+  Executor    ${values["no-executor"] ? "not started" : "simulated: fills approved intents, settles expired ones"}
   Agent API   ${consoleUrl}${CONSOLE_AGENT_API_BASE}
   Rules       ${rules}
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { decisionContextSchema } from "./context";
+import { settlementSchema, signatureSchema } from "./settlement";
 import { addressSchema, bytes32Schema, intentIdSchema, policyRulesSchema, txHashSchema } from "./types";
 
 /**
@@ -45,6 +46,24 @@ export const CONSOLE_AGENT_ROUTES = {
   signalPayment: (receiptId: string) => `${CONSOLE_AGENT_API_BASE}/signal-payments/${receiptId}`,
   /** PUT replaces the snapshot of the agent's signal budget and Gateway balance (latest `asOf` wins). Issue #22. */
   signalBudget: `${CONSOLE_AGENT_API_BASE}/signal-budget`,
+  /** GET: the settlements the executor recorded for the live deployment, newest first. Issue #92. */
+  settlements: `${CONSOLE_AGENT_API_BASE}/settlements`,
+} as const;
+
+/**
+ * The executor's side of the console (issue #92). The executor records what each filled position paid
+ * at settlement here, because the Policy contract can record one result per intent and the executor
+ * spends it on the fill. There is no shared secret: each record is signed with the executor key, and
+ * the console stores it only when the signer is the contract's `executor()`.
+ */
+export const CONSOLE_EXECUTOR_API_BASE = "/api/executor/v1";
+
+export const CONSOLE_EXECUTOR_ROUTES = {
+  /**
+   * PUT stores one settlement under its intent id. The first record wins: the same document again is 200,
+   * a different one is 409 `conflict`.
+   */
+  settlement: (intentId: number | string) => `${CONSOLE_EXECUTOR_API_BASE}/settlements/${String(intentId)}`,
 } as const;
 
 const isoDateTime = z.iso.datetime({ offset: true });
@@ -299,3 +318,30 @@ export type PutSignalBudgetRequest = z.infer<typeof putSignalBudgetRequestSchema
 /** The snapshot the console now holds (the request's or a newer one), with when it stored it. */
 export const signalBudgetResponseSchema = putSignalBudgetRequestSchema.extend({ storedAt: isoDateTime });
 export type SignalBudgetResponse = z.infer<typeof signalBudgetResponseSchema>;
+
+// Settlements (#92)
+
+/** PUT body: the settlement document and the executor's EIP-191 signature of `hashSettlement(document)`. */
+export const putSettlementRequestSchema = z.strictObject({
+  document: settlementSchema,
+  signature: signatureSchema,
+});
+export type PutSettlementRequest = z.infer<typeof putSettlementRequestSchema>;
+
+/** One stored settlement, as the console holds it. */
+export const storedSettlementSchema = z.strictObject({
+  intentId: intentIdSchema,
+  hash: bytes32Schema,
+  document: settlementSchema,
+  signature: signatureSchema,
+  /** The executor address the signature recovers to. */
+  signer: addressSchema,
+  storedAt: isoDateTime,
+});
+export type StoredSettlement = z.infer<typeof storedSettlementSchema>;
+
+export const settlementsResponseSchema = z.strictObject({
+  /** Newest settlement first. Only records whose hash still matches their document. */
+  settlements: z.array(storedSettlementSchema),
+});
+export type SettlementsResponse = z.infer<typeof settlementsResponseSchema>;
