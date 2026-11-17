@@ -3,7 +3,7 @@
  * key can (the contract approves all of it) and check that only a real, correctly labelled Gemini market
  * with a sane price is filled, on both contracts. The venue is a fake, so no network is needed.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Category, type CategoryId, type IntentStatus, type PolicyClient } from "@mandate/shared";
 import {
   checkApprovedIntent,
@@ -135,6 +135,11 @@ describe.each(POLICY_CONTRACTS)("the simulated executor on the %s contract", (ki
 
     // Refused buys are recorded as not filled, so their budget is released: only the valid $1 stays.
     expect((await chain.outsider.getSnapshot()).committedCents).toBe(100);
+    // The executor logs once its own wait for the receipt returns, which can be after this test has
+    // already seen the new status onchain: wait for a line about every intent before reading the log.
+    await vi.waitFor(() => {
+      for (const id of ids) expect(lines.some((line) => line.includes(`intent #${String(id)} `))).toBe(true);
+    });
     const log = lines.join("\n");
     expect(log).toContain("(category_mismatch)");
     expect(log).toContain("(market_not_listed)");
