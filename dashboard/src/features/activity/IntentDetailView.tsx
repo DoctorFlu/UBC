@@ -26,14 +26,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip, statusDescriptions } from "@/components/ui/StatusChip";
 import { When } from "@/components/ui/When";
-import {
-  formatContractPrice,
-  formatCount,
-  formatDateUtc,
-  formatTimeUtc,
-  formatUsdCents,
-  shortenHex,
-} from "@/lib/format";
+import { formatContractPrice, formatCount, formatUsdCents, shortenHex } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents } from "@/lib/live/derive";
 import type { ChainView, ConsoleSnapshot, SealedReason } from "@/lib/live/types";
@@ -157,7 +150,7 @@ function PricesSeen({ ladder, market }: { ladder: LadderSummary; market: string 
     <div className={styles.prices} role="region" aria-labelledby="prices-seen" tabIndex={0}>
       <table className={styles.pricesTable} data-testid="prices-seen">
         <caption id="prices-seen" className={styles.pricesCaption}>
-          Prices seen at {formatTimeUtc(ladder.observedAt)}, {formatDateUtc(ladder.observedAt)}
+          Prices seen <When inSentence at={ladder.observedAt} date />
         </caption>
         <thead>
           <tr>

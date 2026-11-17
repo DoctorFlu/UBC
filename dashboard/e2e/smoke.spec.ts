@@ -135,7 +135,9 @@ test.describe("seeded demo", () => {
     await expect(sealed).toContainText("The $65,000 rung pays first");
     // The order book the agent saw is a table, one row per strike, with the traded rung marked.
     const prices = page.getByTestId("prices-seen");
-    await expect(prices.locator("caption")).toContainText("Prices seen at 13:24");
+    // When the agent saw them: on the owner's clock in words, the exact moment in the markup.
+    await expect(prices.locator("caption")).toContainText("Prices seen ");
+    await expect(prices.locator("caption time")).toHaveAttribute("datetime", /T13:24:30/);
     await expect(prices.locator("tbody tr")).toHaveCount(3);
     const traded = prices.locator("tbody tr[data-traded]");
     await expect(traded).toHaveCount(1);
