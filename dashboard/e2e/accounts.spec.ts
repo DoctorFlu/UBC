@@ -50,7 +50,7 @@ async function shotOf(locator: Locator, testInfo: TestInfo, name: string) {
   await locator.screenshot({
     path: shotPath(testInfo, name),
     animations: "disabled",
-    style: "header { visibility: hidden !important; }",
+    style: "header:not(main header), header:not(main header) * { visibility: hidden !important; }",
   });
 }
 
@@ -264,7 +264,14 @@ test.describe("a second workspace", () => {
   });
 
   test("signs out, is kept out, and signs back in with the same passkey", async () => {
+    // From a page of its own, hydrated, not whatever the last test left behind.
+    await page.goto("/setup");
+    await hydrated(page);
+    const signedOut = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/auth/sign-out",
+    );
     await page.getByRole("button", { name: "Sign out" }).click();
+    expect((await signedOut).status()).toBe(200);
     await page.waitForURL(/\/sign-in$/);
     expect((await page.request.get("/api/console/snapshot")).status()).toBe(401);
     await page.goto("/setup");
