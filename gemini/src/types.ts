@@ -69,6 +69,10 @@ export interface MarketContract {
   resolvedAt: string | null;
   /** Observed settlement price, once settled. */
   settlementValue: string | null;
+  /** Order grid for this contract, as Gemini sent it (for example "0.01"); null when absent. */
+  quantityIncrement: string | null;
+  quantityMinimum: string | null;
+  priceIncrement: string | null;
 }
 
 export interface MarketEvent {

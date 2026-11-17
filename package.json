@@ -43,6 +43,7 @@
     "dev:chain": "tsx devchain/scripts/chain.ts",
     "dev:stack": "tsx devchain/scripts/stack.ts",
     "dev:executor": "tsx devchain/scripts/executor.ts",
+    "gemini:doctor": "tsx gemini/scripts/doctor.ts",
     "dev:propose": "tsx devchain/scripts/propose.ts",
     "redteam": "tsx redteam/src/cli.ts",
     "e2e": "npm run e2e -w @mandate/dashboard && npm run e2e -w @mandate/site",
