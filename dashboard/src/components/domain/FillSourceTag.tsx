@@ -1,4 +1,4 @@
-import { CircleHelp, FlaskConical, TestTube } from "lucide-react";
+import { CircleHelp, Drama, TestTube } from "lucide-react";
 
 import { cx } from "@/lib/cx";
 import type { FillSource } from "@/lib/network";
@@ -25,7 +25,7 @@ const LABELS: Record<Exclude<FillSource, "live">, { text: string; title: string;
   },
 };
 
-const ICONS = { simulated: FlaskConical, sandbox: TestTube, unknown: CircleHelp } as const;
+const ICONS = { simulated: Drama, sandbox: TestTube, unknown: CircleHelp } as const;
 
 /**
  * Says where a fill came from whenever it was not real money on a real exchange (`fillSource`): the

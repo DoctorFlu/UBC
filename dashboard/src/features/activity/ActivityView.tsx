@@ -233,13 +233,10 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           label="Filled"
           value={formatUsdCents(filledCents)}
           hint={
-            <>
+            <span className={styles.statHint}>
               {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded`}
-              <FillSourceTag
-                source={fillsSource(chain, snapshot.network, filledIntentIds(chain))}
-                className={styles.statMarker}
-              />
-            </>
+              <FillSourceTag source={fillsSource(chain, snapshot.network, filledIntentIds(chain))} />
+            </span>
           }
         />
         <Stat
@@ -249,16 +246,13 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
             settled.positions === 0 ? (
               "Nothing has settled yet"
             ) : (
-              <>
+              <span className={styles.statHint}>
                 {`${formatCount(settled.positions)} settled, cost ${formatUsdCents(settled.costCents)}, ` +
                   (settled.feesEstimated ? `fees ${formatUsdCents(settled.feeCents)}, ` : "") +
                   `net ${formatUsdCents(settled.pnlCents, { sign: "always" })}` +
                   (settled.feesEstimated ? " (fees estimated)" : "")}
-                <FillSourceTag
-                  source={fillsSource(chain, snapshot.network, settlements.keys())}
-                  className={styles.statMarker}
-                />
-              </>
+                <FillSourceTag source={fillsSource(chain, snapshot.network, settlements.keys())} />
+              </span>
             )
           }
         />

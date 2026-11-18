@@ -1,39 +1,40 @@
-import { Box, CircleHelp, FlaskConical, Zap } from "lucide-react";
+import { Box, CircleHelp, Drama, Zap } from "lucide-react";
 
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { type FillSource, contractFillSource } from "@/lib/network";
 
 import styles from "./Shell.module.css";
 
+/** `prefix` is read to screen readers only, before the text: "Gemini Sandbox". */
 const BADGES: Record<
   FillSource,
-  { text: string; spoken: string; title: string; className: string; Icon: typeof Box }
+  { text: string; prefix: string; title: string; className: string; Icon: typeof Box }
 > = {
   live: {
     text: "Live",
-    spoken: "Gemini Live",
+    prefix: "Gemini ",
     title: "Live: the executor places approved orders on Gemini with real money.",
     className: styles.venueBadgeLive ?? "",
     Icon: Zap,
   },
   sandbox: {
     text: "Sandbox",
-    spoken: "Gemini Sandbox",
+    prefix: "Gemini ",
     title: "Sandbox: the executor places approved orders on Gemini's sandbox, with test funds only.",
     className: "",
     Icon: Box,
   },
   simulated: {
     text: "Simulated fills",
-    spoken: "Simulated fills",
+    prefix: "",
     title:
       "Simulated fills: the executor's simulated venue fills approved orders. They are recorded onchain, but no exchange sees them.",
     className: styles.venueBadgeSimulated ?? "",
-    Icon: FlaskConical,
+    Icon: Drama,
   },
   unknown: {
     text: "Fill source unknown",
-    spoken: "Fill source unknown",
+    prefix: "",
     title:
       "The executor has not said which venue fills this contract's orders, so the console can't say whether an exchange sees them.",
     className: styles.venueBadgeUnknown ?? "",
@@ -64,7 +65,14 @@ export function VenueBadge({ short = false }: { short?: boolean }) {
       data-venue={source}
     >
       <Icon aria-hidden strokeWidth={2} />
-      {short ? <span className="visually-hidden">{badge.spoken}</span> : badge.text}
+      {short ? (
+        <span className="visually-hidden">{`${badge.prefix}${badge.text}`}</span>
+      ) : (
+        <>
+          {badge.prefix ? <span className="visually-hidden">{badge.prefix}</span> : null}
+          {badge.text}
+        </>
+      )}
     </span>
   );
 }
