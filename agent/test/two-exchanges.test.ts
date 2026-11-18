@@ -108,30 +108,48 @@ describe("plan_hedge with the sandbox as the order venue", () => {
   });
 });
 
-describe("get_portfolio on a goal the console measured as nothing to cover", () => {
-  it("never says the floor is at or above spot when it is below", async () => {
-    // What the console reported for the hosted weekly goal on the sandbox (18 November 2026, 08:29 UTC).
-    const h = harness({
-      clock,
-      cover: () => [
-        {
-          asset: "BTC",
-          eventTicker: WEEKLY,
-          expiresAt: HOSTED_WEEKLY_PLAN.plan.expiry,
-          planId: HOSTED_WEEKLY_PLAN.plan_id,
-          floorCents: 5_799_180,
-          state: "nothing_to_cover",
-          spotCents: 6_469_037,
-          measuredBelowCents: null,
-          targetPayoutCents: 0,
-          heldPayoutCents: 0,
-          heldByState: { filledCents: 0, awaitingFillCents: 0, awaitingOwnerCents: 0 },
-          coverBps: null,
-          missingPayoutCents: 0,
-        },
-      ],
-    });
-    const { summary } = await getPortfolio.run({}, h.ctx);
-    expect(summary).not.toContain("the floor is at or above spot");
+describe("get_portfolio for a goal without a staircase", () => {
+  const goal = {
+    asset: "BTC",
+    eventTicker: WEEKLY,
+    expiresAt: HOSTED_WEEKLY_PLAN.plan.expiry,
+    planId: HOSTED_WEEKLY_PLAN.plan_id,
+    floorCents: 5_799_180,
+    spotCents: 6_469_037,
+    measuredBelowCents: null,
+    targetPayoutCents: 0,
+    heldPayoutCents: 0,
+    heldByState: { filledCents: 0, awaitingFillCents: 0, awaitingOwnerCents: 0 },
+    coverBps: null,
+    missingPayoutCents: 0,
+  };
+  const head = "Cover now: BTC below $57,991.80 on BTC2611202200 (settles Fri Nov 20, 2026, 5:00 PM ET): ";
+
+  it.each([
+    [
+      "cannot_hedge",
+      "no_strike_below_spot",
+      "not covered, and nothing can be bought for it on this ladder now: the exchange orders go to lists no strike below today's price, and no position held pays below it.",
+    ],
+    [
+      "cannot_hedge",
+      "ladder_not_listed",
+      "not covered, and nothing can be bought for it now: the exchange orders go to does not list this ladder, and no position is held on it.",
+    ],
+    [
+      "cannot_hedge",
+      "holding_too_small",
+      "not covered: the holding is too small for the smallest contract (0.01).",
+    ],
+    [
+      "nothing_to_cover",
+      "floor_not_below_ceiling",
+      "not covered, and nothing to protect now: the floor is not below today's price, so the goal calls for no contracts.",
+    ],
+  ] as const)("says %s (%s) in its own words, never covered", async (state, reason, sentence) => {
+    const h = harness({ clock, cover: () => [{ ...goal, state, reason }] });
+    const { structured, summary } = await getPortfolio.run({}, h.ctx);
+    expect(summary).toContain(`${head}${sentence}`);
+    expect((structured["cover"] as Row[])[0]).toMatchObject({ state, reason });
   });
 });

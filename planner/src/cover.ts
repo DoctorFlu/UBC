@@ -19,6 +19,12 @@
  *
  * where T_i is the staircase's payout just below K_i. With nothing held this is the full staircase;
  * with the whole staircase held it is nothing.
+ *
+ * The staircase is designed on the ladder's strikes plus the strikes of the positions held
+ * (`coverStrikes`): what is covered is a fact about the positions, each resolved on the exchange that
+ * lists it, so a goal held at strikes the order venue does not list (Gemini's sandbox lists fewer than
+ * production) is measured by those positions, not read as having nothing to cover. What can be added is
+ * a different question: `planHedge` buys only on the ladder's own strikes.
  */
 import { eventTickerCandidates, type Ladder } from "@mandate/gemini";
 import {
@@ -30,7 +36,9 @@ import {
 } from "./staircase";
 import type {
   CoverAssessment,
+  CoverReason,
   CoverRung,
+  CoverState,
   HeldPosition,
   Holding,
   PositionState,
@@ -51,6 +59,11 @@ export interface CoverLadder {
   eventTicker: string;
   rungs: readonly StrikeRung[];
   spot?: Pick<Ladder["spot"], "midCents">;
+  /**
+   * False when the exchange orders go to does not list this ladder at all (its strikes then come from
+   * production, for positions held only). Default true.
+   */
+  listed?: boolean;
 }
 
 export interface CoverInput {
@@ -214,6 +227,44 @@ function emptyByState(): Record<PositionState, number> {
 }
 
 /**
+ * The strikes a goal's cover is measured on: the ladder's, plus the strike of every position held that
+ * the ladder does not list (bought where another exchange listed it). Positions held carry their own
+ * strike, so nothing more is read.
+ */
+export function coverStrikes(rungs: readonly StrikeRung[], held: readonly HeldPosition[]): StrikeRung[] {
+  const bySymbol = new Map<string, StrikeRung>(
+    rungs.map((r) => [
+      r.instrumentSymbol,
+      { instrumentSymbol: r.instrumentSymbol, strikeCents: r.strikeCents },
+    ]),
+  );
+  for (const p of held) {
+    if (!bySymbol.has(p.instrumentSymbol)) {
+      bySymbol.set(p.instrumentSymbol, { instrumentSymbol: p.instrumentSymbol, strikeCents: p.strikeCents });
+    }
+  }
+  return [...bySymbol.values()];
+}
+
+/** Why a staircase is empty, or null when it is not. */
+function emptyReason(args: {
+  spotCents: number;
+  ceilingCents: number | null;
+  floorCents: number | null;
+  listed: boolean;
+  designed: readonly DesignedRung<StrikeRung>[];
+  target: number;
+}): CoverReason | null {
+  // A floor at or above spot calls for nothing on any ladder, so it is the reason before any about strikes.
+  if (args.floorCents !== null && args.floorCents >= args.spotCents) return "floor_not_below_ceiling";
+  if (args.ceilingCents === null) return args.listed ? "no_strike_below_spot" : "ladder_not_listed";
+  if (args.floorCents !== null && args.floorCents >= args.ceilingCents) return "floor_not_below_ceiling";
+  if (args.designed.length === 0) return args.listed ? "no_strike_below_spot" : "ladder_not_listed";
+  if (args.target === 0) return "holding_too_small";
+  return null;
+}
+
+/**
  * The cover of a staircase already designed. `planHedge` calls this with its own staircase, so a plan
  * and an assessment of the same goal can never disagree.
  */
@@ -226,10 +277,13 @@ export function measureCover(args: {
   floorCents: number | null;
   designed: readonly DesignedRung<StrikeRung>[];
   held: readonly HeldPosition[];
+  /** False when the order venue does not list the ladder (`CoverLadder.listed`). Default true. */
+  listed?: boolean;
 }): CoverAssessment {
   checkHeld(args.held);
   const { designed, held } = args;
   const base = {
+    reason: null,
     asset: args.asset,
     eventTicker: args.eventTicker,
     spotCents: args.spotCents,
@@ -239,10 +293,13 @@ export function measureCover(args: {
   };
   const target = designed.reduce((sum, d) => sum + d.designedHundredths, 0);
   const bottom = designed.at(-1)?.rung.strikeCents;
-  if (bottom === undefined || target === 0) {
+  const reason = emptyReason({ ...args, listed: args.listed ?? true, target });
+  if (bottom === undefined || reason !== null) {
+    const state: CoverState = reason === "floor_not_below_ceiling" ? "nothing_to_cover" : "cannot_hedge";
     return {
       ...base,
-      state: "nothing_to_cover",
+      state,
+      reason: reason ?? "no_strike_below_spot",
       measuredBelowCents: null,
       targetPayoutCents: 0,
       heldPayoutCents: 0,
@@ -314,7 +371,9 @@ export function assessCover(input: CoverInput): CoverAssessment {
   if (spotCents === undefined)
     throw new PlannerInputError("spotCents is required when the ladder has no spot");
   requireInteger(spotCents, "spotCents", 1);
-  const ascending = [...input.ladder.rungs].sort((a, b) => a.strikeCents - b.strikeCents);
+  const ascending = coverStrikes(input.ladder.rungs, input.held).sort(
+    (a, b) => a.strikeCents - b.strikeCents,
+  );
   const floorCents = resolveFloor(input.goal, spotCents);
   const ceilingCents = resolveCeiling(units, spotCents, input.goal.ceilingCents, ascending, () => undefined);
   const designed =
@@ -327,9 +386,10 @@ export function assessCover(input: CoverInput): CoverAssessment {
     spotCents,
     units,
     ceilingCents,
-    floorCents: ceilingCents === null ? null : floorCents,
+    floorCents,
     designed,
     held: input.held,
+    listed: input.ladder.listed ?? true,
   });
 }
 
@@ -354,7 +414,7 @@ export function coverOfPlan(input: {
   plan: PlanGoal;
   /** The holding as saved now, or null to use the plan's. */
   holdingQuantity: string | null;
-  ladder: Pick<CoverLadder, "asset" | "eventTicker" | "rungs">;
+  ladder: Pick<CoverLadder, "asset" | "eventTicker" | "rungs" | "listed">;
   spotCents: number;
   intents: Iterable<RecordedIntent>;
   /** Strikes of positions the ladder does not list, from production (`symbolsMissingFromLadder`). */

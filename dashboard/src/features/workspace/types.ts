@@ -14,7 +14,10 @@ export interface MandateSummary {
   /** Committed on the contract so far, and the budget it counts against; null without the chain or rules. */
   committedCents: number | null;
   budgetCents: number | null;
-  /** The current goals' cover: how many are met, partly met or not, and how many cannot be measured now. */
+  /**
+   * The current goals' cover: how many are covered, how many are not (partly or not covered, nothing to
+   * protect now, or nothing can be bought), and how many cannot be measured now (`coverCounts`).
+   */
   cover: { goals: number; met: number; short: number; unavailable: number };
 }
 

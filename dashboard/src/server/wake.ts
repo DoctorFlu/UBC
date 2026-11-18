@@ -34,6 +34,8 @@ export type LadderSource = (
       ladder: Ladder;
       /** Production's strikes the ladder lacks (`MarketQuotes`); null when production could not be read. */
       elsewhere?: readonly { instrumentSymbol: string; strikeCents: number }[] | null;
+      /** False when the venue does not list the event (`LadderLookup.listed`). Default true. */
+      listed?: boolean;
     }
   | { ok: false }
 >;
@@ -188,7 +190,7 @@ export class ConsoleWake {
         problem = "Gemini's quotes were not available at the last check.";
         continue;
       }
-      const quotes = ladderQuotes(lookup.ladder, lookup.elsewhere);
+      const quotes = ladderQuotes(lookup.ladder, lookup.elsewhere, lookup.listed);
       const holding = inputs.holdings.find((h) => h.asset === plan.asset)?.quantity ?? null;
       const cover = coverNow({ plan, holdingQuantity: holding, quotes, intents: inputs.intents });
       const goal: PriceGoal = {

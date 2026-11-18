@@ -93,10 +93,17 @@ export interface HeldPosition {
  * - `met`: what is held pays the goal's target below the floor, within the tolerance.
  * - `partly_met`: something is held, but less than that.
  * - `not_met`: nothing held pays below the floor.
- * - `nothing_to_cover`: the goal calls for no contracts (no strike below spot, the floor is not
- *   below the ceiling, or the holding is too small for 0.01 contracts).
+ * - `nothing_to_cover`: the floor is not below where protection starts (spot, by default), so the goal
+ *   calls for no contracts now (`reason` "floor_not_below_ceiling").
+ * - `cannot_hedge`: the goal calls for protection, but no staircase can be built: no strike below spot
+ *   on the ladder nor among the positions held, the ladder is not listed where orders go, or the
+ *   holding is too small for 0.01 contracts (`reason`). Never covered.
  */
-export type CoverState = "met" | "partly_met" | "not_met" | "nothing_to_cover";
+export type CoverState = "met" | "partly_met" | "not_met" | "nothing_to_cover" | "cannot_hedge";
+
+/** Why a goal has no staircase (`nothing_to_cover` and `cannot_hedge`). */
+export type CoverReason =
+  "floor_not_below_ceiling" | "no_strike_below_spot" | "ladder_not_listed" | "holding_too_small";
 
 /** One strike of the goal's staircase, highest first. */
 export interface CoverRung {
@@ -116,15 +123,19 @@ export interface CoverRung {
  */
 export interface CoverAssessment {
   state: CoverState;
+  /** Why there is no staircase, for `nothing_to_cover` and `cannot_hedge`; null otherwise. */
+  reason: CoverReason | null;
   asset: string;
   eventTicker: string;
   spotCents: number;
   holdingQuantity: string;
+  /** Where protection starts, or null when no strike lies below spot. */
   ceilingCents: number | null;
+  /** The goal's floor, whatever the ladder lists. */
   floorCents: number | null;
   /**
    * The price below which the staircase pays in full and cover is measured: the floor when it is a
-   * strike, otherwise the first strike under the floor. Null when there is nothing to cover.
+   * strike, otherwise the first strike under the floor. Null when there is no staircase.
    */
   measuredBelowCents: number | null;
   /** What the goal's staircase pays once the price is below `measuredBelowCents`. */

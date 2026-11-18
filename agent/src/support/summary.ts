@@ -7,6 +7,7 @@
 import * as z from "zod";
 import {
   COVER_NOW_STATES,
+  COVER_REASONS,
   formatCents,
   formatEasternTime,
   type CoverNowView,
@@ -44,7 +45,13 @@ export const CoverNowSchema = z.object({
   state: z
     .enum(COVER_NOW_STATES)
     .describe(
-      "met: covered. partly_met / not_met: positions pay less than the goal calls for. nothing_to_cover: the floor is at or above spot. unavailable: the console cannot measure it now; never report it as covered or not",
+      "met: covered. partly_met / not_met: positions pay less than the goal calls for. nothing_to_cover: the floor is not below spot, so the goal calls for no contracts now; not covered. cannot_hedge: not covered, and nothing can be bought for it now (reason says why). unavailable: the console cannot measure it now; never report it as covered or not",
+    ),
+  reason: z
+    .enum(COVER_REASONS)
+    .nullable()
+    .describe(
+      "For nothing_to_cover and cannot_hedge: floor_not_below_ceiling (the floor is not below spot), no_strike_below_spot (neither the ladder where orders go nor any position held has a strike below spot), ladder_not_listed (the exchange orders go to does not list the ladder, and nothing is held on it), holding_too_small (too small for 0.01 contracts). Null otherwise",
     ),
   coverBps: z.int().nullable().describe("held / target; 10000 = 100%"),
   heldPayoutCents: z.int().nullable().describe("What the positions on the ladder pay below the floor"),
@@ -70,6 +77,7 @@ export function coverNowRow(cover: CoverNowView, summary: SummaryResponse): Cove
     expiresText: formatEasternTime(cover.expiresAt),
     floorCents: cover.floorCents,
     state: cover.state,
+    reason: cover.reason,
     coverBps: cover.coverBps,
     heldPayoutCents: cover.heldPayoutCents,
     heldByState: cover.heldByState,
@@ -99,7 +107,16 @@ export function coverSentence(cover: CoverNowRow): string {
     case "not_met":
       return `${goal}: ${cover.coverBps === null ? "not fully covered" : `covered ${percent(cover.coverBps)}`}${paid}, ${formatCents(cover.missingPayoutCents ?? 0)} missing.`;
     case "nothing_to_cover":
-      return `${goal}: nothing to cover, the floor is at or above spot.`;
+      return `${goal}: not covered, and nothing to protect now: the floor is not below today's price, so the goal calls for no contracts.`;
+    case "cannot_hedge":
+      switch (cover.reason) {
+        case "ladder_not_listed":
+          return `${goal}: not covered, and nothing can be bought for it now: the exchange orders go to does not list this ladder, and no position is held on it.`;
+        case "holding_too_small":
+          return `${goal}: not covered: the holding is too small for the smallest contract (0.01).`;
+        default:
+          return `${goal}: not covered, and nothing can be bought for it on this ladder now: the exchange orders go to lists no strike below today's price, and no position held pays below it.`;
+      }
     case "unavailable":
       return `${goal}: the console cannot measure the cover right now; do not report it as covered or not.`;
   }

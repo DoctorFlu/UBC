@@ -1,5 +1,6 @@
 import "server-only";
 
+import { coverCounts } from "@/features/workspace/cover-text";
 import type { MandateSummary, WorkspaceHomeData } from "@/features/workspace/types";
 import { needsOwner } from "@/lib/live/attention";
 
@@ -57,12 +58,7 @@ export async function workspaceHome(
         paused: snapshot.chain?.paused ?? null,
         committedCents: snapshot.chain?.committedCents ?? null,
         budgetCents: snapshot.chain?.rules?.budgetCents ?? null,
-        cover: {
-          goals: cover.length,
-          met: cover.filter((goal) => goal.state === "met" || goal.state === "nothing_to_cover").length,
-          short: cover.filter((goal) => goal.state === "partly_met" || goal.state === "not_met").length,
-          unavailable: cover.filter((goal) => goal.state === "unavailable").length,
-        },
+        cover: coverCounts(cover),
       };
     }),
   );

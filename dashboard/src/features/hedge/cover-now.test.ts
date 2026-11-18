@@ -13,6 +13,7 @@ function quotes(spotCents: number): LadderQuotes {
   return {
     asset: "BTC",
     eventTicker: TICKER,
+    listed: true,
     title: "BTC price on November 20",
     expiry: "2026-11-20T22:00:00.000Z",
     spotCents,

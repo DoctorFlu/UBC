@@ -75,7 +75,7 @@ export function CoverNowCard({
             ? coverSentence(assessment, settles)
             : "Cover cannot be measured now: Gemini's market data for this ladder is unavailable."}
         </p>
-        {assessment && assessment.state !== "nothing_to_cover" ? (
+        {assessment && assessment.measuredBelowCents !== null ? (
           <Meter
             className={cx(styles.meter, assessment.state === "met" && styles.met)}
             min={0}
@@ -89,15 +89,15 @@ export function CoverNowCard({
             </MeterTrack>
           </Meter>
         ) : null}
-        {assessment && assessment.state !== "nothing_to_cover" ? (
+        {assessment && assessment.measuredBelowCents !== null ? (
           <Advanced>
             <p className={styles.detail}>
-              Measured below {usd(assessment.measuredBelowCents ?? 0)}: held {usd(assessment.heldPayoutCents)}{" "}
-              ({usd(assessment.heldByState.filled)} filled, {usd(assessment.heldByState.awaiting_fill)}{" "}
-              waiting to fill, {usd(assessment.heldByState.awaiting_owner)} waiting for your approval) against
-              a goal of {usd(assessment.targetPayoutCents)}. A shortfall up to{" "}
-              {usd(assessment.toleranceCents)} (2%) counts as covered. {cover?.positions.length ?? 0} intents
-              on {assessment.eventTicker} are counted.
+              Measured below {usd(assessment.measuredBelowCents)}: held {usd(assessment.heldPayoutCents)} (
+              {usd(assessment.heldByState.filled)} filled, {usd(assessment.heldByState.awaiting_fill)} waiting
+              to fill, {usd(assessment.heldByState.awaiting_owner)} waiting for your approval) against a goal
+              of {usd(assessment.targetPayoutCents)}. A shortfall up to {usd(assessment.toleranceCents)} (2%)
+              counts as covered. {cover?.positions.length ?? 0} intents on {assessment.eventTicker} are
+              counted.
             </p>
             <Table
               caption={`Cover per strike on ${assessment.eventTicker}`}

@@ -97,7 +97,7 @@ const isoSchema = z.iso.datetime();
 const centsSchema = z.int().nonnegative();
 const intentRef = { id: z.int().nonnegative(), market: z.string().max(128).nullable() };
 
-const coverStateSchema = z.enum(["met", "partly_met", "not_met", "nothing_to_cover"]);
+const coverStateSchema = z.enum(["met", "partly_met", "not_met", "nothing_to_cover", "cannot_hedge"]);
 export type WakeCoverState = z.infer<typeof coverStateSchema>;
 
 /** What each kind reports, beside the fields every wake-up has. */

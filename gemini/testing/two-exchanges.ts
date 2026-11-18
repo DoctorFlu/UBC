@@ -71,6 +71,11 @@ export const LISTED = {
 export interface TwoExchangeOptions {
   /** The sandbox daily's books: "empty" as recorded (the default), or "mirrored" from production's. */
   sandboxDailyBooks?: "empty" | "mirrored";
+  /**
+   * Ladders the sandbox does not list at all (404, and left out of its listing), as when it lacks a
+   * ladder production lists. Not recorded: a variation for the "ladder not listed" cause.
+   */
+  sandboxUnlisted?: readonly string[];
 }
 
 interface Listing {
@@ -96,8 +101,12 @@ const EMPTY_BOOK: Book = { bids: [], asks: [] };
 const MAKER_MAX_CONTRACTS = 100;
 const MAKER_MAX_USD = 50;
 
-function listing(environment: GeminiEnvironment): Listing {
-  return readFixture(`${environment}/events-btc.json`) as Listing;
+function listing(environment: GeminiEnvironment, options: TwoExchangeOptions = {}): Listing {
+  const recorded = readFixture(`${environment}/events-btc.json`) as Listing;
+  if (environment !== "sandbox" || !options.sandboxUnlisted?.length) return recorded;
+  const unlisted = new Set(options.sandboxUnlisted);
+  const data = recorded.data.filter((event) => !unlisted.has(event.ticker));
+  return { data, pagination: { ...recorded.pagination, total: data.length } };
 }
 
 function recordedBook(environment: GeminiEnvironment, symbol: string): Book | null {
@@ -142,7 +151,7 @@ export function twoExchangeResponse(
 ): { status: number; body: unknown } {
   const route = decodeURIComponent(path.split("?")[0] ?? "");
   if (route === LIST_ROUTE) {
-    const { data } = listing(environment);
+    const { data } = listing(environment, options);
     const open = data.filter(
       (event) => Date.parse((event as { expiryDate?: string }).expiryDate ?? "") > now,
     );
@@ -150,7 +159,7 @@ export function twoExchangeResponse(
   }
   if (route.startsWith(EVENT_ROUTE)) {
     const ticker = route.slice(EVENT_ROUTE.length);
-    const event = listing(environment).data.find((candidate) => candidate.ticker === ticker);
+    const event = listing(environment, options).data.find((candidate) => candidate.ticker === ticker);
     return event
       ? { status: 200, body: event }
       : { status: 404, body: { result: "error", reason: "NotFound", message: `Event ${ticker} not found` } };

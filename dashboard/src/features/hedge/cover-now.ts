@@ -28,14 +28,19 @@ export function coverNow(input: {
   >;
   holdingQuantity: string | null;
   quotes: Pick<LadderQuotes, "asset" | "eventTicker" | "spotCents" | "rungs"> &
-    Partial<Pick<LadderQuotes, "elsewhere">>;
+    Partial<Pick<LadderQuotes, "elsewhere" | "listed">>;
   intents: readonly IntentView[];
 }): CoverNow | null {
   const { quotes } = input;
   return coverOfPlan({
     plan: input.plan,
     holdingQuantity: input.holdingQuantity,
-    ladder: { asset: quotes.asset, eventTicker: quotes.eventTicker, rungs: quotes.rungs },
+    ladder: {
+      asset: quotes.asset,
+      eventTicker: quotes.eventTicker,
+      rungs: quotes.rungs,
+      listed: quotes.listed ?? true,
+    },
     spotCents: quotes.spotCents,
     intents: input.intents,
     elsewhere: new Map((quotes.elsewhere ?? []).map((s) => [s.instrumentSymbol, s.strikeCents])),
@@ -45,11 +50,12 @@ export function coverNow(input: {
 /** How much of the holding is covered now, in one or two plain sentences. */
 export function coverSentence(cover: CoverAssessment, settles: string | null): string {
   const holding = `${cover.holdingQuantity} ${cover.asset}`;
-  const floor = price(cover.floorCents ?? 0);
-  const below = price(cover.measuredBelowCents ?? cover.floorCents ?? 0);
+  const floor = cover.floorCents === null ? "its floor" : price(cover.floorCents);
+  const below = price(cover.measuredBelowCents ?? cover.floorCents ?? cover.spotCents);
   const when = settles === null ? "" : ` on ${settles}`;
   const ceiling = cover.ceilingCents ?? cover.spotCents;
   const from = ceiling === cover.spotCents ? `today's ${price(ceiling)}` : price(ceiling);
+  const spot = `today's ${cover.asset} price of ${price(cover.spotCents)}`;
   const loss = `the ${usd(cover.targetPayoutCents)} your ${holding} loses from ${from} down to ${floor}`;
   const pending = cover.heldByState.awaiting_fill + cover.heldByState.awaiting_owner > 0;
   const held = pending ? "the contracts you hold and your pending orders pay" : "the contracts you hold pay";
@@ -61,6 +67,17 @@ export function coverSentence(cover: CoverAssessment, settles: string | null): s
     case "not_met":
       return `Not covered. No contract you hold pays if ${cover.asset} settles below ${below}${when}, against ${loss}.`;
     case "nothing_to_cover":
-      return `Nothing to cover: ${floor} is not below today's ${cover.asset} price of ${price(cover.spotCents)}, or no strike lies between them.`;
+      return ceiling === cover.spotCents
+        ? `Nothing to protect now: the floor ${floor} is not below ${spot}, so the goal calls for no contracts.`
+        : `Nothing to protect now: the floor ${floor} is not below ${price(ceiling)}, where protection starts, so the goal calls for no contracts.`;
+    case "cannot_hedge":
+      switch (cover.reason) {
+        case "ladder_not_listed":
+          return `Not covered, and nothing can be bought for it now: the exchange your orders go to does not list this ladder, and you hold no contract on it.`;
+        case "holding_too_small":
+          return `Not covered: your ${holding} is too small for the smallest contract (0.01) between ${from} and ${floor}.`;
+        default:
+          return `Not covered, and nothing can be bought for it on this ladder now: it lists no strike below ${spot}, and you hold no contract that pays below it.`;
+      }
   }
 }

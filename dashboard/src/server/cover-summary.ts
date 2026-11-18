@@ -46,6 +46,7 @@ async function coverOfGoal(
   const unavailable: CoverNowView = {
     ...goal,
     state: "unavailable",
+    reason: null,
     spotCents: null,
     measuredBelowCents: null,
     targetPayoutCents: null,
@@ -61,7 +62,7 @@ async function coverOfGoal(
   const cover = coverNow({
     plan,
     holdingQuantity: holding,
-    quotes: ladderQuotes(lookup.ladder, lookup.elsewhere),
+    quotes: ladderQuotes(lookup.ladder, lookup.elsewhere, lookup.listed),
     intents,
   });
   if (!cover) return unavailable;
@@ -69,6 +70,7 @@ async function coverOfGoal(
   return {
     ...goal,
     state: assessment.state,
+    reason: assessment.reason,
     spotCents: assessment.spotCents,
     measuredBelowCents: assessment.measuredBelowCents,
     targetPayoutCents: assessment.targetPayoutCents,

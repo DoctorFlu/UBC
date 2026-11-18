@@ -13,6 +13,19 @@ That staircase buys `q x (K_prev - max(K, F))` contracts at each strike `K` belo
 The goal is measured from spot, like a plan.
 When spot rises, the loss between spot and the floor grows, so the same positions cover a smaller share of it; when spot falls, they cover more.
 
+## Two questions, two sources of strikes
+
+What is covered and what can be added are different questions, and they read different strikes.
+
+- **What is covered** comes from the positions held, each at its own strike.
+  The staircase is designed on the ladder's strikes plus the strike of every position held (`coverStrikes`), so a goal held at strikes the exchange orders go to does not list is still measured by those positions.
+- **What can be added** comes from the ladder of the exchange orders go to, and only from it.
+  `planHedge` buys on that ladder's strikes; a position at a strike it does not list still pays below every one of its strikes under it, so it counts toward each rung there.
+
+On 18 November 2026 Gemini's sandbox listed 8 strikes on the weekly BTC ladder, all above spot, while production listed 21 and the hosted mandate held NO at 7 of production's.
+Measured on the sandbox's strikes alone, that goal read "nothing to cover"; measured as above, it reads covered, as on production.
+`planner/test/cover-two-exchanges.test.ts`, `dashboard/src/server/cover-two-exchanges.test.ts` and `agent/test/two-exchanges.test.ts` replay both exchanges as recorded that day (`@mandate/gemini/two-exchanges`).
+
 ## What counts as held
 
 Every intent on that ladder's markets that buys NO and is one of:
@@ -55,7 +68,20 @@ A target under 50 cents has no tolerance, so nothing held is never "met".
 | `met` | Held pays the target below the floor, within the tolerance. `plan_hedge` returns no orders and the reason `ALREADY_COVERED`. |
 | `partly_met` | Something is held, but less. The plan buys only the missing part. |
 | `not_met` | Nothing held pays below the floor. The plan is the full staircase. |
-| `nothing_to_cover` | The goal calls for no contracts: no strike below spot, the floor is not below the ceiling, or the holding is too small. |
+| `nothing_to_cover` | The floor is not below where protection starts (spot, by default), so the goal calls for no contracts now. Reason `floor_not_below_ceiling`. |
+| `cannot_hedge` | The goal calls for protection, but no staircase can be built, so it is not covered and nothing can be bought for it now. Its reason says why (below). |
+
+A goal without a staircase carries a `reason`:
+
+| Reason | State | Meaning |
+| --- | --- | --- |
+| `floor_not_below_ceiling` | `nothing_to_cover` | The floor is at or above spot (or the ceiling the goal set). |
+| `no_strike_below_spot` | `cannot_hedge` | Neither the ladder where orders go nor any position held has a strike below spot. |
+| `ladder_not_listed` | `cannot_hedge` | The exchange orders go to does not list the ladder at all, and nothing is held on it. With positions held, they are measured on production's strikes as usual. |
+| `holding_too_small` | `cannot_hedge` | The holding is too small for the smallest contract (0.01) on any rung. |
+
+Only `met` counts as covered: Home's "Goals covered" counts `met` goals, and neither `nothing_to_cover` nor `cannot_hedge` is ever called covered.
+The cover always states the goal's floor, also when no strike lies below spot, so "$0" never stands for a floor.
 
 Cover is judged below the floor only.
 Positions bunched at low strikes can make a goal "met" while a smaller fall pays less than the staircase would; the console's Advanced view shows each strike for that reason.

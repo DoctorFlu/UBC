@@ -4,6 +4,7 @@ import {
   HOSTED_INTENTS,
   HOSTED_WEEKLY_PLAN,
   TWO_EXCHANGES_AT,
+  type TwoExchangeOptions,
   WEEKLY,
   twoExchangeFetch,
 } from "@mandate/gemini/two-exchanges";
@@ -30,16 +31,44 @@ import { workspaceHome } from "./workspace-home";
 
 const NOW = TWO_EXCHANGES_AT;
 
-function quotesOn(venue: "production" | "sandbox"): LadderSource {
-  const { fetch } = twoExchangeFetch(() => NOW);
+function quotesOn(venue: "production" | "sandbox", options: TwoExchangeOptions = {}): LadderSource {
+  // The client's clock moves only by what it sleeps, so its rate limiter refills.
+  let at = NOW;
+  const { fetch } = twoExchangeFetch(() => at, options);
   const quotes = new MarketQuotes({
     baseUrl: GEMINI_HOSTS[venue],
     productionBaseUrl: GEMINI_HOSTS.production,
     fetch,
-    now: () => NOW,
-    sleep: () => Promise.resolve(),
+    now: () => at,
+    sleep: (ms) => {
+      at += ms;
+      return Promise.resolve();
+    },
   });
   return (asset, eventTicker) => quotes.ladder(asset, eventTicker);
+}
+
+/** The Hedge page's sentence for a goal, on the sandbox. */
+async function hedgeSentence(options: {
+  plan?: Partial<AgentPlanView["plan"]>;
+  holding?: string;
+  intents?: IntentView[];
+  exchanges?: TwoExchangeOptions;
+}): Promise<{ state: string; reason: string | null; sentence: string }> {
+  const lookup = await quotesOn("sandbox", options.exchanges)("BTC", WEEKLY);
+  if (!lookup.ok) throw new Error("the sandbox ladder did not answer");
+  const cover = coverNow({
+    plan: { ...weeklyGoal.plan, ...options.plan },
+    holdingQuantity: options.holding ?? HOSTED_HOLDING.quantity,
+    quotes: ladderQuotes(lookup.ladder, lookup.elsewhere, lookup.listed),
+    intents: options.intents ?? [],
+  });
+  if (!cover) throw new Error("no cover");
+  return {
+    state: cover.assessment.state,
+    reason: cover.assessment.reason,
+    sentence: coverSentence(cover.assessment, "Nov 20, 22:00 UTC"),
+  };
 }
 
 const weeklyGoal: AgentPlanView = {
@@ -133,19 +162,45 @@ describe("cover of the hosted weekly goal, with positions on strikes only produc
   });
 
   it("says so on the Hedge page, with the goal's real floor", async () => {
-    const lookup = await quotesOn("sandbox")("BTC", WEEKLY);
-    if (!lookup.ok) throw new Error("the sandbox ladder did not answer");
-    const cover = coverNow({
-      plan: weeklyGoal.plan,
-      holdingQuantity: HOSTED_HOLDING.quantity,
-      quotes: ladderQuotes(lookup.ladder, lookup.elsewhere),
-      intents: intentViews(),
+    const { state, sentence } = await hedgeSentence({ intents: intentViews() });
+    expect(sentence).toBe(
+      "Covered. If BTC settles below $61,000 on Nov 20, 22:00 UTC, the contracts you hold pay $247.63, more than the $183.08 your 0.05 BTC loses from today's $64,662 down to $57,992. Nothing more is needed.",
+    );
+    expect(state).toBe("met");
+  });
+
+  it("gives each cause without a staircase its own true sentence, never a $0 floor", async () => {
+    // Nothing held, and the sandbox lists no strike below spot.
+    expect(await hedgeSentence({})).toEqual({
+      state: "cannot_hedge",
+      reason: "no_strike_below_spot",
+      sentence:
+        "Not covered, and nothing can be bought for it on this ladder now: it lists no strike below today's BTC price of $64,662, and you hold no contract that pays below it.",
     });
-    if (!cover) throw new Error("no cover");
-    const sentence = coverSentence(cover.assessment, "Nov 20, 22:00 UTC");
-    expect(sentence).toMatch(/^Covered\. If BTC settles below \$61,000 on Nov 20, 22:00 UTC/);
-    expect(sentence).not.toContain("$0 ");
-    expect(cover.assessment.state).toBe("met");
+    // The floor is above spot.
+    expect(await hedgeSentence({ plan: { floorCents: 6_500_000 } })).toEqual({
+      state: "nothing_to_cover",
+      reason: "floor_not_below_ceiling",
+      sentence:
+        "Nothing to protect now: the floor $65,000 is not below today's BTC price of $64,662, so the goal calls for no contracts.",
+    });
+    // A holding too small for one hundredth of a contract.
+    expect(await hedgeSentence({ holding: "0.00000001", intents: intentViews() })).toMatchObject({
+      state: "cannot_hedge",
+      reason: "holding_too_small",
+    });
+    // The sandbox does not list the weekly at all: positions held are measured on production's strikes.
+    const unlisted = { sandboxUnlisted: [WEEKLY] };
+    expect(await hedgeSentence({ exchanges: unlisted })).toEqual({
+      state: "cannot_hedge",
+      reason: "ladder_not_listed",
+      sentence:
+        "Not covered, and nothing can be bought for it now: the exchange your orders go to does not list this ladder, and you hold no contract on it.",
+    });
+    expect(await hedgeSentence({ exchanges: unlisted, intents: intentViews() })).toMatchObject({
+      state: "met",
+      reason: null,
+    });
   });
 
   it("does not count a goal as covered on Home when nothing is held and the venue lists no strike below spot", async () => {

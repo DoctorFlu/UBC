@@ -43,8 +43,14 @@ const PlannedOrderSchema = z.object({
 const CoverSchema = z
   .object({
     state: z
-      .enum(["met", "partly_met", "not_met", "nothing_to_cover"])
-      .describe("met: the goal is already covered and the plan has no orders"),
+      .enum(["met", "partly_met", "not_met", "nothing_to_cover", "cannot_hedge"])
+      .describe(
+        "met: the goal is already covered and the plan has no orders. nothing_to_cover: the floor is not below spot. cannot_hedge: not covered, and nothing can be bought for it on this ladder (reason says why)",
+      ),
+    reason: z
+      .enum(["floor_not_below_ceiling", "no_strike_below_spot", "ladder_not_listed", "holding_too_small"])
+      .nullable()
+      .describe("Why there is no staircase, for nothing_to_cover and cannot_hedge; null otherwise"),
     measuredBelowCents: z
       .int()
       .nullable()
@@ -68,6 +74,7 @@ const CoverSchema = z
 function coverView(cover: PlanCover): z.infer<typeof CoverSchema> {
   return {
     state: cover.state,
+    reason: cover.reason,
     measuredBelowCents: cover.measuredBelowCents,
     targetPayoutCents: cover.targetPayoutCents,
     heldPayoutCents: cover.heldPayoutCents,
@@ -387,7 +394,13 @@ export const planHedge = defineTool({
     }
     const covered = plan.cover?.state === "met";
     const environment = ctx.config.marketData.environment;
-    const noPrices = plan.orders.length === 0 && !covered ? noPricesReason(ladder, environment) : null;
+    // Prices matter only on a ladder that could protect at all: with no strike below spot, or a floor not
+    // below it, that is the reason to give first, not the empty books.
+    const structural = plan.warnings.some(
+      (w) => w.code === "no_strike_below_spot" || w.code === "floor_not_below_ceiling",
+    );
+    const noPrices =
+      plan.orders.length === 0 && !covered && !structural ? noPricesReason(ladder, environment) : null;
     const v = covered
       ? ok(
           [
