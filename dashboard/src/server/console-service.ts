@@ -77,8 +77,18 @@ export interface MandateChain {
   /** For records that belong to one deployment: settlements, venue orders, context links. */
   deploymentId: string;
   policy: PolicyClient;
+  /** As last read, or read for this call when asked for `trusted` roles. */
   roles: Roles;
   chainId: number;
+}
+
+export interface ChainOptions {
+  /**
+   * Read the roles from the contract for this call, as every check that trusts one must: roles can change
+   * (v2's `setUser`, `setAgent`, `setExecutor`), and the cached ones are only as fresh as the last sync.
+   * The chain is then null when they cannot be read, so the caller refuses instead of trusting an old holder.
+   */
+  trusted?: boolean;
 }
 
 /**
@@ -335,9 +345,9 @@ export class ConsoleService {
     return this.envFollower.current;
   }
 
-  /** Roles of the server's own contract (its executor serves every mandate), read now when none yet. */
+  /** Roles of the server's own contract (its executor serves every mandate), read from it now. */
   serverRoles(): Promise<Roles | null> {
-    return this.envFollower.currentRoles();
+    return this.envFollower.trustedRoles();
   }
 
   // ---------------------------------------------------------------- the pipeline
@@ -468,6 +478,7 @@ export class ConsoleService {
     const follower = this.followerOf(mandate);
     const session = follower?.current ?? null;
     const lastEvent = follower?.state.events.at(-1);
+    const stored = this.accounts.store.mandate(mandate.id);
     const contract: ContractInfo | null =
       follower && session
         ? {
@@ -477,8 +488,8 @@ export class ConsoleService {
             roles: follower.roles,
             recordsContextHash: follower.recordsContextHash,
             // On a `server` contract the console holds the owner key and signs after a passkey says so.
-            ownerSigner:
-              this.accounts.store.mandate(mandate.id)?.deployment === "server" ? "console" : "wallet",
+            ownerSigner: stored?.deployment === "server" ? "console" : "wallet",
+            consoleOwnerKey: stored?.deployment === "server" ? stored.ownerKeyAddress : null,
           }
         : null;
     const pairing = this.offchain.latestPairing(mandate.id);
@@ -742,11 +753,11 @@ export class ConsoleService {
    * that belong to one deployment), read-only client, roles and chain. Null for a mandate with no
    * contract, and while the chain is unreachable.
    */
-  async chainFor(mandate: MandateScope): Promise<MandateChain | null> {
+  async chainFor(mandate: MandateScope, options: ChainOptions = {}): Promise<MandateChain | null> {
     const follower = this.followerOf(mandate);
     if (!follower) return null;
     const session = follower.current;
-    const roles = await follower.currentRoles();
+    const roles = options.trusted ? await follower.trustedRoles() : await follower.currentRoles();
     if (!session || !roles || follower.current !== session) return null;
     return { deploymentId: session.id, policy: session.policy, roles, chainId: session.deployment.chain.id };
   }
@@ -764,6 +775,7 @@ export class ConsoleService {
   async contractOf(
     chainId: number,
     address: Address,
+    options: ChainOptions = {},
   ): Promise<{ mandate: Mandate; chain: MandateChain } | null> {
     const env = this.envFollower.current;
     const mandate =
@@ -771,7 +783,7 @@ export class ConsoleService {
         ? this.accounts.store.mandate(this.envMandateId)
         : this.accounts.store.mandateByContract(chainId, address);
     if (!mandate) return null;
-    const chain = await this.chainFor(mandate);
+    const chain = await this.chainFor(mandate, options);
     if (!chain || chain.chainId !== chainId || !isAddressEqual(chain.policy.address, address)) return null;
     return { mandate, chain };
   }

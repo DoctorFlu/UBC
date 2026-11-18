@@ -37,6 +37,7 @@ import {
   venueDeployment,
 } from "@mandate/devchain";
 import { type Address, createWalletClient, http } from "viem";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { CreatedMandateResponse, MandateView, MandatesResponse } from "@/lib/accounts/types";
@@ -52,7 +53,7 @@ import {
 import { BTC_ABOVE_65K, type TestChain, startTestChain } from "../../../test/support/devchain";
 import { exampleLadder, examplePlan } from "../../../test/support/hedge";
 import { SoftPasskey } from "../../../test/support/passkey";
-import { localAgentSigner } from "../accounts/keys";
+import { localAgentSigner, localOwnerSigner } from "../accounts/keys";
 import type { StepUpAction } from "../accounts/step-up";
 import type { Member } from "../accounts/store";
 import { readMandatesConfig, testConsoleConfig } from "../config";
@@ -1099,5 +1100,57 @@ describe("mandates on the demo chain", () => {
 
     const signed = await call(bob, hedge.id, setPolicy, stepUp);
     expect(signed.status).toBe(201);
+  });
+
+  it("never signs a role setter, and stops acting as the owner the moment the owner hands the contract over", async () => {
+    const dave = member("Dave");
+    const created = await create(dave, "Handed over");
+    const mandate = service.accounts.store.mandate(created.mandate.id);
+    const key = service.accounts.store.ownerKeyOf(created.mandate.id);
+    const session = service.serverContract;
+    if (!mandate?.contract || !key || !session) throw new Error("no console-owned contract");
+    await until(() => snapshotOf(mandate.id).contract?.roles?.user === key.address, "the owner's roles");
+    expect(snapshotOf(mandate.id).contract?.consoleOwnerKey).toBe(key.address);
+
+    // The console never signs a role setter, whatever a passkey would confirm: handing a role over is
+    // the owner's own decision, from their own wallet.
+    const wallet = privateKeyToAccount(generatePrivateKey()).address;
+    for (const functionName of ["setUser", "setAgent", "setExecutor"]) {
+      const setter = { functionName, user: wallet, agent: wallet, executor: wallet } as unknown as OwnerCall;
+      const refusedCall = await call(dave, mandate.id, setter);
+      expect(refusedCall.status, functionName).toBe(422);
+      expect(await errorCode(refusedCall)).toBe("invalid_body");
+      const challenge = await startStepUp(
+        post(dave, "step-up", { action: { kind: "owner-call", mandateId: mandate.id, call: setter } }),
+        service,
+      );
+      expect(challenge.status, functionName).toBe(422);
+    }
+
+    // The owner key hands the contract to a wallet (v2 `setUser`), outside the console.
+    const asOwner = new PolicyClient({
+      address: mandate.contract.address,
+      publicClient: session.client,
+      walletClient: createWalletClient({
+        chain: session.deployment.chain,
+        transport: http(chain.rpcUrl),
+        account: signerAccount(localOwnerSigner(service.accounts.master, mandate.id, key)),
+      }),
+      minMaxFeePerGas: 0n,
+      receiptPollingMs: 50,
+    });
+    await asOwner.setUser(wallet);
+
+    // At once, before the console's own reading has seen the event: the owner is read for the call.
+    const refused = await call(dave, mandate.id, { functionName: "setPaused", paused: true });
+    expect(refused.status).toBe(409);
+    const body = consoleErrorSchema.parse(await refused.json());
+    expect(body.error.code).toBe("owner_changed");
+    expect(body.error.message).toContain(wallet);
+    expect(await read<Address>(mandate.contract.address, "user")).toBe(wallet);
+
+    // The pages then show the new owner beside the console's key, so no passkey action is offered.
+    await until(() => snapshotOf(mandate.id).contract?.roles?.user === wallet, "the new owner");
+    expect(snapshotOf(mandate.id).contract?.consoleOwnerKey).toBe(key.address);
   });
 });

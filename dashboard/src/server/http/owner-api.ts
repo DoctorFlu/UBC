@@ -39,7 +39,7 @@ export const confirmPairing = consoleRoute(async (request, service, scope) => {
     confirmPairingPayloadSchema,
   );
   if (!parsed.ok) return parsed.response;
-  const chain = await service.chainFor(mandate);
+  const chain = await service.chainFor(mandate, { trusted: true });
   if (!chain)
     return apiError(503, "chain_unavailable", "The console can't read the Policy contract right now.");
   const pairing = service.offchain.confirmPairing(mandate.id, parsed.data.agentAddress, chain.roles.user);

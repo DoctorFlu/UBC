@@ -65,6 +65,16 @@ export function useOwnerAccess(): OwnerAccess {
         ? { kind: "no-contract", reason: "The chain is unreachable, so the owner can't be checked." }
         : { kind: "loading" };
     }
+    const key = snapshot.contract.consoleOwnerKey;
+    if (key !== null && !isAddressEqual(key, roles.user)) {
+      return {
+        kind: "not-owner",
+        address: key,
+        owner: roles.user,
+        reason:
+          "The owner handed this contract to another account, so the key the console holds can no longer act as the owner.",
+      };
+    }
     return { kind: "owner", address: roles.user, signer: "passkey" };
   }
   switch (wallet.kind) {

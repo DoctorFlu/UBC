@@ -69,7 +69,10 @@ export interface ContractInfo {
   deployBlock: number;
   /** Known for the local devchain; null for a deployment configured by address. */
   kind: ContractKind | null;
-  /** Read with `user()`, `agent()` and `executor()`: role changes emit no event. Null until first read. */
+  /**
+   * Read with `user()`, `agent()` and `executor()`, and kept current from the role events of v2, whose
+   * owner can hand each role to another account. Null until first read.
+   */
   roles: Roles | null;
   /** Whether `proposeTrade` can record a decision context hash (requested extension 2). Null until probed. */
   recordsContextHash: boolean | null;
@@ -79,6 +82,11 @@ export interface ContractInfo {
    * passkey authorises the call (#95).
    */
   ownerSigner: "wallet" | "console";
+  /**
+   * The owner key the console holds for this mandate (`ownerSigner` `console`), or null. When it is no
+   * longer `roles.user`, the owner handed the contract to another account and the console cannot act.
+   */
+  consoleOwnerKey: Address | null;
 }
 
 /**

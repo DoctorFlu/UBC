@@ -53,14 +53,21 @@ export function WalletButton({ block = false }: { block?: boolean }) {
 
   // The console holds this mandate's owner key (#95): no wallet signs here, the member's passkey confirms.
   if (scope?.mandate.ownerSigner === "console") {
+    // The owner may have handed the contract to another account (`setUser`): the console's key is no
+    // longer the owner, and no passkey action is offered.
     return (
       <span
         className={styles.walletChip}
         data-testid="passkey-owner"
-        title="The console holds this mandate's owner key. Each owner action asks for your passkey first."
+        data-owner={notOwner ? "false" : "true"}
+        title={
+          notOwner
+            ? access.reason
+            : "The console holds this mandate's owner key. Each owner action asks for your passkey first."
+        }
       >
         <KeyRound aria-hidden className={styles.walletKey} strokeWidth={1.75} />
-        <span>Passkey owner</span>
+        <span>{notOwner ? "Not owner" : "Passkey owner"}</span>
       </span>
     );
   }
