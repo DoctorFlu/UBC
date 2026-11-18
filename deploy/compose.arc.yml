@@ -49,6 +49,8 @@ services:
       POLICY_ADDRESS: ${POLICY_ADDRESS:?the Arc testnet setup needs POLICY_ADDRESS, the deployed Policy contract, in deploy/.env}
       POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
       ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
+      # Declared by the operator when the maker service runs (docs/gemini-venue.md#the-mirror-maker).
+      SANDBOX_LIQUIDITY: ${SANDBOX_LIQUIDITY:-}
       <<: *market-data
     volumes:
       - console-data-arc:/data/console

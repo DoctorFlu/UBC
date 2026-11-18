@@ -209,6 +209,11 @@ docker compose --env-file /data/mandate/mandate.env run --rm --no-deps maker nod
 Its keys are `GEMINI_MAKER_API_KEY` and `GEMINI_MAKER_API_SECRET`, set with `deploy/set-secret.sh`.
 The second account is made, funded and given its Prediction Markets terms by its owner on <https://exchange.sandbox.gemini.com>, as in [Setting it up](#setting-it-up).
 
+The console states the maker only where the operator declares it: set `SANDBOX_LIQUIDITY=mirror-maker` in `mandate.env` while the maker runs, and restart the console ([configuration.md](configuration.md)).
+The venue badge's details then add that our own maker, on a second sandbox account, quotes the sandbox at the prices of Gemini's live exchange on the ladders it covers.
+Without it they say only that orders go to Gemini's sandbox, with test funds, and that Gemini settles on the real BTC index.
+No fill names a counterparty, with or without it: the executor's journal records where and at what price an order filled, not who took the other side, and the hourly ladders are quoted by the sandbox's own maker.
+
 The first match between the two accounts, on 18 November 2026: the maker's YES bid of 1 contract at 52c on `GEMI-BTC2611182200-HI64250` was taken at once by the executor account's NO buy at 48c, and Get Positions showed YES 1 at 0.52 on one account and NO 1 at 0.48 on the other.
 Gemini's self-trade prevention does not stop a match between two accounts.
 `MAKER_INTEGRATION=1 npx vitest run gemini/test/maker.sandbox.live.test.ts` repeats it with the maker's own loop, about $1 of test funds.

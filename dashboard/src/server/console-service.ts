@@ -528,6 +528,7 @@ export class ConsoleService {
         signalBudget: this.offchain.signalBudget(mandate.id),
       },
       mcpPublicUrl: this.config.mcpPublicUrl,
+      sandboxLiquidity: this.config.sandboxLiquidity,
       wake: this.wakeStatus(mandate),
     };
     this.snapshotCache.set(mandate.id, snapshot);

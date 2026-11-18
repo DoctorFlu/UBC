@@ -497,7 +497,7 @@ describe("the executor's order journal in the console", () => {
     const other = workspaceAgent(service, mallory);
     const theirs = service.snapshot(other.mandate);
     expect(theirs.chain).toBeNull();
-    expect(JSON.stringify(theirs)).not.toMatch(/venueOrder|"venue"|clientOrderId|sandbox/);
+    expect(JSON.stringify(theirs)).not.toMatch(/venueOrder|"venue"|clientOrderId|"sandbox"/);
     expect(service.deploymentIdFor(other.mandate)).toBeNull();
     expect(service.deploymentIdFor(envMandate(service))).not.toBeNull();
 
@@ -516,7 +516,7 @@ describe("the executor's order journal in the console", () => {
       expect(hers.chain?.venueOrders[placedId]).toMatchObject({ state: "filled" });
       const his = await GET(as(mallory));
       expect(his.status).toBe(200);
-      expect(await his.text()).not.toMatch(/venueOrder|"venue"|clientOrderId|sandbox/);
+      expect(await his.text()).not.toMatch(/venueOrder|"venue"|clientOrderId|"sandbox"/);
       for (const mandate of [envMandate(service).id, "mnd_does_not_exist"]) {
         const query = `?mandate=${encodeURIComponent(mandate)}`;
         expect((await GET(as(mallory, query))).status, mandate).toBe(404);
