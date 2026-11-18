@@ -15,7 +15,12 @@ export type GeminiErrorCode =
   /** No ladder matches the requested asset and expiry. */
   | "no_ladder"
   /** The caller passed an argument the client cannot use. */
-  | "invalid_argument";
+  | "invalid_argument"
+  /**
+   * Gemini answered, but its spot market is not trading normally: the spread is too wide to take its mid
+   * and the last trade is too old to take instead (`getSpot`). Nothing is planned on such a price.
+   */
+  | "spot_unavailable";
 
 export class GeminiError extends Error {
   override readonly name = "GeminiError";

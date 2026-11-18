@@ -153,10 +153,19 @@ export interface SpotPrice {
   askCents: number | null;
   lastCents: number | null;
   /**
-   * Mid of bid and ask (falls back to last), rounded half-up. This is the exchange spot price,
-   * which tracks but is not the index the ladder settles on.
+   * The spot price everything is measured from: the mid of bid and ask, rounded half-up, or the last trade
+   * when the spread is too wide for a mid to mean anything (`basis`). This is the exchange spot price,
+   * which tracks but is not the index the ladder settles on: Gemini does not publish that index's
+   * current value.
    */
   midCents: number;
+  /**
+   * Which price `midCents` is: `mid` of bid and ask, or `last`, the last trade, used when the spread was
+   * wider than `MAX_SPOT_SPREAD_BPS` and that trade recent. Absent on a stand-in that does not say.
+   */
+  basis?: "mid" | "last";
+  /** The spread, in basis points of the mid, when Gemini quoted both sides. */
+  spreadBps?: number;
   fetchedAt: string;
 }
 

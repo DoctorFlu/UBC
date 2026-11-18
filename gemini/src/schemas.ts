@@ -110,6 +110,9 @@ export const tickerSchema = z.object({
   last: optionalDecimal,
 });
 
+/** `GET /v1/trades/:symbol?limit_trades=1`: the latest trade, newest first. */
+export const tradesSchema = z.array(z.object({ timestampms: z.number(), price: decimalString }));
+
 /** `GET /v2/candles/:symbol/:timeFrame`: `[timeMs, open, high, low, close, volume]` rows, newest first. */
 export const candlesSchema = z.array(
   z.tuple([z.number(), z.number(), z.number(), z.number(), z.number(), z.number()]),

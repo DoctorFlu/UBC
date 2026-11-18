@@ -29,6 +29,7 @@ import {
   eventsResponseSchema,
   orderBookSchema,
   tickerSchema,
+  tradesSchema,
   type RawEvent,
 } from "./schemas";
 import {
@@ -80,7 +81,14 @@ const DEFAULT_TTLS: CacheTtls = {
 };
 
 export interface GeminiClientOptions {
+  /** Where listings, events and books are read. Default production. */
   baseUrl?: string;
+  /**
+   * Where spot prices and candles are read. Default `baseUrl`. A stack trading on the sandbox sets it to
+   * production (`createMarketDataClient`): the ladders settle on production's index, and the sandbox's spot
+   * market is far from it.
+   */
+  spotBaseUrl?: string;
   /** Defaults to the global `fetch`. */
   fetch?: FetchLike;
   /** Clock in milliseconds. Drives the rate limiter, the cache and ladder selection. */
@@ -171,6 +179,18 @@ export interface GeminiClient {
   clearCache(): void;
 }
 
+/**
+ * The widest spread, in basis points of the mid, at which spot is the mid of bid and ask (0.5 %). A wider
+ * one takes the last trade instead, while that trade is at most `MAX_LAST_TRADE_AGE_MS` old.
+ */
+export const MAX_SPOT_SPREAD_BPS = 50;
+export const MAX_LAST_TRADE_AGE_MS = 5 * 60_000;
+
+/** "1.56 %" for 156 basis points. */
+function formatBps(bps: number): string {
+  return `${(bps / 100).toFixed(2)} %`;
+}
+
 export function createGeminiClient(options: GeminiClientOptions = {}): GeminiClient {
   const now = options.now ?? (() => Date.now());
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -191,6 +211,10 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     baseDelayMs: options.baseDelayMs ?? 500,
     maxDelayMs: options.maxDelayMs ?? 8_000,
     ...(options.onRequest ? { onRequest: options.onRequest } : {}),
+  };
+  const spotHttp: HttpOptions = {
+    ...http,
+    baseUrl: (options.spotBaseUrl ?? http.baseUrl).replace(/\/+$/, ""),
   };
   const cache = new TtlCache(now);
   const candleGapRetryDelayMs = options.candleGapRetryDelayMs ?? 1_000;
@@ -277,7 +301,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     const raw = await cache.getOrLoad(
       path,
       ttl.spot,
-      (shared) => getJson(http, path, tickerSchema, shared),
+      (shared) => getJson(spotHttp, path, tickerSchema, shared),
       request.signal,
     );
     const spot = normalizeTicker(upper, raw, isoNow());
@@ -286,7 +310,31 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
         path,
       });
     }
-    return spot;
+    if ((spot.spreadBps ?? 0) <= MAX_SPOT_SPREAD_BPS) return spot;
+    // A spread this wide (18 November 2026, during Gemini's incident: $64,242.83 / $65,249.98) puts the mid
+    // hundreds of dollars from any price that traded. The last trade stands in while it is recent; an old
+    // one means the market is not trading, and nothing is measured from it.
+    const unavailable = (why: string) =>
+      new GeminiError(
+        "spot_unavailable",
+        `Gemini's ${upper}/USD spot market is not trading normally: the spread is ${formatBps(spot.spreadBps ?? 0)} wide, and ${why}.`,
+        { path },
+      );
+    if (spot.lastCents === null || spot.lastCents <= 0) throw unavailable("there is no last trade");
+    const tradesPath = `/v1/trades/${spotSymbol(upper)}?limit_trades=1`;
+    const trades = await cache.getOrLoad(
+      tradesPath,
+      ttl.spot,
+      (shared) => getJson(spotHttp, tradesPath, tradesSchema, shared),
+      request.signal,
+    );
+    const lastAt = trades[0]?.timestampms;
+    if (lastAt === undefined) throw unavailable("there is no last trade");
+    const ageMs = now() - lastAt;
+    if (ageMs > MAX_LAST_TRADE_AGE_MS) {
+      throw unavailable(`its last trade was ${String(Math.round(ageMs / 60_000))} minutes ago`);
+    }
+    return { ...spot, midCents: spot.lastCents, basis: "last" };
   }
 
   async function getCandles(
@@ -310,13 +358,13 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
 
   /** One request, and one more only when the first answer has candles missing inside it. */
   async function loadCandles(path: string, intervalMs: number, signal: AbortSignal): Promise<Candle[]> {
-    const first = normalizeCandles(await getJson(http, path, candlesSchema, signal));
+    const first = normalizeCandles(await getJson(spotHttp, path, candlesSchema, signal));
     const firstMissing = countMissingCandles(first, intervalMs);
     if (firstMissing === 0) return first;
     await raceAbort(sleep(candleGapRetryDelayMs), signal);
     let second: Candle[];
     try {
-      second = normalizeCandles(await getJson(http, path, candlesSchema, signal));
+      second = normalizeCandles(await getJson(spotHttp, path, candlesSchema, signal));
     } catch {
       // The first answer is still a real answer; its gap is the caller's to handle.
       return first;
