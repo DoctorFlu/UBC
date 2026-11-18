@@ -197,7 +197,8 @@ test("after the switch to Gemini's sandbox, earlier fills still say simulated an
   test.setTimeout(300_000);
   // The hosted switch: every service restarts on Gemini's sandbox, on the same contract and database.
   await stopConsole();
-  await startConsole({ EXECUTOR_VENUE: "gemini", GEMINI_ENV: "sandbox" });
+  // The operator declares the mirror maker for this deployment; the console never infers it.
+  await startConsole({ EXECUTOR_VENUE: "gemini", GEMINI_ENV: "sandbox", SANDBOX_LIQUIDITY: "mirror-maker" });
   await waitForSnapshot(baseURL, (current) => current.feed.health === "live", 120_000);
 
   const chainId = chain.executor.publicClient.chain.id;
@@ -264,9 +265,18 @@ test("after the switch to Gemini's sandbox, earlier fills still say simulated an
     60_000,
   );
 
-  // The top bar states the venue now.
+  // The top bar states the venue now, and its details say how this deployment gets sandbox liquidity.
   await page.goto(await firstMandatePath(baseURL));
   await expect(badge(page)).toHaveAttribute("data-venue", "sandbox");
+  await badge(page).click();
+  const details = page.getByTestId("venue-details");
+  await expect(details).toContainText("with test funds only");
+  await expect(details).toContainText(
+    "our own market maker, on a second sandbox account, quotes the sandbox at those prices",
+  );
+  await expect(details).toContainText("Gemini settles every contract on the real BTC index.");
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
 
   // Activity's Filled total says each source's share, never one tag for both.
   await page.goto(await firstMandatePath(baseURL, "/activity"));
@@ -280,6 +290,11 @@ test("after the switch to Gemini's sandbox, earlier fills still say simulated an
   await expect(page.getByTestId("intent-timeline").getByTestId("sandbox-fill")).toHaveCount(0);
   await page.goto(await firstMandatePath(baseURL, `/activity/${sandboxId.toString()}`));
   await expect(page.getByTestId("intent-timeline").getByTestId("sandbox-fill")).toBeVisible();
+  // A fill says only what the journal proves: where, and with what funds, never who took the other side.
+  await expect(page.getByTestId("intent-timeline").getByTestId("sandbox-fill")).toHaveAttribute(
+    "title",
+    "Filled on Gemini's sandbox, with test funds.",
+  );
   await expect(page.getByTestId("intent-timeline").getByTestId("simulated-fill")).toHaveCount(0);
 
   // Audit tags each fill row with its own source.

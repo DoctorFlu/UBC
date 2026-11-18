@@ -203,6 +203,11 @@ docker compose --env-file /data/mandate/mandate.env run --rm --no-deps maker nod
 ```
 
 `stop` sends SIGTERM and allows 60 seconds, in which the maker cancels its orders.
+
+The console states the maker only where the operator declares it: set `SANDBOX_LIQUIDITY=mirror-maker` in `mandate.env` while the maker runs, and restart the console ([configuration.md](configuration.md)).
+The venue badge's details then add that our own maker, on a second sandbox account, quotes the sandbox at the prices of Gemini's live exchange on the ladders it covers.
+Without it they say only that orders go to Gemini's sandbox, with test funds, and that Gemini settles on the real BTC index.
+No fill names a counterparty, with or without it: the executor's journal records where and at what price an order filled, not who took the other side, and the hourly ladders are quoted by the sandbox's own maker.
 Its keys are `GEMINI_MAKER_API_KEY` and `GEMINI_MAKER_API_SECRET`, set with `deploy/set-secret.sh`.
 The second account is made, funded and given its Prediction Markets terms by its owner on <https://exchange.sandbox.gemini.com>, as in [Setting it up](#setting-it-up).
 

@@ -1405,6 +1405,16 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     const badge = page.getByTestId("venue-badge").filter({ visible: true });
     await expect(badge).toHaveText("Gemini Sandbox");
     await expect(badge).toHaveAttribute("data-venue", "sandbox");
+    // Its details open by keyboard too, and say nothing of a market maker no operator declared here.
+    await badge.focus();
+    await page.keyboard.press("Enter");
+    const details = page.getByTestId("venue-details");
+    await expect(details).toHaveText(
+      "The executor places approved orders on Gemini's sandbox, with test funds only.Gemini settles every contract on the real BTC index.",
+    );
+    await page.keyboard.press("Escape");
+    await expect(details).toHaveCount(0);
+    await expect(badge).toBeFocused();
     await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toBeVisible();
     await shoot(page, testInfo, "topbar-sandbox", page.locator("header").first());
     // On a phone the strip still fits: menu, name, lamp, Sandbox, Dev and the isolator, no sideways scroll.
@@ -1517,10 +1527,13 @@ test("an approval the contract refuses says which rule, in plain words, and the 
   await approve.click();
   await expect(toast(page)).toContainText("Refused by the contract: Paused");
   await expect(toast(page)).toContainText("The user has paused the agent");
-  // Refused, it leaves Waiting and is listed among the rejected, with the rule in words.
+  // Refused, it leaves Waiting; the toast says where it went, and its link opens the intent in the app.
   await expect(row(page, held.intentId)).toHaveCount(0);
-  await tab("Rejected").click();
-  await expect(row(page, held.intentId)).toContainText("agent paused");
+  await toast(page)
+    .getByRole("link", { name: `See intent #${held.intentId.toString()}` })
+    .click();
+  await page.waitForURL(new RegExp(`/m/mnd_[a-z0-9]+/activity/${held.intentId.toString()}$`));
+  await expect(page.getByText("Refused when you approved it: agent paused")).toBeVisible();
   expect(
     (await snapshot(baseURL)).chain?.intents.find((intent) => intent.id === held.intentId),
   ).toMatchObject({
@@ -1528,8 +1541,10 @@ test("an approval the contract refuses says which rule, in plain words, and the 
     reason: "agent paused",
   });
 
-  await open(page, `/activity/${held.intentId.toString()}`);
-  await expect(page.getByText("Refused when you approved it: agent paused")).toBeVisible();
+  // Activity lists it among the rejected, with the rule in words.
+  await open(page, "/activity");
+  await tab("Rejected").click();
+  await expect(row(page, held.intentId)).toContainText("agent paused");
 });
 
 test("the agent's reason, linked offchain, is checked against the intent", async ({ page }) => {

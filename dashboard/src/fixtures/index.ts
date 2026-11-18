@@ -293,6 +293,7 @@ export const fixtureSnapshot: ConsoleSnapshot = {
     },
   },
   mcpPublicUrl: "https://mandate-mcp.example.dev/mcp",
+  sandboxLiquidity: null,
   wake: {
     enabled: true,
     dailyCap: 12,

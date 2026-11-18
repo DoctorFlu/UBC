@@ -28,6 +28,13 @@ import type { SignalBudgetView, SignalPaymentView } from "@/lib/payments/types";
 export type NetworkKind = "local" | "arc-testnet";
 
 /** The chain the console reads and the owner's wallet signs on. */
+/**
+ * How a deployment gets liquidity on Gemini's sandbox, declared by its operator (`SANDBOX_LIQUIDITY`):
+ * `mirror-maker`, our own maker on a second sandbox account quoting at production's prices.
+ */
+export const SANDBOX_LIQUIDITY = ["mirror-maker"] as const;
+export type SandboxLiquidity = (typeof SANDBOX_LIQUIDITY)[number];
+
 export interface ConsoleNetwork {
   kind: NetworkKind;
   chainId: number;
@@ -249,5 +256,7 @@ export interface ConsoleSnapshot {
   offchain: OffchainView;
   /** Where Grok Bot reaches the MCP server, when configured. */
   mcpPublicUrl: string | null;
+  /** How this deployment gets liquidity on Gemini's sandbox, as its operator declares it, or null. */
+  sandboxLiquidity: SandboxLiquidity | null;
   wake: ConsoleWakeStatus;
 }
