@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sets one secret in the env file, for values the owner copies from another product (a webhook URL, an API
-# key) or from another machine (the Arc testnet keys `npm run arc:keygen` made), so that the value never
+# key, such as the Gemini sandbox keys of the executor's account and of the mirror maker's) or from another machine (the Arc testnet keys `npm run arc:keygen` made), so that the value never
 # passes through a person, a terminal's output, shell history or a process argument list:
 #
 #   pbpaste | deploy/set-secret.sh GROK_WEBHOOK_URL       # from standard input (one trailing newline is dropped)
@@ -26,7 +26,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 env_file="${MANDATE_ENV_FILE:-$here/.env}"
 umask 077
 
-ALLOWED="GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY QUICKNODE_STREAM_SECURITY_TOKEN"
+ALLOWED="GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET GEMINI_MAKER_API_KEY GEMINI_MAKER_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY QUICKNODE_STREAM_SECURITY_TOKEN"
 MAX_BYTES=8192
 
 usage() {

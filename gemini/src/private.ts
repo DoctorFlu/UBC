@@ -133,6 +133,21 @@ export type SettledPosition = z.infer<typeof settledPositionSchema>;
 
 const settledPositionsSchema = z.object({ positions: z.array(settledPositionSchema) });
 
+/** One open position, as Get Positions returns it (developer.gemini.com, Prediction Markets, Positions). */
+export const openPositionSchema = z.object({
+  symbol: z.string(),
+  outcome: z.string(),
+  /** Contracts held. */
+  totalQuantity: decimal,
+  /** Contracts held back for open sell orders. */
+  quantityOnHold: decimal.nullish(),
+  /** Average entry price, dollars per contract. */
+  avgPrice: decimal.nullish(),
+});
+export type OpenPosition = z.infer<typeof openPositionSchema>;
+
+const openPositionsSchema = z.object({ positions: z.array(openPositionSchema) });
+
 export const termsStatusSchema = z.object({
   hasAcceptedLatest: z.boolean(),
   acceptedVersion: z.number().int().nullish(),
@@ -177,6 +192,11 @@ export interface LimitOrderRequest {
    * 17 November 2026). Nothing in this client depends on Gemini keeping it.
    */
   clientOrderId?: string;
+  /**
+   * Maker only (Gemini REST's `makerOrCancel`): an order that would take liquidity at once is cancelled
+   * instead of filling. Sent only when true.
+   */
+  makerOrCancel?: boolean;
 }
 
 export interface GeminiPrivateClient {
@@ -197,6 +217,8 @@ export interface GeminiPrivateClient {
   orderHistory(symbol?: string): Promise<PrivateOrder[]>;
   /** The account's settled positions, most recent first (at most 1000). */
   settledPositions(): Promise<SettledPosition[]>;
+  /** The account's open positions: filled, not settled yet. */
+  positions(): Promise<OpenPosition[]>;
 }
 
 /** The host a redirect names, for the error message only; never requested. */
@@ -364,6 +386,7 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
           outcome: order.outcome,
           timeInForce: "good-til-cancel",
           ...(order.clientOrderId === undefined ? {} : { clientOrderId: order.clientOrderId }),
+          ...(order.makerOrCancel === true ? { makerOrCancel: true } : {}),
         },
         privateOrderSchema,
       );
@@ -405,6 +428,10 @@ export function createGeminiPrivateClient(options: GeminiPrivateClientOptions): 
         {},
         settledPositionsSchema,
       );
+      return answer.positions;
+    },
+    async positions() {
+      const answer = await serial("POST", "/v1/prediction-markets/positions", {}, openPositionsSchema);
       return answer.positions;
     },
   };

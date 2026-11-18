@@ -161,7 +161,7 @@ pbpaste | ./set-secret.sh GROK_WEBHOOK_URL    # from the clipboard (xclip -o or 
 ./set-secret.sh GROK_WEBHOOK_KEY              # or typed or pasted at its prompt, which shows nothing
 ```
 
-It accepts only `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, `GEMINI_API_KEY`, `GEMINI_API_SECRET`, `QUICKNODE_STREAM_SECURITY_TOKEN`, and the Arc testnet keys `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY` (see [Arc testnet](#arc-testnet)); the tokens and the master key are generated.
+It accepts only `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, `GEMINI_API_KEY`, `GEMINI_API_SECRET`, `GEMINI_MAKER_API_KEY`, `GEMINI_MAKER_API_SECRET` (the mirror maker's sandbox account), `QUICKNODE_STREAM_SECURITY_TOKEN`, and the Arc testnet keys `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY` (see [Arc testnet](#arc-testnet)); the tokens and the master key are generated.
 It drops one trailing newline and refuses an empty value, a line break or other control character, a character outside printable ASCII (a non-breaking space from a web page), a space at either end and a single quote; the URL must start with `https://`, a key must be `0x` and 64 hex digits, and the Stream's token at least 32 characters.
 It writes the line as `NAME='value'`, because docker compose would otherwise expand a `$` in the value and cut it at ` #`.
 The file is rebuilt next to itself with mode 600 and moved over the old one, so it is never half written, and a failure leaves no temporary file; run it as the file's owner, so the owner stays.
