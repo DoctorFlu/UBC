@@ -164,7 +164,13 @@ export function journalFeeCents(record: VenueOrderRecord): number | undefined {
   return estimatedFeeCents(record.filledHundredths, Math.min(Math.max(implied, 1), record.limitPrice * 100));
 }
 
-type Lookup = { found: PrivateOrder } | { found: null; detail: string };
+/**
+ * An earlier attempt, looked up on Gemini. `absent` is set only when Gemini's answer proves no such order
+ * exists: the account holds no orders at all on the market, none of the orders carrying client order ids
+ * is this one's, or no order there has its terms. Several matches, or terms that cannot tell mandates
+ * apart, prove nothing.
+ */
+type Lookup = { found: PrivateOrder } | { found: null; detail: string; absent: boolean };
 
 export function geminiVenue(options: GeminiVenueOptions): Venue {
   const { publicClient, productionClient, trading, journal, deployment } = options;
@@ -281,11 +287,16 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       return {
         found: null,
         detail: `${String(byId.length)} orders on Gemini carry client order id ${record.clientOrderId}`,
+        absent: false,
       };
     }
     if (orders.some((order) => order.clientOrderId)) {
       // Gemini keeps client order ids, and none is ours: the attempt never reached it.
-      return { found: null, detail: "no order on Gemini carries this intent's client order id" };
+      return {
+        found: null,
+        detail: "no order on Gemini carries this intent's client order id",
+        absent: true,
+      };
     }
     if (options.matchByTerms === false) {
       return {
@@ -293,6 +304,7 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
         detail:
           "Gemini returned no client order ids, and this account places orders for several mandates, so an " +
           "order cannot be told apart by its terms; check Gemini",
+        absent: orders.length === 0,
       };
     }
     const sentAt = Date.parse(record.placedAt);
@@ -316,6 +328,7 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
         matches.length === 0
           ? `no order for ${quantity} contracts at ${String(record.limitPrice)}c on Gemini since the attempt`
           : `${String(matches.length)} orders for ${quantity} contracts at ${String(record.limitPrice)}c match; check Gemini`,
+      absent: matches.length === 0,
     };
   }
 
@@ -493,6 +506,14 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       return publicOutcomes.categoryOf(instrumentSymbol);
     },
 
+    async reachedVenue(intentId) {
+      await flushUnsaved(intentId);
+      const record = await current(intentId);
+      if (record === null || record.state === "not_placed") return false;
+      // A "placing" version whose first write failed was never sent (see `attempt`).
+      return !(record.state === "placing" && neverSent.get(intentId) === record.revision);
+    },
+
     async placeOrder(order) {
       await flushUnsaved(order.intentId);
       const record = await current(order.intentId);
@@ -503,8 +524,22 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
           return { status: "refused", detail: record.detail ?? `${where} refused the order` };
         case "placing":
         case "unknown": {
+          // Never sent again from here, whatever the lookup says: this pass ran no market check (the
+          // executor skips it once an attempt may have reached the venue), and the one that ran was on the
+          // pass that journalled this attempt.
           const lookup = await lookUp(record);
           if (lookup.found === null) {
+            // Gemini proves there is no such order, and the contract no longer trades, so none can still
+            // arrive and fill: nothing filled, and the budget is released instead of held for good.
+            if (lookup.absent) {
+              const found = await findInstrument((ticker) => publicClient.getEvent(ticker), record.market);
+              const closed = notTrading(found, record.market, where);
+              if (closed !== null) {
+                const detail = `an earlier attempt got no answer, ${lookup.detail}, and ${closed}: nothing filled`;
+                await update(record, { state: "rejected", detail });
+                return { status: "refused", detail };
+              }
+            }
             const detail = `an earlier attempt got no answer and ${lookup.detail}; it is never sent again, so the intent waits`;
             if (record.detail !== detail) await update(record, { state: "unknown", detail });
             return { status: "held", detail };

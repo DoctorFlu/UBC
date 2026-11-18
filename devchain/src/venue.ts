@@ -110,6 +110,13 @@ export interface Venue {
    * nothing was sent.
    */
   placeOrder(order: VenueOrder): Promise<Placement>;
+  /**
+   * Whether an earlier attempt for this intent may have reached the venue, from the venue's own journal:
+   * the executor then takes its result from `placeOrder` and `readFill` alone, never checking the market
+   * again. False when no attempt was made, or the one made is known never to have been sent. Throws when
+   * the journal cannot be read. Absent on a venue that keeps no journal (the simulated one).
+   */
+  reachedVenue?(intentId: number): Promise<boolean>;
   /** Where the order stands now. Throws when the venue cannot be reached. */
   readFill(placed: PlacedOrder): Promise<FillState>;
   /** What became of a filled position's market. Throws when the venue cannot be reached. */

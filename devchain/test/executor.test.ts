@@ -31,6 +31,7 @@ import {
   growingRetryDelayMs,
   memoryOrderJournal,
   POLICY_CONTRACTS,
+  simulatedVenue,
   startExecutor,
   type Executor,
   type PositionOutcome,
@@ -633,6 +634,8 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
   let fake: FakeGeminiPrivate;
   let journal: ReturnType<typeof memoryOrderJournal>;
   let lines: string[];
+  /** What Gemini lists for the order's event: a test takes the market away, or the market data. */
+  let listing: () => Promise<typeof OPEN_EVENT>;
   const executors: Executor[] = [];
 
   beforeAll(async () => {
@@ -649,14 +652,15 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
     fake = new FakeGeminiPrivate({ apiKey: "account-FAKEKEY", apiSecret: "fake-secret" });
     journal = memoryOrderJournal();
     lines = [];
+    listing = () => Promise.resolve(OPEN_EVENT);
   });
 
   const start = (client: PolicyClient = chain.executor): Executor => {
     const executor = startExecutor({
       client,
       venue: geminiVenue({
-        publicClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
-        productionClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
+        publicClient: { getEvent: () => listing() },
+        productionClient: { getEvent: () => listing() },
         trading: createGeminiPrivateClient({
           environment: "sandbox",
           credentials: { apiKey: "account-FAKEKEY", apiSecret: "fake-secret" },
@@ -761,15 +765,17 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
     expect(statuses.get(id)).toBe("executed");
   });
 
-  /** The executor's client, whose next `failures` result writes are refused as the public RPC does. */
-  const refusingWrites = (failures: number): PolicyClient => {
-    let left = failures;
-    return new Proxy(chain.executor, {
+  /**
+   * The executor's client, whose result writes are refused as the public RPC does while `refusals.left` is
+   * above zero (each refusal counts one down), so a test decides when the next write lands.
+   */
+  const refusingWrites = (refusals: { left: number }): PolicyClient =>
+    new Proxy(chain.executor, {
       get(target, property) {
         if (property === "recordResult") {
           return (result: Parameters<PolicyClient["recordResult"]>[0]) => {
-            if (left > 0) {
-              left -= 1;
+            if (refusals.left > 0) {
+              refusals.left -= 1;
               return Promise.reject(new Error("HTTP request failed. Status: 429. Details: rate limited"));
             }
             return target.recordResult(result);
@@ -779,17 +785,27 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
         return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
       },
     });
-  };
 
-  it("records a fill whose first writes the RPC refused, after growing waits, and never sends a second order", async () => {
-    start(refusingWrites(2));
+  /** Proposes a $13 NO buy at 31c (40 contracts) and returns its id and the order the executor placed. */
+  async function placedOrder(): Promise<{ id: number; orderId: string }> {
     const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     await vi.waitFor(() => {
       expect(fake.orders.size).toBe(1);
     });
     const [placed] = [...fake.orders.values()];
     if (placed === undefined) throw new Error("no order");
-    fake.fill(placed.orderId, 2_000);
+    return { id, orderId: placed.orderId };
+  }
+
+  const refusedWrite = () => lines.some((line) => line.includes("could not be recorded onchain"));
+  /** Gemini no longer lists the market: the ladder expired, or left the listing. */
+  const unlisted = () => Promise.resolve({ ...OPEN_EVENT, contracts: [] });
+  const marketDataDown = () => Promise.reject(new Error("Gemini's market data is unavailable"));
+
+  it("records a fill whose first writes the RPC refused, after growing waits, and never sends a second order", async () => {
+    start(refusingWrites({ left: 2 }));
+    const { id, orderId } = await placedOrder();
+    fake.fill(orderId, 2_000);
     fake.cancelOpen();
 
     const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
@@ -809,25 +825,145 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
     });
   });
 
-  it("records the fill after a restart when the first executor never could, from the journal", async () => {
-    const first = start(refusingWrites(Number.POSITIVE_INFINITY));
+  it.each([
+    ["the market has left Gemini's listing", unlisted],
+    ["Gemini's market data is down", marketDataDown],
+  ])(
+    "records a fill whose write was refused as filled, never refused, when by the next pass %s",
+    async (_, gone) => {
+      const refusals = { left: Number.POSITIVE_INFINITY };
+      start(refusingWrites(refusals));
+      const { id, orderId } = await placedOrder();
+      fake.fill(orderId);
+      await vi.waitFor(() => {
+        expect(refusedWrite()).toBe(true);
+      });
+      listing = gone;
+      refusals.left = 0;
+
+      const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+      expect(statuses.get(id)).toBe("executed");
+      expect((await chain.outsider.getIntent(id))?.filledCents).toBe(1_240);
+      expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+      const log = lines.join("\n");
+      expect(log).not.toContain("REFUSED");
+      expect(log).not.toContain("could not check the market");
+    },
+  );
+
+  it.each([
+    ["filled", undefined, 1_240],
+    ["partly filled, then cancelled at its time", 2_000, 620],
+  ])(
+    "records an order %s from the journal after a restart, though the market has since expired",
+    async (_, hundredths, filledCents) => {
+      const first = start(refusingWrites({ left: Number.POSITIVE_INFINITY }));
+      const { id, orderId } = await placedOrder();
+      fake.fill(orderId, hundredths);
+      if (hundredths !== undefined) fake.cancelOpen();
+      await vi.waitFor(() => {
+        expect(refusedWrite()).toBe(true);
+      });
+      first.stop();
+      expect((await chain.outsider.getIntent(id))?.status).toBe("approved");
+
+      // The ladder expired while no executor ran: Gemini lists it no more.
+      listing = unlisted;
+      lines = [];
+      start();
+      const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+      expect(statuses.get(id)).toBe("executed");
+      expect((await chain.outsider.getIntent(id))?.filledCents).toBe(filledCents);
+      expect((await chain.outsider.getSnapshot()).committedCents).toBe(filledCents);
+      expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+      await vi.waitFor(() => {
+        expect(lines.some((line) => line.includes(`intent #${String(id)} buy NO`))).toBe(true);
+      });
+      expect(lines.join("\n")).not.toContain("REFUSED");
+    },
+  );
+
+  it("still refuses an approval with no order behind it when the market is gone", async () => {
+    listing = unlisted;
+    start();
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
+    const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+    expect(statuses.get(id)).toBe("failed");
+    expect(fake.orders.size).toBe(0);
+    await vi.waitFor(() => {
+      expect(lines.join("\n")).toContain("REFUSED (market_not_listed)");
+    });
+  });
+
+  it("ends an attempt Gemini never received as not filled once its contract is gone, never sending it again", async () => {
+    // The placement's answer is lost and Gemini never saw it: the intent waits while the market trades.
+    fake.failNextPlacement({ kind: "drop-before" });
+    start();
     const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
     await vi.waitFor(() => {
-      expect(fake.orders.size).toBe(1);
+      expect(lines.some((line) => line.includes("it is never sent again, so the intent waits"))).toBe(true);
     });
-    const [placed] = [...fake.orders.values()];
-    if (placed === undefined) throw new Error("no order");
-    fake.fill(placed.orderId);
-    await vi.waitFor(() => {
-      expect(lines.some((line) => line.includes("could not be recorded onchain"))).toBe(true);
-    });
-    first.stop();
     expect((await chain.outsider.getIntent(id))?.status).toBe("approved");
 
-    start();
+    // The ladder stops trading: no order of this attempt can arrive and fill any more.
+    listing = unlisted;
     const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
-    expect(statuses.get(id)).toBe("executed");
-    expect((await chain.outsider.getIntent(id))?.filledCents).toBe(1_240);
+    expect(statuses.get(id)).toBe("failed");
+    expect((await chain.outsider.getSnapshot()).committedCents).toBe(0);
     expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+    expect(fake.orders.size).toBe(0);
+    expect(journal.records.get(id)).toMatchObject({ state: "rejected" });
+    await vi.waitFor(() => {
+      expect(lines.join("\n")).toContain(
+        `REFUSED by the venue: an earlier attempt got no answer, no order for 40 contracts at 31c on Gemini since the attempt, and Gemini's sandbox does not list ${BTC}: nothing filled`,
+      );
+    });
+  });
+
+  it("fills nothing on a contract that stopped trading, on Gemini's sandbox and on the simulated venue alike", async () => {
+    // A held order approved after its ladder closed: Gemini still lists the contract, closed.
+    listing = () =>
+      Promise.resolve({
+        ...OPEN_EVENT,
+        contracts: OPEN_EVENT.contracts.map((contract) => ({ ...contract, marketState: "closed" })),
+      });
+    start();
+    const onGemini = await proposeRaw(
+      chain.agent,
+      order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }),
+    );
+    expect((await waitForStatus(chain.outsider, [onGemini], (s) => s !== "approved")).get(onGemini)).toBe(
+      "failed",
+    );
+    expect(fake.requests).toEqual([]);
+    for (const executor of executors.splice(0)) executor.stop();
+
+    const simulated = startExecutor({
+      client: chain.executor,
+      venue: simulatedVenue({ getEvent: () => listing() }),
+      fromBlock: chain.deployBlock,
+      fillDelayMs: 0,
+      venueRetryMs: 50,
+      pollingIntervalMs: 50,
+      log: (line) => lines.push(line),
+    });
+    executors.push(simulated);
+    const onSimulated = await proposeRaw(
+      chain.agent,
+      order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }),
+    );
+    expect(
+      (await waitForStatus(chain.outsider, [onSimulated], (s) => s !== "approved")).get(onSimulated),
+    ).toBe("failed");
+    expect((await chain.outsider.getSnapshot()).committedCents).toBe(0);
+    await vi.waitFor(() => {
+      const log = lines.join("\n");
+      expect(log).toContain(
+        `intent #${String(onGemini)} REFUSED by the venue: ${BTC} no longer trades on Gemini's sandbox (its market is closed)`,
+      );
+      expect(log).toContain(
+        `intent #${String(onSimulated)} REFUSED by the venue: ${BTC} no longer trades on Gemini (its market is closed)`,
+      );
+    });
   });
 });
