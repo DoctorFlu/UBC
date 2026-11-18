@@ -1,7 +1,8 @@
 /**
  * The mirror maker against a stub of both public books and the fake sandbox account: it copies
- * production's best bids and nothing else, never quotes what production does not show, never takes or
- * competes with liquidity that is not its own, keeps to its caps and its pace, and leaves no order behind.
+ * production's best bids and nothing else, never quotes what production does not show, never competes with
+ * someone else's order and takes it only where production's price reaches it, never leaves a side empty
+ * while it moves a quote, keeps to its caps and its pace, and leaves no order behind.
  */
 import { describe, expect, it } from "vitest";
 import { makerDoctor } from "../src/maker/doctor";
@@ -9,6 +10,7 @@ import { MirrorMaker, type MarketReader } from "../src/maker/maker";
 import {
   mirrorQuotes,
   quoteChanges,
+  quoteSteps,
   type MakerLimits,
   type MirrorInput,
   type MirrorRung,
@@ -100,21 +102,61 @@ describe("mirrorQuotes", () => {
     ],
     ["it expires within two minutes", { expiresAtMs: NOW + 119_000 }, /expires soon/],
     ["its expiry is unknown", { expiresAtMs: null }, /expiry is unknown/],
-    [
-      "someone else bids YES in the sandbox",
-      { sandbox: { marketState: "open", yesBidCents: 55, yesAskCents: null } },
-      /YES bid that is not ours/,
-    ],
-    [
-      "someone else offers YES in the sandbox",
-      { sandbox: { marketState: "open", yesBidCents: null, yesAskCents: 70 } },
-      /YES offer that is not ours/,
-    ],
   ])("quotes nothing when %s", (_, overrides, reason) => {
     const plan = mirrorQuotes(input({ rungs: [rung(overrides)] }));
     expect(plan.quotes).toEqual([]);
     expect(plan.skips).toHaveLength(1);
     expect(plan.skips[0]?.reason).toMatch(reason);
+  });
+
+  it.each<[string, MirrorRung["sandbox"], "yes" | "no", RegExp]>([
+    [
+      "bids YES",
+      { marketState: "open", yesBidCents: 55, yesAskCents: null },
+      "yes",
+      /YES bid that is not ours/,
+    ],
+    [
+      "offers YES (bids NO)",
+      { marketState: "open", yesBidCents: null, yesAskCents: 70 },
+      "no",
+      /YES offer that is not ours/,
+    ],
+  ])(
+    "leaves the side to someone else who %s, and quotes the other side maker only",
+    (_, sandbox, side, reason) => {
+      const plan = mirrorQuotes(input({ rungs: [rung({ sandbox })] }));
+      expect(plan.skips).toEqual([
+        { symbol: sym(64_000), outcome: side, reason: expect.stringMatching(reason) as string },
+      ]);
+      const other = side === "yes" ? "no" : "yes";
+      // Production's price there does not reach their order: nothing would fill.
+      expect(plan.quotes).toEqual([
+        {
+          symbol: sym(64_000),
+          outcome: other,
+          priceCents: other === "yes" ? 60 : 38,
+          hundredths: other === "yes" ? 2_500 : 4_000,
+        },
+      ]);
+    },
+  );
+
+  it("may take someone else's order once production's own price reaches it, at its price", () => {
+    // Someone bids NO at 41 (a YES offer at 59); production's YES bid is 60.
+    const reached = mirrorQuotes(
+      input({ rungs: [rung({ sandbox: { marketState: "open", yesBidCents: null, yesAskCents: 59 } })] }),
+    );
+    expect(reached.quotes).toEqual([
+      { symbol: sym(64_000), outcome: "yes", priceCents: 60, hundredths: 2_500, mayTake: true },
+    ]);
+    // Someone bids YES at 63; production's NO bid is 38 (63 + 38 >= 100).
+    const yesBid = mirrorQuotes(
+      input({ rungs: [rung({ sandbox: { marketState: "open", yesBidCents: 63, yesAskCents: null } })] }),
+    );
+    expect(yesBid.quotes).toEqual([
+      { symbol: sym(64_000), outcome: "no", priceCents: 38, hundredths: 4_000, mayTake: true },
+    ]);
   });
 
   it("takes its own resting and just-replaced quotes in the sandbox book for its own", () => {
@@ -176,6 +218,7 @@ describe("quoteChanges", () => {
   it("keeps an order at the quote's price with between half and all of its size left", () => {
     expect(quoteChanges([order("1", 60, 1_000)], want)).toEqual({
       cancel: [],
+      replace: [],
       place: [],
       keep: [order("1", 60, 1_000)],
     });
@@ -183,18 +226,94 @@ describe("quoteChanges", () => {
 
   it("replaces an order whose price moved, that is mostly filled, or that is larger than the quote", () => {
     for (const stale of [order("1", 59, 2_000), order("1", 60, 999), order("1", 60, 2_001)]) {
-      expect(quoteChanges([stale], want)).toEqual({ cancel: [stale], place: want, keep: [] });
+      expect(quoteChanges([stale], want)).toEqual({
+        cancel: [],
+        replace: [{ order: stale, quote: want[0] }],
+        place: [],
+        keep: [],
+      });
     }
+    expect(quoteChanges([], want)).toEqual({ cancel: [], replace: [], place: want, keep: [] });
   });
 
-  it("cancels a second order on a side and any order on a side with no quote", () => {
+  it("keeps a fitting order wherever it is listed, and cancels a side's other orders and any side with no quote", () => {
     const changes = quoteChanges(
-      [order("1", 60, 2_000), order("2", 60, 2_000), { ...order("3", 40, 100), outcome: "no" as const }],
+      [order("2", 59, 2_000), order("1", 60, 2_000), { ...order("3", 40, 100), outcome: "no" as const }],
       want,
     );
     expect(changes.keep.map((o) => o.orderId)).toEqual(["1"]);
     expect(changes.cancel.map((o) => o.orderId)).toEqual(["2", "3"]);
+    expect(changes.replace).toEqual([]);
     expect(changes.place).toEqual([]);
+    // With no fitting order, the first on the side is replaced and the rest cancelled.
+    const doubled = quoteChanges([order("2", 59, 2_000), order("4", 58, 2_000)], want);
+    expect(doubled.replace.map((r) => r.order.orderId)).toEqual(["2"]);
+    expect(doubled.cancel.map((o) => o.orderId)).toEqual(["4"]);
+  });
+});
+
+describe("quoteSteps", () => {
+  const quote = (strike: number, outcome: "yes" | "no", priceCents: number) => ({
+    symbol: sym(strike),
+    outcome,
+    priceCents,
+    hundredths: 1_000,
+  });
+  const resting = (strike: number, outcome: "yes" | "no", priceCents: number) => ({
+    orderId: `${String(strike)}${outcome}`,
+    symbol: sym(strike),
+    outcome,
+    priceCents,
+    remainingHundredths: 1_000,
+  });
+  const order = (steps: ReturnType<typeof quoteSteps>) =>
+    steps.map(
+      (step) => `${step.quote.symbol.slice(-7)} ${step.quote.outcome} ${String(step.quote.priceCents)}`,
+    );
+
+  it("places YES bids below spot first, nearest spot first, then above spot, then the NO bids", () => {
+    const place = [
+      quote(66_000, "yes", 20),
+      quote(66_000, "no", 78),
+      quote(62_000, "yes", 90),
+      quote(62_000, "no", 8),
+      quote(64_000, "yes", 55),
+      quote(64_000, "no", 43),
+      quote(65_000, "yes", 40),
+      quote(65_000, "no", 58),
+    ];
+    expect(order(quoteSteps({ replace: [], place }))).toEqual([
+      "HI64000 yes 55",
+      "HI62000 yes 90",
+      "HI65000 yes 40",
+      "HI66000 yes 20",
+      "HI64000 no 43",
+      "HI62000 no 8",
+      "HI65000 no 58",
+      "HI66000 no 78",
+    ]);
+  });
+
+  it("replaces a rung's NO bid first when the new YES bid would meet the NO bid it replaces", () => {
+    // Production moved up 3c: a YES bid at 63 meets the old NO bid at 38 (63 + 38 >= 100).
+    const steps = quoteSteps({
+      replace: [
+        { order: resting(64_000, "yes", 60), quote: quote(64_000, "yes", 63) },
+        { order: resting(64_000, "no", 38), quote: quote(64_000, "no", 35) },
+      ],
+      place: [],
+    });
+    expect(order(steps)).toEqual(["HI64000 no 35", "HI64000 yes 63"]);
+    expect(steps.map((step) => step.replaces?.orderId)).toEqual(["64000no", "64000yes"]);
+    // Moved down: the new NO bid at 41 would meet the old YES bid at 60, and the YES bid goes first.
+    const down = quoteSteps({
+      replace: [
+        { order: resting(64_000, "yes", 60), quote: quote(64_000, "yes", 57) },
+        { order: resting(64_000, "no", 38), quote: quote(64_000, "no", 41) },
+      ],
+      place: [],
+    });
+    expect(order(down)).toEqual(["HI64000 yes 57", "HI64000 no 41"]);
   });
 });
 
@@ -353,6 +472,12 @@ class Sandbox implements MarketReader {
         const other = this.foreign.get(symbol);
         if (other?.yesBid !== undefined) yesBids.push(other.yesBid);
         if (other?.yesAsk !== undefined) yesAsks.push(other.yesAsk);
+        // Other accounts' orders the fake account's buys can meet.
+        for (const order of this.account.foreign) {
+          if (order.symbol !== symbol || order.hundredths <= 0) continue;
+          if (order.outcome === "yes") yesBids.push(order.priceCents);
+          else yesAsks.push(100 - order.priceCents);
+        }
         return contract(
           symbol,
           strike,
@@ -492,12 +617,106 @@ describe("MirrorMaker", () => {
     expect(resting()).toHaveLength(4);
   });
 
-  it("stays off a rung where someone else's order rests", async () => {
-    const { sandbox, maker, resting } = setUp();
-    sandbox.foreign.set(sym(63_000), { yesBid: 70 });
+  it("leaves someone else's order untouched, and withdraws only its own quote on that side", async () => {
+    const { account, production, maker, resting, advance } = setUp();
     await maker.cycle();
-    expect(resting().filter((line) => line.startsWith("HI63000"))).toEqual([]);
-    expect(resting()).toHaveLength(2);
+    // The executor's NO bid at 20c on $63,000 (a YES offer at 80), better than the maker's NO bid at 15c.
+    account.foreign.push({ symbol: sym(63_000), outcome: "no", priceCents: 20, hundredths: 1_000 });
+    production.set(63_000, [75, 2_500], [85, 3_000]);
+    advance(15_000);
+    await maker.cycle();
+    expect(resting().filter((line) => line.startsWith("HI63000"))).toEqual(["HI63000 yes 75 x2500"]);
+    advance(15_000);
+    expect(await maker.cycle()).toMatchObject({ placed: 0, cancelled: 0 });
+    expect(account.foreign[0]?.hundredths).toBe(1_000);
+    expect(account.selfCrosses).toEqual([]);
+  });
+
+  it("fills someone else's order once, at its price, when production's price reaches it; the caps stop more", async () => {
+    const { account, production, maker, resting, lines, advance } = setUp({
+      maxRungInventoryHundredths: 1_000,
+    });
+    account.foreign.push({ symbol: sym(63_000), outcome: "no", priceCents: 20, hundredths: 1_000 });
+    production.set(63_000, [75, 2_500], [85, 3_000]);
+    await maker.cycle();
+    expect(account.foreign[0]?.hundredths).toBe(1_000);
+
+    // Production's YES bid reaches 81: production would have filled their YES offer at 80 there.
+    production.set(63_000, [81, 2_500], [85, 3_000]);
+    advance(15_000);
+    await maker.cycle();
+    expect(account.foreign[0]?.hundredths).toBe(0);
+    const taker = account
+      .callsTo("/v1/prediction-markets/order")
+      .filter((request) => request.fields.makerOrCancel !== true);
+    expect(
+      taker.map((request) => `${String(request.fields.outcome)} ${String(request.fields.price)}`),
+    ).toEqual(["yes 0.81"]);
+    const filled = [...account.orders.values()].filter((order) => order.filled > 0);
+    expect(filled.map((order) => [order.filled, order.costUnits / order.filled])).toEqual([[1_000, 80]]);
+    expect(lines.join("\n")).toMatch(/sent to meet an order that is not the maker's/);
+
+    // The maker now holds its cap on that side: the rest of that bid goes, and another order there is
+    // left alone however production moves.
+    advance(15_000);
+    await maker.cycle();
+    expect(resting().filter((line) => line.startsWith("HI63000 yes"))).toEqual([]);
+    account.foreign.push({ symbol: sym(63_000), outcome: "no", priceCents: 19, hundredths: 1_000 });
+    production.set(63_000, [82, 2_500], [85, 3_000]);
+    advance(15_000);
+    await maker.cycle();
+    expect(account.foreign[1]?.hundredths).toBe(1_000);
+    expect([...account.orders.values()].filter((order) => order.filled > 0)).toHaveLength(1);
+    expect(account.selfCrosses).toEqual([]);
+  });
+
+  it("never leaves a side empty: unchanged quotes stay, and a moved one is placed before its order goes", async () => {
+    const { account, production, maker, advance } = setUp();
+    await maker.cycle();
+    const sides = [sym(64_000), sym(63_000)].flatMap((symbol) => [`${symbol}|yes`, `${symbol}|no`]);
+    const empty: string[] = [];
+    const requests: string[] = [];
+    account.afterRequest = (route) => {
+      requests.push(route.endsWith("cancel") ? "cancel" : "place");
+      const open = [...account.orders.values()].filter((order) => order.status === "open");
+      for (const side of sides) {
+        if (!open.some((order) => `${order.symbol}|${order.outcome}` === side)) empty.push(side);
+      }
+    };
+
+    // Production stands still: nothing is sent.
+    advance(15_000);
+    expect(await maker.cycle()).toMatchObject({ kept: 4, placed: 0, cancelled: 0 });
+    expect(requests).toEqual([]);
+
+    // A cent on one side, same size: exactly one placement, then one cancel.
+    production.set(64_000, [61, 2_500], [62, 4_000]);
+    advance(15_000);
+    expect(await maker.cycle()).toMatchObject({ kept: 3, placed: 1, replaced: 1, cancelled: 1 });
+    expect(requests).toEqual(["place", "cancel"]);
+
+    // Every quote moves, up (the new YES bid would meet the old NO bid) and down.
+    production.set(64_000, [64, 2_500], [66, 4_000]);
+    production.set(63_000, [78, 2_500], [82, 3_000]);
+    advance(15_000);
+    expect(await maker.cycle()).toMatchObject({ kept: 0, placed: 4, replaced: 4, cancelled: 4 });
+    expect(empty).toEqual([]);
+    expect(account.selfCrosses).toEqual([]);
+  });
+
+  it("leaves an order stale for a cycle within a cent of production when out of placements, never further", async () => {
+    const { production, maker, resting, advance } = setUp({}, 1);
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      await maker.cycle();
+      advance(15_000);
+    }
+    expect(resting()).toHaveLength(4);
+    // Both rungs' YES bids move a cent, the $63,000 NO bid moves two.
+    production.set(64_000, [61, 2_500], [62, 4_000]);
+    production.set(63_000, [82, 2_500], [87, 3_000]);
+    expect(await maker.cycle()).toMatchObject({ placed: 1, replaced: 1, stale: 1, cancelled: 2 });
+    // The first in line replaced; the other cent stale; the NO bid two cents off cancelled, not left.
+    expect(resting()).toEqual(["HI63000 yes 81 x2500", "HI64000 no 38 x4000", "HI64000 yes 61 x2500"]);
   });
 
   it("skips a quote Gemini cancels as taking liquidity, and tries again only at a new price", async () => {
