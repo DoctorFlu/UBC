@@ -1,0 +1,2703 @@
+{
+  "production 12:39, 0.05 BTC": {
+    "planId": "plan_9c4f7799ca935d80",
+    "status": "partial",
+    "asset": "BTC",
+    "eventTicker": "BTC2611182200",
+    "expiry": "2026-11-18T22:00:00.000Z",
+    "spotCents": 6450000,
+    "holdingQuantity": "0.05",
+    "ceilingCents": 6450000,
+    "floorCents": 6300000,
+    "rungs": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "designedHundredths": 1250,
+        "limitPriceCents": 56,
+        "amountCents": 700,
+        "payoutCents": 1250,
+        "coversFromCents": 6450000,
+        "coversToCents": 6425000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+            "strikeCents": 6425000,
+            "side": "no",
+            "quantity": "12.50",
+            "quantityHundredths": 1250,
+            "limitPriceCents": 56,
+            "amountCents": 700
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "designedHundredths": 1250,
+        "limitPriceCents": 47,
+        "amountCents": 588,
+        "payoutCents": 1250,
+        "coversFromCents": 6425000,
+        "coversToCents": 6400000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+            "strikeCents": 6400000,
+            "side": "no",
+            "quantity": "12.50",
+            "quantityHundredths": 1250,
+            "limitPriceCents": 47,
+            "amountCents": 588
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "designedHundredths": 1250,
+        "limitPriceCents": 41,
+        "amountCents": 513,
+        "payoutCents": 1250,
+        "coversFromCents": 6400000,
+        "coversToCents": 6375000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+            "strikeCents": 6375000,
+            "side": "no",
+            "quantity": "12.50",
+            "quantityHundredths": 1250,
+            "limitPriceCents": 41,
+            "amountCents": 513
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 1250,
+        "limitPriceCents": 34,
+        "amountCents": 170,
+        "payoutCents": 500,
+        "coversFromCents": 6375000,
+        "coversToCents": 6350000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+            "strikeCents": 6350000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 34,
+            "amountCents": 170
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "designedHundredths": 1250,
+        "limitPriceCents": 27,
+        "amountCents": 338,
+        "payoutCents": 1250,
+        "coversFromCents": 6350000,
+        "coversToCents": 6325000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+            "strikeCents": 6325000,
+            "side": "no",
+            "quantity": "12.50",
+            "quantityHundredths": 1250,
+            "limitPriceCents": 27,
+            "amountCents": 338
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+        "strikeCents": 6300000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 1250,
+        "limitPriceCents": 21,
+        "amountCents": 105,
+        "payoutCents": 500,
+        "coversFromCents": 6325000,
+        "coversToCents": 6300000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+            "strikeCents": 6300000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 21,
+            "amountCents": 105
+          }
+        ]
+      }
+    ],
+    "orders": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "limitPriceCents": 56,
+        "amountCents": 700
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "limitPriceCents": 47,
+        "amountCents": 588
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "limitPriceCents": 41,
+        "amountCents": 513
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 34,
+        "amountCents": 170
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "limitPriceCents": 27,
+        "amountCents": 338
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+        "strikeCents": 6300000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 21,
+        "amountCents": 105
+      }
+    ],
+    "totals": {
+      "costCents": 2414,
+      "maxPayoutCents": 6000,
+      "contractsHundredths": 6000,
+      "orderCount": 6,
+      "spendCapCents": 5000,
+      "protectedRange": {
+        "fromCents": 6450000,
+        "toCents": 6300000
+      },
+      "lossAtFloorCents": 7500,
+      "payoutBelowFloorCents": 6000,
+      "coverageAtFloorBps": 8000
+    },
+    "payoff": [
+      {
+        "priceCents": 6235500,
+        "unhedgedPnlCents": -10725,
+        "hedgePnlCents": 3586,
+        "netPnlCents": -7139
+      },
+      {
+        "priceCents": 6247125,
+        "unhedgedPnlCents": -10144,
+        "hedgePnlCents": 3586,
+        "netPnlCents": -6558
+      },
+      {
+        "priceCents": 6258750,
+        "unhedgedPnlCents": -9563,
+        "hedgePnlCents": 3586,
+        "netPnlCents": -5977
+      },
+      {
+        "priceCents": 6270375,
+        "unhedgedPnlCents": -8981,
+        "hedgePnlCents": 3586,
+        "netPnlCents": -5395
+      },
+      {
+        "priceCents": 6282000,
+        "unhedgedPnlCents": -8400,
+        "hedgePnlCents": 3586,
+        "netPnlCents": -4814
+      },
+      {
+        "priceCents": 6293625,
+        "unhedgedPnlCents": -7819,
+        "hedgePnlCents": 3586,
+        "netPnlCents": -4233
+      },
+      {
+        "priceCents": 6299999,
+        "unhedgedPnlCents": -7500,
+        "hedgePnlCents": 3586,
+        "netPnlCents": -3914
+      },
+      {
+        "priceCents": 6300000,
+        "unhedgedPnlCents": -7500,
+        "hedgePnlCents": 3086,
+        "netPnlCents": -4414
+      },
+      {
+        "priceCents": 6305250,
+        "unhedgedPnlCents": -7238,
+        "hedgePnlCents": 3086,
+        "netPnlCents": -4152
+      },
+      {
+        "priceCents": 6316875,
+        "unhedgedPnlCents": -6656,
+        "hedgePnlCents": 3086,
+        "netPnlCents": -3570
+      },
+      {
+        "priceCents": 6324999,
+        "unhedgedPnlCents": -6250,
+        "hedgePnlCents": 3086,
+        "netPnlCents": -3164
+      },
+      {
+        "priceCents": 6325000,
+        "unhedgedPnlCents": -6250,
+        "hedgePnlCents": 1836,
+        "netPnlCents": -4414
+      },
+      {
+        "priceCents": 6328500,
+        "unhedgedPnlCents": -6075,
+        "hedgePnlCents": 1836,
+        "netPnlCents": -4239
+      },
+      {
+        "priceCents": 6340125,
+        "unhedgedPnlCents": -5494,
+        "hedgePnlCents": 1836,
+        "netPnlCents": -3658
+      },
+      {
+        "priceCents": 6349999,
+        "unhedgedPnlCents": -5000,
+        "hedgePnlCents": 1836,
+        "netPnlCents": -3164
+      },
+      {
+        "priceCents": 6350000,
+        "unhedgedPnlCents": -5000,
+        "hedgePnlCents": 1336,
+        "netPnlCents": -3664
+      },
+      {
+        "priceCents": 6351750,
+        "unhedgedPnlCents": -4913,
+        "hedgePnlCents": 1336,
+        "netPnlCents": -3577
+      },
+      {
+        "priceCents": 6363375,
+        "unhedgedPnlCents": -4331,
+        "hedgePnlCents": 1336,
+        "netPnlCents": -2995
+      },
+      {
+        "priceCents": 6374999,
+        "unhedgedPnlCents": -3750,
+        "hedgePnlCents": 1336,
+        "netPnlCents": -2414
+      },
+      {
+        "priceCents": 6375000,
+        "unhedgedPnlCents": -3750,
+        "hedgePnlCents": 86,
+        "netPnlCents": -3664
+      },
+      {
+        "priceCents": 6386625,
+        "unhedgedPnlCents": -3169,
+        "hedgePnlCents": 86,
+        "netPnlCents": -3083
+      },
+      {
+        "priceCents": 6398250,
+        "unhedgedPnlCents": -2588,
+        "hedgePnlCents": 86,
+        "netPnlCents": -2502
+      },
+      {
+        "priceCents": 6399999,
+        "unhedgedPnlCents": -2500,
+        "hedgePnlCents": 86,
+        "netPnlCents": -2414
+      },
+      {
+        "priceCents": 6400000,
+        "unhedgedPnlCents": -2500,
+        "hedgePnlCents": -1164,
+        "netPnlCents": -3664
+      },
+      {
+        "priceCents": 6409875,
+        "unhedgedPnlCents": -2006,
+        "hedgePnlCents": -1164,
+        "netPnlCents": -3170
+      },
+      {
+        "priceCents": 6421500,
+        "unhedgedPnlCents": -1425,
+        "hedgePnlCents": -1164,
+        "netPnlCents": -2589
+      },
+      {
+        "priceCents": 6424999,
+        "unhedgedPnlCents": -1250,
+        "hedgePnlCents": -1164,
+        "netPnlCents": -2414
+      },
+      {
+        "priceCents": 6425000,
+        "unhedgedPnlCents": -1250,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -3664
+      },
+      {
+        "priceCents": 6433125,
+        "unhedgedPnlCents": -844,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -3258
+      },
+      {
+        "priceCents": 6444750,
+        "unhedgedPnlCents": -263,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -2677
+      },
+      {
+        "priceCents": 6450000,
+        "unhedgedPnlCents": 0,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -2414
+      },
+      {
+        "priceCents": 6456375,
+        "unhedgedPnlCents": 319,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -2095
+      },
+      {
+        "priceCents": 6468000,
+        "unhedgedPnlCents": 900,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -1514
+      },
+      {
+        "priceCents": 6479625,
+        "unhedgedPnlCents": 1481,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -933
+      },
+      {
+        "priceCents": 6491250,
+        "unhedgedPnlCents": 2063,
+        "hedgePnlCents": -2414,
+        "netPnlCents": -351
+      },
+      {
+        "priceCents": 6502875,
+        "unhedgedPnlCents": 2644,
+        "hedgePnlCents": -2414,
+        "netPnlCents": 230
+      },
+      {
+        "priceCents": 6514500,
+        "unhedgedPnlCents": 3225,
+        "hedgePnlCents": -2414,
+        "netPnlCents": 811
+      }
+    ],
+    "breakEven": {
+      "paysForItselfBelowCents": 6400000,
+      "netBreakEvenAboveCents": 6498280,
+      "notes": [
+        "The hedge costs $24.14 and pays back at least that if BTC finishes below $64,000.",
+        "At or above $64,250 every NO contract expires worthless; BTC must finish above $64,982.80 for the holding's gain to cover the cost.",
+        "Between $63,000 and $64,500 the worst net result is a loss of $44.14, at $63,000, against $75.00 unhedged."
+      ]
+    },
+    "warnings": [
+      {
+        "code": "thin_depth",
+        "message": "The order book is too thin at $63,500 (5.00 of 12.50), $63,000 (5.00 of 12.50) contracts at the best price.",
+        "strikesCents": [6350000, 6300000]
+      }
+    ],
+    "uncovered": [
+      {
+        "code": "thin_depth",
+        "fromCents": 6375000,
+        "toCents": 6350000,
+        "shortfallCents": 750,
+        "strikeCents": 6350000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6325000,
+        "toCents": 6300000,
+        "shortfallCents": 750,
+        "strikeCents": 6300000
+      }
+    ]
+  },
+  "production 12:39, 0.3 BTC": {
+    "planId": "plan_9a44dcbb06569581",
+    "status": "partial",
+    "asset": "BTC",
+    "eventTicker": "BTC2611182200",
+    "expiry": "2026-11-18T22:00:00.000Z",
+    "spotCents": 6450000,
+    "holdingQuantity": "0.3",
+    "ceilingCents": 6450000,
+    "floorCents": 6300000,
+    "rungs": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "75.00",
+        "quantityHundredths": 7500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 56,
+        "amountCents": 4201,
+        "payoutCents": 7500,
+        "coversFromCents": 6450000,
+        "coversToCents": 6425000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+            "strikeCents": 6425000,
+            "side": "no",
+            "quantity": "44.64",
+            "quantityHundredths": 4464,
+            "limitPriceCents": 56,
+            "amountCents": 2500
+          },
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+            "strikeCents": 6425000,
+            "side": "no",
+            "quantity": "30.36",
+            "quantityHundredths": 3036,
+            "limitPriceCents": 56,
+            "amountCents": 1701
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "75.00",
+        "quantityHundredths": 7500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 47,
+        "amountCents": 3526,
+        "payoutCents": 7500,
+        "coversFromCents": 6425000,
+        "coversToCents": 6400000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+            "strikeCents": 6400000,
+            "side": "no",
+            "quantity": "53.19",
+            "quantityHundredths": 5319,
+            "limitPriceCents": 47,
+            "amountCents": 2500
+          },
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+            "strikeCents": 6400000,
+            "side": "no",
+            "quantity": "21.81",
+            "quantityHundredths": 2181,
+            "limitPriceCents": 47,
+            "amountCents": 1026
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "30.00",
+        "quantityHundredths": 3000,
+        "designedHundredths": 7500,
+        "limitPriceCents": 41,
+        "amountCents": 1230,
+        "payoutCents": 3000,
+        "coversFromCents": 6400000,
+        "coversToCents": 6375000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+            "strikeCents": 6375000,
+            "side": "no",
+            "quantity": "30.00",
+            "quantityHundredths": 3000,
+            "limitPriceCents": 41,
+            "amountCents": 1230
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 34,
+        "amountCents": 170,
+        "payoutCents": 500,
+        "coversFromCents": 6375000,
+        "coversToCents": 6350000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+            "strikeCents": 6350000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 34,
+            "amountCents": 170
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "25.00",
+        "quantityHundredths": 2500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 27,
+        "amountCents": 675,
+        "payoutCents": 2500,
+        "coversFromCents": 6350000,
+        "coversToCents": 6325000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+            "strikeCents": 6325000,
+            "side": "no",
+            "quantity": "25.00",
+            "quantityHundredths": 2500,
+            "limitPriceCents": 27,
+            "amountCents": 675
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+        "strikeCents": 6300000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 21,
+        "amountCents": 105,
+        "payoutCents": 500,
+        "coversFromCents": 6325000,
+        "coversToCents": 6300000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+            "strikeCents": 6300000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 21,
+            "amountCents": 105
+          }
+        ]
+      }
+    ],
+    "orders": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "44.64",
+        "quantityHundredths": 4464,
+        "limitPriceCents": 56,
+        "amountCents": 2500
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "30.36",
+        "quantityHundredths": 3036,
+        "limitPriceCents": 56,
+        "amountCents": 1701
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "53.19",
+        "quantityHundredths": 5319,
+        "limitPriceCents": 47,
+        "amountCents": 2500
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "21.81",
+        "quantityHundredths": 2181,
+        "limitPriceCents": 47,
+        "amountCents": 1026
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "30.00",
+        "quantityHundredths": 3000,
+        "limitPriceCents": 41,
+        "amountCents": 1230
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 34,
+        "amountCents": 170
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "25.00",
+        "quantityHundredths": 2500,
+        "limitPriceCents": 27,
+        "amountCents": 675
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+        "strikeCents": 6300000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 21,
+        "amountCents": 105
+      }
+    ],
+    "totals": {
+      "costCents": 9907,
+      "maxPayoutCents": 21500,
+      "contractsHundredths": 21500,
+      "orderCount": 8,
+      "spendCapCents": 30000,
+      "protectedRange": {
+        "fromCents": 6450000,
+        "toCents": 6300000
+      },
+      "lossAtFloorCents": 45000,
+      "payoutBelowFloorCents": 21500,
+      "coverageAtFloorBps": 4777
+    },
+    "payoff": [
+      {
+        "priceCents": 6235500,
+        "unhedgedPnlCents": -64350,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -52757
+      },
+      {
+        "priceCents": 6247125,
+        "unhedgedPnlCents": -60863,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -49270
+      },
+      {
+        "priceCents": 6258750,
+        "unhedgedPnlCents": -57375,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -45782
+      },
+      {
+        "priceCents": 6270375,
+        "unhedgedPnlCents": -53888,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -42295
+      },
+      {
+        "priceCents": 6282000,
+        "unhedgedPnlCents": -50400,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -38807
+      },
+      {
+        "priceCents": 6293625,
+        "unhedgedPnlCents": -46913,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -35320
+      },
+      {
+        "priceCents": 6299999,
+        "unhedgedPnlCents": -45000,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -33407
+      },
+      {
+        "priceCents": 6300000,
+        "unhedgedPnlCents": -45000,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -33907
+      },
+      {
+        "priceCents": 6305250,
+        "unhedgedPnlCents": -43425,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -32332
+      },
+      {
+        "priceCents": 6316875,
+        "unhedgedPnlCents": -39938,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -28845
+      },
+      {
+        "priceCents": 6324999,
+        "unhedgedPnlCents": -37500,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -26407
+      },
+      {
+        "priceCents": 6325000,
+        "unhedgedPnlCents": -37500,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -28907
+      },
+      {
+        "priceCents": 6328500,
+        "unhedgedPnlCents": -36450,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -27857
+      },
+      {
+        "priceCents": 6340125,
+        "unhedgedPnlCents": -32963,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -24370
+      },
+      {
+        "priceCents": 6349999,
+        "unhedgedPnlCents": -30000,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -21407
+      },
+      {
+        "priceCents": 6350000,
+        "unhedgedPnlCents": -30000,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -21907
+      },
+      {
+        "priceCents": 6351750,
+        "unhedgedPnlCents": -29475,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -21382
+      },
+      {
+        "priceCents": 6363375,
+        "unhedgedPnlCents": -25988,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -17895
+      },
+      {
+        "priceCents": 6374999,
+        "unhedgedPnlCents": -22500,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -14407
+      },
+      {
+        "priceCents": 6375000,
+        "unhedgedPnlCents": -22500,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -17407
+      },
+      {
+        "priceCents": 6386625,
+        "unhedgedPnlCents": -19013,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -13920
+      },
+      {
+        "priceCents": 6398250,
+        "unhedgedPnlCents": -15525,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -10432
+      },
+      {
+        "priceCents": 6399999,
+        "unhedgedPnlCents": -15000,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -9907
+      },
+      {
+        "priceCents": 6400000,
+        "unhedgedPnlCents": -15000,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -17407
+      },
+      {
+        "priceCents": 6409875,
+        "unhedgedPnlCents": -12038,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -14445
+      },
+      {
+        "priceCents": 6421500,
+        "unhedgedPnlCents": -8550,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -10957
+      },
+      {
+        "priceCents": 6424999,
+        "unhedgedPnlCents": -7500,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -9907
+      },
+      {
+        "priceCents": 6425000,
+        "unhedgedPnlCents": -7500,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -17407
+      },
+      {
+        "priceCents": 6433125,
+        "unhedgedPnlCents": -5063,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -14970
+      },
+      {
+        "priceCents": 6444750,
+        "unhedgedPnlCents": -1575,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -11482
+      },
+      {
+        "priceCents": 6450000,
+        "unhedgedPnlCents": 0,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -9907
+      },
+      {
+        "priceCents": 6456375,
+        "unhedgedPnlCents": 1913,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -7994
+      },
+      {
+        "priceCents": 6468000,
+        "unhedgedPnlCents": 5400,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -4507
+      },
+      {
+        "priceCents": 6479625,
+        "unhedgedPnlCents": 8888,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -1019
+      },
+      {
+        "priceCents": 6491250,
+        "unhedgedPnlCents": 12375,
+        "hedgePnlCents": -9907,
+        "netPnlCents": 2468
+      },
+      {
+        "priceCents": 6502875,
+        "unhedgedPnlCents": 15863,
+        "hedgePnlCents": -9907,
+        "netPnlCents": 5956
+      },
+      {
+        "priceCents": 6514500,
+        "unhedgedPnlCents": 19350,
+        "hedgePnlCents": -9907,
+        "netPnlCents": 9443
+      }
+    ],
+    "breakEven": {
+      "paysForItselfBelowCents": 6400000,
+      "netBreakEvenAboveCents": 6483024,
+      "notes": [
+        "The hedge costs $99.07 and pays back at least that if BTC finishes below $64,000.",
+        "At or above $64,250 every NO contract expires worthless; BTC must finish above $64,830.24 for the holding's gain to cover the cost.",
+        "Between $63,000 and $64,500 the worst net result is a loss of $339.07, at $63,000, against $450.00 unhedged."
+      ]
+    },
+    "warnings": [
+      {
+        "code": "thin_depth",
+        "message": "The order book is too thin at $63,750 (30.00 of 75.00), $63,500 (5.00 of 75.00), $63,250 (25.00 of 75.00), $63,000 (5.00 of 75.00) contracts at the best price.",
+        "strikesCents": [6375000, 6350000, 6325000, 6300000]
+      },
+      {
+        "code": "orders_split",
+        "message": "Rungs at $64,250, $64,000 cost more than the $25.00 per-trade limit, so each is split into several orders within it.",
+        "strikesCents": [6425000, 6400000]
+      }
+    ],
+    "uncovered": [
+      {
+        "code": "thin_depth",
+        "fromCents": 6400000,
+        "toCents": 6375000,
+        "shortfallCents": 4500,
+        "strikeCents": 6375000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6375000,
+        "toCents": 6350000,
+        "shortfallCents": 7000,
+        "strikeCents": 6350000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6350000,
+        "toCents": 6325000,
+        "shortfallCents": 5000,
+        "strikeCents": 6325000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6325000,
+        "toCents": 6300000,
+        "shortfallCents": 7000,
+        "strikeCents": 6300000
+      }
+    ]
+  },
+  "sandbox capped 12:39, 0.3 BTC": {
+    "planId": "plan_9a44dcbb06569581",
+    "status": "partial",
+    "asset": "BTC",
+    "eventTicker": "BTC2611182200",
+    "expiry": "2026-11-18T22:00:00.000Z",
+    "spotCents": 6450000,
+    "holdingQuantity": "0.3",
+    "ceilingCents": 6450000,
+    "floorCents": 6300000,
+    "rungs": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "75.00",
+        "quantityHundredths": 7500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 56,
+        "amountCents": 4201,
+        "payoutCents": 7500,
+        "coversFromCents": 6450000,
+        "coversToCents": 6425000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+            "strikeCents": 6425000,
+            "side": "no",
+            "quantity": "44.64",
+            "quantityHundredths": 4464,
+            "limitPriceCents": 56,
+            "amountCents": 2500
+          },
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+            "strikeCents": 6425000,
+            "side": "no",
+            "quantity": "30.36",
+            "quantityHundredths": 3036,
+            "limitPriceCents": 56,
+            "amountCents": 1701
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "75.00",
+        "quantityHundredths": 7500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 47,
+        "amountCents": 3526,
+        "payoutCents": 7500,
+        "coversFromCents": 6425000,
+        "coversToCents": 6400000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+            "strikeCents": 6400000,
+            "side": "no",
+            "quantity": "53.19",
+            "quantityHundredths": 5319,
+            "limitPriceCents": 47,
+            "amountCents": 2500
+          },
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+            "strikeCents": 6400000,
+            "side": "no",
+            "quantity": "21.81",
+            "quantityHundredths": 2181,
+            "limitPriceCents": 47,
+            "amountCents": 1026
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "30.00",
+        "quantityHundredths": 3000,
+        "designedHundredths": 7500,
+        "limitPriceCents": 41,
+        "amountCents": 1230,
+        "payoutCents": 3000,
+        "coversFromCents": 6400000,
+        "coversToCents": 6375000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+            "strikeCents": 6375000,
+            "side": "no",
+            "quantity": "30.00",
+            "quantityHundredths": 3000,
+            "limitPriceCents": 41,
+            "amountCents": 1230
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 34,
+        "amountCents": 170,
+        "payoutCents": 500,
+        "coversFromCents": 6375000,
+        "coversToCents": 6350000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+            "strikeCents": 6350000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 34,
+            "amountCents": 170
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "25.00",
+        "quantityHundredths": 2500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 27,
+        "amountCents": 675,
+        "payoutCents": 2500,
+        "coversFromCents": 6350000,
+        "coversToCents": 6325000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+            "strikeCents": 6325000,
+            "side": "no",
+            "quantity": "25.00",
+            "quantityHundredths": 2500,
+            "limitPriceCents": 27,
+            "amountCents": 675
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+        "strikeCents": 6300000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 7500,
+        "limitPriceCents": 21,
+        "amountCents": 105,
+        "payoutCents": 500,
+        "coversFromCents": 6325000,
+        "coversToCents": 6300000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+            "strikeCents": 6300000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 21,
+            "amountCents": 105
+          }
+        ]
+      }
+    ],
+    "orders": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "44.64",
+        "quantityHundredths": 4464,
+        "limitPriceCents": 56,
+        "amountCents": 2500
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "30.36",
+        "quantityHundredths": 3036,
+        "limitPriceCents": 56,
+        "amountCents": 1701
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "53.19",
+        "quantityHundredths": 5319,
+        "limitPriceCents": 47,
+        "amountCents": 2500
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "21.81",
+        "quantityHundredths": 2181,
+        "limitPriceCents": 47,
+        "amountCents": 1026
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "30.00",
+        "quantityHundredths": 3000,
+        "limitPriceCents": 41,
+        "amountCents": 1230
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 34,
+        "amountCents": 170
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "25.00",
+        "quantityHundredths": 2500,
+        "limitPriceCents": 27,
+        "amountCents": 675
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+        "strikeCents": 6300000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 21,
+        "amountCents": 105
+      }
+    ],
+    "totals": {
+      "costCents": 9907,
+      "maxPayoutCents": 21500,
+      "contractsHundredths": 21500,
+      "orderCount": 8,
+      "spendCapCents": 30000,
+      "protectedRange": {
+        "fromCents": 6450000,
+        "toCents": 6300000
+      },
+      "lossAtFloorCents": 45000,
+      "payoutBelowFloorCents": 21500,
+      "coverageAtFloorBps": 4777
+    },
+    "payoff": [
+      {
+        "priceCents": 6235500,
+        "unhedgedPnlCents": -64350,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -52757
+      },
+      {
+        "priceCents": 6247125,
+        "unhedgedPnlCents": -60863,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -49270
+      },
+      {
+        "priceCents": 6258750,
+        "unhedgedPnlCents": -57375,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -45782
+      },
+      {
+        "priceCents": 6270375,
+        "unhedgedPnlCents": -53888,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -42295
+      },
+      {
+        "priceCents": 6282000,
+        "unhedgedPnlCents": -50400,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -38807
+      },
+      {
+        "priceCents": 6293625,
+        "unhedgedPnlCents": -46913,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -35320
+      },
+      {
+        "priceCents": 6299999,
+        "unhedgedPnlCents": -45000,
+        "hedgePnlCents": 11593,
+        "netPnlCents": -33407
+      },
+      {
+        "priceCents": 6300000,
+        "unhedgedPnlCents": -45000,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -33907
+      },
+      {
+        "priceCents": 6305250,
+        "unhedgedPnlCents": -43425,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -32332
+      },
+      {
+        "priceCents": 6316875,
+        "unhedgedPnlCents": -39938,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -28845
+      },
+      {
+        "priceCents": 6324999,
+        "unhedgedPnlCents": -37500,
+        "hedgePnlCents": 11093,
+        "netPnlCents": -26407
+      },
+      {
+        "priceCents": 6325000,
+        "unhedgedPnlCents": -37500,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -28907
+      },
+      {
+        "priceCents": 6328500,
+        "unhedgedPnlCents": -36450,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -27857
+      },
+      {
+        "priceCents": 6340125,
+        "unhedgedPnlCents": -32963,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -24370
+      },
+      {
+        "priceCents": 6349999,
+        "unhedgedPnlCents": -30000,
+        "hedgePnlCents": 8593,
+        "netPnlCents": -21407
+      },
+      {
+        "priceCents": 6350000,
+        "unhedgedPnlCents": -30000,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -21907
+      },
+      {
+        "priceCents": 6351750,
+        "unhedgedPnlCents": -29475,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -21382
+      },
+      {
+        "priceCents": 6363375,
+        "unhedgedPnlCents": -25988,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -17895
+      },
+      {
+        "priceCents": 6374999,
+        "unhedgedPnlCents": -22500,
+        "hedgePnlCents": 8093,
+        "netPnlCents": -14407
+      },
+      {
+        "priceCents": 6375000,
+        "unhedgedPnlCents": -22500,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -17407
+      },
+      {
+        "priceCents": 6386625,
+        "unhedgedPnlCents": -19013,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -13920
+      },
+      {
+        "priceCents": 6398250,
+        "unhedgedPnlCents": -15525,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -10432
+      },
+      {
+        "priceCents": 6399999,
+        "unhedgedPnlCents": -15000,
+        "hedgePnlCents": 5093,
+        "netPnlCents": -9907
+      },
+      {
+        "priceCents": 6400000,
+        "unhedgedPnlCents": -15000,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -17407
+      },
+      {
+        "priceCents": 6409875,
+        "unhedgedPnlCents": -12038,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -14445
+      },
+      {
+        "priceCents": 6421500,
+        "unhedgedPnlCents": -8550,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -10957
+      },
+      {
+        "priceCents": 6424999,
+        "unhedgedPnlCents": -7500,
+        "hedgePnlCents": -2407,
+        "netPnlCents": -9907
+      },
+      {
+        "priceCents": 6425000,
+        "unhedgedPnlCents": -7500,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -17407
+      },
+      {
+        "priceCents": 6433125,
+        "unhedgedPnlCents": -5063,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -14970
+      },
+      {
+        "priceCents": 6444750,
+        "unhedgedPnlCents": -1575,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -11482
+      },
+      {
+        "priceCents": 6450000,
+        "unhedgedPnlCents": 0,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -9907
+      },
+      {
+        "priceCents": 6456375,
+        "unhedgedPnlCents": 1913,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -7994
+      },
+      {
+        "priceCents": 6468000,
+        "unhedgedPnlCents": 5400,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -4507
+      },
+      {
+        "priceCents": 6479625,
+        "unhedgedPnlCents": 8888,
+        "hedgePnlCents": -9907,
+        "netPnlCents": -1019
+      },
+      {
+        "priceCents": 6491250,
+        "unhedgedPnlCents": 12375,
+        "hedgePnlCents": -9907,
+        "netPnlCents": 2468
+      },
+      {
+        "priceCents": 6502875,
+        "unhedgedPnlCents": 15863,
+        "hedgePnlCents": -9907,
+        "netPnlCents": 5956
+      },
+      {
+        "priceCents": 6514500,
+        "unhedgedPnlCents": 19350,
+        "hedgePnlCents": -9907,
+        "netPnlCents": 9443
+      }
+    ],
+    "breakEven": {
+      "paysForItselfBelowCents": 6400000,
+      "netBreakEvenAboveCents": 6483024,
+      "notes": [
+        "The hedge costs $99.07 and pays back at least that if BTC finishes below $64,000.",
+        "At or above $64,250 every NO contract expires worthless; BTC must finish above $64,830.24 for the holding's gain to cover the cost.",
+        "Between $63,000 and $64,500 the worst net result is a loss of $339.07, at $63,000, against $450.00 unhedged."
+      ]
+    },
+    "warnings": [
+      {
+        "code": "thin_depth",
+        "message": "The order book is too thin at $63,750 (30.00 of 75.00), $63,500 (5.00 of 75.00), $63,250 (25.00 of 75.00), $63,000 (5.00 of 75.00) contracts at the best price.",
+        "strikesCents": [6375000, 6350000, 6325000, 6300000]
+      },
+      {
+        "code": "orders_split",
+        "message": "Rungs at $64,250, $64,000 cost more than the $25.00 per-trade limit, so each is split into several orders within it.",
+        "strikesCents": [6425000, 6400000]
+      }
+    ],
+    "uncovered": [
+      {
+        "code": "thin_depth",
+        "fromCents": 6400000,
+        "toCents": 6375000,
+        "shortfallCents": 4500,
+        "strikeCents": 6375000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6375000,
+        "toCents": 6350000,
+        "shortfallCents": 7000,
+        "strikeCents": 6350000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6350000,
+        "toCents": 6325000,
+        "shortfallCents": 5000,
+        "strikeCents": 6325000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6325000,
+        "toCents": 6300000,
+        "shortfallCents": 7000,
+        "strikeCents": 6300000
+      }
+    ]
+  },
+  "sandbox one level, 0.05 BTC": {
+    "planId": "plan_17c42681be35b8f9",
+    "status": "partial",
+    "asset": "BTC",
+    "eventTicker": "BTC2611182200",
+    "expiry": "2026-11-18T22:00:00.000Z",
+    "spotCents": 6450000,
+    "holdingQuantity": "0.05",
+    "ceilingCents": 6450000,
+    "floorCents": 6300000,
+    "rungs": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "designedHundredths": 1250,
+        "limitPriceCents": 48,
+        "amountCents": 600,
+        "payoutCents": 1250,
+        "coversFromCents": 6450000,
+        "coversToCents": 6425000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+            "strikeCents": 6425000,
+            "side": "no",
+            "quantity": "12.50",
+            "quantityHundredths": 1250,
+            "limitPriceCents": 48,
+            "amountCents": 600
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 1250,
+        "limitPriceCents": 28,
+        "amountCents": 140,
+        "payoutCents": 500,
+        "coversFromCents": 6375000,
+        "coversToCents": 6350000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+            "strikeCents": 6350000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 28,
+            "amountCents": 140
+          }
+        ]
+      }
+    ],
+    "orders": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "limitPriceCents": 48,
+        "amountCents": 600
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 28,
+        "amountCents": 140
+      }
+    ],
+    "totals": {
+      "costCents": 740,
+      "maxPayoutCents": 1750,
+      "contractsHundredths": 1750,
+      "orderCount": 2,
+      "spendCapCents": 5000,
+      "protectedRange": {
+        "fromCents": 6450000,
+        "toCents": 6350000
+      },
+      "lossAtFloorCents": 7500,
+      "payoutBelowFloorCents": 1750,
+      "coverageAtFloorBps": 2333
+    },
+    "payoff": [
+      {
+        "priceCents": 6235500,
+        "unhedgedPnlCents": -10725,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -9715
+      },
+      {
+        "priceCents": 6247125,
+        "unhedgedPnlCents": -10144,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -9134
+      },
+      {
+        "priceCents": 6258750,
+        "unhedgedPnlCents": -9563,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -8553
+      },
+      {
+        "priceCents": 6270375,
+        "unhedgedPnlCents": -8981,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -7971
+      },
+      {
+        "priceCents": 6282000,
+        "unhedgedPnlCents": -8400,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -7390
+      },
+      {
+        "priceCents": 6293625,
+        "unhedgedPnlCents": -7819,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -6809
+      },
+      {
+        "priceCents": 6300000,
+        "unhedgedPnlCents": -7500,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -6490
+      },
+      {
+        "priceCents": 6305250,
+        "unhedgedPnlCents": -7238,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -6228
+      },
+      {
+        "priceCents": 6316875,
+        "unhedgedPnlCents": -6656,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -5646
+      },
+      {
+        "priceCents": 6328500,
+        "unhedgedPnlCents": -6075,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -5065
+      },
+      {
+        "priceCents": 6340125,
+        "unhedgedPnlCents": -5494,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -4484
+      },
+      {
+        "priceCents": 6349999,
+        "unhedgedPnlCents": -5000,
+        "hedgePnlCents": 1010,
+        "netPnlCents": -3990
+      },
+      {
+        "priceCents": 6350000,
+        "unhedgedPnlCents": -5000,
+        "hedgePnlCents": 510,
+        "netPnlCents": -4490
+      },
+      {
+        "priceCents": 6351750,
+        "unhedgedPnlCents": -4913,
+        "hedgePnlCents": 510,
+        "netPnlCents": -4403
+      },
+      {
+        "priceCents": 6363375,
+        "unhedgedPnlCents": -4331,
+        "hedgePnlCents": 510,
+        "netPnlCents": -3821
+      },
+      {
+        "priceCents": 6375000,
+        "unhedgedPnlCents": -3750,
+        "hedgePnlCents": 510,
+        "netPnlCents": -3240
+      },
+      {
+        "priceCents": 6386625,
+        "unhedgedPnlCents": -3169,
+        "hedgePnlCents": 510,
+        "netPnlCents": -2659
+      },
+      {
+        "priceCents": 6398250,
+        "unhedgedPnlCents": -2588,
+        "hedgePnlCents": 510,
+        "netPnlCents": -2078
+      },
+      {
+        "priceCents": 6409875,
+        "unhedgedPnlCents": -2006,
+        "hedgePnlCents": 510,
+        "netPnlCents": -1496
+      },
+      {
+        "priceCents": 6421500,
+        "unhedgedPnlCents": -1425,
+        "hedgePnlCents": 510,
+        "netPnlCents": -915
+      },
+      {
+        "priceCents": 6424999,
+        "unhedgedPnlCents": -1250,
+        "hedgePnlCents": 510,
+        "netPnlCents": -740
+      },
+      {
+        "priceCents": 6425000,
+        "unhedgedPnlCents": -1250,
+        "hedgePnlCents": -740,
+        "netPnlCents": -1990
+      },
+      {
+        "priceCents": 6433125,
+        "unhedgedPnlCents": -844,
+        "hedgePnlCents": -740,
+        "netPnlCents": -1584
+      },
+      {
+        "priceCents": 6444750,
+        "unhedgedPnlCents": -263,
+        "hedgePnlCents": -740,
+        "netPnlCents": -1003
+      },
+      {
+        "priceCents": 6450000,
+        "unhedgedPnlCents": 0,
+        "hedgePnlCents": -740,
+        "netPnlCents": -740
+      },
+      {
+        "priceCents": 6456375,
+        "unhedgedPnlCents": 319,
+        "hedgePnlCents": -740,
+        "netPnlCents": -421
+      },
+      {
+        "priceCents": 6468000,
+        "unhedgedPnlCents": 900,
+        "hedgePnlCents": -740,
+        "netPnlCents": 160
+      },
+      {
+        "priceCents": 6479625,
+        "unhedgedPnlCents": 1481,
+        "hedgePnlCents": -740,
+        "netPnlCents": 741
+      },
+      {
+        "priceCents": 6491250,
+        "unhedgedPnlCents": 2063,
+        "hedgePnlCents": -740,
+        "netPnlCents": 1323
+      },
+      {
+        "priceCents": 6502875,
+        "unhedgedPnlCents": 2644,
+        "hedgePnlCents": -740,
+        "netPnlCents": 1904
+      },
+      {
+        "priceCents": 6514500,
+        "unhedgedPnlCents": 3225,
+        "hedgePnlCents": -740,
+        "netPnlCents": 2485
+      }
+    ],
+    "breakEven": {
+      "paysForItselfBelowCents": 6425000,
+      "netBreakEvenAboveCents": 6464800,
+      "notes": [
+        "The hedge costs $7.40 and pays back at least that if BTC finishes below $64,250.",
+        "At or above $64,250 every NO contract expires worthless; BTC must finish above $64,648 for the holding's gain to cover the cost.",
+        "Between $63,000 and $64,500 the worst net result is a loss of $64.90, at $63,000, against $75.00 unhedged."
+      ]
+    },
+    "warnings": [
+      {
+        "code": "no_price",
+        "message": "Skipped strikes with no NO offer: $64,000, $63,750, $63,250, $63,000.",
+        "strikesCents": [6400000, 6375000, 6325000, 6300000]
+      },
+      {
+        "code": "thin_depth",
+        "message": "The order book is too thin at $63,500 (5.00 of 12.50) contracts at the best price.",
+        "strikesCents": [6350000]
+      }
+    ],
+    "uncovered": [
+      {
+        "code": "no_price",
+        "fromCents": 6425000,
+        "toCents": 6400000,
+        "shortfallCents": 1250,
+        "strikeCents": 6400000
+      },
+      {
+        "code": "no_price",
+        "fromCents": 6400000,
+        "toCents": 6375000,
+        "shortfallCents": 1250,
+        "strikeCents": 6375000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6375000,
+        "toCents": 6350000,
+        "shortfallCents": 750,
+        "strikeCents": 6350000
+      },
+      {
+        "code": "no_price",
+        "fromCents": 6350000,
+        "toCents": 6325000,
+        "shortfallCents": 1250,
+        "strikeCents": 6325000
+      },
+      {
+        "code": "no_price",
+        "fromCents": 6325000,
+        "toCents": 6300000,
+        "shortfallCents": 1250,
+        "strikeCents": 6300000
+      }
+    ]
+  },
+  "production recorded daily, 0.05 BTC, 2 % drop": {
+    "planId": "plan_bbf082b65819f1b4",
+    "status": "partial",
+    "asset": "BTC",
+    "eventTicker": "BTC2611182200",
+    "expiry": "2026-11-18T22:00:00.000Z",
+    "spotCents": 6466173,
+    "holdingQuantity": "0.05",
+    "ceilingCents": 6466173,
+    "floorCents": 6336850,
+    "rungs": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "designedHundredths": 1250,
+        "limitPriceCents": 35,
+        "amountCents": 438,
+        "payoutCents": 1250,
+        "coversFromCents": 6450000,
+        "coversToCents": 6425000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+            "strikeCents": 6425000,
+            "side": "no",
+            "quantity": "12.50",
+            "quantityHundredths": 1250,
+            "limitPriceCents": 35,
+            "amountCents": 438
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "designedHundredths": 1250,
+        "limitPriceCents": 27,
+        "amountCents": 338,
+        "payoutCents": 1250,
+        "coversFromCents": 6425000,
+        "coversToCents": 6400000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+            "strikeCents": 6400000,
+            "side": "no",
+            "quantity": "12.50",
+            "quantityHundredths": 1250,
+            "limitPriceCents": 27,
+            "amountCents": 338
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 1250,
+        "limitPriceCents": 23,
+        "amountCents": 115,
+        "payoutCents": 500,
+        "coversFromCents": 6400000,
+        "coversToCents": 6375000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+            "strikeCents": 6375000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 23,
+            "amountCents": 115
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 1250,
+        "limitPriceCents": 19,
+        "amountCents": 95,
+        "payoutCents": 500,
+        "coversFromCents": 6375000,
+        "coversToCents": 6350000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+            "strikeCents": 6350000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 19,
+            "amountCents": 95
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "designedHundredths": 657,
+        "limitPriceCents": 14,
+        "amountCents": 70,
+        "payoutCents": 500,
+        "coversFromCents": 6350000,
+        "coversToCents": 6336850,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+            "strikeCents": 6325000,
+            "side": "no",
+            "quantity": "5.00",
+            "quantityHundredths": 500,
+            "limitPriceCents": 14,
+            "amountCents": 70
+          }
+        ]
+      }
+    ],
+    "orders": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+        "strikeCents": 6425000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "limitPriceCents": 35,
+        "amountCents": 438
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "12.50",
+        "quantityHundredths": 1250,
+        "limitPriceCents": 27,
+        "amountCents": 338
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+        "strikeCents": 6375000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 23,
+        "amountCents": 115
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+        "strikeCents": 6350000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 19,
+        "amountCents": 95
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+        "strikeCents": 6325000,
+        "side": "no",
+        "quantity": "5.00",
+        "quantityHundredths": 500,
+        "limitPriceCents": 14,
+        "amountCents": 70
+      }
+    ],
+    "totals": {
+      "costCents": 1056,
+      "maxPayoutCents": 4000,
+      "contractsHundredths": 4000,
+      "orderCount": 5,
+      "spendCapCents": 5000,
+      "protectedRange": {
+        "fromCents": 6450000,
+        "toCents": 6336850
+      },
+      "lossAtFloorCents": 6466,
+      "payoutBelowFloorCents": 3500,
+      "coverageAtFloorBps": 5412
+    },
+    "payoff": [
+      {
+        "priceCents": 6260338,
+        "unhedgedPnlCents": -10292,
+        "hedgePnlCents": 2944,
+        "netPnlCents": -7348
+      },
+      {
+        "priceCents": 6271609,
+        "unhedgedPnlCents": -9728,
+        "hedgePnlCents": 2944,
+        "netPnlCents": -6784
+      },
+      {
+        "priceCents": 6282879,
+        "unhedgedPnlCents": -9165,
+        "hedgePnlCents": 2944,
+        "netPnlCents": -6221
+      },
+      {
+        "priceCents": 6294150,
+        "unhedgedPnlCents": -8601,
+        "hedgePnlCents": 2944,
+        "netPnlCents": -5657
+      },
+      {
+        "priceCents": 6305421,
+        "unhedgedPnlCents": -8038,
+        "hedgePnlCents": 2944,
+        "netPnlCents": -5094
+      },
+      {
+        "priceCents": 6316692,
+        "unhedgedPnlCents": -7474,
+        "hedgePnlCents": 2944,
+        "netPnlCents": -4530
+      },
+      {
+        "priceCents": 6324999,
+        "unhedgedPnlCents": -7059,
+        "hedgePnlCents": 2944,
+        "netPnlCents": -4115
+      },
+      {
+        "priceCents": 6325000,
+        "unhedgedPnlCents": -7059,
+        "hedgePnlCents": 2444,
+        "netPnlCents": -4615
+      },
+      {
+        "priceCents": 6327962,
+        "unhedgedPnlCents": -6911,
+        "hedgePnlCents": 2444,
+        "netPnlCents": -4467
+      },
+      {
+        "priceCents": 6336850,
+        "unhedgedPnlCents": -6466,
+        "hedgePnlCents": 2444,
+        "netPnlCents": -4022
+      },
+      {
+        "priceCents": 6339233,
+        "unhedgedPnlCents": -6347,
+        "hedgePnlCents": 2444,
+        "netPnlCents": -3903
+      },
+      {
+        "priceCents": 6349999,
+        "unhedgedPnlCents": -5809,
+        "hedgePnlCents": 2444,
+        "netPnlCents": -3365
+      },
+      {
+        "priceCents": 6350000,
+        "unhedgedPnlCents": -5809,
+        "hedgePnlCents": 1944,
+        "netPnlCents": -3865
+      },
+      {
+        "priceCents": 6350504,
+        "unhedgedPnlCents": -5783,
+        "hedgePnlCents": 1944,
+        "netPnlCents": -3839
+      },
+      {
+        "priceCents": 6361774,
+        "unhedgedPnlCents": -5220,
+        "hedgePnlCents": 1944,
+        "netPnlCents": -3276
+      },
+      {
+        "priceCents": 6373045,
+        "unhedgedPnlCents": -4656,
+        "hedgePnlCents": 1944,
+        "netPnlCents": -2712
+      },
+      {
+        "priceCents": 6374999,
+        "unhedgedPnlCents": -4559,
+        "hedgePnlCents": 1944,
+        "netPnlCents": -2615
+      },
+      {
+        "priceCents": 6375000,
+        "unhedgedPnlCents": -4559,
+        "hedgePnlCents": 1444,
+        "netPnlCents": -3115
+      },
+      {
+        "priceCents": 6384316,
+        "unhedgedPnlCents": -4093,
+        "hedgePnlCents": 1444,
+        "netPnlCents": -2649
+      },
+      {
+        "priceCents": 6395587,
+        "unhedgedPnlCents": -3529,
+        "hedgePnlCents": 1444,
+        "netPnlCents": -2085
+      },
+      {
+        "priceCents": 6399999,
+        "unhedgedPnlCents": -3309,
+        "hedgePnlCents": 1444,
+        "netPnlCents": -1865
+      },
+      {
+        "priceCents": 6400000,
+        "unhedgedPnlCents": -3309,
+        "hedgePnlCents": 194,
+        "netPnlCents": -3115
+      },
+      {
+        "priceCents": 6406857,
+        "unhedgedPnlCents": -2966,
+        "hedgePnlCents": 194,
+        "netPnlCents": -2772
+      },
+      {
+        "priceCents": 6418128,
+        "unhedgedPnlCents": -2402,
+        "hedgePnlCents": 194,
+        "netPnlCents": -2208
+      },
+      {
+        "priceCents": 6424999,
+        "unhedgedPnlCents": -2059,
+        "hedgePnlCents": 194,
+        "netPnlCents": -1865
+      },
+      {
+        "priceCents": 6425000,
+        "unhedgedPnlCents": -2059,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -3115
+      },
+      {
+        "priceCents": 6429399,
+        "unhedgedPnlCents": -1839,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -2895
+      },
+      {
+        "priceCents": 6440669,
+        "unhedgedPnlCents": -1275,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -2331
+      },
+      {
+        "priceCents": 6451940,
+        "unhedgedPnlCents": -712,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -1768
+      },
+      {
+        "priceCents": 6463211,
+        "unhedgedPnlCents": -148,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -1204
+      },
+      {
+        "priceCents": 6466173,
+        "unhedgedPnlCents": 0,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -1056
+      },
+      {
+        "priceCents": 6474481,
+        "unhedgedPnlCents": 415,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -641
+      },
+      {
+        "priceCents": 6485752,
+        "unhedgedPnlCents": 979,
+        "hedgePnlCents": -1056,
+        "netPnlCents": -77
+      },
+      {
+        "priceCents": 6497023,
+        "unhedgedPnlCents": 1543,
+        "hedgePnlCents": -1056,
+        "netPnlCents": 487
+      },
+      {
+        "priceCents": 6508294,
+        "unhedgedPnlCents": 2106,
+        "hedgePnlCents": -1056,
+        "netPnlCents": 1050
+      },
+      {
+        "priceCents": 6519564,
+        "unhedgedPnlCents": 2670,
+        "hedgePnlCents": -1056,
+        "netPnlCents": 1614
+      },
+      {
+        "priceCents": 6530835,
+        "unhedgedPnlCents": 3233,
+        "hedgePnlCents": -1056,
+        "netPnlCents": 2177
+      }
+    ],
+    "breakEven": {
+      "paysForItselfBelowCents": 6425000,
+      "netBreakEvenAboveCents": 6487293,
+      "notes": [
+        "The hedge costs $10.56 and pays back at least that if BTC finishes below $64,250.",
+        "At or above $64,250 every NO contract expires worthless; BTC must finish above $64,872.93 for the holding's gain to cover the cost.",
+        "Between $63,368.50 and $64,661.73 the worst net result is a loss of $40.22, at $63,368.50, against $64.66 unhedged."
+      ]
+    },
+    "warnings": [
+      {
+        "code": "thin_depth",
+        "message": "The order book is too thin at $64,500 (0.00 of 8.08), $63,750 (5.00 of 12.50), $63,500 (5.00 of 12.50), $63,250 (5.00 of 6.57) contracts at the best price.",
+        "strikesCents": [6450000, 6375000, 6350000, 6325000]
+      }
+    ],
+    "uncovered": [
+      {
+        "code": "thin_depth",
+        "fromCents": 6466173,
+        "toCents": 6450000,
+        "shortfallCents": 808,
+        "strikeCents": 6450000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6400000,
+        "toCents": 6375000,
+        "shortfallCents": 750,
+        "strikeCents": 6375000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6375000,
+        "toCents": 6350000,
+        "shortfallCents": 750,
+        "strikeCents": 6350000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6350000,
+        "toCents": 6336850,
+        "shortfallCents": 157,
+        "strikeCents": 6325000
+      }
+    ]
+  },
+  "production recorded weekly, 0.05 BTC, tight cap": {
+    "planId": "plan_4e5df91e373eff8e",
+    "status": "partial",
+    "asset": "BTC",
+    "eventTicker": "BTC2611202200",
+    "expiry": "2026-11-20T22:00:00.000Z",
+    "spotCents": 6466173,
+    "holdingQuantity": "0.05",
+    "ceilingCents": 6466173,
+    "floorCents": 6142864,
+    "rungs": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611202200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "25.00",
+        "quantityHundredths": 2500,
+        "designedHundredths": 2500,
+        "limitPriceCents": 40,
+        "amountCents": 1000,
+        "payoutCents": 2500,
+        "coversFromCents": 6450000,
+        "coversToCents": 6400000,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611202200-HI64000",
+            "strikeCents": 6400000,
+            "side": "no",
+            "quantity": "25.00",
+            "quantityHundredths": 2500,
+            "limitPriceCents": 40,
+            "amountCents": 1000
+          }
+        ]
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611202200-HI61000",
+        "strikeCents": 6100000,
+        "side": "no",
+        "quantity": "3.56",
+        "quantityHundredths": 356,
+        "designedHundredths": 356,
+        "limitPriceCents": 10,
+        "amountCents": 36,
+        "payoutCents": 356,
+        "coversFromCents": 6150000,
+        "coversToCents": 6142864,
+        "orders": [
+          {
+            "instrumentSymbol": "GEMI-BTC2611202200-HI61000",
+            "strikeCents": 6100000,
+            "side": "no",
+            "quantity": "3.56",
+            "quantityHundredths": 356,
+            "limitPriceCents": 10,
+            "amountCents": 36
+          }
+        ]
+      }
+    ],
+    "orders": [
+      {
+        "instrumentSymbol": "GEMI-BTC2611202200-HI64000",
+        "strikeCents": 6400000,
+        "side": "no",
+        "quantity": "25.00",
+        "quantityHundredths": 2500,
+        "limitPriceCents": 40,
+        "amountCents": 1000
+      },
+      {
+        "instrumentSymbol": "GEMI-BTC2611202200-HI61000",
+        "strikeCents": 6100000,
+        "side": "no",
+        "quantity": "3.56",
+        "quantityHundredths": 356,
+        "limitPriceCents": 10,
+        "amountCents": 36
+      }
+    ],
+    "totals": {
+      "costCents": 1036,
+      "maxPayoutCents": 2856,
+      "contractsHundredths": 2856,
+      "orderCount": 2,
+      "spendCapCents": 1500,
+      "protectedRange": {
+        "fromCents": 6450000,
+        "toCents": 6142864
+      },
+      "lossAtFloorCents": 16165,
+      "payoutBelowFloorCents": 2500,
+      "coverageAtFloorBps": 1546
+    },
+    "payoff": [
+      {
+        "priceCents": 6008456,
+        "unhedgedPnlCents": -22886,
+        "hedgePnlCents": 1820,
+        "netPnlCents": -21066
+      },
+      {
+        "priceCents": 6031342,
+        "unhedgedPnlCents": -21742,
+        "hedgePnlCents": 1820,
+        "netPnlCents": -19922
+      },
+      {
+        "priceCents": 6054228,
+        "unhedgedPnlCents": -20597,
+        "hedgePnlCents": 1820,
+        "netPnlCents": -18777
+      },
+      {
+        "priceCents": 6077114,
+        "unhedgedPnlCents": -19453,
+        "hedgePnlCents": 1820,
+        "netPnlCents": -17633
+      },
+      {
+        "priceCents": 6099999,
+        "unhedgedPnlCents": -18309,
+        "hedgePnlCents": 1820,
+        "netPnlCents": -16489
+      },
+      {
+        "priceCents": 6100000,
+        "unhedgedPnlCents": -18309,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -16845
+      },
+      {
+        "priceCents": 6122885,
+        "unhedgedPnlCents": -17164,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -15700
+      },
+      {
+        "priceCents": 6142864,
+        "unhedgedPnlCents": -16165,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -14701
+      },
+      {
+        "priceCents": 6145771,
+        "unhedgedPnlCents": -16020,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -14556
+      },
+      {
+        "priceCents": 6168657,
+        "unhedgedPnlCents": -14876,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -13412
+      },
+      {
+        "priceCents": 6191543,
+        "unhedgedPnlCents": -13732,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -12268
+      },
+      {
+        "priceCents": 6214429,
+        "unhedgedPnlCents": -12587,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -11123
+      },
+      {
+        "priceCents": 6237315,
+        "unhedgedPnlCents": -11443,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -9979
+      },
+      {
+        "priceCents": 6260201,
+        "unhedgedPnlCents": -10299,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -8835
+      },
+      {
+        "priceCents": 6283087,
+        "unhedgedPnlCents": -9154,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -7690
+      },
+      {
+        "priceCents": 6305972,
+        "unhedgedPnlCents": -8010,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -6546
+      },
+      {
+        "priceCents": 6328858,
+        "unhedgedPnlCents": -6866,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -5402
+      },
+      {
+        "priceCents": 6351744,
+        "unhedgedPnlCents": -5721,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -4257
+      },
+      {
+        "priceCents": 6374630,
+        "unhedgedPnlCents": -4577,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -3113
+      },
+      {
+        "priceCents": 6397516,
+        "unhedgedPnlCents": -3433,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -1969
+      },
+      {
+        "priceCents": 6399999,
+        "unhedgedPnlCents": -3309,
+        "hedgePnlCents": 1464,
+        "netPnlCents": -1845
+      },
+      {
+        "priceCents": 6400000,
+        "unhedgedPnlCents": -3309,
+        "hedgePnlCents": -1036,
+        "netPnlCents": -4345
+      },
+      {
+        "priceCents": 6420402,
+        "unhedgedPnlCents": -2289,
+        "hedgePnlCents": -1036,
+        "netPnlCents": -3325
+      },
+      {
+        "priceCents": 6443288,
+        "unhedgedPnlCents": -1144,
+        "hedgePnlCents": -1036,
+        "netPnlCents": -2180
+      },
+      {
+        "priceCents": 6466173,
+        "unhedgedPnlCents": 0,
+        "hedgePnlCents": -1036,
+        "netPnlCents": -1036
+      },
+      {
+        "priceCents": 6466174,
+        "unhedgedPnlCents": 0,
+        "hedgePnlCents": -1036,
+        "netPnlCents": -1036
+      },
+      {
+        "priceCents": 6489059,
+        "unhedgedPnlCents": 1144,
+        "hedgePnlCents": -1036,
+        "netPnlCents": 108
+      },
+      {
+        "priceCents": 6511945,
+        "unhedgedPnlCents": 2289,
+        "hedgePnlCents": -1036,
+        "netPnlCents": 1253
+      },
+      {
+        "priceCents": 6534831,
+        "unhedgedPnlCents": 3433,
+        "hedgePnlCents": -1036,
+        "netPnlCents": 2397
+      },
+      {
+        "priceCents": 6557717,
+        "unhedgedPnlCents": 4577,
+        "hedgePnlCents": -1036,
+        "netPnlCents": 3541
+      }
+    ],
+    "breakEven": {
+      "paysForItselfBelowCents": 6400000,
+      "netBreakEvenAboveCents": 6486893,
+      "notes": [
+        "The hedge costs $10.36 and pays back at least that if BTC finishes below $64,000.",
+        "At or above $64,000 every NO contract expires worthless; BTC must finish above $64,868.93 for the holding's gain to cover the cost.",
+        "Between $61,428.64 and $64,661.73 the worst net result is a loss of $147.01, at $61,428.64, against $161.65 unhedged."
+      ]
+    },
+    "warnings": [
+      {
+        "code": "thin_depth",
+        "message": "The order book is too thin at $64,500 (0.00 of 8.08), $63,500 (0.00 of 25.00), $63,000 (0.00 of 25.00), $62,500 (0.00 of 25.00), $62,000 (0.00 of 25.00), $61,500 (0.00 of 25.00) contracts at the best price.",
+        "strikesCents": [6450000, 6350000, 6300000, 6250000, 6200000, 6150000]
+      }
+    ],
+    "uncovered": [
+      {
+        "code": "thin_depth",
+        "fromCents": 6466173,
+        "toCents": 6450000,
+        "shortfallCents": 808,
+        "strikeCents": 6450000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6400000,
+        "toCents": 6350000,
+        "shortfallCents": 2500,
+        "strikeCents": 6350000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6350000,
+        "toCents": 6300000,
+        "shortfallCents": 2500,
+        "strikeCents": 6300000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6300000,
+        "toCents": 6250000,
+        "shortfallCents": 2500,
+        "strikeCents": 6250000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6250000,
+        "toCents": 6200000,
+        "shortfallCents": 2500,
+        "strikeCents": 6200000
+      },
+      {
+        "code": "thin_depth",
+        "fromCents": 6200000,
+        "toCents": 6150000,
+        "shortfallCents": 2500,
+        "strikeCents": 6150000
+      }
+    ]
+  }
+}

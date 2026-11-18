@@ -29,11 +29,13 @@
  */
 import type { LadderRung } from "@mandate/gemini";
 import { assessCover, measureCover } from "./cover";
+import { rungOffer, type RungOffer } from "./depth";
 import { planIdFor } from "./id";
 import { orderBySignal, rateRung, readSignal, shortId, type SignalContext } from "./signal";
 import { designStaircase, resolveCeiling, resolveFloor, type DesignedRung as Designed } from "./staircase";
 import type {
   CoverAssessment,
+  DepthOption,
   HeldPosition,
   HedgeInput,
   HedgePlan,
@@ -88,9 +90,20 @@ interface Context {
   ratings: Rating[];
   /** Cover already held, when the input gave positions. */
   cover: CoverAssessment | null;
+  /** Whether to measure what higher slippages would buy (`HedgePlan.depthOptions`): not for those plans themselves. */
+  withOptions: boolean;
+  /** The plan's `thin_depth` warning, when the book was too thin somewhere. */
+  thinDepth: PlanWarning | null;
 }
 
+/** The highest slippage `plan_hedge` takes, and so the last one `depthOptions` measures. */
+export const MAX_SLIPPAGE_CENTS = 10;
+
 export function planHedge(input: HedgeInput): HedgePlan {
+  return plan(input, true);
+}
+
+function plan(input: HedgeInput, withOptions: boolean): HedgePlan {
   const units = parseHoldingUnits(input.holding.quantity);
   const asset = input.holding.asset.trim().toUpperCase();
   if (input.ladder.asset.toUpperCase() !== asset) {
@@ -122,6 +135,8 @@ export function planHedge(input: HedgeInput): HedgePlan {
     signal,
     ratings: [],
     cover: null,
+    withOptions,
+    thinDepth: null,
   };
   if (signal !== null) warnIfIgnored(ctx, signal);
   // The goal is designed over the ladder's strikes and production's for the same event (`elsewhere`).
@@ -314,8 +329,16 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
   // and how many contracts each needs do not change.
   const signal = ctx.signal?.ignoredBecause === null ? ctx.signal : null;
   const ratingOf = new Map<string, Rating>();
+  const override = (d: DesignedRung) => input.depthHundredths?.[d.rung.instrumentSymbol];
   if (signal !== null) {
-    ctx.ratings = staircase.map((d) => rateRung(signal, d.rung, slippage));
+    // Each rung is rated at the limit the plan would pay for all it wants there.
+    ctx.ratings = staircase.map((d) => {
+      const priced = d.rung.noBuyCents !== null && d.rung.noBuyCents >= 1 && d.rung.noBuyCents <= 99;
+      if (!priced) return rateRung(signal, d.rung, slippage);
+      const offer = rungOffer(d.rung, slippage, override(d));
+      const want = Math.min(d.wantHundredths, offer.availableHundredths ?? d.wantHundredths);
+      return rateRung(signal, d.rung, offer.limitFor(want) - (d.rung.noBuyCents ?? 0));
+    });
     for (const rating of ctx.ratings) ratingOf.set(rating.instrumentSymbol, rating);
   }
   const designed =
@@ -365,20 +388,20 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
       note(capCode, d, want);
       continue;
     }
-    const limitPriceCents = Math.min(99, rung.noBuyCents + slippage);
-    const depth = input.depthHundredths?.[rung.instrumentSymbol] ?? rung.depth?.noBuyHundredths;
+    const offer = rungOffer(rung, slippage, override(d));
+    const depth = offer.availableHundredths;
     if (depth !== undefined && depth < want) {
       thin.push(`${formatPrice(rung.strikeCents)} (${formatContracts(depth)} of ${formatContracts(want)})`);
       note("thin_depth", d, want - depth);
       want = depth;
       if (want < 1) continue;
     }
-    const perOrderMax = Math.floor((input.limits.maxTradeCents * 100) / limitPriceCents);
-    if (perOrderMax < 1) {
+    const perOrderMaxAt = (priceCents: number) => Math.floor((input.limits.maxTradeCents * 100) / priceCents);
+    if (perOrderMaxAt(offer.limitFor(1)) < 1) {
       note("trade_cap_too_small", d, want);
       continue;
     }
-    const affordable = maxAffordable(want, limitPriceCents, perOrderMax, ctx.spendCapCents - spent);
+    const affordable = maxAffordable(want, offer, perOrderMaxAt, ctx.spendCapCents - spent);
     if (affordable < want) {
       capReached = true;
       capped.push(
@@ -389,6 +412,8 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
       note(capCode, d, want - affordable);
       if (affordable === 0) continue;
     }
+    const limitPriceCents = offer.limitFor(affordable);
+    const perOrderMax = perOrderMaxAt(limitPriceCents);
     const orders = splitOrder(affordable, perOrderMax).map((quantityHundredths): PlannedOrder => ({
       instrumentSymbol: rung.instrumentSymbol,
       strikeCents: rung.strikeCents,
@@ -414,6 +439,9 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
       coversFromCents: d.coversFromCents,
       coversToCents: d.coversToCents,
       orders,
+      bestPriceCents: rung.noBuyCents,
+      levelsUsed: offer.levelsFor(affordable),
+      expectedFillCents: offer.expectedFillFor(affordable),
     });
   }
 
@@ -444,10 +472,12 @@ function buy(ctx: Context, staircase: DesignedRung[], slippage: number): void {
     );
   }
   if (thin.length > 0) {
-    warn(
+    const where = slippage === 0 ? "at the best price" : `within ${formatCents(slippage)} of the best price`;
+    // The first sentence is the one plans always gave; `finalize` adds what more slippage would buy.
+    ctx.thinDepth = warn(
       ctx,
       "thin_depth",
-      `The order book is too thin at ${thin.join(", ")} contracts at the best price.`,
+      `The order book is too thin at ${thin.join(", ")} contracts ${where}.`,
       strikesOf("thin_depth"),
     );
   }
@@ -519,22 +549,37 @@ function splitCost(hundredths: number, priceCents: number, perOrderMax: number):
   );
 }
 
-/** Largest quantity up to `want` whose split orders cost at most `budgetCents`. */
-function maxAffordable(want: number, priceCents: number, perOrderMax: number, budgetCents: number): number {
+/**
+ * Largest quantity up to `want` whose split orders cost at most `budgetCents`, each quantity at its own
+ * limit (`offer.limitFor`). The cost never decreases as the quantity grows: a larger quantity takes the
+ * same levels or deeper ones, so its limit is the same or higher and its orders smaller or as large.
+ */
+function maxAffordable(
+  want: number,
+  offer: RungOffer,
+  perOrderMaxAt: (priceCents: number) => number,
+  budgetCents: number,
+): number {
+  const cost = (hundredths: number) => {
+    const priceCents = offer.limitFor(hundredths);
+    return splitCost(hundredths, priceCents, perOrderMaxAt(priceCents));
+  };
   if (budgetCents <= 0) return 0;
-  if (splitCost(want, priceCents, perOrderMax) <= budgetCents) return want;
+  if (cost(want) <= budgetCents) return want;
   let low = 0;
   let high = want;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (splitCost(mid, priceCents, perOrderMax) <= budgetCents) low = mid;
+    if (cost(mid) <= budgetCents) low = mid;
     else high = mid - 1;
   }
   return low;
 }
 
-function warn(ctx: Context, code: WarningCode, message: string, strikesCents: number[] = []): void {
-  ctx.warnings.push({ code, message, strikesCents });
+function warn(ctx: Context, code: WarningCode, message: string, strikesCents: number[] = []): PlanWarning {
+  const warning = { code, message, strikesCents };
+  ctx.warnings.push(warning);
+  return warning;
 }
 
 /** Hedge payout in cents for a final price: every NO whose strike is above the price pays $1. */
@@ -596,6 +641,11 @@ function finalize(ctx: Context): HedgePlan {
   });
   const signal = ctx.signal === null ? null : signalUse(ctx, ctx.signal, orders);
   const cover = ctx.cover === null ? null : planCover(ctx.cover, rungs);
+  const expectedFillCents = rungs.reduce((sum, r) => sum + (r.expectedFillCents ?? r.amountCents), 0);
+  const depth =
+    ctx.withOptions && ctx.thinDepth !== null
+      ? measureDepthOptions(ctx, ctx.thinDepth, coverBpsOf(cover, coverageAtFloorBps))
+      : null;
 
   return {
     planId: planIdFor(canonical),
@@ -619,6 +669,7 @@ function finalize(ctx: Context): HedgePlan {
       lossAtFloorCents,
       payoutBelowFloorCents,
       coverageAtFloorBps,
+      expectedFillCents,
     },
     payoff,
     breakEven,
@@ -626,7 +677,86 @@ function finalize(ctx: Context): HedgePlan {
     uncovered: ctx.uncovered,
     ...(signal === null ? {} : { signal }),
     ...(cover === null ? {} : { cover }),
+    ...(depth === null ? {} : depth),
   };
+}
+
+/** The cover a plan gives: with positions held, theirs and the plan's together; otherwise at the floor. */
+function coverBpsOf(cover: PlanCover | null | undefined, coverageAtFloorBps: number | null): number | null {
+  return cover === null || cover === undefined ? coverageAtFloorBps : cover.withPlanCoverBps;
+}
+
+/** Why a plan leaves part of the goal out that more slippage can change: depth, or the money it may spend. */
+const SHORT_CODES: readonly WarningCode[] = ["thin_depth", "cost_cap_reached", "budget_exhausted"];
+
+/**
+ * What the same plan would be at each higher slippage, up to `MAX_SLIPPAGE_CENTS`: the planner run again
+ * with only `slippageCents` changed, so every option respects the spending cap, the budget, the per-trade
+ * limit and the depth exactly as a plan made at that slippage would. Only slippages that buy a different
+ * quantity than the one before are kept. The `thin_depth` warning then says what they buy.
+ */
+function measureDepthOptions(
+  ctx: Context,
+  thin: PlanWarning,
+  coverBps: number | null,
+): { depthOptions: DepthOption[]; coversAtSlippageCents: number | null } {
+  const slippage = ctx.input.slippageCents ?? 0;
+  // A step counts when it buys a different quantity somewhere: a limit that moves alone buys nothing more.
+  const key = (rungs: readonly PlannedRung[]) =>
+    JSON.stringify(rungs.map((r) => [r.instrumentSymbol, r.quantityHundredths]));
+  let previous = key(ctx.rungs);
+  const depthOptions: DepthOption[] = [];
+  for (let slippageCents = slippage + 1; slippageCents <= MAX_SLIPPAGE_CENTS; slippageCents++) {
+    const option = plan({ ...ctx.input, slippageCents }, false);
+    const current = key(option.rungs);
+    if (current === previous) continue;
+    previous = current;
+    const short = option.uncovered.filter((slice) => SHORT_CODES.includes(slice.code));
+    depthOptions.push({
+      slippageCents,
+      coverBps: coverBpsOf(option.cover, option.totals.coverageAtFloorBps),
+      totalAmountCents: option.totals.costCents,
+      expectedFillCents: option.totals.expectedFillCents ?? option.totals.costCents,
+      orderCount: option.orders.length,
+      orderAmountsCents: option.orders.map((o) => o.amountCents),
+      shortStrikesCents: [...new Set(short.flatMap((slice) => slice.strikeCents ?? []))],
+      coversGoal: short.length === 0,
+    });
+  }
+  const covers = depthOptions.find((option) => option.coversGoal) ?? null;
+  const coversAtSlippageCents = covers?.slippageCents ?? null;
+
+  const at = (cents: number) =>
+    cents === 0 ? "At the best price" : `Paying up to ${formatCents(cents)} above the best price`;
+  const percent = (bps: number | null) => (bps === null ? "none of the goal" : formatBps(bps));
+  const cost = (option: DepthOption) =>
+    `${formatUsd(option.totalAmountCents)} committed (about ${formatUsd(option.expectedFillCents)} expected)`;
+  const most = depthOptions.reduce<DepthOption | null>(
+    (best, option) => (best === null || (option.coverBps ?? 0) > (best.coverBps ?? 0) ? option : best),
+    null,
+  );
+  const walkable = ctx.input.ladder.rungs.some(
+    (rung) =>
+      thin.strikesCents.includes(rung.strikeCents) &&
+      rung.depth?.noOffers !== undefined &&
+      ctx.input.depthHundredths?.[rung.instrumentSymbol] === undefined,
+  );
+  let more: string | null = null;
+  if (covers !== null) {
+    more = `${at(covers.slippageCents)} covers ${percent(covers.coverBps)}, for ${cost(covers)}.`;
+  } else if (most !== null) {
+    more = `${at(most.slippageCents)} covers ${percent(most.coverBps)}, for ${cost(most)}; no slippage up to ${formatCents(MAX_SLIPPAGE_CENTS)} covers the goal within the spending cap.`;
+  } else if (walkable && slippage < MAX_SLIPPAGE_CENTS) {
+    more = `No more is offered within ${formatCents(MAX_SLIPPAGE_CENTS)} of the best price.`;
+  }
+  if (more !== null)
+    thin.message = `${thin.message} ${at(slippage)} this plan covers ${percent(coverBps)}. ${more}`;
+  return { depthOptions, coversAtSlippageCents };
+}
+
+/** "1 cent", "5 cents". */
+function formatCents(cents: number): string {
+  return cents === 1 ? "1 cent" : `${cents.toString()} cents`;
 }
 
 /** Contracts held per symbol, sorted, for the plan id. */
@@ -659,7 +789,7 @@ function signalUse(ctx: Context, signal: SignalContext, orders: readonly Planned
     boughtHundredths: bought.get(rating.instrumentSymbol) ?? 0,
   }));
   // The same inputs without the signal: the plan says plainly whether the signal changed anything.
-  const baseline = used ? planHedge({ ...ctx.input, signal: undefined }).orders : orders;
+  const baseline = used ? plan({ ...ctx.input, signal: undefined }, false).orders : orders;
   const key = (list: readonly PlannedOrder[]) =>
     JSON.stringify(list.map((o) => [o.instrumentSymbol, o.quantityHundredths, o.limitPriceCents]));
   return {

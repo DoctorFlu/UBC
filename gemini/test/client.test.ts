@@ -143,8 +143,16 @@ describe("getLadder", () => {
     expect(books.at(-1)).toBe("/v1/book/GEMI-BTC2611202200-HI65000");
     const withDepth = ladder.rungs.filter((r) => r.depth !== undefined);
     expect(withDepth.map((r) => r.strikeCents).at(-1)).toBe(6_500_000);
-    // Every book request answers with the recorded $61,000 book: 25 contracts bid, 4,545 offered.
-    expect(withDepth[0]?.depth).toEqual({ noBuyHundredths: 2_500, yesBuyHundredths: 454_500 });
+    // Every book request answers with the recorded $61,000 book: 25 contracts bid at 81c and 657 at 76c,
+    // which a NO buyer takes at 19c and 24c; 4,545 offered.
+    expect(withDepth[0]?.depth).toEqual({
+      noBuyHundredths: 2_500,
+      yesBuyHundredths: 454_500,
+      noOffers: [
+        { priceCents: 19, quantityHundredths: 2_500 },
+        { priceCents: 24, quantityHundredths: 65_700 },
+      ],
+    });
   });
 
   it("explains which ladders exist when none matches", async () => {

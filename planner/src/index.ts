@@ -12,13 +12,14 @@ export {
   type PlanGoal,
   type RecordedIntent,
 } from "./cover";
-export { hedgePayoutCents, planHedge } from "./plan";
+export { hedgePayoutCents, MAX_SLIPPAGE_CENTS, planHedge } from "./plan";
 export { summarizePlan } from "./summary";
 export type {
   CoverAssessment,
   CoverReason,
   CoverRung,
   CoverState,
+  DepthOption,
   HedgeInput,
   HeldPosition,
   HedgePlan,

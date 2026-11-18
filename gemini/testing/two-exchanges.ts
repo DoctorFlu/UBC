@@ -24,6 +24,11 @@
  * Spot is each exchange's own recorded BTC/USD ticker: production's mid is $64,661.73, the sandbox's
  * $64,037.07 (the stack reads production's on every venue).
  *
+ * `daily1239` serves another reading, given rather than recorded: the daily's NO offers on its six sandbox
+ * strikes as read in the rehearsal at 12:39:48 UTC (`DAILY_1239_NO_OFFERS`), as production's books and the
+ * listing's quotes on both exchanges, and as the sandbox's books, whole or capped per level as the maker caps
+ * a quote (100 contracts and $50).
+ *
  * `HOSTED_WEEKLY_PLAN` and `HOSTED_INTENTS` are the hosted mandate's goal and positions at the switch: the
  * weekly plan Grok Bot made at 03:14 UTC (floor $57,991.80, holding 0.05 BTC) and its eight NO buys, all
  * filled by the simulated venue (positions pay $247.63 below $61,000), plus one rejected intent.
@@ -68,7 +73,46 @@ export const LISTED = {
   },
 } as const;
 
+/**
+ * The daily's NO offers on its six sandbox strikes, read from production in the rehearsal at 12:39:48 UTC:
+ * [NO price in cents, contracts], cheapest first. A NO offer at p cents is a YES bid at 100 - p.
+ */
+export const DAILY_1239_NO_OFFERS: Readonly<Record<number, readonly (readonly [number, number])[]>> = {
+  63000: [
+    [21, 5],
+    [22, 25],
+    [24, 657],
+  ],
+  63250: [
+    [27, 25],
+    [29, 704],
+  ],
+  63500: [
+    [34, 5],
+    [35, 769],
+    [36, 250],
+  ],
+  63750: [
+    [41, 30],
+    [42, 862],
+  ],
+  64000: [
+    [47, 250],
+    [48, 5],
+    [50, 1000],
+  ],
+  64250: [
+    [56, 250],
+    [58, 1190],
+  ],
+};
+
 export interface TwoExchangeOptions {
+  /**
+   * Serve the daily's 12:39 reading (`DAILY_1239_NO_OFFERS`): as production's books and both listings'
+   * quotes, and as the sandbox's books, "uncapped" or "capped" per level at 100 contracts and $50.
+   */
+  daily1239?: "uncapped" | "capped";
   /** The sandbox daily's books: "empty" as recorded (the default), or "mirrored" from production's. */
   sandboxDailyBooks?: "empty" | "mirrored";
   /**
@@ -108,10 +152,61 @@ const MAKER_MAX_USD = 50;
 
 function listing(environment: GeminiEnvironment, options: TwoExchangeOptions = {}): Listing {
   const recorded = readFixture(`${environment}/events-btc.json`) as Listing;
-  if (environment !== "sandbox" || !options.sandboxUnlisted?.length) return recorded;
+  const quoted = options.daily1239 === undefined ? recorded : withDaily1239Quotes(recorded);
+  if (environment !== "sandbox" || !options.sandboxUnlisted?.length) return quoted;
   const unlisted = new Set(options.sandboxUnlisted);
-  const data = recorded.data.filter((event) => !unlisted.has(event.ticker));
-  return { data, pagination: { ...recorded.pagination, total: data.length } };
+  const data = quoted.data.filter((event) => !unlisted.has(event.ticker));
+  return { data, pagination: { ...quoted.pagination, total: data.length } };
+}
+
+const daily1239Symbol = (strike: number) => `GEMI-${DAILY}-HI${String(strike)}`;
+
+/** A YES price in dollars, as Gemini writes it, from cents. */
+const dollars = (cents: number) => String(cents / 100);
+
+/** The listing with the daily's six quotes at 12:39: the best NO offer, and the YES bid it is. */
+function withDaily1239Quotes(recorded: Listing): Listing {
+  const best = new Map(
+    Object.entries(DAILY_1239_NO_OFFERS).map(([strike, offers]) => [
+      daily1239Symbol(Number(strike)),
+      offers[0]?.[0] ?? 0,
+    ]),
+  );
+  type Contract = { instrumentSymbol: string; prices?: Record<string, unknown> & { buy?: object } };
+  const data = recorded.data.map((event) => {
+    if (event.ticker !== DAILY) return event;
+    const contracts = ((event as { contracts?: Contract[] }).contracts ?? []).map((contract) => {
+      const noCents = best.get(contract.instrumentSymbol);
+      if (noCents === undefined || contract.prices === undefined) return contract;
+      return {
+        ...contract,
+        prices: {
+          ...contract.prices,
+          buy: { ...contract.prices.buy, no: dollars(noCents) },
+          bestBid: dollars(100 - noCents),
+        },
+      };
+    });
+    return { ...event, contracts };
+  });
+  return { ...recorded, data };
+}
+
+/** The 12:39 book of one of the daily's six strikes, or null for any other symbol. */
+function daily1239Book(symbol: string): Book | null {
+  const strike = Object.keys(DAILY_1239_NO_OFFERS)
+    .map(Number)
+    .find((candidate) => daily1239Symbol(candidate) === symbol);
+  if (strike === undefined) return null;
+  const recordedAsks = recordedBook("production", symbol)?.asks ?? [];
+  return {
+    bids: (DAILY_1239_NO_OFFERS[strike] ?? []).map(([noCents, contracts]) => ({
+      price: dollars(100 - noCents),
+      amount: contracts.toFixed(1),
+      timestamp: "1795005588",
+    })),
+    asks: recordedAsks,
+  };
 }
 
 function recordedBook(environment: GeminiEnvironment, symbol: string): Book | null {
@@ -131,6 +226,11 @@ function capped(level: BookLevel): BookLevel {
 }
 
 function book(environment: GeminiEnvironment, symbol: string, options: TwoExchangeOptions): Book {
+  const at1239 = options.daily1239 === undefined ? null : daily1239Book(symbol);
+  if (at1239 !== null) {
+    if (environment === "production" || options.daily1239 === "uncapped") return at1239;
+    return { bids: at1239.bids.map(capped), asks: at1239.asks.map(capped) };
+  }
   if (environment === "production") return recordedBook("production", symbol) ?? EMPTY_BOOK;
   if (options.sandboxDailyBooks !== "mirrored" || !symbol.startsWith(`GEMI-${DAILY}-`)) return EMPTY_BOOK;
   const listed = (listing("sandbox").data as { ticker: string; contracts?: { instrumentSymbol: string }[] }[])
