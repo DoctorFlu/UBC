@@ -46,6 +46,8 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 3. It writes "placing" to the journal, then sends one limit order, good till cancelled.
 4. It follows the order (`POST /v1/prediction-markets/orders/active`, then `orders/history`) and records each change in the journal.
 5. When the order fills, or when its time is up (`EXECUTOR_ORDER_TTL_MS`, 10 minutes by default, and never later than a minute before the market stops trading), it cancels what is left and records the fill onchain with `recordResult`.
+6. When that write fails (the RPC refuses it or times out), it tries again with waits of 15 s doubling to 10 minutes, and logs each failure with its wait.
+   Each try asks the venue for the order again, which finds the journaled one and never sends a second; until a try lands, the intent stays Approved and its amount committed.
 
 | Gemini's answer | Journal state | Onchain |
 | --- | --- | --- |
@@ -110,6 +112,8 @@ A "placing" version whose write failed was never sent, and the next try sends th
 The executor also announces its venue at start (`PUT /api/executor/v1/venue`), which drives the console's badge.
 The console keeps every announcement of a contract in order, and labels each fill by the one in force when it was mined (see below).
 A restart on the venue already in force adds nothing.
+The executor logs what the console did: "The console stored the venue of 0x… as announcement #3, holding from block …" for a new one, or "The console already has this venue in force for 0x… (announcement #2, …): nothing added."
+Until then it logs each failed attempt with the wait before the next (5 s doubling to a minute); a console that reads another Gemini stops it.
 
 ## The console
 

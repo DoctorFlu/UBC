@@ -2,9 +2,14 @@
  * The console order journal's client (issue #93): it tries again, briefly, when the console cannot take a
  * request yet (it has not seen the intent on chain, did not answer, or failed), and never on a refusal.
  */
-import { CONSOLE_EXECUTOR_ROUTES, clientOrderIdFor, type VenueOrderRecord } from "@mandate/shared";
+import {
+  CONSOLE_EXECUTOR_ROUTES,
+  clientOrderIdFor,
+  type ExecutorVenue,
+  type VenueOrderRecord,
+} from "@mandate/shared";
 import { describe, expect, it } from "vitest";
-import { consoleOrderJournal } from "../src/order-journal";
+import { announceUntilAccepted, announceVenue, consoleOrderJournal } from "../src/order-journal";
 
 const POLICY = "0x00000000000000000000000000000000000000aa";
 
@@ -109,5 +114,90 @@ describe("the console order journal", () => {
     await expect(journal.put(record)).rejects.toThrow(/not_seen: not_seen from the console \(6 tries\)$/);
     expect(calls).toHaveLength(6);
     expect(sleeps).toEqual([250, 500, 1_000, 2_000, 4_000]);
+  });
+});
+
+describe("the executor's venue announcement", () => {
+  const announcement: ExecutorVenue = {
+    kind: "executor-venue",
+    version: 1,
+    chainId: 5_042_002,
+    policy: POLICY,
+    venue: "gemini",
+    environment: "sandbox",
+    announcedAt: "2026-11-18T13:00:00.000Z",
+  };
+  const answer = (status: number, extra: Record<string, unknown> = {}) =>
+    new Response(
+      JSON.stringify({
+        venue: "gemini",
+        environment: "sandbox",
+        announcedAt: announcement.announcedAt,
+        ...extra,
+      }),
+      { status, headers: { "content-type": "application/json" } },
+    );
+  /** Announces until accepted against a console giving these answers in turn. */
+  async function run(answers: (Response | Error)[]) {
+    const lines: string[] = [];
+    const sleeps: number[] = [];
+    const outcome = await announceUntilAccepted({
+      announce: () =>
+        announceVenue(
+          {
+            consoleUrl: "http://console.test",
+            sign: () => Promise.resolve(`0x${"11".repeat(65)}` as const),
+            fetch: () => {
+              const next = answers.shift() ?? answer(500);
+              return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
+            },
+          },
+          announcement,
+        ),
+      policy: POLICY,
+      log: (line) => lines.push(line),
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    return { outcome, lines, sleeps };
+  }
+
+  it("logs every failed attempt with its wait, then the new announcement the console stored", async () => {
+    const { outcome, lines, sleeps } = await run([
+      consoleError(422, "wrong_deployment"),
+      new Error("connect ECONNREFUSED"),
+      answer(201, { stored: true, seq: 3, holdsFromBlock: 72_900_001 }),
+    ]);
+    expect(outcome).toEqual({ accepted: true, stored: true, seq: 3, holdsFromBlock: 72_900_001 });
+    expect(sleeps).toEqual([5_000, 10_000]);
+    expect(lines).toEqual([
+      `[executor] Could not tell the console the venue of ${POLICY} yet (the console answered wrong_deployment: wrong_deployment from the console); attempt 1, trying again in 5 s.`,
+      `[executor] Could not tell the console the venue of ${POLICY} yet (the console at http://console.test did not answer (connect ECONNREFUSED)); attempt 2, trying again in 10 s.`,
+      `[executor] The console stored the venue of ${POLICY} as announcement #3, holding from block 72900001.`,
+    ]);
+  });
+
+  it("says when the venue was already in force and nothing was added", async () => {
+    const { lines } = await run([answer(200, { stored: false, seq: 2, holdsFromBlock: 72_821_559 })]);
+    expect(lines).toEqual([
+      `[executor] The console already has this venue in force for ${POLICY} (announcement #2, holding from block 72821559): nothing added.`,
+    ]);
+  });
+
+  it("reads an older console's answer by its status alone", async () => {
+    expect((await run([answer(201)])).lines).toEqual([
+      `[executor] The console stored the venue of ${POLICY} as the announcement.`,
+    ]);
+    expect((await run([answer(200)])).lines).toEqual([
+      `[executor] The console already has this venue in force for ${POLICY} (the announcement): nothing added.`,
+    ]);
+  });
+
+  it("stops at a console that reads another Gemini, which no retry resolves", async () => {
+    await expect(run([consoleError(409, "environment_mismatch")])).rejects.toThrow(
+      "The console refused this executor: environment_mismatch from the console",
+    );
   });
 });
