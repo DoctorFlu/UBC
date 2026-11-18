@@ -765,6 +765,7 @@ describe("agent API: the owner's view (#97)", () => {
       floorCents: 6_400_000,
       state: "unavailable",
       reason: null,
+      belowFloor: null,
       spotCents: null,
       measuredBelowCents: null,
       targetPayoutCents: null,

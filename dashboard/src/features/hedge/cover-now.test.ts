@@ -123,7 +123,7 @@ describe("cover now", () => {
     const cover = coverNow({ plan, holdingQuantity: null, quotes: quotes(6_464_000), intents });
     expect(cover?.assessment.state).toBe("not_met");
     expect(coverSentence(must(cover).assessment, null)).toBe(
-      "Not covered. No contract you hold pays if BTC settles below $63,000, against the $82 your 0.05 BTC loses from today's $64,640 down to $63,000.",
+      "Not covered. No contract you hold pays if BTC settles below $63,000, against the $82 your 0.05 BTC loses from today's $64,640 down to $63,000. A new plan buys only the missing $82.",
     );
   });
 
@@ -136,7 +136,7 @@ describe("cover now", () => {
       intents: hosted,
     });
     expect(coverSentence(must(cover).assessment, null)).toMatch(
-      /^Covered\. If BTC settles below \$62,500, the contracts you hold pay \$165, more than the \$[0-9.]+ your 0\.05 BTC loses from today's \$64,710 down to \$61,475\. Nothing more is needed\.$/,
+      /^Covered\. If BTC settles below \$62,500, the contracts you hold pay \$165, more than the \$[0-9.]+ your 0\.05 BTC loses from today's \$64,710 down to \$62,500, the lowest strike there is \(your floor \$61,475 is below every strike\)\. Nothing more is needed\.$/,
     );
   });
 

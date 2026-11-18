@@ -76,6 +76,11 @@ export interface TwoExchangeOptions {
    * ladder production lists. Not recorded: a variation for the "ladder not listed" cause.
    */
   sandboxUnlisted?: readonly string[];
+  /**
+   * BTC/USD on both exchanges, in dollars, as bid, ask and last alike: for a price the recording did not
+   * see, such as a fall through a goal's floor. Not recorded. Default: as recorded.
+   */
+  spotUsd?: number;
 }
 
 interface Listing {
@@ -168,7 +173,10 @@ export function twoExchangeResponse(
     return { status: 200, body: book(environment, route.slice(BOOK_ROUTE.length), options) };
   }
   if (route === "/v1/pubticker/btcusd") {
-    return { status: 200, body: readFixture(`${environment}/pubticker-btcusd.json`) };
+    const recorded = readFixture(`${environment}/pubticker-btcusd.json`) as Record<string, unknown>;
+    if (options.spotUsd === undefined) return { status: 200, body: recorded };
+    const at = options.spotUsd.toFixed(2);
+    return { status: 200, body: { ...recorded, bid: at, ask: at, last: at } };
   }
   return { status: 404, body: { result: "error", reason: "NotFound" } };
 }

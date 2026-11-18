@@ -1,4 +1,5 @@
 import type { Ladder } from "@mandate/gemini";
+import type { StrikeRung } from "./staircase";
 
 /** What the owner holds. */
 export interface Holding {
@@ -71,6 +72,11 @@ export interface HedgeInput {
    * carries a `cover` assessment. Without it the plan is the full staircase, as before.
    */
   held?: readonly HeldPosition[] | undefined;
+  /**
+   * Strikes Gemini's production exchange lists on this ladder's event that `ladder` does not, when the
+   * orders go to another exchange. They are part of the goal (what is covered), never bought.
+   */
+  elsewhere?: readonly StrikeRung[] | undefined;
 }
 
 /**
@@ -94,16 +100,26 @@ export interface HeldPosition {
  * - `partly_met`: something is held, but less than that.
  * - `not_met`: nothing held pays below the floor.
  * - `nothing_to_cover`: the floor is not below where protection starts (spot, by default), so the goal
- *   calls for no contracts now (`reason` "floor_not_below_ceiling").
+ *   calls for no contracts now (`reason` "floor_not_below_ceiling"). With positions held and spot at or
+ *   below the floor, `coverOfPlan` measures the goal as planned instead (`belowFloor`).
  * - `cannot_hedge`: the goal calls for protection, but no staircase can be built: no strike below spot
  *   on the ladder nor among the positions held, the ladder is not listed where orders go, or the
  *   holding is too small for 0.01 contracts (`reason`). Never covered.
  */
 export type CoverState = "met" | "partly_met" | "not_met" | "nothing_to_cover" | "cannot_hedge";
 
-/** Why a goal has no staircase (`nothing_to_cover` and `cannot_hedge`). */
+/**
+ * Why a goal has no staircase (`nothing_to_cover` and `cannot_hedge`), or why nothing can be added to a
+ * goal not met on the exchange that takes the orders: its ladder lists no strike below spot, does not
+ * list the ladder, the holding is too small, or (`no_more_strikes`) what is still missing lies on
+ * strikes it does not list.
+ */
 export type CoverReason =
-  "floor_not_below_ceiling" | "no_strike_below_spot" | "ladder_not_listed" | "holding_too_small";
+  | "floor_not_below_ceiling"
+  | "no_strike_below_spot"
+  | "ladder_not_listed"
+  | "holding_too_small"
+  | "no_more_strikes";
 
 /** One strike of the goal's staircase, highest first. */
 export interface CoverRung {
@@ -123,7 +139,10 @@ export interface CoverRung {
  */
 export interface CoverAssessment {
   state: CoverState;
-  /** Why there is no staircase, for `nothing_to_cover` and `cannot_hedge`; null otherwise. */
+  /**
+   * Why there is no staircase, for `nothing_to_cover` and `cannot_hedge`; for `partly_met` and
+   * `not_met`, why nothing can be added on the exchange that takes the orders. Null otherwise.
+   */
   reason: CoverReason | null;
   asset: string;
   eventTicker: string;
@@ -146,12 +165,23 @@ export interface CoverAssessment {
   heldByState: Record<PositionState, number>;
   /** `max(0, target - held)`. */
   shortfallCents: number;
+  /**
+   * Set when spot is at or below the floor and positions are held on the ladder (`coverOfPlan`): the
+   * goal is then measured as it was planned, from the spot the plan read down to the floor, and
+   * `heldPayoutCents` is what the positions pay if the price settles at today's spot. Null otherwise.
+   */
+  belowFloor: { plannedSpotCents: number; paysAtSpotCents: number } | null;
   /** A shortfall up to this much still counts as met: rounding and small moves of spot. */
   toleranceCents: number;
   /** held / target in basis points (10000 = 100 %), or null when the target is 0. */
   coverBps: number | null;
   /** Payout the missing contracts add below `measuredBelowCents`: the shortfall, or 0 when met. */
   missingPayoutCents: number;
+  /**
+   * The part of `missingPayoutCents` a plan can buy on the exchange that takes the orders, on its own
+   * strikes: less when the rest lies on strikes it does not list, 0 when nothing can be added.
+   */
+  addablePayoutCents: number;
   rungs: CoverRung[];
 }
 

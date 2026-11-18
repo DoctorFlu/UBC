@@ -92,10 +92,13 @@ export function CoverNowCard({
         {assessment && assessment.measuredBelowCents !== null ? (
           <Advanced>
             <p className={styles.detail}>
-              Measured below {usd(assessment.measuredBelowCents)}: held {usd(assessment.heldPayoutCents)} (
-              {usd(assessment.heldByState.filled)} filled, {usd(assessment.heldByState.awaiting_fill)} waiting
-              to fill, {usd(assessment.heldByState.awaiting_owner)} waiting for your approval) against a goal
-              of {usd(assessment.targetPayoutCents)}. A shortfall up to {usd(assessment.toleranceCents)} (2%)
+              {assessment.belowFloor === null
+                ? `Measured below ${usd(assessment.measuredBelowCents)}`
+                : `Measured at today's ${usd(assessment.spotCents)}, at or below the floor, against the goal as planned from ${usd(assessment.belowFloor.plannedSpotCents)}`}
+              : held {usd(assessment.heldPayoutCents)} ({usd(assessment.heldByState.filled)} filled,{" "}
+              {usd(assessment.heldByState.awaiting_fill)} waiting to fill,{" "}
+              {usd(assessment.heldByState.awaiting_owner)} waiting for your approval) against a goal of{" "}
+              {usd(assessment.targetPayoutCents)}. A shortfall up to {usd(assessment.toleranceCents)} (2%)
               counts as covered. {cover?.positions.length ?? 0} intents on {assessment.eventTicker} are
               counted.
             </p>

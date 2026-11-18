@@ -161,10 +161,11 @@ describe("cover of the hosted weekly goal, with positions on strikes only produc
     });
   });
 
-  it("says so on the Hedge page, with the goal's real floor", async () => {
+  it("says so on the Hedge page, with the goal's real floor and where its protection ends", async () => {
     const { state, sentence } = await hedgeSentence({ intents: intentViews() });
+    // 0.05 BTC x ($64,662 - $61,000): every strike there is lies above the floor, so the staircase ends at $61,000.
     expect(sentence).toBe(
-      "Covered. If BTC settles below $61,000 on Nov 20, 22:00 UTC, the contracts you hold pay $247.63, more than the $183.08 your 0.05 BTC loses from today's $64,662 down to $57,992. Nothing more is needed.",
+      "Covered. If BTC settles below $61,000 on Nov 20, 22:00 UTC, the contracts you hold pay $247.63, more than the $183.08 your 0.05 BTC loses from today's $64,662 down to $61,000, the lowest strike there is (your floor $57,992 is below every strike). Nothing more is needed.",
     );
     expect(state).toBe("met");
   });
@@ -177,7 +178,7 @@ describe("cover of the hosted weekly goal, with positions on strikes only produc
       sentence:
         "Not covered, and nothing can be bought for it on this ladder now: it lists no strike below today's BTC price of $64,662, and you hold no contract that pays below it.",
     });
-    // The floor is above spot.
+    // The floor is above spot, nothing held.
     expect(await hedgeSentence({ plan: { floorCents: 6_500_000 } })).toEqual({
       state: "nothing_to_cover",
       reason: "floor_not_below_ceiling",
@@ -203,47 +204,74 @@ describe("cover of the hosted weekly goal, with positions on strikes only produc
     });
   });
 
-  it("does not count a goal as covered on Home when nothing is held and the venue lists no strike below spot", async () => {
-    // Two mandates with the same weekly goal: one holds the hosted positions, the other holds nothing.
-    const held = {
-      id: "mnd_held",
-      name: "Held",
-      deployment: null,
-      contract: null,
-      createdAt: "2026-11-18T03:00:00Z",
-    };
-    const bare = {
-      id: "mnd_bare",
-      name: "Bare",
-      deployment: null,
-      contract: null,
-      createdAt: "2026-11-18T03:00:00Z",
-    };
-    const snapshots: Record<string, ConsoleSnapshot> = {
-      [held.id]: snapshot({ intents: intentViews(), plans: [weeklyGoal] }),
-      [bare.id]: snapshot({ intents: [], plans: [weeklyGoal] }),
-    };
-    const service = {
-      accounts: {
-        store: {
-          mandates: () => [held, bare],
-          agentOf: (id: string) => ({
-            id: `agt_${id}`,
-            address: "0x0000000000000000000000000000000000000001",
-          }),
-        },
-      },
-      serverContract: null,
-      snapshot: (mandate: { id: string }) => snapshots[mandate.id],
-      config: { mandates: { maxPerWorkspace: 5 } },
-    } as unknown as ConsoleService;
-    const access = {
-      workspace: { id: "ws", name: "First workspace" },
-      member: { role: "admin" },
-    } as unknown as Access;
-    const home = await workspaceHome(access, service, quotesOn("sandbox"));
-    const coverOf = (id: string) => home.mandates.find((row) => row.mandate.id === id)?.cover;
-    expect(coverOf(held.id)).toMatchObject({ goals: 1, met: 1 });
-    expect(coverOf(bare.id)).toMatchObject({ goals: 1, met: 0 });
+  it("with BTC fallen through the floor, measures the held contracts against the goal as planned", async () => {
+    const fallen = { spotUsd: 57_000 };
+    // The goal as planned: 0.05 BTC from the plan's $64,435.33 down to $61,000, $171.76 in 0.01 contracts.
+    // Every held strike is above $57,000, so all of them pay if it settles there.
+    expect(await hedgeSentence({ exchanges: fallen, intents: intentViews() })).toEqual({
+      state: "met",
+      reason: null,
+      sentence:
+        "Covered. BTC is at or below the floor: today's $57,000 is not above $57,992. If it settles there on Nov 20, 22:00 UTC, the contracts you hold pay $247.63, more than the $171.76 the goal protects, your 0.05 BTC's fall from $64,435, its price when the goal was set, down to $61,000, the lowest strike there is (your floor $57,992 is below every strike).",
+    });
+    // Nothing held: nothing to protect, as before.
+    expect(await hedgeSentence({ exchanges: fallen })).toEqual({
+      state: "nothing_to_cover",
+      reason: "floor_not_below_ceiling",
+      sentence:
+        "Nothing to protect now: the floor $57,992 is not below today's BTC price of $57,000, so the goal calls for no contracts.",
+    });
+    // Only the top three strikes held: they pay $82.68 of the $171.76.
+    const partial = intentViews().filter((intent) => intent.id <= 2);
+    expect(await hedgeSentence({ exchanges: fallen, intents: partial })).toMatchObject({
+      state: "partly_met",
+      reason: null,
+    });
+  });
+
+  it("counts on Home only goals that are met: a bare mandate never, a held one also below the floor", async () => {
+    const atRecording = await homeCover(quotesOn("sandbox"));
+    expect(atRecording.held).toMatchObject({ goals: 1, met: 1 });
+    expect(atRecording.bare).toMatchObject({ goals: 1, met: 0 });
+    const fallen = await homeCover(quotesOn("sandbox", { spotUsd: 57_000 }));
+    expect(fallen.held).toMatchObject({ goals: 1, met: 1 });
+    expect(fallen.bare).toMatchObject({ goals: 1, met: 0 });
   });
 });
+
+/** Home's cover counts for two mandates with the hosted weekly goal: one holds its positions, one nothing. */
+async function homeCover(ladder: LadderSource) {
+  const held = {
+    id: "mnd_held",
+    name: "Held",
+    deployment: null,
+    contract: null,
+    createdAt: "2026-11-18T03:00:00Z",
+  };
+  const bare = { ...held, id: "mnd_bare", name: "Bare" };
+  const snapshots: Record<string, ConsoleSnapshot> = {
+    [held.id]: snapshot({ intents: intentViews(), plans: [weeklyGoal] }),
+    [bare.id]: snapshot({ intents: [], plans: [weeklyGoal] }),
+  };
+  const service = {
+    accounts: {
+      store: {
+        mandates: () => [held, bare],
+        agentOf: (id: string) => ({
+          id: `agt_${id}`,
+          address: "0x0000000000000000000000000000000000000001",
+        }),
+      },
+    },
+    serverContract: null,
+    snapshot: (mandate: { id: string }) => snapshots[mandate.id],
+    config: { mandates: { maxPerWorkspace: 5 } },
+  } as unknown as ConsoleService;
+  const access = {
+    workspace: { id: "ws", name: "First workspace" },
+    member: { role: "admin" },
+  } as unknown as Access;
+  const home = await workspaceHome(access, service, ladder);
+  const coverOf = (id: string) => home.mandates.find((row) => row.mandate.id === id)?.cover;
+  return { held: coverOf(held.id), bare: coverOf(bare.id) };
+}

@@ -478,6 +478,7 @@ export const COVER_REASONS = [
   "no_strike_below_spot",
   "ladder_not_listed",
   "holding_too_small",
+  "no_more_strikes",
 ] as const;
 export type CoverReasonCode = (typeof COVER_REASONS)[number];
 
@@ -491,7 +492,10 @@ export const coverNowSchema = z.strictObject({
   planId: z.string().min(1),
   floorCents: z.int().nullable(),
   state: z.enum(COVER_NOW_STATES),
-  /** Why there is no staircase, for `nothing_to_cover` and `cannot_hedge`; null otherwise. */
+  /**
+   * Why there is no staircase, for `nothing_to_cover` and `cannot_hedge`; for `partly_met` and
+   * `not_met`, why nothing can be added on the exchange that takes the orders. Null otherwise.
+   */
   reason: z.enum(COVER_REASONS).nullable().default(null),
   /** Spot the cover was measured from, or null when `unavailable`. */
   spotCents: z.int().nullable(),
@@ -512,6 +516,15 @@ export const coverNowSchema = z.strictObject({
   coverBps: z.int().nullable(),
   /** What a new plan would add below the floor: the shortfall, or 0 when met. */
   missingPayoutCents: z.int().nullable(),
+  /**
+   * Spot is at or below the floor and positions are held: the goal is measured as planned, from
+   * `plannedSpotCents` down to the floor, and `heldPayoutCents` (= `paysAtSpotCents`) is what the positions
+   * pay if the price settles at today's spot. Null otherwise.
+   */
+  belowFloor: z
+    .strictObject({ plannedSpotCents: z.int(), paysAtSpotCents: z.int() })
+    .nullable()
+    .default(null),
 });
 export type CoverNowView = z.infer<typeof coverNowSchema>;
 
