@@ -6,12 +6,13 @@ import {
   categoryLabel,
   Category,
   type CategoryId,
+  formatEasternTime,
 } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
-import { capList, CategoryNameSchema, categoryIdOf } from "../support/format";
+import { capList, CategoryNameSchema, categoryIdOf, DateTextSchema } from "../support/format";
 
 const MAX_CONTRACTS = 25;
 
@@ -20,6 +21,7 @@ const EventRowSchema = z.object({
   title: UntrustedTextSchema,
   category: z.string().describe("Mandate category"),
   expiry: z.string().nullable(),
+  expiryText: DateTextSchema.nullable(),
   isLadder: z.boolean().describe("A crypto strike ladder: use get_ladder for its contracts"),
   asset: z.string().nullable(),
   contractCount: z.int(),
@@ -83,6 +85,7 @@ export const listMarkets = defineTool({
           title: untrusted(event.title, "gemini"),
           category: categoryLabel(categoryId),
           expiry: event.expiry,
+          expiryText: event.expiry === null ? null : formatEasternTime(event.expiry),
           isLadder: event.isLadder,
           asset: event.asset,
           contractCount: event.contracts.length,
@@ -163,6 +166,7 @@ export const listMarkets = defineTool({
         title: untrusted(e.title, "gemini"),
         category: categoryLabel(categoryFromGemini(e.category ?? "")),
         expiry: e.expiry,
+        expiryText: e.expiry === null ? null : formatEasternTime(e.expiry),
         isLadder: e.isLadder,
         asset: e.asset,
         contractCount: e.contractCount,

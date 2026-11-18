@@ -2,20 +2,10 @@
  * Plain-language summary an agent can read to its owner: three to five short sentences with
  * exact numbers, generated from the plan alone.
  */
+import { formatEasternTime } from "@mandate/shared";
 import { shortId } from "./signal";
 import type { HedgePlan, PlanSignalUse, SignalRungRating as SignalRung } from "./types";
 import { formatContracts, formatPrice, formatUsd } from "./units";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/** "Nov 20, 2026 22:00 UTC". Fixed format so summaries do not depend on the host locale. */
-export function formatExpiry(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const hh = date.getUTCHours().toString().padStart(2, "0");
-  const mm = date.getUTCMinutes().toString().padStart(2, "0");
-  return `${MONTHS[date.getUTCMonth()] ?? ""} ${date.getUTCDate().toString()}, ${date.getUTCFullYear().toString()} ${hh}:${mm} UTC`;
-}
 
 function percent(bps: number): string {
   return `${Math.floor(bps / 100).toString()}%`;
@@ -55,7 +45,7 @@ export function summarizePlan(plan: HedgePlan): string {
       ? `at ${formatPrice(highest)}`
       : `across ${plan.rungs.length.toString()} strikes from ${formatPrice(highest)} down to ${formatPrice(lowest)}`;
   sentences.push(
-    `To protect your ${holding} (spot ${formatPrice(plan.spotCents)}), buy ${formatContracts(totals.contractsHundredths)} NO contracts ${span} for ${formatUsd(totals.costCents)}, settling ${formatExpiry(plan.expiry)}.`,
+    `To protect your ${holding} (spot ${formatPrice(plan.spotCents)}), buy ${formatContracts(totals.contractsHundredths)} NO contracts ${span} for ${formatUsd(totals.costCents)}, settling ${formatEasternTime(plan.expiry)}.`,
   );
 
   if (cover !== undefined && cover.state === "partly_met" && cover.measuredBelowCents !== null) {

@@ -377,7 +377,7 @@ describe("ladderSettledWake", () => {
     });
     if (!wake) throw new Error("no wake-up");
     expect(wakeSummary(wake, 1)).toBe(
-      "The BTC ladder BTC2611202200 settled at $65,210.00: 2 positions cost $24.80, paid $0, net -$24.80. " +
+      "The BTC ladder BTC2611202200, which expired Fri Nov 20, 2026, 5:00 PM ET, settled at $65,210.00: 2 positions cost $24.80, paid $0, net -$24.80. " +
         "Plan on the next ladder.",
     );
   });
@@ -393,7 +393,7 @@ describe("ladderSettledWake", () => {
     });
     if (!wake) throw new Error("no wake-up");
     expect(wakeSummary(wake, 1)).toBe(
-      "The BTC ladder BTC2611202200 settled at $65,210.00: 2 positions cost $24.80, fees $1.20 (estimated), " +
+      "The BTC ladder BTC2611202200, which expired Fri Nov 20, 2026, 5:00 PM ET, settled at $65,210.00: 2 positions cost $24.80, fees $1.20 (estimated), " +
         "paid $0, net after fees -$26. Plan on the next ladder.",
     );
   });

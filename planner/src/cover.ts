@@ -64,7 +64,7 @@ export interface CoverInput {
 
 /**
  * An intent as the Policy contract records it, in the fields cover needs. `IntentView` and `Intent`
- * from `@mandate/shared` both fit; the planner stays a leaf package.
+ * from `@mandate/shared` both fit; the planner takes no type from it, only its date formatter.
  */
 export interface RecordedIntent {
   id: number;

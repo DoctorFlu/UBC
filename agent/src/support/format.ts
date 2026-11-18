@@ -10,6 +10,16 @@ export function isoFromUnix(seconds: number): string {
   return new Date(seconds * 1000).toISOString();
 }
 
+/**
+ * The text form beside an ISO time the agent may repeat to its owner. A model that works a weekday out of
+ * an ISO time can get it wrong ("settles Thu Nov 20" for a Friday), so each one comes written out to copy.
+ */
+export const DateTextSchema = z
+  .string()
+  .describe(
+    'The same time as the owner reads it, weekday included ("Fri Nov 20, 2026, 5:00 PM ET"). Copy it; never work out a weekday or date yourself',
+  );
+
 /** Category names as the mandate uses them: Crypto, Sports, Economics, Commodities, Weather, Politics, Other. */
 export const CATEGORY_NAMES = CATEGORY_IDS.map((id) => categoryLabel(id)) as [string, ...string[]];
 export const CategoryNameSchema = z.enum(CATEGORY_NAMES);

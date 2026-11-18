@@ -4,6 +4,7 @@ import type { HedgePlan, IntentPosition, PlanCover, ProtectionGoal } from "@mand
 import {
   Category,
   evaluateIntent,
+  formatEasternTime,
   holdingQuantitySchema,
   isCategoryAllowed,
   type PolicySnapshot,
@@ -14,7 +15,7 @@ import { defineTool } from "../mcp/tool";
 import { PLAN_EXECUTABLE_FOR_MS } from "../state/plans";
 import { heldPositions } from "../trading/positions";
 import { describeFailure, notConfigured, unavailableFor, type Failure } from "../support/failures";
-import { capList } from "../support/format";
+import { capList, DateTextSchema } from "../support/format";
 import { NO_PRICES_HINT, noPricesReason } from "../support/no-prices";
 import { reasonCode } from "../support/rules";
 import { ladderSummaryFromLadder } from "../trading/context";
@@ -92,6 +93,7 @@ const PlanViewSchema = z.object({
   asset: z.string(),
   eventTicker: z.string(),
   expiry: z.string(),
+  expiryText: DateTextSchema,
   spotCents: z.int(),
   holdingQuantity: z.string(),
   ceilingCents: z.int().nullable().describe("Where protection starts"),
@@ -424,6 +426,7 @@ export const planHedge = defineTool({
           asset: plan.asset,
           eventTicker: plan.eventTicker,
           expiry: plan.expiry,
+          expiryText: formatEasternTime(plan.expiry),
           spotCents: plan.spotCents,
           holdingQuantity: plan.holdingQuantity,
           ceilingCents: plan.ceilingCents,

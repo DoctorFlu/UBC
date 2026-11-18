@@ -17,6 +17,7 @@ import {
   hashSettlement,
   settlementMessage,
   wakeEventSchema,
+  formatEasternTime,
 } from "@mandate/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -154,7 +155,8 @@ describe("the settlement wake-up", () => {
       count: 1,
       link: `http://localhost:3000/m/${envMandate(service).id}/hedge`,
       summary:
-        "The BTC ladder BTC2611202200 settled at $64,250.42: 2 positions cost $24.80, paid $80, net +$55.20. " +
+        `The BTC ladder BTC2611202200, which expired ${formatEasternTime(EXPIRED_AT)}, settled at $64,250.42:` +
+        " 2 positions cost $24.80, paid $80, net +$55.20. " +
         "Plan on the next ladder.",
       detail: {
         ladders: [

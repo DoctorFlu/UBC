@@ -2,7 +2,7 @@
  * Read-only client for Gemini's public prediction-market and spot endpoints. No API key, no
  * authenticated route, no order placement: every call here is a public GET.
  */
-import { raceAbort } from "@mandate/shared";
+import { formatEasternTime, raceAbort } from "@mandate/shared";
 import type { RequestOptions } from "./abort";
 import { TtlCache } from "./cache";
 import { GeminiError } from "./errors";
@@ -385,7 +385,13 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
       throw new GeminiError("invalid_argument", "getLadder needs an eventTicker, an expiry or a horizon");
     }
     const ladders = (await listLadders(asset, { signal })).filter((l) => l.openStrikeCount > 0);
-    const available = ladders.map((l) => `${l.kind} ${l.expiry} (${l.eventTicker})`).join("; ") || "none";
+    // Each expiry written out for the owner, weekday included, and as the ISO time a caller passes back.
+    const available =
+      ladders
+        .map(
+          (l) => `${l.kind} ${l.eventTicker}, settling ${formatEasternTime(l.expiry)} (expiry ${l.expiry})`,
+        )
+        .join("; ") || "none";
     if (opts.expiry !== undefined) {
       const target = typeof opts.expiry === "string" ? Date.parse(opts.expiry) : opts.expiry.getTime();
       if (Number.isNaN(target)) throw new GeminiError("invalid_argument", "expiry is not a valid date");
@@ -393,7 +399,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
       if (match === undefined) {
         throw new GeminiError(
           "no_ladder",
-          `No open ${asset} ladder expires at ${new Date(target).toISOString()}. Available: ${available}`,
+          `No open ${asset} ladder expires at ${formatEasternTime(new Date(target))} (${new Date(target).toISOString()}). Available: ${available}`,
         );
       }
       return match.eventTicker;

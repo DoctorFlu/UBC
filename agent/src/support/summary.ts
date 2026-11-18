@@ -5,9 +5,16 @@
  * recompute it, and say plainly when the console cannot.
  */
 import * as z from "zod";
-import { COVER_NOW_STATES, formatCents, type CoverNowView, type SummaryResponse } from "@mandate/shared";
+import {
+  COVER_NOW_STATES,
+  formatCents,
+  formatEasternTime,
+  type CoverNowView,
+  type SummaryResponse,
+} from "@mandate/shared";
 import type { ToolContext } from "../context";
 import { describeFailure } from "./failures";
+import { DateTextSchema } from "./format";
 
 /**
  * The console's summary, or null when it cannot say: no console configured, a console without the route,
@@ -32,6 +39,7 @@ export const CoverNowSchema = z.object({
   asset: z.string(),
   eventTicker: z.string().describe("The ladder the goal is on"),
   expiresAt: z.string(),
+  expiresText: DateTextSchema,
   floorCents: z.int().nullable().describe("The goal: protect the holding below this price"),
   state: z
     .enum(COVER_NOW_STATES)
@@ -59,6 +67,7 @@ export function coverNowRow(cover: CoverNowView, summary: SummaryResponse): Cove
     asset: cover.asset,
     eventTicker: cover.eventTicker,
     expiresAt: cover.expiresAt,
+    expiresText: formatEasternTime(cover.expiresAt),
     floorCents: cover.floorCents,
     state: cover.state,
     coverBps: cover.coverBps,
@@ -72,9 +81,9 @@ export function coverNowRow(cover: CoverNowView, summary: SummaryResponse): Cove
 
 const percent = (bps: number) => `${Math.floor(bps / 100)}%`;
 
-/** "BTC below $63,000.00 on BTC2611272200: covered 100% (positions pay $66.15 of $65.00)." */
+/** "BTC below $63,000.00 on BTC2611272200 (settles Fri Nov 27, 2026, 5:00 PM ET): covered, the goal is met (...)." */
 export function coverSentence(cover: CoverNowRow): string {
-  const goal = `${cover.asset} below ${cover.floorCents === null ? "its floor" : formatCents(cover.floorCents)} on ${cover.eventTicker}`;
+  const goal = `${cover.asset} below ${cover.floorCents === null ? "its floor" : formatCents(cover.floorCents)} on ${cover.eventTicker} (settles ${cover.expiresText})`;
   const owner = cover.heldByState?.awaitingOwnerCents ?? 0;
   const pending =
     owner > 0 ? `, ${formatCents(owner)} of it from orders waiting for the owner's approval` : "";

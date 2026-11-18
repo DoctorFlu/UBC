@@ -302,7 +302,7 @@ describe("summarizePlan", () => {
     const summary = summarizePlan(planHedge(exampleInput()));
     expect(summary).toBe(
       [
-        "To protect your 0.05 BTC (spot $65,586), buy 100.00 NO contracts across 4 strikes from $65,500 down to $64,000 for $40.75, settling Nov 20, 2026 22:00 UTC.",
+        "To protect your 0.05 BTC (spot $65,586), buy 100.00 NO contracts across 4 strikes from $65,500 down to $64,000 for $40.75, settling Fri Nov 20, 2026, 5:00 PM ET.",
         "If BTC finishes below $64,000, the hedge pays $100.00 against a $79.30 loss on the holding there (126% covered).",
         "The hedge pays back its cost if BTC finishes below $65,000; at or above $65,500 it expires worthless.",
         "Protection starts at $66,000, above spot ($65,586), so the payout can exceed the holding's actual loss by up to $20.70.",

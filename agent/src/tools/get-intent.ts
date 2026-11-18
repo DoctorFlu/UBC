@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { verifyContext, type Intent, type IntentView } from "@mandate/shared";
+import { formatEasternTime, verifyContext, type Intent, type IntentView } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, unavailable, verdictSchema, type NextAction } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
@@ -117,7 +117,7 @@ export const getIntent = defineTool({
     const atExpiry =
       row.settlement === null
         ? ""
-        : ` At expiry it resolved ${row.settlement.resolution.toUpperCase()}: ${moneyLine(row.settlement)}.`;
+        : ` At expiry, ${formatEasternTime(row.settlement.expiresAt)}, it resolved ${row.settlement.resolution.toUpperCase()}: ${moneyLine(row.settlement)}.`;
     const placed = row.order === null ? "" : orderSentence(row.order, row.amountCents, row.limitPrice);
     const why = row.reason === null ? "" : ` Reason: ${row.reason}.`;
     const flagged =

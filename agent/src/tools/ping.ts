@@ -1,5 +1,7 @@
+import { formatEasternTime } from "@mandate/shared";
 import * as z from "zod";
 import { defineTool } from "../mcp/tool";
+import { DateTextSchema } from "../support/format";
 import { SERVER_VERSION } from "../version";
 
 export const ping = defineTool({
@@ -11,14 +13,17 @@ export const ping = defineTool({
   outputSchema: z.object({
     status: z.literal("ok"),
     serverTime: z.string().describe("Server time, ISO 8601 in UTC"),
+    serverTimeText: DateTextSchema,
     version: z.string(),
   }),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: (_input, ctx) => {
-    const serverTime = ctx.clock.now().toISOString();
+    const now = ctx.clock.now();
+    const serverTime = now.toISOString();
+    const serverTimeText = formatEasternTime(now);
     return {
-      structured: { status: "ok" as const, serverTime, version: SERVER_VERSION },
-      summary: `Mandate server ${SERVER_VERSION} is up. Server time ${serverTime}.`,
+      structured: { status: "ok" as const, serverTime, serverTimeText, version: SERVER_VERSION },
+      summary: `Mandate server ${SERVER_VERSION} is up. Server time ${serverTimeText} (${serverTime}).`,
     };
   },
 });
