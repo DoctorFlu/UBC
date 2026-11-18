@@ -22,6 +22,7 @@ The browser never receives `ARC_RPC_URL`, because it may carry a provider key; i
 
 The Policy contract on Arc testnet is in [contracts/README.md](../contracts/README.md): `POLICY_ADDRESS=0x571D8ea7C86c80a230C10818743f8861084F82f3`, `POLICY_DEPLOY_BLOCK=72740419`.
 Moving to it is configuration: two keys of the stack's own, three roles the owner sets on the contract, gas for two addresses, and the variables below.
+Instead of the team's instance, the stack can deploy one of its own with `npm run arc:deploy` ([below](#our-own-instance-or-the-teams)).
 The hosted machine's switch is in [hosting.md](hosting.md#arc-testnet).
 
 | Variable | Required | Meaning |
@@ -65,6 +66,42 @@ The gas is measured, not guessed: the doctor starts a local anvil that forks Arc
 Nothing done on the fork reaches Arc, and the fork never uses the configured `ARC_RPC_URL`, so it spends no provider credits; `--no-fork` skips it.
 Measured on 2026-11-17 at 29 gwei: a proposal held for the owner 215,852 gas (0.0063 USDC), one approved by the rules 205,689 (0.0060), an owner approval 82,684 (0.0024), a `recordResult` 131,229 (0.0038).
 Arc pays gas in USDC, so 1 USDC from the faucet covers about 130 proposals, with the doctor's 20% headroom.
+
+### Our own instance, or the team's
+
+There are two ways to get a contract whose roles are the stack's keys:
+
+- **The team's instance** (`0x571D…82f3` above): its user, the deployer, calls `setAgent` and `setExecutor` with the addresses `arc:keygen` printed, and `setUser` to the owner's wallet.
+  Only that address can make these calls.
+- **Our own instance**: `npm run arc:deploy -- --owner 0x<owner wallet>` deploys the same contract with our keys in its roles, as `contracts/script/Deploy.s.sol` does, without waiting for anyone.
+
+`arc:deploy` sends three transactions from the executor's key: `new Policy(agent, executor)` from this checkout's compiled `contracts/src/Policy.sol` (the build the doctor compares against), `setPolicy` with the demo rules (`DEMO_POLICY`), and `setUser(owner)` last.
+The deployer is the contract's user only between the first and the last of them.
+It uses the executor's key because that key is funded and its role has no power over the rules; the agent's key never holds the user role, not even for one block, because the agent proposes the trades the user's rules judge.
+The keys come from the env file the process loads (`ENV_FILE`), never from the command line, and no key is printed.
+Do not run it while an executor with the same key is sending on the same chain: two senders with one key race for its nonces.
+
+It refuses, sending nothing, without `--owner`; with an owner that is the zero address, the agent or the executor; with a missing, malformed or shared key, or one of anvil's published keys; with a loopback `ARC_RPC_URL` unless `--fork` says it is a local fork; on a chain other than 5042002; and when the deployer's balance does not cover the three transactions with 50% headroom (it estimates the deployment, and bounds the two calls).
+Each transaction's hash is printed as it is sent; after the deployment the address, the deploy block and the command to finish a stopped run; at the end the two lines for the env file:
+
+```text
+POLICY_ADDRESS=0x...
+POLICY_DEPLOY_BLOCK=...
+```
+
+Then it runs the doctor against the same chain and exits 0 only when the doctor says `READY`.
+
+It is resumable and never deploys twice by accident:
+
+- `--resume 0x<address>` reads the contract first and sends only what is missing (`setPolicy`, `setUser`, or nothing).
+  It refuses an address that is not this build's Policy, names other keys, or whose user is neither the deployer nor the owner.
+  It finds the deploy block itself.
+- Without `--resume`, it looks at the contracts the deployer's key created (its last 64 nonces); if one is this build's Policy, it stops and names it.
+  `--new` deploys another anyway.
+
+`--dry-run` runs all three on a throwaway local anvil fork of Arc's public RPC, with the real keys loaded in the process, then the doctor on that fork, and sends nothing to Arc.
+The address it prints is the one a real run would get, while the deployer's nonce does not change.
+On 2026-11-18 at 02:05 UTC it used 3,092,050 gas at most (about 0.055 USDC spent at 20 gwei on the fork; up to 0.116 USDC with headroom) and ended with the doctor's `READY`.
 
 ### Which RPC each service uses, and what it costs
 
