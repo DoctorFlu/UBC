@@ -6,6 +6,7 @@
 import {
   buildLadder,
   GeminiError,
+  ladderRungs,
   type Ladder,
   type LadderListing,
   type MarketContract,
@@ -384,6 +385,16 @@ export class FakeMarkets implements MarketsClient {
   async getSpot(): Promise<SpotPrice> {
     await this.#check("getSpot");
     return SPOT;
+  }
+
+  /** What Gemini's production exchange lists, for `productionStrikes`. Default: the same events. */
+  productionEvents: MarketEvent[] | undefined;
+
+  async productionStrikes(eventTicker: string): Promise<ReadonlyMap<string, number>> {
+    await this.#check(`productionStrikes ${eventTicker}`);
+    const event = (this.productionEvents ?? this.events).find((e) => e.ticker === eventTicker);
+    if (event === undefined) throw new GeminiError("not_found", `no event ${eventTicker}`);
+    return new Map(ladderRungs(event).map((r) => [r.instrumentSymbol, r.strikeCents]));
   }
 
   async resolveMarket(instrumentSymbol: string) {

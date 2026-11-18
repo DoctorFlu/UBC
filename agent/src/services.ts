@@ -125,7 +125,13 @@ export interface MarketsClient {
   getEvent(eventTicker: string, signal?: AbortSignal): Promise<MarketEvent>;
   listLadders(asset: string, signal?: AbortSignal): Promise<LadderListing[]>;
   getLadder(options: GetLadderOptions, signal?: AbortSignal): Promise<Ladder>;
+  /** Spot from Gemini's production exchange, whose index every ladder settles on, whatever the venue. */
   getSpot(asset: string, signal?: AbortSignal): Promise<SpotPrice>;
+  /**
+   * The strike of each contract Gemini's production exchange lists on `eventTicker`, by instrument
+   * symbol: for positions the simulated venue filled there, which a sandbox ladder may not list.
+   */
+  productionStrikes(eventTicker: string, signal?: AbortSignal): Promise<ReadonlyMap<string, number>>;
   /** The event and contract behind a symbol, or null when Gemini has no such market. */
   resolveMarket(instrumentSymbol: string, signal?: AbortSignal): Promise<ResolvedMarket | null>;
 }
@@ -261,7 +267,7 @@ export interface Services {
 export function createServices(config: Config): Services {
   return {
     policy: createAgentPolicy(config),
-    markets: createGeminiMarkets({ baseUrl: config.marketData.baseUrl }),
+    markets: createGeminiMarkets(config.marketData),
     planner: createHedgePlanner(),
     console: createConsoleClient(config),
     payments: createSignalPayments(config),

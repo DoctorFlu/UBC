@@ -58,7 +58,12 @@ async function coverOfGoal(
   const lookup = await ladder(plan.asset, plan.eventTicker).catch(() => ({ ok: false as const }));
   if (!lookup.ok) return unavailable;
   const holding = holdings.find((candidate) => candidate.asset === plan.asset)?.quantity ?? null;
-  const cover = coverNow({ plan, holdingQuantity: holding, quotes: ladderQuotes(lookup.ladder), intents });
+  const cover = coverNow({
+    plan,
+    holdingQuantity: holding,
+    quotes: ladderQuotes(lookup.ladder, lookup.elsewhere),
+    intents,
+  });
   if (!cover) return unavailable;
   const { assessment } = cover;
   return {

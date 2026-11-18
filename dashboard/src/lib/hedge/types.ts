@@ -33,8 +33,18 @@ export interface LadderQuotes {
   eventTicker: string;
   title: string;
   expiry: string;
-  /** Mid of Gemini's spot bid and ask, the price the planner measures from. */
+  /**
+   * Spot, the price the planner measures from: Gemini production's BTC/USD price on every venue (the
+   * ladder settles on its index), the mid of bid and ask, or the last trade when `spotBasis` says so.
+   */
   spotCents: number;
+  /** `mid` of bid and ask, or `last` trade when the spread was too wide for a mid. */
+  spotBasis: "mid" | "last";
+  /**
+   * Strikes Gemini's production exchange lists on this event that the venue's ladder lacks, for cover of
+   * the simulated venue's earlier fills there; null when production could not be read.
+   */
+  elsewhere: { instrumentSymbol: string; strikeCents: number }[] | null;
   fetchedAt: string;
   /** Highest strike first. */
   rungs: QuoteRung[];

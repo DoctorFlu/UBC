@@ -3,12 +3,16 @@
  * account key, no authenticated route and no order placement exist on this path.
  */
 import {
-  createGeminiClient,
+  createMarketDataClient,
+  createProductionClient,
   eventTickerCandidates,
   findInstrument,
+  GEMINI_HOSTS,
   isInstrumentSymbol,
+  ladderRungs,
   type GeminiClient,
-  type GeminiClientOptions,
+  type MarketDataClientOptions,
+  type MarketDataSource,
   type MarketContract,
   type MarketEvent,
 } from "@mandate/gemini";
@@ -27,8 +31,24 @@ export interface ResolvedMarket {
 export const isGeminiSymbol = isInstrumentSymbol;
 export { eventTickerCandidates };
 
-export function createGeminiMarkets(options: GeminiClientOptions = {}): MarketsClient {
-  const client: GeminiClient = createGeminiClient({ maxRetries: 1, timeoutMs: 8_000, ...options });
+const PRODUCTION: Pick<MarketDataSource, "baseUrl" | "productionBaseUrl"> = {
+  baseUrl: GEMINI_HOSTS.production,
+  productionBaseUrl: GEMINI_HOSTS.production,
+};
+
+/**
+ * Market data from the stack's source (`marketDataSource`, production by default): listings and books from
+ * the venue's exchange, spot from production's (`createMarketDataClient`).
+ */
+export function createGeminiMarkets(
+  source: Pick<MarketDataSource, "baseUrl" | "productionBaseUrl"> = PRODUCTION,
+  options: MarketDataClientOptions = {},
+): MarketsClient {
+  const settings = { maxRetries: 1, timeoutMs: 8_000, ...options };
+  const client: GeminiClient = createMarketDataClient(source, settings);
+  // The same client when the venue is production: nothing is read twice.
+  const production: GeminiClient =
+    source.productionBaseUrl === source.baseUrl ? client : createProductionClient(source, settings);
   const resolved = new Map<string, string>();
 
   return {
@@ -46,6 +66,10 @@ export function createGeminiMarkets(options: GeminiClientOptions = {}): MarketsC
     listLadders: (asset, signal) => client.listLadders(asset, { signal }),
     getLadder: (opts, signal) => client.getLadder(opts, { signal }),
     getSpot: (asset, signal) => client.getSpot(asset, { signal }),
+    async productionStrikes(eventTicker, signal) {
+      const event = await production.getEvent(eventTicker, { signal });
+      return new Map(ladderRungs(event).map((rung) => [rung.instrumentSymbol, rung.strikeCents]));
+    },
     async resolveMarket(instrumentSymbol, signal) {
       const known = resolved.get(instrumentSymbol);
       const found = await findInstrument(

@@ -262,8 +262,9 @@ export const planHedge = defineTool({
 
     // What is already held on this ladder, from the chain. Without it the plan could buy twice.
     let held: IntentPosition[];
+    let elsewhere: ReadonlyMap<string, number>;
     try {
-      held = await heldPositions(ctx.policy, ladder);
+      ({ positions: held, elsewhere } = await heldPositions(ctx.policy, ladder, ctx.markets));
     } catch (error) {
       return none(describeFailure(error, ctx));
     }
@@ -312,10 +313,12 @@ export const planHedge = defineTool({
         createdAt: now,
         ladderSummary: ladderSummaryFromLadder(ladder),
         categoryId: Category.Crypto,
-        strikes: ladder.rungs.map((r) => ({
-          instrumentSymbol: r.instrumentSymbol,
-          strikeCents: r.strikeCents,
-        })),
+        // With the strikes of held positions only production lists, so execute_plan's cover check
+        // counts them as this plan did.
+        strikes: [
+          ...ladder.rungs.map((r) => ({ instrumentSymbol: r.instrumentSymbol, strikeCents: r.strikeCents })),
+          ...[...elsewhere].map(([instrumentSymbol, strikeCents]) => ({ instrumentSymbol, strikeCents })),
+        ],
         basis: new Set(held.map((p) => p.intentId)),
         consoleStored: false,
       },
