@@ -121,8 +121,12 @@ export class FakeGeminiPrivate {
    * Whether an order would take liquidity at once. A maker-only order that would is cancelled instead
    * (Gemini REST's `makerOrCancel`); other orders rest as usual, since this fake has no matching engine.
    */
-  wouldTake: (order: { symbol: string; side: "buy" | "sell"; outcome: "yes" | "no"; priceCents: number }) => boolean =
-    () => false;
+  wouldTake: (order: {
+    symbol: string;
+    side: "buy" | "sell";
+    outcome: "yes" | "no";
+    priceCents: number;
+  }) => boolean = () => false;
   private faults: PlacementFault[] = [];
   private settled: SettledEntry[] = [];
   /** Real-sized ids, above 2^53 like the sandbox's (145853902320696849), so rounding one shows up. */
@@ -416,7 +420,12 @@ export class FakeGeminiPrivate {
     for (const order of this.orders.values()) {
       if (order.filled === 0) continue;
       const key = `${order.symbol}:${order.outcome}`;
-      const entry = held.get(key) ?? { symbol: order.symbol, outcome: order.outcome, quantity: 0, costUnits: 0 };
+      const entry = held.get(key) ?? {
+        symbol: order.symbol,
+        outcome: order.outcome,
+        quantity: 0,
+        costUnits: 0,
+      };
       const sign = order.side === "buy" ? 1 : -1;
       entry.quantity += sign * order.filled;
       entry.costUnits += sign * order.costUnits;
