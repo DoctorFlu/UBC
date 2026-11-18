@@ -54,6 +54,18 @@ export interface FakeOrder {
   cancelledAt: string | null;
 }
 
+/**
+ * Someone else's buy order resting on the public book (another account's: the executor's NO bid that did
+ * not fill at once, say). This account's buys meet it as Gemini's matching engine would.
+ */
+export interface FakeForeignOrder {
+  symbol: string;
+  outcome: "yes" | "no";
+  priceCents: number;
+  /** Hundredths of a contract still resting. */
+  hundredths: number;
+}
+
 interface SettledEntry {
   symbol: string;
   outcome: "yes" | "no";
@@ -127,6 +139,20 @@ export class FakeGeminiPrivate {
     outcome: "yes" | "no";
     priceCents: number;
   }) => boolean = () => false;
+  /**
+   * Other accounts' buy orders on the public book. A buy of this account's that meets one (a YES bid at y
+   * and a NO bid at n on one contract meet when y + n >= 100) takes it at its price when placed as a plain
+   * limit order, or is cancelled when placed maker only.
+   */
+  readonly foreign: FakeForeignOrder[] = [];
+  /**
+   * Placements that met an open order of this account's own on the other side of the same contract. A
+   * maker-only one is cancelled, as Gemini cancels any order that would take liquidity; a plain one is kept
+   * here too and rests, as a test then fails on this list being non-empty.
+   */
+  readonly selfCrosses: { placed: FakeOrder; met: FakeOrder }[] = [];
+  /** Called after every request this fake answers, so a test can look at the book between requests. */
+  afterRequest: (route: string) => void = () => {};
   private faults: PlacementFault[] = [];
   private settled: SettledEntry[] = [];
   /** Real-sized ids, above 2^53 like the sandbox's (145853902320696849), so rounding one shows up. */
@@ -255,9 +281,9 @@ export class FakeGeminiPrivate {
           },
         };
       case "POST /v1/prediction-markets/order":
-        return this.place(fields);
+        return this.observed(route, this.place(fields));
       case "POST /v1/prediction-markets/order/cancel":
-        return this.cancelRoute(fields);
+        return this.observed(route, this.cancelRoute(fields));
       case "POST /v1/prediction-markets/orders/active":
         return this.list(fields, (order) => order.status === "open");
       case "POST /v1/prediction-markets/orders/history":
@@ -386,11 +412,40 @@ export class FakeGeminiPrivate {
       cancelledAt: null,
     };
     this.orders.set(order.orderId, order);
-    if (makerOnly && this.wouldTake({ symbol: order.symbol, side, outcome, priceCents: price })) {
+    const meets = (yes: number, no: number) => yes + no >= 100;
+    const crossing = (other: { symbol: string; outcome: "yes" | "no"; priceCents: number }) =>
+      side === "buy" &&
+      other.symbol === order.symbol &&
+      other.outcome !== outcome &&
+      (outcome === "yes" ? meets(price, other.priceCents) : meets(other.priceCents, price));
+    const own = [...this.orders.values()].find(
+      (other) => other !== order && other.status === "open" && other.side === "buy" && crossing(other),
+    );
+    if (own !== undefined) this.selfCrosses.push({ placed: order, met: own });
+    const theirs = this.foreign.filter((other) => other.hundredths > 0 && crossing(other));
+    if (
+      makerOnly &&
+      (own !== undefined ||
+        theirs.length > 0 ||
+        this.wouldTake({ symbol: order.symbol, side, outcome, priceCents: price }))
+    ) {
       this.cancel(order);
+    } else {
+      // Best price first for the taker: the highest bid on the other side.
+      for (const other of theirs.sort((a, b) => b.priceCents - a.priceCents)) {
+        const amount = Math.min(other.hundredths, order.quantity - order.filled);
+        if (amount <= 0) break;
+        other.hundredths -= amount;
+        this.fill(order.orderId, amount, 100 - other.priceCents);
+      }
     }
     if (fault?.kind === "drop-after") return DROPPED;
     return { status: 201, body: this.orderView(order) };
+  }
+
+  private observed<T>(route: string, answer: T): T {
+    this.afterRequest(route);
+    return answer;
   }
 
   private cancelRoute(fields: Record<string, unknown>): FakeAnswer {

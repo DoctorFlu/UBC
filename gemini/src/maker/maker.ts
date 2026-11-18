@@ -6,18 +6,24 @@
  * its own.
  *
  * Each cycle reads production's public books, the sandbox's public listing, and the maker account's open
- * orders and positions, then cancels what no longer matches and places what is missing, maker only (an
- * order that would take liquidity is cancelled by Gemini instead of filling). It cancels every order of
- * its own when it starts and when it stops, and touches no order without its client order id prefix.
+ * orders and positions, then changes only what differs. An order that still matches its quote stays where
+ * it is. An order whose price or size changed is replaced: the new quote is placed first and the old order
+ * cancelled after, so the side is never empty. Quotes are maker only (an order that would take liquidity is
+ * cancelled by Gemini instead of filling), except one sent to meet someone else's order at production's
+ * price (see mirror.ts). The YES bids below spot go first, nearest spot first: what a hedge buys is fresh
+ * first. It cancels every order of its own when it starts and when it stops, and touches no order without
+ * its client order id prefix.
  */
 import { isGeminiPrivateError } from "../private-errors";
 import type { GeminiPrivateClient, PrivateOrder } from "../private";
 import type { EventSummary, MarketEvent, OrderBook } from "../types";
 import { toCents, toHundredths } from "../units";
 import {
+  crosses,
   mirrorQuotes,
   quoteChanges,
   quoteKey,
+  quoteSteps,
   type DesiredQuote,
   type Holding,
   type MakerOutcome,
@@ -75,10 +81,29 @@ export interface CycleReport {
   cancelled: number;
   /** Quotes Gemini cancelled at once because they would have taken liquidity, or refused. */
   refused: number;
+  /** Of `placed`, quotes that took the place of a resting order (placed first, then the order cancelled). */
+  replaced: number;
+  /** Orders left resting at their old price for one more cycle, the cycle's placements used up. */
+  stale: number;
   skips: Skip[];
 }
 
 const MAX_CANCEL_ROUNDS = 20;
+/**
+ * How far from production's price an order being replaced may stay for one more cycle when the cycle's
+ * placements are used up: a bid at most this many cents above or below the quote, and no larger. A cent
+ * either way is one tick of Gemini's price grid: the sandbox then shows what production showed one cycle
+ * ago, instead of nothing.
+ */
+export const STALE_BOUND_CENTS = 1;
+
+/** Whether `order` may stay one more cycle in place of `quote` (see STALE_BOUND_CENTS). */
+export function staleButFair(order: RestingQuote, quote: DesiredQuote): boolean {
+  return (
+    Math.abs(order.priceCents - quote.priceCents) <= STALE_BOUND_CENTS &&
+    order.remainingHundredths <= quote.hundredths
+  );
+}
 /** How long a refused price is not tried again on the same side (it is tried at once at a new price). */
 const REFUSAL_HOLD_MS = 5 * 60_000;
 
@@ -281,57 +306,74 @@ export class MirrorMaker {
       resting.filter((quote) => !untouched(quote.symbol, quote.outcome)),
       desired,
     );
+    // The maker's own orders resting now, kept up to date as this cycle changes them, so that no quote is
+    // ever sent where it would meet one of them.
+    const live = new Map(resting.map((order) => [order.orderId, order]));
     let cancelled = 0;
+    const cancel = async (order: { orderId: string; symbol: string }): Promise<void> => {
+      try {
+        await account.cancelOrder(order.orderId);
+        cancelled += 1;
+        live.delete(order.orderId);
+      } catch (error) {
+        say(`could not cancel order ${order.orderId} (${order.symbol}): ${message(error)}`);
+      }
+    };
+    // First what goes with nothing in its stead: a side with no quote now, a doubled side, a stray.
     for (const order of [
       ...changes.cancel,
       ...strays.map((order) => ({ orderId: order.orderId, symbol: order.symbol })),
     ]) {
-      try {
-        await account.cancelOrder(order.orderId);
-        cancelled += 1;
-      } catch (error) {
-        say(`could not cancel order ${order.orderId} (${order.symbol}): ${message(error)}`);
-      }
+      await cancel(order);
     }
     let placed = 0;
     let refused = 0;
-    for (const quote of changes.place.slice(0, settings.maxPlacementsPerCycle)) {
-      const key = quoteKey(quote.symbol, quote.outcome);
-      try {
-        const order = await account.placeOrder({
+    let replaced = 0;
+    let stale = 0;
+    let sent = 0;
+    for (const { quote, replaces } of quoteSteps(changes)) {
+      if (sent >= settings.maxPlacementsPerCycle) {
+        // Out of placements this cycle. An order being replaced stays (stale but present, for one more
+        // cycle) only within STALE_BOUND_CENTS of production's price and no larger than its size.
+        if (replaces !== null) {
+          if (staleButFair(replaces, quote)) stale += 1;
+          else await cancel(replaces);
+        }
+        continue;
+      }
+      // quoteSteps orders a rung's two sides so this does not happen; should it, the maker's order goes
+      // first, so the maker never trades with itself.
+      for (const order of [...live.values()]) {
+        if (order.symbol !== quote.symbol || order.outcome === quote.outcome) continue;
+        const [yes, no] =
+          quote.outcome === "yes"
+            ? [quote.priceCents, order.priceCents]
+            : [order.priceCents, quote.priceCents];
+        if (!crosses(yes, no)) continue;
+        say(
+          `${quote.outcome.toUpperCase()} bid at ${String(quote.priceCents)}c on ${quote.symbol} would meet the maker's own ${order.outcome.toUpperCase()} bid at ${String(order.priceCents)}c: cancelling that first`,
+        );
+        await cancel(order);
+      }
+      sent += 1;
+      const answer = await this.#place(quote);
+      if (answer.status === "placed") {
+        placed += 1;
+        live.set(answer.orderId, {
+          orderId: answer.orderId,
           symbol: quote.symbol,
-          side: "buy",
           outcome: quote.outcome,
-          quantity: decimal(quote.hundredths),
-          price: price(quote.priceCents),
-          clientOrderId: `${MAKER_ORDER_PREFIX}${this.#newId()}`,
-          makerOrCancel: true,
+          priceCents: quote.priceCents,
+          remainingHundredths: quote.hundredths,
         });
-        this.#remember(key, quote.priceCents, this.#now());
-        if (order.status.toLowerCase() === "cancelled") {
-          refused += 1;
-          this.#refused.set(key, { priceCents: quote.priceCents, atMs: this.#now() });
-          this.#note(
-            key,
-            `${quote.outcome.toUpperCase()} bid at ${String(quote.priceCents)}c on ${quote.symbol} would have taken liquidity: skipped until production moves`,
-          );
-        } else {
-          placed += 1;
-        }
-      } catch (error) {
-        if (isGeminiPrivateError(error) && error.outcomeUnknown) {
-          this.#pending.set(key, this.#now() + 2 * settings.intervalMs);
-          say(
-            `no answer placing ${quote.outcome.toUpperCase()} bid on ${quote.symbol}; looking it up in the account before quoting that side again`,
-          );
-        } else {
-          refused += 1;
-          this.#refused.set(key, { priceCents: quote.priceCents, atMs: this.#now() });
-          this.#note(
-            key,
-            `${quote.outcome.toUpperCase()} bid at ${String(quote.priceCents)}c on ${quote.symbol} refused: ${message(error)}`,
-          );
-        }
+      } else if (answer.status === "refused") {
+        refused += 1;
+      }
+      // The order it replaces is at a price production no longer shows: it goes whatever became of the
+      // new one, and after it, so the side is empty at no instant when the new one rests.
+      if (replaces !== null) {
+        await cancel(replaces);
+        if (answer.status === "placed") replaced += 1;
       }
     }
     for (const skip of plan.skips) {
@@ -351,14 +393,68 @@ export class MirrorMaker {
       placed,
       cancelled,
       refused,
+      replaced,
+      stale,
       skips: plan.skips,
     };
-    if (placed + cancelled + refused > 0) {
+    if (placed + cancelled + refused + stale > 0) {
       say(
-        `cycle: ${String(rungs.length)} rungs, ${String(plan.quotes.length)} quotes wanted, ${String(changes.keep.length)} kept, ${String(placed)} placed, ${String(cancelled)} cancelled, ${String(refused)} refused`,
+        `cycle: ${String(rungs.length)} rungs, ${String(plan.quotes.length)} quotes wanted, ${String(changes.keep.length)} kept, ${String(placed)} placed (${String(replaced)} replacing an order), ${String(cancelled)} cancelled, ${String(refused)} refused${stale > 0 ? `, ${String(stale)} left stale until the next cycle` : ""}`,
       );
     }
     return report;
+  }
+
+  /**
+   * Places one quote, maker only unless it may take a foreign order (`DesiredQuote.mayTake`). Remembers
+   * a refusal so the same price is not tried again on that side until production moves, and a placement
+   * that got no answer so its side is left alone until the account shows what became of it.
+   */
+  async #place(
+    quote: DesiredQuote,
+  ): Promise<{ status: "placed"; orderId: string } | { status: "refused" } | { status: "unknown" }> {
+    const { account, settings, say } = this.#deps;
+    const key = quoteKey(quote.symbol, quote.outcome);
+    try {
+      const order = await account.placeOrder({
+        symbol: quote.symbol,
+        side: "buy",
+        outcome: quote.outcome,
+        quantity: decimal(quote.hundredths),
+        price: price(quote.priceCents),
+        clientOrderId: `${MAKER_ORDER_PREFIX}${this.#newId()}`,
+        makerOrCancel: quote.mayTake !== true,
+      });
+      this.#remember(key, quote.priceCents, this.#now());
+      if (order.status.toLowerCase() === "cancelled") {
+        this.#refused.set(key, { priceCents: quote.priceCents, atMs: this.#now() });
+        this.#note(
+          key,
+          `${quote.outcome.toUpperCase()} bid at ${String(quote.priceCents)}c on ${quote.symbol} would have taken liquidity: skipped until production moves`,
+        );
+        return { status: "refused" };
+      }
+      if (quote.mayTake === true) {
+        say(
+          `${quote.outcome.toUpperCase()} bid at ${String(quote.priceCents)}c on ${quote.symbol} sent to meet an order that is not the maker's, at production's price`,
+        );
+      }
+      return { status: "placed", orderId: order.orderId };
+    } catch (error) {
+      if (isGeminiPrivateError(error) && error.outcomeUnknown) {
+        this.#pending.set(key, this.#now() + 2 * settings.intervalMs);
+        say(
+          `no answer placing ${quote.outcome.toUpperCase()} bid on ${quote.symbol}; looking it up in the account before quoting that side again`,
+        );
+        return { status: "unknown" };
+      }
+      this.#refused.set(key, { priceCents: quote.priceCents, atMs: this.#now() });
+      this.#note(
+        key,
+        `${quote.outcome.toUpperCase()} bid at ${String(quote.priceCents)}c on ${quote.symbol} refused: ${message(error)}`,
+      );
+      return { status: "refused" };
+    }
   }
 
   async #discover(): Promise<void> {
