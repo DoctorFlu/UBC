@@ -21,8 +21,6 @@ export interface WalletRestore {
   restoring: boolean;
   /** The wallet that has not answered by the deadline ("MetaMask", or "Your wallet"), until one connects. */
   unanswered: string | null;
-  /** The person pressed Connect: the note about the wallet that did not answer has done its job. */
-  connectStarted: () => void;
   /** The person's own connection: a restore that answers after it does not replace it. */
   connected: (uid: string) => void;
 }
@@ -30,7 +28,6 @@ export interface WalletRestore {
 const RestoreContext = createContext<WalletRestore>({
   restoring: false,
   unanswered: null,
-  connectStarted: () => {},
   connected: () => {},
 });
 
@@ -106,24 +103,45 @@ export function WalletRestoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let live = true;
+    let overdue = false;
+    // wagmi's restore records each wallet that answers at once, but says "connected" only once every
+    // wallet has answered, and only if nothing else changed the status meanwhile (a Connect the person
+    // declined, say). Past the deadline, a wallet it recorded is connected, whatever the others do.
+    const settle = () => {
+      const { current, connections, status } = config.state;
+      if (current !== null && connections.has(current) && status !== "connected") {
+        config.setState((state) => ({ ...state, status: "connected" }));
+      }
+    };
     const deadline = setTimeout(() => {
+      overdue = true;
       setRestoring(false);
+      settle();
       void waitedOn(config).then((name) => {
         if (live && config.state.status !== "connected" && chosen.current === null) setUnanswered(name);
       });
     }, RESTORE_DEADLINE_MS);
-    // The person's connection as it is now (its chain changes), to put back if a late restore replaces it.
     const unwatch = config.subscribe(
       (state) => state,
       (state) => {
-        const own = chosen.current === null ? undefined : state.connections.get(chosen.current);
-        if (own && state.current === chosen.current) kept.current = own;
+        if (chosen.current !== null) {
+          const own = state.connections.get(chosen.current);
+          // The person's connection as it is now (its chain changes), to put back if a late restore replaces it.
+          if (own && state.current === chosen.current) kept.current = own;
+          // They disconnected it: nothing to put back.
+          if (!own && state.status === "disconnected") {
+            chosen.current = null;
+            kept.current = null;
+          }
+        }
         if (state.status === "connected") setUnanswered(null);
+        else if (overdue) settle();
       },
     );
     void restoreOnce(config).then(() => {
       clearTimeout(deadline);
       if (!live) return;
+      overdue = true;
       setRestoring(false);
       setUnanswered(null);
       // wagmi's restore replaces every connection with the one that answered: when that answer came after
@@ -138,6 +156,7 @@ export function WalletRestoreProvider({ children }: { children: ReactNode }) {
           status: "connected",
         }));
       }
+      settle();
     });
     return () => {
       live = false;
@@ -150,7 +169,6 @@ export function WalletRestoreProvider({ children }: { children: ReactNode }) {
     () => ({
       restoring,
       unanswered,
-      connectStarted: () => setUnanswered(null),
       connected: (uid) => {
         chosen.current = uid;
         kept.current = config.state.connections.get(uid) ?? null;

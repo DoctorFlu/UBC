@@ -102,11 +102,13 @@ interface StandInWallet {
   account: string;
   startChainId: number;
   /**
-   * A wallet that is locked, asleep or busy, as MetaMask can be: it answers nothing until the person opens
-   * it, which the site's request to connect does (`eth_requestAccounts`, `wallet_requestPermissions`), or
-   * until the test wakes it (`wakeWallet`). Its pending requests are answered then.
+   * A wallet that is locked, asleep or busy, as MetaMask can be: it answers nothing until it wakes, and
+   * then answers what is pending. The test wakes it with `wakeWallet`; besides, with "until-opened" the
+   * site's request to connect (`eth_requestAccounts`, `wallet_requestPermissions`) opens it, as a locked
+   * MetaMask asks to be unlocked; "deeply" leaves that request pending too; with "declines" the person
+   * says no to it (4001) and the wallet stays asleep.
    */
-  asleep?: boolean;
+  asleep?: "until-opened" | "deeply" | "declines";
 }
 
 /** Each stand-in's icon, a data URI as wallets announce them: a coloured square. */
@@ -173,7 +175,7 @@ async function installWallets(
           for (const listener of listeners.get(event) ?? []) listener(value);
         };
         const fail = (code: number, message: string) => Object.assign(new Error(message), { code });
-        let awake = wallet.asleep !== true;
+        let awake = wallet.asleep === undefined;
         const waiting: (() => void)[] = [];
         const wake = () => {
           awake = true;
@@ -214,8 +216,10 @@ async function installWallets(
           },
           async request({ method, params }: { method: string; params?: unknown }) {
             calls.push({ method, params });
-            // Asking to connect opens the wallet, as a locked MetaMask asks to be unlocked; nothing else does.
-            if (method === "eth_requestAccounts" || method === "wallet_requestPermissions") wake();
+            const toConnect = method === "eth_requestAccounts" || method === "wallet_requestPermissions";
+            if (toConnect && !awake && wallet.asleep === "declines")
+              throw fail(4001, "User rejected the request.");
+            if (toConnect && wallet.asleep === "until-opened") wake();
             if (!awake) await new Promise<void>((answer) => waiting.push(answer));
             switch (method) {
               case "eth_chainId":
@@ -493,11 +497,15 @@ test("a remembered wallet that never answers: within the deadline the console of
 }) => {
   const owner = devAccount("user").address;
   await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
-  await installWallets(page, [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: true }], {
-    rpcUrl: chain.anvil.rpcUrl,
-    announce: true,
-    legacy: METAMASK.rdns,
-  });
+  await installWallets(
+    page,
+    [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "until-opened" }],
+    {
+      rpcUrl: chain.anvil.rpcUrl,
+      announce: true,
+      legacy: METAMASK.rdns,
+    },
+  );
 
   // Home: the restore asked MetaMask for its accounts and had no answer; the owner can still act.
   await page.goto("/");
@@ -544,11 +552,15 @@ test("a remembered wallet that never answers: within the deadline the console of
 test("a remembered wallet that answers late connects by itself, with no click", async ({ page }) => {
   const owner = devAccount("user").address;
   await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
-  await installWallets(page, [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: true }], {
-    rpcUrl: chain.anvil.rpcUrl,
-    announce: true,
-    legacy: METAMASK.rdns,
-  });
+  await installWallets(
+    page,
+    [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "until-opened" }],
+    {
+      rpcUrl: chain.anvil.rpcUrl,
+      announce: true,
+      legacy: METAMASK.rdns,
+    },
+  );
   await page.goto(await firstMandatePath(baseURL));
   await expect(page.getByTestId("wallet-notice")).toContainText("MetaMask did not answer");
   await expectActionable(page);
@@ -571,7 +583,7 @@ test("a wallet the owner picked while another did not answer stays the one conne
   await installWallets(
     page,
     [
-      { ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: true },
+      { ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "until-opened" },
       { ...PHANTOM, account: stranger, startChainId: CHAIN_ID },
     ],
     { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
@@ -601,6 +613,126 @@ test("a wallet the owner picked while another did not answer stays the one conne
     .toBe(true);
   await expect(chip).toHaveAttribute("data-address", stranger);
   await expect(chip).toHaveAttribute("data-owner", "false");
+});
+
+test("a wallet the owner picked and then disconnected is not put back when another answers late", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  const stranger = devAccount("outsider").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(
+    page,
+    [
+      { ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "deeply" },
+      { ...PHANTOM, account: stranger, startChainId: CHAIN_ID },
+    ],
+    { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
+  );
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await connect.click();
+  await page
+    .getByRole("dialog", { name: "Choose a wallet" })
+    .getByRole("button", { name: "Phantom" })
+    .click();
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", stranger);
+  await chip.click();
+  await page.getByRole("button", { name: "Disconnect" }).click();
+  await expect(connect).toBeVisible();
+
+  // MetaMask answers the restore's request now: it is the wallet connected, not the Phantom left behind.
+  await wakeWallet(page, METAMASK.rdns);
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+});
+
+test("a remembered wallet that answers at once is connected even while another never answers", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  const stranger = devAccount("outsider").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(
+    page,
+    [
+      { ...METAMASK, account: owner, startChainId: CHAIN_ID },
+      { ...PHANTOM, account: stranger, startChainId: CHAIN_ID, asleep: "deeply" },
+    ],
+    { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
+  );
+  await page.goto(await firstMandatePath(baseURL));
+  // The restore asked Phantom too, and is still waiting on it; MetaMask answered, so it is the owner's.
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true })).toBeEnabled();
+  expect(methods(await walletCalls(page, PHANTOM.rdns))).toContain("eth_accounts");
+});
+
+test("a wallet that does not answer the request to connect either: the button can be pressed again, says it is waiting, and asks once", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(page, [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "deeply" }], {
+    rpcUrl: chain.anvil.rpcUrl,
+    announce: true,
+    legacy: METAMASK.rdns,
+  });
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await connect.click();
+  // MetaMask has not answered: the button is not left busy, and the page still says which wallet to open.
+  await expectActionable(page);
+  await expect(connect).toBeEnabled();
+  await expect(page.getByTestId("wallet-notice")).toContainText("MetaMask did not answer");
+  await connect.click();
+  await expect(page.getByText("Waiting for your wallet")).toBeVisible();
+  const asks = (await walletCalls(page, METAMASK.rdns)).filter(
+    (call) => call.method === "wallet_requestPermissions" || call.method === "eth_requestAccounts",
+  );
+  expect(asks).toHaveLength(1);
+
+  // The owner opens MetaMask and approves: the request it held connects the owner.
+  await wakeWallet(page, METAMASK.rdns);
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
+});
+
+test("after a Connect the owner declined, the remembered wallet's late answer still connects", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(page, [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "declines" }], {
+    rpcUrl: chain.anvil.rpcUrl,
+    announce: true,
+    legacy: METAMASK.rdns,
+  });
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await connect.click();
+  await expect(page.getByText("You declined in MetaMask, so nothing changed.")).toBeVisible();
+  await expectActionable(page);
+
+  await wakeWallet(page, METAMASK.rdns);
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
 });
 
 test("a wallet remembered from before the chooser reconnects under its own name", async ({ page }) => {

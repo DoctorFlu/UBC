@@ -1,7 +1,7 @@
 "use client";
 
 import { Wallet } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type Connector, useConnect, useConnectors } from "wagmi";
 
 import { Dialog } from "@/components/ui/Dialog";
@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/Toast";
 
 import styles from "@/components/shell/Shell.module.css";
 
-import { useWalletRestore } from "./restore";
+import { RESTORE_DEADLINE_MS, useWalletRestore } from "./restore";
 
 /** Whether the person said no in their wallet (EIP-1193 code 4001), however the wallet library wrapped it. */
 export function declined(error: unknown): boolean {
@@ -39,7 +39,11 @@ export function walletChoices(connectors: readonly Connector[]): Connector[] {
 export interface ConnectWallet {
   /** Connects the one wallet in the browser at once, or opens the chooser when there are more. */
   start: () => void;
-  /** True while a wallet is asked, and the chooser is closed (a button then shows its spinner). */
+  /**
+   * True while a wallet is asked and the chooser is closed, for as long as a wallet takes to answer (a
+   * button then shows its spinner). One that has not answered by then may be locked: the button is
+   * pressable again, and says so rather than asking twice.
+   */
   connecting: boolean;
   /** The chooser dialog: render it once, next to the control that calls `start`. */
   chooser: ReactNode;
@@ -55,9 +59,26 @@ export function useConnectWallet(): ConnectWallet {
   const toast = useToast();
   const restore = useWalletRestore();
   const [chooserOpen, setChooserOpen] = useState(false);
+  const [patient, setPatient] = useState(true);
+  const asked = useRef<string | null>(null);
   const choices = walletChoices(connectors);
 
-  const connectWith = (connector: Connector) =>
+  useEffect(() => {
+    if (!isPending) return;
+    const timer = setTimeout(() => setPatient(false), RESTORE_DEADLINE_MS);
+    return () => clearTimeout(timer);
+  }, [isPending]);
+
+  const connectWith = (connector: Connector) => {
+    if (isPending) {
+      toast({
+        title: "Waiting for your wallet",
+        description: `${asked.current ?? "Your wallet"} has not answered yet. Open it to unlock it and approve the connection.`,
+      });
+      return;
+    }
+    asked.current = connector.name;
+    setPatient(true);
     connect(
       { connector },
       {
@@ -76,11 +97,11 @@ export function useConnectWallet(): ConnectWallet {
           ),
       },
     );
+  };
 
   const start = () => {
     const [first, ...others] = choices;
     if (!first) return;
-    restore.connectStarted();
     if (others.length === 0) connectWith(first);
     else setChooserOpen(true);
   };
@@ -99,7 +120,7 @@ export function useConnectWallet(): ConnectWallet {
               type="button"
               className={styles.walletChoice}
               onClick={() => connectWith(connector)}
-              disabled={isPending}
+              disabled={isPending && patient}
               data-testid="wallet-choice"
               data-wallet={connector.id}
             >
@@ -118,5 +139,5 @@ export function useConnectWallet(): ConnectWallet {
     </Dialog>
   );
 
-  return { start, connecting: isPending && !chooserOpen, chooser };
+  return { start, connecting: isPending && patient && !chooserOpen, chooser };
 }
