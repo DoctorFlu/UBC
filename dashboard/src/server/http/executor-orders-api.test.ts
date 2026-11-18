@@ -367,6 +367,77 @@ describe("the executor's order journal in the console", () => {
       announcedAt: base.announcedAt,
     });
     await expectError(await announce({ ...base, announcedAt: "2026-11-17T07:00:00.000Z" }), 409, "stale");
+
+    // A restart on the same venue adds nothing to the history: the announcement in force keeps its start.
+    const deploymentId = service.deploymentIdFor(envMandate(service)) ?? "";
+    const history = () => service.venueOrders.venues(deploymentId);
+    expect(history()).toHaveLength(1);
+    expect((await announce({ ...base, announcedAt: "2026-11-17T08:05:00.000Z" })).status).toBe(200);
+    expect(history()).toHaveLength(1);
+    expect(envSnapshot(service).chain?.venues).toEqual([
+      {
+        holdsFromBlock: null,
+        announced: { venue: "gemini", environment: "sandbox", announcedAt: base.announcedAt },
+      },
+    ]);
+  });
+
+  it("appends a new venue to the history, holding from one past the chain head read when it is stored", async () => {
+    const deploymentId = service.deploymentIdFor(envMandate(service)) ?? "";
+    const before = service.venueOrders.venues(deploymentId);
+    const head = Number(await chain.executor.publicClient.getBlockNumber({ cacheTime: 0 }));
+    const productionConsole: ConsoleMarketData = () =>
+      ({ environment: "production", settings: "EXECUTOR_VENUE=simulated (the default)" }) as const;
+    const document: ExecutorVenue = {
+      kind: "executor-venue",
+      version: 1,
+      chainId: chain.executor.publicClient.chain.id,
+      policy: chain.address.toLowerCase() as `0x${string}`,
+      venue: "simulated",
+      environment: null,
+      announcedAt: "2026-11-17T08:30:00.000Z",
+    };
+    const response = await putExecutorVenue(productionConsole)(
+      new Request(`http://console.test${CONSOLE_EXECUTOR_ROUTES.venue}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ document, signature: await executorSign(hashExecutorRecord(document)) }),
+      }),
+      service,
+      {},
+    );
+    expect(response.status).toBe(201);
+    const after = service.venueOrders.venues(deploymentId);
+    expect(after.slice(0, before.length)).toEqual(before);
+    expect(after.at(-1)).toMatchObject({ seq: before.length, holdsFromBlock: head + 1 });
+    const venues = envSnapshot(service).chain?.venues ?? [];
+    expect(venues.at(-1)).toEqual({
+      holdsFromBlock: head + 1,
+      announced: { venue: "simulated", environment: null, announcedAt: document.announcedAt },
+    });
+    expect(envSnapshot(service).chain?.venue?.venue).toBe("simulated");
+
+    // Back on the sandbox for the tests that follow: a third announcement.
+    const sandbox: ExecutorVenue = {
+      ...document,
+      venue: "gemini",
+      environment: "sandbox",
+      announcedAt: "2026-11-17T08:40:00.000Z",
+    };
+    const back = await putExecutorVenue(sandboxConsole)(
+      new Request(`http://console.test${CONSOLE_EXECUTOR_ROUTES.venue}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          document: sandbox,
+          signature: await executorSign(hashExecutorRecord(sandbox)),
+        }),
+      }),
+      service,
+      {},
+    );
+    expect(back.status).toBe(201);
+    expect(service.venueOrders.venues(deploymentId)).toHaveLength(before.length + 2);
   });
 
   it("refuses an executor that reads another Gemini than the console, naming both sides' settings", async () => {

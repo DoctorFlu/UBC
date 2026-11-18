@@ -662,6 +662,8 @@ The steps were first used for the update from version 5 to 6 (the `settlements` 
    The same `diff` as in the rehearsal is expected, with one more line: `signal_budget` changes its hash on every update, because the MCP server sends the console its budget again when it starts.
    Only the times in that row change (`as_of`, `stored_at` and the snapshot's `asOf`), not the amounts.
    `executor_venues` changes its hash too, because the executor announces its venue again when it starts: only `announcedAt`, `stored_at`, the document's hash and its signature change, while the venue, the contract and the signer stay the same (seen in the update from 8 to 9 on 17 Nov 2026).
+   From version 10 on, the announcements are kept in `executor_venue_announcements`, which a restart on the same venue leaves as it is: one new row appears only when the executor announces a different venue.
+   The update from 9 to 10 adds that table, with the row of `executor_venues` as its first announcement; `executor_venues` itself keeps its row and its hash, no longer written, so the old console still runs on the file after a rollback.
 
 If the new version misbehaves after the swap, roll back to the old images and the old `repo`.
 After an update that only adds tables, the old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.

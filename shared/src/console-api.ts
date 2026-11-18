@@ -3,6 +3,7 @@ import { decisionContextSchema } from "./context";
 import { SETTLEMENT_VENUES, settlementSchema, signatureSchema } from "./settlement";
 import {
   executorVenueSchema,
+  FILL_SOURCES,
   VENUE_ENVIRONMENTS,
   VENUE_ORDER_STATES,
   venueOrderRecordSchema,
@@ -441,6 +442,12 @@ export const ordersResponseSchema = z.strictObject({
     .strictObject({ venue: z.enum(SETTLEMENT_VENUES), environment: z.enum(VENUE_ENVIRONMENTS).nullable() })
     .nullable()
     .optional(),
+  /**
+   * Where each filled intent's fill came from, as the console labels it: by the announcement in force when
+   * its result was mined, never by a later one. Prefer this to `venue`, which is only the venue now.
+   * Absent from a console older than this field.
+   */
+  fillSources: z.array(z.strictObject({ intentId: intentIdSchema, source: z.enum(FILL_SOURCES) })).optional(),
 });
 export type OrdersResponse = z.infer<typeof ordersResponseSchema>;
 

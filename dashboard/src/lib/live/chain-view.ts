@@ -52,5 +52,6 @@ export function buildChainView(
     settlements,
     venueOrders: {},
     venue: null,
+    venues: [],
   };
 }

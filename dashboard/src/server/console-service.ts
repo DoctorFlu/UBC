@@ -32,6 +32,7 @@ import type {
   SealedReason,
   SealedSource,
   SettlementView,
+  VenueAnnouncementView,
   VenueOrderView,
 } from "@/lib/live/types";
 import { readClaims } from "@/lib/evidence/claims";
@@ -571,7 +572,7 @@ export class ConsoleService {
       sealed: this.sealedReasons(mandate, session.id, intents),
       settlements: this.settlementViews(session.id),
       venueOrders: this.venueOrderViews(session.id),
-      venue: this.venueView(session.id),
+      ...this.venueViews(session.id),
     };
   }
 
@@ -612,10 +613,16 @@ export class ConsoleService {
       .sort((a, b) => a.intentId - b.intentId);
   }
 
-  /** The venue the executor last announced for one deployment, when it still verifies. */
-  private venueView(deploymentId: string): ExecutorVenueView | null {
-    const row = this.venueOrders.venue(deploymentId);
-    return row ? checkExecutorVenue(row) : null;
+  /**
+   * The executor's announcements for one deployment, oldest first, each checked against the hash it was
+   * stored under, and the one in force now. The first covers the contract from its start (migration 10).
+   */
+  private venueViews(deploymentId: string): Pick<ChainView, "venue" | "venues"> {
+    const venues: VenueAnnouncementView[] = this.venueOrders.venues(deploymentId).map((row, index) => ({
+      holdsFromBlock: index === 0 ? null : (row.holdsFromBlock ?? null),
+      announced: checkExecutorVenue(row),
+    }));
+    return { venue: venues.at(-1)?.announced ?? null, venues };
   }
 
   /**

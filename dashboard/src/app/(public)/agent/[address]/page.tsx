@@ -6,7 +6,7 @@ import { ChainUnavailable } from "@/components/states/ChainStates";
 import { ScorecardView } from "@/features/scorecard";
 import { NetworkProvider } from "@/lib/live/LiveConsole";
 import type { ChainView } from "@/lib/live/types";
-import { filledIntentIds, fillsSource } from "@/lib/network";
+import { fillShares, filledIntentIds } from "@/lib/network";
 import { type PublicScorecard, buildScorecard, publicAgentName } from "@/lib/scorecard/scorecard";
 import { getConsoleService } from "@/server/console";
 
@@ -76,7 +76,7 @@ export default async function AgentScorecardPage({ params }: PageProps<"/agent/[
         contract={contract}
         network={snapshot.network}
         card={scorecardOf(snapshot.chain)}
-        fills={fillsSource(snapshot.chain, snapshot.network, filledIntentIds(snapshot.chain))}
+        fills={fillShares(snapshot.chain, snapshot.network, filledIntentIds(snapshot.chain))}
       />
     </NetworkProvider>
   );

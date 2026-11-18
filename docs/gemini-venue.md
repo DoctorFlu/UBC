@@ -108,6 +108,8 @@ Only after those 8 seconds does the executor wait its usual 15 seconds and try t
 A "placing" version whose write failed was never sent, and the next try sends the order; before this rule, that version stayed in the executor's memory and the intent waited for an order that never existed (the live e2e flake of 17 November 2026).
 
 The executor also announces its venue at start (`PUT /api/executor/v1/venue`), which drives the console's badge.
+The console keeps every announcement of a contract in order, and labels each fill by the one in force when it was mined (see below).
+A restart on the venue already in force adds nothing.
 
 ## The console
 
@@ -117,16 +119,23 @@ The executor also announces its venue at start (`PUT /api/executor/v1/venue`), w
   Only a local devchain whose executor announced nothing reads as simulated, since its in-process simulator never announces.
   On a phone the badge is the icon alone, so the strip still fits.
 - Each fill is labelled the same way wherever it is shown with its amount or result: the intent page and its timeline, Activity's Filled and Paid at expiry totals, the evidence page, and the public scorecard's Filled count and settled result.
-  A fill's own evidence comes first: the order the executor journaled for it (Sandbox or Live, so earlier simulated fills keep their marker), then the venue its settlement names, then the announced venue.
+  A fill's own evidence comes first: the order the executor journaled for it (Sandbox or Live), then the venue its settlement names, then the venue announced when the fill was mined, never a later one.
   A Gemini executor journals every order, so a fill it has no order for is "Fill source unknown".
-  A total carries the label that most qualifies any of its fills: simulated, then unknown, then sandbox.
+- When the console stores an announcement of a new venue, it reads the chain head and the announcement holds from the next block: fills mined up to that head keep the announcement before it.
+  The first announcement of a contract also covers that contract's earlier fills.
+  This is the rule that keeps a switch truthful: after the hosted demo moves from the simulated venue to Gemini's sandbox, its earlier fills still say "Simulated fill", and the new ones say "Sandbox fill" from their journaled orders.
+  It is not a guess about the past: an announcement only labels a fill that has no journaled order, so the most it can say of one is "simulated" or "unknown", and no earlier fill on Gemini (which always has an order) can be called simulated by it.
+  When the console cannot read the head, it answers 503 and the executor tries again.
+- A total of fills from one source carries that source's tag, as a single fill does.
+  A total of mixed fills says each source's count instead ("1 simulated", "1 on the sandbox"), never one tag for all: Activity's Filled and Paid at expiry, the Hedge page's settled totals, and the public scorecard's Filled count and settled result.
 - The intent page, in Advanced view: the Gemini order id, its state, how much filled, the executor's note, and our client order id.
 - The Order line, on the intent page, in Activity and on Home, gives the contracts the order was placed for, which [Fees](#fees) can make fewer than the amount buys at the limit (issue #117).
   Advanced view adds what the amount buys at the limit when the two differ: "Buy NO, 10 at 97¢ (10.03 before the fee)".
   Before an order is placed, and on the simulated venue, the line gives what the amount buys at the limit.
 
 The agent reads the same journal through the console's agent API (`GET /api/agent/v1/orders`, its own mandate only): `get_intent` and `get_activity` give each intent's `order` (venue, environment, state, contracts placed and filled, fee), and `get_intent` says when fewer contracts were placed than the amount buys at the limit.
-The same response carries the announced venue, so each filled intent also has a `fillSource` (`simulated`, `sandbox`, `live` or `unknown`), and `get_intent` and `get_activity` name it in their summaries whenever a fill was not real money.
+The same response carries each filled intent's source as the console labels it (`fillSources`), so each filled intent also has a `fillSource` (`simulated`, `sandbox`, `live` or `unknown`), and `get_intent` and `get_activity` name it in their summaries whenever a fill was not real money; `get_activity` gives each source's count when its fills differ.
+Against a console from before `fillSources`, the agent falls back to the venue announced last.
 
 ## The doctor
 

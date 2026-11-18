@@ -32,8 +32,8 @@ import {
   type RecentIntent,
 } from "@/lib/scorecard/scorecard";
 
-import { FillSourceTag } from "@/components/domain/FillSourceTag";
-import type { FillSource } from "@/lib/network";
+import { FillSharesTag } from "@/components/domain/FillSourceTag";
+import type { FillShare } from "@/lib/network";
 import styles from "./scorecard.module.css";
 
 export interface ScorecardData {
@@ -42,8 +42,8 @@ export interface ScorecardData {
   contract: Address;
   network: ConsoleNetwork;
   card: PublicScorecard;
-  /** Where the counted fills came from (`fillsSource`): labelled unless every one was real money. */
-  fills: FillSource;
+  /** Where the counted fills came from (`fillShares`): each source's count when they differ. */
+  fills: readonly FillShare[];
 }
 
 const at = (unix: number) => `${formatDateUtc(isoFromUnix(unix))}, ${formatTimeUtc(isoFromUnix(unix))}`;
@@ -165,7 +165,7 @@ export function ScorecardView({
   contract,
   network,
   card,
-  fills: fillSourceOfCard,
+  fills: fillSharesOfCard,
 }: ScorecardData) {
   const { atProposal, owner: decisions, fills, mandate, settled } = card;
   const proposed = card.proposed.count;
@@ -218,7 +218,7 @@ export function ScorecardView({
                 <>
                   {`Across ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"}` +
                     (settled.feesEstimated ? ", after fees (estimated)" : "")}{" "}
-                  <FillSourceTag source={fillSourceOfCard} />
+                  <FillSharesTag shares={fillSharesOfCard} />
                 </>
               )
             }
@@ -299,7 +299,7 @@ export function ScorecardView({
                 <>
                   {formatCount(fills.filled.count)}
                   <span className={styles.rowSub}>{formatUsdCents(fills.filledCents)}</span>
-                  {fills.filled.count > 0 ? <FillSourceTag source={fillSourceOfCard} /> : null}
+                  {fills.filled.count > 0 ? <FillSharesTag shares={fillSharesOfCard} /> : null}
                 </>
               }
               testId="count-filled"
@@ -323,7 +323,7 @@ export function ScorecardView({
           </ul>
           <p className={styles.note} data-testid="settled-note">
             {settled.positions === 0
-              ? "No filled position has reached its market's expiry and settled yet."
+              ? "No filled position has reached its market's expiry and settled yet. "
               : `${formatCount(settled.paidOut)} of ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"} paid out. `}
             Settlements are recorded offchain by the console, each signed by the contract&rsquo;s executor,
             because the contract cannot record a payout: it records each fill with a result of $0, so a

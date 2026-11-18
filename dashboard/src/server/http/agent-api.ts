@@ -31,6 +31,7 @@ import { type Address, type Hex, isAddressEqual } from "viem";
 import { hedgePlanSchema } from "@/lib/hedge/plan-schema";
 import type { ExecutorVenueView } from "@/lib/live/types";
 import { mandatePath } from "@/lib/mandate-path";
+import { fillSource, filledIntentIds } from "@/lib/network";
 
 import type { Agent, Mandate } from "../accounts/store";
 import type { ConsoleService } from "../console-service";
@@ -358,16 +359,25 @@ export const getSettlements = agentRoute((_request, service, { mandate }) =>
 );
 
 /** The orders the executor placed for the agent's mandate (issue #117); only versions that still verify. */
-export const getOrders = agentRoute((_request, service, { mandate }) =>
-  Promise.resolve(
+export const getOrders = agentRoute((_request, service, { mandate }) => {
+  const snapshot = service.snapshot(mandate);
+  const chain = snapshot.chain;
+  return Promise.resolve(
     json(
       ordersResponseSchema.parse({
         orders: service.verifiedVenueOrders(mandate),
-        venue: announcedVenue(service.snapshot(mandate).chain?.venue ?? null),
+        venue: announcedVenue(chain?.venue ?? null),
+        // Labelled here, where the announcements' history is, so the agent says what the console says.
+        fillSources: chain
+          ? filledIntentIds(chain).map((intentId) => ({
+              intentId,
+              source: fillSource(chain, snapshot.network, intentId),
+            }))
+          : [],
       }),
     ),
-  ),
-);
+  );
+});
 
 // ------------------------------------------------------------------ the owner's view (#97)
 

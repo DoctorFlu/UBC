@@ -6,7 +6,7 @@
 import { type FillSource, fillSourceOf } from "@mandate/shared";
 import { type Chain, defineChain } from "viem";
 
-import type { ChainView, ConsoleNetwork, NetworkKind } from "@/lib/live/types";
+import type { ChainView, ConsoleNetwork, NetworkKind, VenueAnnouncementView } from "@/lib/live/types";
 
 /** The short tag beside the logo, from the chain the console actually resolved. */
 export const NETWORK_TAGS: Record<NetworkKind, string> = { local: "Local", "arc-testnet": "Arc testnet" };
@@ -21,29 +21,67 @@ export const NETWORK_TAGS: Record<NetworkKind, string> = { local: "Local", "arc-
  */
 export type { FillSource };
 
+type FillEvidence = Pick<ChainView, "venues" | "venueOrders" | "settlements" | "events">;
+
+/** The block each filled intent's `ResultRecorded` was mined in, read once per chain view. */
+const fillBlocksOf = new WeakMap<ChainView["events"], Map<number, number>>();
+
+function fillBlock(chain: Pick<ChainView, "events">, intentId: number): number | null {
+  let blocks = fillBlocksOf.get(chain.events);
+  if (!blocks) {
+    blocks = new Map();
+    for (const event of chain.events) {
+      if (event.type === "ResultRecorded") blocks.set(event.intentId, event.blockNumber);
+    }
+    fillBlocksOf.set(chain.events, blocks);
+  }
+  return blocks.get(intentId) ?? null;
+}
+
+/**
+ * The announcement in force when a fill was mined in `block`: the latest whose start is at or before it.
+ * The first announcement covers everything before the second, earlier fills included. With no block to go
+ * by, only a lone announcement can say; among several, nothing does.
+ */
+export function announcementInForce(
+  venues: readonly VenueAnnouncementView[],
+  block: number | null,
+): VenueAnnouncementView | null {
+  const [first, ...later] = venues;
+  if (!first) return null;
+  if (block === null) return later.length === 0 ? first : null;
+  let inForce = first;
+  for (const announcement of later) {
+    if (announcement.holdsFromBlock !== null && announcement.holdsFromBlock <= block) inForce = announcement;
+  }
+  return inForce;
+}
+
 /**
  * Where intent `intentId`'s fill came from, from what the executor signed, never from the chain: the order
- * it journaled for that intent (#93), else the venue its settlement names, else the venue it announced for
- * the contract. A Gemini executor journals every order, so a fill it has no order for is `unknown`. With no
- * announcement at all, a local devchain's fills are its in-process simulator's; elsewhere they are unknown.
+ * it journaled for that intent (#93), else the venue its settlement names, else the venue announced when
+ * its `ResultRecorded` was mined, never a later one. A Gemini executor journals every order, so a fill it
+ * has no order for is `unknown`. With no announcement at all, a local devchain's fills are its in-process
+ * simulator's; elsewhere they are unknown.
  */
 export function fillSource(
-  chain: Pick<ChainView, "venue" | "venueOrders" | "settlements">,
+  chain: FillEvidence,
   network: Pick<ConsoleNetwork, "kind">,
   intentId: number,
 ): FillSource {
   const settlement = chain.settlements[intentId];
+  const inForce = announcementInForce(chain.venues, fillBlock(chain, intentId));
   return fillSourceOf({
     order: chain.venueOrders[intentId],
     settlementVenue: settlement?.status === "verified" ? settlement.document.venue : null,
-    announced: chain.venue,
-    fallback: network.kind === "local" ? "simulated" : "unknown",
+    announced: inForce?.announced,
+    fallback: chain.venues.length === 0 && network.kind === "local" ? "simulated" : "unknown",
   });
 }
 
 /**
- * Where this contract's orders are filled now, from the venue its executor announced (`fillSource` with no
- * intent of its own): what the top bar says on every page, before any fill exists.
+ * Where this contract's orders are filled now, from the venue its executor last announced: what the top
+ * bar says on every page, before any fill exists. Earlier fills keep the source they were filled with.
  */
 export function contractFillSource(
   chain: Pick<ChainView, "venue">,
@@ -57,21 +95,34 @@ export function contractFillSource(
   return network.kind === "local" ? "simulated" : "unknown";
 }
 
-/** Labelled in this order when a total mixes fills of several sources: the one that most qualifies it. */
-const QUALIFYING: readonly FillSource[] = ["simulated", "unknown", "sandbox"];
+/** How many of a total's fills came from one source. */
+export interface FillShare {
+  source: FillSource;
+  count: number;
+}
+
+/** Listed in this order: the source that most qualifies a total first, real money last. */
+const SHARE_ORDER: readonly FillSource[] = ["simulated", "unknown", "sandbox", "live"];
 
 /**
- * The label a total of the fills `intentIds` carries (a count, an amount, a P&L): the source that most
- * qualifies any of them, or `live` when every one was filled with real money (or there are none).
+ * Where the fills of a total (a count, an amount, a P&L) came from, one share per source: one share when
+ * every fill had the same source, several when they differ, none for no fills. A total of mixed fills
+ * says each part, never one source for all.
  */
-export function fillsSource(
-  chain: Pick<ChainView, "venue" | "venueOrders" | "settlements">,
+export function fillShares(
+  chain: FillEvidence,
   network: Pick<ConsoleNetwork, "kind">,
   intentIds: Iterable<number>,
-): FillSource {
-  const sources = new Set<FillSource>();
-  for (const id of intentIds) sources.add(fillSource(chain, network, id));
-  return QUALIFYING.find((source) => sources.has(source)) ?? "live";
+): FillShare[] {
+  const counts = new Map<FillSource, number>();
+  for (const id of intentIds) {
+    const source = fillSource(chain, network, id);
+    counts.set(source, (counts.get(source) ?? 0) + 1);
+  }
+  return SHARE_ORDER.flatMap((source) => {
+    const count = counts.get(source);
+    return count === undefined ? [] : [{ source, count }];
+  });
 }
 
 /** Every intent the contract recorded as filled. */

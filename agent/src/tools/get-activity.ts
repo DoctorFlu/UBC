@@ -2,6 +2,7 @@ import * as z from "zod";
 import { formatUnits } from "viem";
 import {
   ARC_TESTNET,
+  type FillSource,
   formatCents,
   type Intent,
   type IntentView,
@@ -479,12 +480,34 @@ export const getActivity = defineTool({
   },
 });
 
-/** What qualifies the fills of `rows` in one sentence: nothing when every one was real money. */
-function fillsText(rows: readonly IntentRow[]): string {
-  const sources = new Set(rows.flatMap((row) => (row.fillSource === null ? [] : [row.fillSource])));
-  if (sources.has("simulated")) return "; simulated fills: no exchange saw those orders";
-  if (sources.has("unknown"))
+/** How a part of a mixed total names its source: "2 simulated (no exchange saw those orders)". */
+const SHARE_TEXT: Record<FillSource, (count: number) => string> = {
+  simulated: (count) => `${count} simulated (no exchange saw those orders)`,
+  unknown: (count) => `${count} of unknown source (the executor had not said which venue fills its orders)`,
+  sandbox: (count) => `${count} on Gemini's sandbox, with test funds`,
+  live: (count) => `${count} on Gemini, with real money`,
+};
+
+/**
+ * What qualifies the fills of `rows` in one sentence: nothing when every one was real money, the one
+ * source when they share it, and each source's count when they differ, never one source for all.
+ */
+export function fillsText(rows: readonly Pick<IntentRow, "fillSource">[]): string {
+  const counts = new Map<FillSource, number>();
+  for (const row of rows) {
+    if (row.fillSource !== null) counts.set(row.fillSource, (counts.get(row.fillSource) ?? 0) + 1);
+  }
+  if (counts.size > 1) {
+    const order: readonly FillSource[] = ["simulated", "unknown", "sandbox", "live"];
+    const parts = order.flatMap((source) => {
+      const count = counts.get(source);
+      return count === undefined ? [] : [SHARE_TEXT[source](count)];
+    });
+    return `; fills by source: ${parts.join(", ")}`;
+  }
+  if (counts.has("simulated")) return "; simulated fills: no exchange saw those orders";
+  if (counts.has("unknown"))
     return "; fill source unknown: the executor has not said which venue fills its orders";
-  if (sources.has("sandbox")) return "; on Gemini's sandbox, with test funds";
+  if (counts.has("sandbox")) return "; on Gemini's sandbox, with test funds";
   return "";
 }

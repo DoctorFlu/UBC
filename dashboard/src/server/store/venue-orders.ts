@@ -28,7 +28,20 @@ interface OrderRow {
   stored_at: string;
 }
 
+/** One announcement of the executor's venue, in the order the console stored them. */
+export interface VenueAnnouncementRow extends SignedRow {
+  /** 0 for the deployment's first announcement, then 1, 2, ... */
+  seq: number;
+  /**
+   * The first block this announcement holds from: one past the head the console read when it stored it.
+   * Null for an announcement stored before the console recorded blocks (migration 10).
+   */
+  holdsFromBlock: number | null;
+}
+
 interface VenueRow {
+  seq: number;
+  holds_from_block: number | null;
   hash: string;
   document: string;
   signature: string;
@@ -117,42 +130,62 @@ export class VenueOrderStore {
     return rows.map(fromOrderRow);
   }
 
-  putVenue(
+  /**
+   * Appends an announcement to the deployment's history. It holds from `holdsFromBlock` on; the earlier
+   * ones keep labelling the fills mined before it.
+   */
+  announceVenue(
     deploymentId: string,
     record: { hash: Hex; document: unknown; signature: Hex; signer: Address },
-  ): SignedRow {
+    holdsFromBlock: number,
+  ): VenueAnnouncementRow {
+    const latest = this.venue(deploymentId);
     this.db
       .prepare(
-        `INSERT INTO executor_venues (deployment_id, hash, document, signature, signer, stored_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT (deployment_id) DO UPDATE SET
-           hash = excluded.hash, document = excluded.document, signature = excluded.signature,
-           signer = excluded.signer, stored_at = excluded.stored_at`,
+        `INSERT INTO executor_venue_announcements
+           (deployment_id, seq, hash, document, signature, signer, stored_at, holds_from_block)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         deploymentId,
+        latest === null ? 0 : latest.seq + 1,
         record.hash.toLowerCase(),
         JSON.stringify(record.document),
         record.signature.toLowerCase(),
         record.signer,
         this.now().toISOString(),
+        holdsFromBlock,
       );
     const row = this.venue(deploymentId);
     if (!row) throw new Error("the executor's venue vanished after insert");
     return row;
   }
 
-  venue(deploymentId: string): SignedRow | null {
-    const row = this.db.prepare("SELECT * FROM executor_venues WHERE deployment_id = ?").get(deploymentId) as
-      VenueRow | undefined;
-    return row
-      ? {
-          hash: row.hash as Hex,
-          document: parse(row.document),
-          signature: row.signature as Hex,
-          signer: row.signer as Address,
-          storedAt: row.stored_at,
-        }
-      : null;
+  /** The announcement in force now: the latest stored. */
+  venue(deploymentId: string): VenueAnnouncementRow | null {
+    const row = this.db
+      .prepare("SELECT * FROM executor_venue_announcements WHERE deployment_id = ? ORDER BY seq DESC LIMIT 1")
+      .get(deploymentId) as VenueRow | undefined;
+    return row ? fromVenueRow(row) : null;
   }
+
+  /** Every announcement of the deployment, oldest first. */
+  venues(deploymentId: string): VenueAnnouncementRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM executor_venue_announcements WHERE deployment_id = ? ORDER BY seq")
+      .all(deploymentId) as unknown as VenueRow[];
+    return rows.map(fromVenueRow);
+  }
+}
+
+function fromVenueRow(row: VenueRow): VenueAnnouncementRow {
+  return {
+    seq: row.seq,
+    holdsFromBlock: row.holds_from_block,
+    hash: row.hash as Hex,
+    document: parse(row.document),
+    signature: row.signature as Hex,
+    signer: row.signer as Address,
+    storedAt: row.stored_at,
+  };
 }
