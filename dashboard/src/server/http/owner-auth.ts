@@ -82,7 +82,7 @@ export async function readOwnerRequest<T>(
   if (Math.abs(now() - issued) > OWNER_REQUEST_MAX_AGE_MS) {
     return fail(401, "stale_signature", "The signature is too old. Sign the request again.");
   }
-  const chain = await service.chainFor(mandate);
+  const chain = await service.chainFor(mandate, { trusted: true });
   if (!chain) {
     return fail(
       503,

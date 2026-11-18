@@ -102,6 +102,8 @@ export class ContractFollower {
   roles: Roles | null = null;
   recordsContextHash: boolean | null = null;
   private rolesReadAt = 0;
+  /** The role read in flight for `trustedRoles`, shared by every caller that asks meanwhile. */
+  private rolesRead: Promise<Roles> | null = null;
   feed: FeedStatus;
   private lastStreamAt = 0;
   private lastPushAt = 0;
@@ -345,6 +347,7 @@ export class ContractFollower {
   private apply(added: readonly PolicyEvent[], history = false): void {
     if (added.length === 0) return;
     this.state = applyEvents(this.state, added);
+    this.followRoleEvents(added, history);
     const session = this.session;
     if (session) this.hooks.onEvents?.(added, this.state.events, session.id, history);
     this.hooks.changed();
@@ -418,6 +421,11 @@ export class ContractFollower {
     if (this.roles && Date.now() - this.rolesReadAt < ROLES_REFRESH_MS) return;
     const roles = await session.policy.getRoles();
     if (this.session !== session) return;
+    this.noteRoles(roles);
+  }
+
+  /** Keeps a fresh read of the roles for the views, and tells them when a holder changed. */
+  private noteRoles(roles: Roles): void {
     this.rolesReadAt = Date.now();
     const changed =
       !this.roles ||
@@ -426,6 +434,56 @@ export class ContractFollower {
       !isAddressEqual(this.roles.executor, roles.executor);
     this.roles = roles;
     if (changed) this.hooks.changed();
+  }
+
+  /**
+   * A role changed (v2's `UserChanged`, `AgentChanged`, `ExecutorChanged`): the shown roles take the new
+   * holder at once, so no view pairs the event with the old one, and the next sync reads them again. While
+   * backfilling, the events are history: the read at the end of the sync gives the roles as they are now.
+   */
+  private followRoleEvents(added: readonly PolicyEvent[], history: boolean): void {
+    let roles = this.roles;
+    let changed = false;
+    for (const event of added) {
+      if (event.type !== "UserChanged" && event.type !== "AgentChanged" && event.type !== "ExecutorChanged")
+        continue;
+      changed = true;
+      if (history || !roles) continue;
+      const role =
+        event.type === "UserChanged" ? "user" : event.type === "AgentChanged" ? "agent" : "executor";
+      roles = { ...roles, [role]: event.current };
+    }
+    if (!changed) return;
+    this.roles = roles;
+    this.rolesReadAt = 0;
+  }
+
+  /**
+   * The roles as the contract holds them now, read for this call (one read shared by concurrent callers),
+   * for every place that trusts a role: an owner's signature, the executor's records, the console's own
+   * owner key. Roles can change (v2), and the cache is only as fresh as the last sync, so it is never used
+   * here. Null when the chain cannot be read: the caller refuses rather than trusting an old holder.
+   */
+  async trustedRoles(): Promise<Roles | null> {
+    const session = this.session;
+    if (!session) return null;
+    let read = this.rolesRead;
+    if (read === null) {
+      read = session.policy.getRoles();
+      this.rolesRead = read;
+      const clear = () => {
+        if (this.rolesRead === read) this.rolesRead = null;
+      };
+      read.then(clear, clear);
+    }
+    try {
+      const roles = await read;
+      if (this.session !== session) return null;
+      this.noteRoles(roles);
+      return roles;
+    } catch {
+      return null;
+    }
   }
 
   /** Roles as last read, reading them now when there are none yet. Null when the chain is unreachable. */

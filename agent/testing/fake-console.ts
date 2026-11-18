@@ -43,6 +43,7 @@ import {
   settlementMessage,
   settlementProblems,
   type AgentOrder,
+  type AnnouncedVenue,
   type StoredSettlement,
   postPlanRequestSchema,
   postPolicyChangeRequestSchema,
@@ -83,6 +84,8 @@ export interface FakeConsoleState {
   settlements: Map<number, StoredSettlement>;
   /** The executor's venue orders by intent id, as the agent API serves them (the first mandate's only). */
   orders: Map<number, AgentOrder>;
+  /** The venue the executor announced, as the agent API serves it with the orders; null before it has. */
+  venue: AnnouncedVenue | null;
   /** Every request seen, as `METHOD path`, for assertions (on the first agent's state: all agents'). */
   requests: string[];
 }
@@ -220,6 +223,7 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
     signalBudget: null,
     settlements: new Map(),
     orders: new Map(),
+    venue: null,
     requests: [],
   });
   const state = newState(options.holdings);
@@ -496,7 +500,10 @@ export function createFakeConsole(options: FakeConsoleOptions): FakeConsole {
   );
 
   api.get("/orders", (c) =>
-    c.json({ orders: [...tenant(c).orders.values()].sort((a, b) => a.intentId - b.intentId) }),
+    c.json({
+      orders: [...tenant(c).orders.values()].sort((a, b) => a.intentId - b.intentId),
+      venue: tenant(c).venue,
+    }),
   );
 
   api.get("/summary", async (c) => {

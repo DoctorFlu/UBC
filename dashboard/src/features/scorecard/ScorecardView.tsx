@@ -32,6 +32,8 @@ import {
   type RecentIntent,
 } from "@/lib/scorecard/scorecard";
 
+import { FillSourceTag } from "@/components/domain/FillSourceTag";
+import type { FillSource } from "@/lib/network";
 import styles from "./scorecard.module.css";
 
 export interface ScorecardData {
@@ -40,6 +42,8 @@ export interface ScorecardData {
   contract: Address;
   network: ConsoleNetwork;
   card: PublicScorecard;
+  /** Where the counted fills came from (`fillsSource`): labelled unless every one was real money. */
+  fills: FillSource;
 }
 
 const at = (unix: number) => `${formatDateUtc(isoFromUnix(unix))}, ${formatTimeUtc(isoFromUnix(unix))}`;
@@ -155,7 +159,14 @@ function CountRow({
  * The agent's record as anyone can check it, with no wallet and nothing offchain: every number is read
  * from the Policy contract's events, matches the owner's audit trail, and lists the transactions behind it.
  */
-export function ScorecardView({ agent, owner, contract, network, card }: ScorecardData) {
+export function ScorecardView({
+  agent,
+  owner,
+  contract,
+  network,
+  card,
+  fills: fillSourceOfCard,
+}: ScorecardData) {
   const { atProposal, owner: decisions, fills, mandate, settled } = card;
   const proposed = card.proposed.count;
   const inside = atProposal.approved.count + atProposal.held.count;
@@ -201,10 +212,15 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
             label="Settled result"
             value={<span className="num">{formatUsdCentsDelta(settled.pnlCents)}</span>}
             hint={
-              settled.positions === 0
-                ? "Nothing settled yet"
-                : `Across ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"}` +
-                  (settled.feesEstimated ? ", after fees (estimated)" : "")
+              settled.positions === 0 ? (
+                "Nothing settled yet"
+              ) : (
+                <>
+                  {`Across ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"}` +
+                    (settled.feesEstimated ? ", after fees (estimated)" : "")}{" "}
+                  <FillSourceTag source={fillSourceOfCard} />
+                </>
+              )
             }
           />
         </StatGroup>
@@ -283,6 +299,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
                 <>
                   {formatCount(fills.filled.count)}
                   <span className={styles.rowSub}>{formatUsdCents(fills.filledCents)}</span>
+                  {fills.filled.count > 0 ? <FillSourceTag source={fillSourceOfCard} /> : null}
                 </>
               }
               testId="count-filled"

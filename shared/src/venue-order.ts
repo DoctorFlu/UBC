@@ -198,3 +198,38 @@ export function hashExecutorRecord(doc: VenueOrderRecord | ExecutorVenue): Hex {
     doc.kind === "venue-order" ? venueOrderRecordSchema.parse(doc) : executorVenueSchema.parse(doc);
   return keccak256(stringToBytes(canonicalJson(valid)));
 }
+
+/**
+ * Where a fill came from, which the Policy contract cannot say (it records a fill either way):
+ * - `simulated`: the executor's simulated venue, which places nothing; the record onchain is real, but no
+ *   exchange saw the order. On any chain: the hosted Arc demo fills this way.
+ * - `sandbox`: Gemini's sandbox, with test funds. `live`: Gemini, with real money.
+ * - `unknown`: the executor never said, so nobody can say whether an exchange saw the order.
+ */
+export const FILL_SOURCES = ["simulated", "sandbox", "live", "unknown"] as const;
+export type FillSource = (typeof FILL_SOURCES)[number];
+
+/** The venue the executor announced for a contract, without its signature or time. */
+export interface AnnouncedVenue {
+  venue: "simulated" | "gemini";
+  environment: VenueEnvironment | null;
+}
+
+/**
+ * Where one intent's fill came from, from what the executor signed, never from the chain: the order it
+ * journaled for the intent (#93), else the venue its settlement names, else the venue it announced for the
+ * contract. A Gemini executor journals every order, so a fill it has no order for is `unknown`; so is any
+ * fill before the executor announced a venue (`fallback` lets a local devchain, whose in-process simulator
+ * announces nothing, say `simulated`).
+ */
+export function fillSourceOf(evidence: {
+  order: { environment: VenueEnvironment } | null | undefined;
+  settlementVenue: "simulated" | "gemini" | null | undefined;
+  announced: AnnouncedVenue | null | undefined;
+  fallback?: FillSource;
+}): FillSource {
+  if (evidence.order) return evidence.order.environment === "production" ? "live" : "sandbox";
+  if (evidence.settlementVenue === "simulated") return "simulated";
+  if (evidence.announced) return evidence.announced.venue === "simulated" ? "simulated" : "unknown";
+  return evidence.fallback ?? "unknown";
+}

@@ -14,7 +14,7 @@ import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import type { AgentPolicy } from "../services";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
-import { intentFlags, intentRow, IntentRowSchema, shownMarket } from "../support/intents";
+import { intentFlags, intentRow, IntentRowSchema, shownMarket, type IntentRow } from "../support/intents";
 import { proposedChangesText, reasonCode } from "../support/rules";
 import { readOrders } from "../support/orders";
 import {
@@ -393,7 +393,8 @@ export const getActivity = defineTool({
         views.get(intent.id),
         ctx.ledger.lookup(intent.id),
         byIntent.get(intent.id),
-        orders?.get(intent.id),
+        orders?.byIntent.get(intent.id),
+        orders,
       ),
     );
     const ladders = stored === null ? null : settledLadders(stored);
@@ -462,7 +463,7 @@ export const getActivity = defineTool({
     const latest =
       total === 0
         ? "No intents have been proposed on this contract yet."
-        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waitingIds.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}${settledText}${flaggedText}`;
+        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled${fillsText(rows)}), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waitingIds.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}${settledText}${flaggedText}`;
     return {
       structured: {
         ...v,
@@ -477,3 +478,13 @@ export const getActivity = defineTool({
     };
   },
 });
+
+/** What qualifies the fills of `rows` in one sentence: nothing when every one was real money. */
+function fillsText(rows: readonly IntentRow[]): string {
+  const sources = new Set(rows.flatMap((row) => (row.fillSource === null ? [] : [row.fillSource])));
+  if (sources.has("simulated")) return "; simulated fills: no exchange saw those orders";
+  if (sources.has("unknown"))
+    return "; fill source unknown: the executor has not said which venue fills its orders";
+  if (sources.has("sandbox")) return "; on Gemini's sandbox, with test funds";
+  return "";
+}

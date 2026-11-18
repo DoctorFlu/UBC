@@ -17,7 +17,7 @@ export type WalletState =
   | { kind: "no-wallet" }
   | { kind: "disconnected" }
   | { kind: "wrong-network"; address: Address; chainId: number | undefined }
-  | { kind: "connected"; address: Address; isDevSigner: boolean };
+  | { kind: "connected"; address: Address; isDevSigner: boolean; walletName: string };
 
 const subscribeNoop = () => () => {};
 
@@ -52,6 +52,8 @@ export function useWalletState(): WalletState {
       kind: "connected",
       address: connection.address,
       isDevSigner: connection.connector.id === DEV_SIGNER_ID,
+      // The name the wallet announced (EIP-6963), or wagmi's "Injected" for a legacy provider.
+      walletName: connection.connector.name,
     };
   }
 

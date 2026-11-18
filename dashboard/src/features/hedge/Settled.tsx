@@ -2,13 +2,17 @@
 
 import type { Settlement } from "@mandate/shared";
 
+import { FillSourceTag } from "@/components/domain/FillSourceTag";
 import { IntentLink } from "@/components/domain/Intent";
 import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/ui/Money";
 import { type Column, Table } from "@/components/ui/Table";
 import { When } from "@/components/ui/When";
 import { Advanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
+import { cx } from "@/lib/cx";
 import { formatContractPrice, formatContractsHundredths, formatUsdCents } from "@/lib/format";
+import { useSnapshot } from "@/lib/live/LiveConsole";
+import { fillsSource } from "@/lib/network";
 import {
   type LadderSettlementState,
   type SettledLadder,
@@ -111,11 +115,21 @@ function SettledPositions({ ladder }: { ladder: SettledLadder }) {
 }
 
 function SettledBody({ ladder }: { ladder: SettledLadder }) {
+  const snapshot = useSnapshot();
+  // Where these positions were filled, from the executor's venue: a simulated fill's payout is no trade.
+  const source = snapshot.chain
+    ? fillsSource(
+        snapshot.chain,
+        snapshot.network,
+        ladder.positions.map((position) => position.intentId),
+      )
+    : "live";
   return (
     <>
       <p className={styles.sentence}>{settledAtSentence(ladder)}</p>
-      <p className={styles.sentence} data-testid="settlement-totals">
-        {totalsSentence(ladder.totals)}
+      <p className={cx(styles.sentence, styles.settledTotals)} data-testid="settlement-totals">
+        <span>{totalsSentence(ladder.totals)}</span>
+        <FillSourceTag source={source} />
       </p>
       <SettledPositions ladder={ladder} />
     </>

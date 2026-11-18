@@ -17,7 +17,7 @@ import { AgentReason } from "@/components/domain/AgentReason";
 import { RequestText } from "@/components/domain/RequestText";
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { amountLabel, FlaggedBadge, intentFlags, MarketName, OrderSummary } from "@/components/domain/Intent";
-import { SimulatedFill } from "@/components/domain/SimulatedFill";
+import { FillSourceTag } from "@/components/domain/FillSourceTag";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Advanced } from "@/lib/advanced/Advanced";
 import { ArrowLink } from "@/components/ui/ArrowLink";
@@ -54,7 +54,7 @@ import { useNow } from "@/lib/useNow";
 import { categoryName, describeMarket, namingCategory } from "@/lib/markets";
 import { evidenceHref } from "@/lib/evidence/chain";
 import { paymentHref } from "@/lib/payments/links";
-import { fillsAreSimulated } from "@/lib/network";
+import { type FillSource, fillSource } from "@/lib/network";
 
 import styles from "./detail.module.css";
 
@@ -63,14 +63,14 @@ interface Step {
   title: string;
   detail: string | null;
   tone: "neutral" | "good" | "attention" | "bad";
-  /** A fill recorded by the local devchain's simulated executor. */
-  simulated?: boolean;
+  /** Where a fill came from, for a step that records one. */
+  fill?: FillSource;
   timestamp: number;
   blockNumber: number;
   txHash: Hex;
 }
 
-function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
+function steps(chain: ChainView, intentId: number, source: FillSource): Step[] {
   const events = intentEvents(chain, intentId);
   const intent = chain.intents.find((candidate) => candidate.id === intentId);
   // The executor refuses what the MCP server could not have sent, and records it as not filled.
@@ -156,7 +156,7 @@ function steps(chain: ChainView, intentId: number, simulated: boolean): Step[] {
               ? "The executor refuses intents like this one, flagged above, so it recorded that the order did not fill; its amount went back to the budget."
               : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
-          simulated: simulated && event.filled,
+          ...(event.filled ? { fill: source } : {}),
         });
         break;
       default:
@@ -690,8 +690,8 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
   }
   const market = intent.market ? describeMarket(intent.market, namingCategory(intent)) : null;
   const venueOrder: VenueOrderView | undefined = chain.venueOrders[intent.id];
-  const simulated = fillsAreSimulated(snapshot.network, venueOrder !== undefined);
-  const timeline = steps(chain, intent.id, simulated);
+  const source = fillSource(chain, snapshot.network, intent.id);
+  const timeline = steps(chain, intent.id, source);
   const flags = intentFlags(intent);
   const settlement: SettlementView | undefined = chain.settlements[intent.id];
   const result = positionResult(intent, settlement, now);
@@ -745,7 +745,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                   <dt>Filled</dt>
                   <dd className={styles.filled}>
                     <Money cents={intent.filledCents} />
-                    {simulated && intent.status === "executed" ? <SimulatedFill /> : null}
+                    {intent.status === "executed" ? <FillSourceTag source={source} /> : null}
                   </dd>
                   <PositionResultFacts result={result} estimatedFeeCents={venueOrder?.feeCents ?? null} />
                   <Advanced>
@@ -804,7 +804,7 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                 <div className={styles.stepBody}>
                   <p className={styles.stepTitle}>
                     {step.title}
-                    {step.simulated ? <SimulatedFill /> : null}
+                    {step.fill ? <FillSourceTag source={step.fill} /> : null}
                   </p>
                   {step.detail ? <p className={styles.stepDetail}>{step.detail}</p> : null}
                   <p className={styles.stepMeta}>

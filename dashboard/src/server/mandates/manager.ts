@@ -1,7 +1,16 @@
 import "server-only";
 
-import { PolicyClient, type PolicyRules, revertErrorName, signerAccount } from "@mandate/shared";
-import { type Address, BaseError, type Hex, createWalletClient, http, numberToHex, parseEther } from "viem";
+import { PolicyClient, type PolicyRules, policyAbi, revertErrorName, signerAccount } from "@mandate/shared";
+import {
+  type Address,
+  BaseError,
+  type Hex,
+  createWalletClient,
+  http,
+  isAddressEqual,
+  numberToHex,
+  parseEther,
+} from "viem";
 
 import type { ContractKind } from "@/lib/live/types";
 import { type OwnerCall, encodeOwnerCall } from "@/lib/owner/calls";
@@ -243,6 +252,10 @@ export class MandateManager {
    * Signs and sends an owner call with the owner key the console holds for `mandate`, and records who
    * authorised it with which passkey. The caller has already checked the authority (`StepUp`, or a
    * session alone for a pause). The call is simulated first, so a refusal names the contract's reason.
+   *
+   * The contract's owner can hand the contract to another account (`setUser`). The console checks that its
+   * key is still `user()`, read now, before it spends anything on the call, and refuses with who the owner
+   * is otherwise: from then on only that account can act, and the console's pages say so.
    */
   async ownerCall(
     access: Access,
@@ -261,6 +274,27 @@ export class MandateManager {
         503,
         "chain_unavailable",
         "The console can't read the chain right now. Try again shortly.",
+      );
+    }
+    let owner: Address;
+    try {
+      owner = await chain.client.readContract({
+        address: contract.address,
+        abi: policyAbi,
+        functionName: "user",
+      });
+    } catch {
+      throw new AccountError(
+        503,
+        "chain_unavailable",
+        "The console can't read the contract's owner right now. Try again shortly.",
+      );
+    }
+    if (!isAddressEqual(owner, key.address)) {
+      throw new AccountError(
+        409,
+        "owner_changed",
+        `This contract's owner is now ${owner}, not the key the console holds for this mandate, so only that account can act as the owner.`,
       );
     }
     const calldata = encodeOwnerCall(call);

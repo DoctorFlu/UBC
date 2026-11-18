@@ -4,6 +4,7 @@ import { describeReason } from "@mandate/shared";
 import { ScrollText } from "lucide-react";
 import { useState } from "react";
 
+import { FillSourceTag } from "@/components/domain/FillSourceTag";
 import { FlaggedBadge, IntentLink } from "@/components/domain/Intent";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Advanced, useAdvanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
@@ -19,6 +20,7 @@ import { When } from "@/components/ui/When";
 import { formatCount } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
+import { fillSource } from "@/lib/network";
 
 import {
   type AuditGroup,
@@ -35,6 +37,18 @@ import {
 import styles from "./audit.module.css";
 import { ExportButtons } from "./ExportButtons";
 import { OwnerActions } from "./OwnerActions";
+
+/** Where a recorded fill came from, from the executor's venue (never the chain): no tag for a live fill. */
+function RowFillSource({ intentId }: { intentId: number }) {
+  const snapshot = useSnapshot();
+  if (!snapshot.chain) return null;
+  const source = fillSource(snapshot.chain, snapshot.network, intentId);
+  return source === "live" ? null : (
+    <span className={styles.flagged}>
+      <FillSourceTag source={source} />
+    </span>
+  );
+}
 
 const columns: readonly Column<AuditRow>[] = [
   {
@@ -66,6 +80,9 @@ const columns: readonly Column<AuditRow>[] = [
           )}
         </span>
         <span className={styles.summary}>{row.summary}</span>
+        {row.event === "ResultRecorded" && row.status === "executed" && row.intentId !== null ? (
+          <RowFillSource intentId={row.intentId} />
+        ) : null}
         {row.flags.length > 0 ? (
           <span className={styles.flagged}>
             <FlaggedBadge flags={row.flags} />

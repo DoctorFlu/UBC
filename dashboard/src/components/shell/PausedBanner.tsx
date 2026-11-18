@@ -1,8 +1,9 @@
 "use client";
 
-import { CircleAlert, Power, RefreshCw } from "lucide-react";
+import { CircleAlert, Power, RefreshCw, Wallet } from "lucide-react";
 
 import { useLiveConsole } from "@/lib/live/LiveConsole";
+import { useOwnerAccess } from "@/lib/owner/access";
 
 import styles from "./Shell.module.css";
 
@@ -52,6 +53,35 @@ export function FeedNotice() {
         <p className={styles.feedNotice} data-tone={notice.tone} data-testid="feed-notice">
           {notice.icon === "alert" ? <CircleAlert aria-hidden /> : <RefreshCw aria-hidden />}
           <span>{notice.text}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Says in the page, not only in a disabled button's tooltip, why no owner control works while the owner's
+ * wallet is on another network, and what one step fixes it.
+ */
+export function WalletNotice() {
+  const access = useOwnerAccess();
+  const { snapshot } = useLiveConsole();
+  return (
+    <div aria-live="polite">
+      {access.kind === "wrong-network" ? (
+        <p className={styles.feedNotice} data-tone="waiting" data-testid="wallet-notice">
+          <Wallet aria-hidden />
+          <span>
+            Your wallet is on another network, so approving, rejecting, changing the rules and pausing are off
+            until it is on {snapshot.network.name}. Press &ldquo;Switch to {snapshot.network.name}&rdquo; at
+            the top; your wallet asks to add the network first if it does not know it. Nothing is sent until
+            then.
+          </span>
+        </p>
+      ) : access.kind === "not-owner" ? (
+        <p className={styles.feedNotice} data-tone="waiting" data-testid="wallet-notice">
+          <Wallet aria-hidden />
+          <span>{access.reason} Approving, rejecting, changing the rules and pausing are off for now.</span>
         </p>
       ) : null}
     </div>

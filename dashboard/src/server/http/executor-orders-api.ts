@@ -85,7 +85,7 @@ async function verifySigned(
   | { ok: false; response: Response }
 > {
   const found = isAddress(document.policy)
-    ? await service.contractOf(document.chainId, document.policy)
+    ? await service.contractOf(document.chainId, document.policy, { trusted: true })
     : null;
   if (!found) {
     return {

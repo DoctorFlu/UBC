@@ -4,7 +4,12 @@
  * contracts than the amount buys at the limit alone. These helpers say what was placed, never the nominal.
  */
 import * as z from "zod";
-import { type AgentOrder, quantityHundredthsFromAmount, VENUE_ORDER_STATES } from "@mandate/shared";
+import {
+  type AgentOrder,
+  type AnnouncedVenue,
+  quantityHundredthsFromAmount,
+  VENUE_ORDER_STATES,
+} from "@mandate/shared";
 import type { ToolContext } from "../context";
 import { describeFailure } from "./failures";
 
@@ -39,15 +44,26 @@ export function orderRow(order: AgentOrder): OrderRow {
   };
 }
 
+/** The executor's orders by intent id, and the venue it announced for the contract (null before it has). */
+export interface OrdersRead {
+  byIntent: Map<number, AgentOrder>;
+  venue: AnnouncedVenue | null;
+}
+
 /**
- * The executor's orders from the console, by intent id. Null when there is no console, the console has no
- * such route, or the read failed: a null never reads as "no order was placed".
+ * The executor's orders from the console, and the venue it announced. Null when there is no console, the
+ * console has no such route, or the read failed: a null never reads as "no order was placed".
  */
-export async function readOrders(ctx: ToolContext): Promise<Map<number, AgentOrder> | null> {
+export async function readOrders(ctx: ToolContext): Promise<OrdersRead | null> {
   if (ctx.console === undefined) return null;
   try {
     const response = await ctx.console.getOrders(ctx.signal);
-    return response === null ? null : new Map(response.orders.map((order) => [order.intentId, order]));
+    return response === null
+      ? null
+      : {
+          byIntent: new Map(response.orders.map((order) => [order.intentId, order])),
+          venue: response.venue ?? null,
+        };
   } catch (error) {
     describeFailure(error, ctx);
     return null;

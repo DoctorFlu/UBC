@@ -2,7 +2,7 @@
 
 import { KeyRound, LogOut, TriangleAlert, Wallet } from "lucide-react";
 import { useState } from "react";
-import { useConnect, useConnectors, useDisconnect, useSwitchChain } from "wagmi";
+import { type Connector, useConnect, useConnectors, useDisconnect, useSwitchChain } from "wagmi";
 
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -13,10 +13,34 @@ import { shortenHex } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { useMandateScope } from "@/lib/mandate/MandateContext";
 import { useOwnerAccess } from "@/lib/owner/access";
-import { DEV_SIGNER_ID } from "@/lib/wallet/flags";
 import { useWalletState } from "@/lib/wallet/useWalletState";
 
 import styles from "./Shell.module.css";
+
+/** Whether the person said no in their wallet (EIP-1193 code 4001), however the wallet library wrapped it. */
+function declined(error: unknown): boolean {
+  for (
+    let cause = error;
+    typeof cause === "object" && cause !== null;
+    cause = (cause as { cause?: unknown }).cause
+  ) {
+    const { code, name } = cause as { code?: unknown; name?: unknown };
+    if (code === 4001 || name === "UserRejectedRequestError") return true;
+  }
+  return false;
+}
+
+/**
+ * The wallets "Connect wallet" offers: each one that announced itself (EIP-6963, which wagmi discovers),
+ * so MetaMask and Phantom in one browser are two choices, never whichever claimed `window.ethereum`. Only
+ * when none announces does the browser's one legacy provider stand in. The dev signer connects itself.
+ */
+export function walletChoices(connectors: readonly Connector[]): Connector[] {
+  const announced = connectors.filter(
+    (connector) => connector.type === "injected" && connector.id !== "injected",
+  );
+  return announced.length > 0 ? announced : connectors.filter((connector) => connector.id === "injected");
+}
 
 /**
  * The owner's wallet, in each of its states: no wallet installed, not connected, wrong network
@@ -35,32 +59,53 @@ export function WalletButton({ block = false }: { block?: boolean }) {
   const toast = useToast();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [chooserOpen, setChooserOpen] = useState(false);
 
-  // Real wallets first; the dev signer only connects itself (see WalletProvider).
-  const walletConnectors = connectors.filter((connector) => connector.id !== DEV_SIGNER_ID);
+  const choices = walletChoices(connectors);
 
-  const connectFirst = () => {
-    const connector = walletConnectors[0];
-    if (!connector) return;
+  // wagmi keeps the wallet that connected (`recentConnectorId`) and reconnects to it on the next visit.
+  const connectWith = (connector: Connector) =>
     connect(
       { connector },
       {
+        onSuccess: () => setChooserOpen(false),
         onError: (error) =>
-          toast({ title: "Wallet not connected", description: error.message.split("\n")[0], tone: "danger" }),
+          toast(
+            declined(error)
+              ? {
+                  title: "Wallet not connected",
+                  description: `You declined in ${connector.name}, so nothing changed.`,
+                }
+              : { title: "Wallet not connected", description: error.message.split("\n")[0], tone: "danger" },
+          ),
       },
     );
+
+  // One wallet connects at once; with more, the owner picks the one that holds the owner's account.
+  const startConnect = () => {
+    const [first, ...others] = choices;
+    if (!first) return;
+    if (others.length === 0) connectWith(first);
+    else setChooserOpen(true);
   };
 
   // The console holds this mandate's owner key (#95): no wallet signs here, the member's passkey confirms.
   if (scope?.mandate.ownerSigner === "console") {
+    // The owner may have handed the contract to another account (`setUser`): the console's key is no
+    // longer the owner, and no passkey action is offered.
     return (
       <span
         className={styles.walletChip}
         data-testid="passkey-owner"
-        title="The console holds this mandate's owner key. Each owner action asks for your passkey first."
+        data-owner={notOwner ? "false" : "true"}
+        title={
+          notOwner
+            ? access.reason
+            : "The console holds this mandate's owner key. Each owner action asks for your passkey first."
+        }
       >
         <KeyRound aria-hidden className={styles.walletKey} strokeWidth={1.75} />
-        <span>Passkey owner</span>
+        <span>{notOwner ? "Not owner" : "Passkey owner"}</span>
       </span>
     );
   }
@@ -87,8 +132,8 @@ export function WalletButton({ block = false }: { block?: boolean }) {
         <Button
           variant="primary"
           icon={<Wallet aria-hidden />}
-          onClick={connectFirst}
-          loading={connecting}
+          onClick={startConnect}
+          loading={connecting && !chooserOpen}
           block={block}
         >
           Connect wallet
@@ -105,11 +150,18 @@ export function WalletButton({ block = false }: { block?: boolean }) {
               { chainId: network.chainId },
               {
                 onError: (error) =>
-                  toast({
-                    title: `Could not switch to ${network.name}`,
-                    description: error.message.split("\n")[0],
-                    tone: "danger",
-                  }),
+                  toast(
+                    declined(error)
+                      ? {
+                          title: `Still on another network`,
+                          description: `You declined in your wallet, so nothing changed. Press "Switch to ${network.name}" again when you are ready to sign as the owner.`,
+                        }
+                      : {
+                          title: `Could not switch to ${network.name}`,
+                          description: error.message.split("\n")[0],
+                          tone: "danger",
+                        },
+                  ),
               },
             )
           }
@@ -179,16 +231,63 @@ export function WalletButton({ block = false }: { block?: boolean }) {
               </dd>
               <dt>Role</dt>
               <dd>
-                {notOwner
-                  ? "Not the owner. The Policy contract only accepts the owner's signature."
-                  : "Owner of the Policy contract"}
+                {notOwner ? (
+                  <>
+                    Not the owner. The Policy contract names <HexValue value={access.owner} kind="address" />{" "}
+                    as its owner and accepts only that account&rsquo;s signature.
+                  </>
+                ) : (
+                  "Owner of the Policy contract"
+                )}
               </dd>
               <dt>Signer</dt>
-              <dd>{state.isDevSigner ? "Dev signer (public anvil test key)" : "Browser wallet"}</dd>
+              <dd>
+                {state.isDevSigner
+                  ? "Dev signer (public anvil test key)"
+                  : state.walletName === "Injected"
+                    ? "Browser wallet"
+                    : `${state.walletName}, a browser wallet`}
+              </dd>
             </dl>
           </div>
         </Dialog>
       ) : null}
+      <Dialog
+        open={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        title="Choose a wallet"
+        description="More than one wallet is installed in this browser. Pick the one that holds the owner's account; the console reconnects to it next time."
+      >
+        <ul className={styles.walletChoices} aria-label="Wallets in this browser">
+          {choices.map((connector) => (
+            <li key={connector.uid}>
+              <button
+                type="button"
+                className={styles.walletChoice}
+                onClick={() => connectWith(connector)}
+                disabled={connecting}
+                data-testid="wallet-choice"
+                data-wallet={connector.id}
+              >
+                {connector.icon ? (
+                  // The wallet's own icon, a data URI it announced: nothing for next/image to optimise.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={connector.icon}
+                    alt=""
+                    width={28}
+                    height={28}
+                    className={styles.walletChoiceIcon}
+                  />
+                ) : (
+                  <Wallet aria-hidden className={styles.walletChoiceIcon} strokeWidth={1.75} />
+                )}
+                <span>{connector.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </Dialog>
       <Dialog
         open={helpOpen}
         onClose={() => setHelpOpen(false)}

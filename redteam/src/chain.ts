@@ -13,7 +13,6 @@ import {
   encodeFunctionData,
   getContractError,
   http,
-  parseEventLogs,
   type Abi,
   type Account,
   type Address,
@@ -27,6 +26,7 @@ import {
   applyFeeFloor,
   ARC_MIN_MAX_FEE_PER_GAS,
   devchain,
+  parsePolicyLogs,
   policyAbi,
   revertErrorName,
   type PolicyClient,
@@ -49,7 +49,7 @@ export interface ChainAttempt {
   error: string | null;
   /** The proposal's verdict, read from the verdict event in the receipt. */
   verdict: ChainVerdict | null;
-  /** Names of the Policy events the transaction emitted. */
+  /** Names of the Policy events the transaction emitted; "undecodable" for a log this code cannot read. */
   events: string[];
 }
 
@@ -235,10 +235,13 @@ export class ChainAttacker {
       pollingInterval: 50,
       timeout: 60_000,
     });
-    const logs = parseEventLogs({
-      abi: policyAbi,
-      logs: receipt.logs.filter((log) => log.address.toLowerCase() === this.policy.toLowerCase()),
-      strict: true,
+    // Every log of the contract is accounted for: one this code cannot read is listed, not dropped.
+    let unreadable = 0;
+    const logs = parsePolicyLogs(receipt.logs, {
+      address: this.policy,
+      onUndecodable: () => {
+        unreadable += 1;
+      },
     });
     let verdict: ChainVerdict | null = null;
     for (const log of logs) {
@@ -256,7 +259,10 @@ export class ChainAttacker {
       status: reverted ? "reverted" : "success",
       error: reverted ? (simulatedError ?? "reverted") : null,
       verdict,
-      events: logs.map((log) => log.eventName),
+      events: [
+        ...logs.map((log) => log.eventName as string),
+        ...Array<string>(unreadable).fill("undecodable"),
+      ],
     };
   }
 }

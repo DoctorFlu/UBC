@@ -406,7 +406,8 @@ That leaves 12 GB, enough for a rebuild with new dependencies (about 4 GB more) 
 
 ### Deploy
 
-The repository is private, so copy the code from a checkout on your computer instead of cloning it on the machine:
+Copy the code from a checkout on your computer, so the machine runs exactly the commit you tested.
+The repository is public, so cloning it on the machine works too, but an archive of `HEAD` also carries work you have not pushed:
 
 ```sh
 git archive --format=tar.gz -o mandate-src.tgz HEAD
@@ -832,6 +833,8 @@ What each setting means, the doctor, and the RPC budget are in [configuration.md
 What changes:
 
 - `COMPOSE_FILE` takes `compose.arc.yml` instead of `compose.demo.yml`: no anvil and no `chain-init`, an executor with a key of its own, and a console image (`mandate-console:arc`) without the test signer, so the owner signs with their own browser wallet.
+  With more than one wallet extension (MetaMask and Phantom, say), "Connect wallet" lists each by name and icon; pick the one that holds the contract's `user` account, and the console reconnects to it next time.
+  Another account connects as "Not owner", and the page names the account the contract does.
 - The env file gains `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_PRIVATE_KEY` and `EXECUTOR_PRIVATE_KEY`; `ARC_RPC_URL` stays empty, so every service uses Arc's public RPC and spends no QuickNode credits.
 - The console uses a database of its own, in the volume `mandate_console-data-arc`, and leaves the demo chain's `mandate_console-data` as it is.
   Chain events are kept per deployment, but the first mandate's offchain records (holdings, hedge plans, change requests, wake-ups) are kept per mandate, so in one database the demo chain's would show against the Arc contract.

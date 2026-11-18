@@ -459,9 +459,27 @@ describe("get_intent", () => {
     h.policy.intents[0] = { ...intent, status: "executed", filledCents: 990, pnlCents: -990 };
     const { structured, summary } = await getIntent.run({ intentId: 0 }, h.ctx);
     expect(structured).toMatchObject({ intent: { status: "executed", filledCents: 990, pnlCents: -990 } });
-    // The contract's recorded result is not the position's: it is open until its market expires.
-    expect(summary).toContain("Filled $9.90. No result yet: the position is open until its market expires");
+    // The contract's recorded result is not the position's: it is open until its market expires. The
+    // executor never said which venue fills its orders, so the fill cannot read as a trade on Gemini.
+    expect(summary).toContain(
+      "Filled $9.90 (fill source unknown: the executor has not said which venue fills its orders). No result yet: the position is open until its market expires",
+    );
+    expect(structured).toMatchObject({ intent: { fillSource: "unknown" } });
     expect(summary).not.toContain("profit");
+  });
+
+  it("says a fill is simulated when the executor announced the simulated venue, on any chain", async () => {
+    const h = harness();
+    h.console.state.venue = { venue: "simulated", environment: null };
+    await proposeTrade.run({ ...trade, amountCents: 1_000, reason: "Hedge." }, h.ctx);
+    const intent = h.policy.intents[0];
+    if (intent === undefined) throw new Error("missing");
+    h.policy.intents[0] = { ...intent, status: "executed", filledCents: 990, pnlCents: -990 };
+    const { structured, summary } = await getIntent.run({ intentId: 0 }, h.ctx);
+    expect(structured).toMatchObject({ intent: { fillSource: "simulated" } });
+    expect(summary).toContain(
+      "Filled $9.90 (a simulated fill: the executor's simulated venue recorded it, and no exchange saw the order).",
+    );
   });
 });
 

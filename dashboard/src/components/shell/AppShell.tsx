@@ -15,7 +15,7 @@ import { Brand } from "./Brand";
 import { GetStarted } from "./GetStarted";
 import { MandateSwitcher } from "./MandateSwitcher";
 import { NavLinks } from "./NavLinks";
-import { FeedNotice, PausedBanner } from "./PausedBanner";
+import { FeedNotice, PausedBanner, WalletNotice } from "./PausedBanner";
 import styles from "./Shell.module.css";
 import { ThemeToggle } from "./ThemeToggle";
 import { TopBar } from "./TopBar";
@@ -46,6 +46,7 @@ export function AppShell({ account, children }: { account: AccountView; children
         <TopBar navCounts={navCounts} foot={<SidebarFoot agent={agent} account={account} />} />
         <PausedBanner />
         <FeedNotice />
+        <WalletNotice />
         <main id="main" tabIndex={-1} className={styles.content}>
           {children}
         </main>

@@ -61,7 +61,7 @@ async function handlePut(
   }
 
   // Settlements belong to the contract they name, which one mandate follows (#95: one executor serves all).
-  const found = await service.contractOf(document.chainId, document.policy);
+  const found = await service.contractOf(document.chainId, document.policy, { trusted: true });
   if (!found) {
     return apiError(
       422,

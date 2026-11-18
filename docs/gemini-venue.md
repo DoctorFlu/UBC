@@ -108,16 +108,22 @@ The executor also announces its venue at start (`PUT /api/executor/v1/venue`), w
 
 ## The console
 
-- A "Sandbox" badge (or "Live", in the danger colour) next to the "Local" and "Dev signer" badges, from the executor's signed announcement.
-  On a phone it is the icon alone (a box for the sandbox, a bolt for real money), so the strip still fits.
-  Nothing is shown for the simulated executor.
+- A badge in the top bar says where approved orders are filled, from the executor's signed announcement, never from the chain:
+  "Live" (in the danger colour) for real money on Gemini, "Sandbox" for its test funds, "Simulated fills" for the simulated venue, and "Fill source unknown" until the executor announces one.
+  The chain decides nothing here: the hosted Arc demo is a real chain whose fills are simulated, and it says so.
+  Only a local devchain whose executor announced nothing reads as simulated, since its in-process simulator never announces.
+  On a phone the badge is the icon alone, so the strip still fits.
+- Each fill is labelled the same way wherever it is shown with its amount or result: the intent page and its timeline, Activity's Filled and Paid at expiry totals, the evidence page, and the public scorecard's Filled count and settled result.
+  A fill's own evidence comes first: the order the executor journaled for it (Sandbox or Live, so earlier simulated fills keep their marker), then the venue its settlement names, then the announced venue.
+  A Gemini executor journals every order, so a fill it has no order for is "Fill source unknown".
+  A total carries the label that most qualifies any of its fills: simulated, then unknown, then sandbox.
 - The intent page, in Advanced view: the Gemini order id, its state, how much filled, the executor's note, and our client order id.
-- A fill with a Gemini order in the journal is no longer marked as simulated; earlier simulated fills keep the marker.
 - The Order line, on the intent page, in Activity and on Home, gives the contracts the order was placed for, which [Fees](#fees) can make fewer than the amount buys at the limit (issue #117).
   Advanced view adds what the amount buys at the limit when the two differ: "Buy NO, 10 at 97¢ (10.03 before the fee)".
   Before an order is placed, and on the simulated venue, the line gives what the amount buys at the limit.
 
 The agent reads the same journal through the console's agent API (`GET /api/agent/v1/orders`, its own mandate only): `get_intent` and `get_activity` give each intent's `order` (venue, environment, state, contracts placed and filled, fee), and `get_intent` says when fewer contracts were placed than the amount buys at the limit.
+The same response carries the announced venue, so each filled intent also has a `fillSource` (`simulated`, `sandbox`, `live` or `unknown`), and `get_intent` and `get_activity` name it in their summaries whenever a fill was not real money.
 
 ## The doctor
 
