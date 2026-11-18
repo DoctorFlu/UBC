@@ -18,6 +18,7 @@ import { RequestText } from "@/components/domain/RequestText";
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { amountLabel, FlaggedBadge, intentFlags, MarketName, OrderSummary } from "@/components/domain/Intent";
 import { FillSourceTag } from "@/components/domain/FillSourceTag";
+import { type IntentFill, fillChipProps, intentFill, partFilledHundredths } from "@/components/domain/fill";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Advanced } from "@/lib/advanced/Advanced";
 import { ArrowLink } from "@/components/ui/ArrowLink";
@@ -67,11 +68,18 @@ interface Step {
   /** Where a fill came from, for a step that records one. */
   fill?: FillSource;
   timestamp: number;
-  blockNumber: number;
-  txHash: Hex;
+  /** Null for a step the executor's journal tells and the chain does not hold yet. */
+  blockNumber: number | null;
+  txHash: Hex | null;
 }
 
-function steps(chain: ChainView, intentId: number, source: FillSource): Step[] {
+function steps(
+  chain: ChainView,
+  intentId: number,
+  source: FillSource,
+  journal: { fill: IntentFill | null; order: VenueOrderView | undefined },
+): Step[] {
+  const { fill } = journal;
   const events = intentEvents(chain, intentId);
   const intent = chain.intents.find((candidate) => candidate.id === intentId);
   // The executor refuses what the MCP server could not have sent, and records it as not filled.
@@ -144,25 +152,47 @@ function steps(chain: ChainView, intentId: number, source: FillSource): Step[] {
         });
         break;
       }
-      case "ResultRecorded":
+      case "ResultRecorded": {
+        // The contract only knows that the executor recorded a result, not where the order went; the
+        // executor's journal says when only part of it filled, or why it did not fill.
+        const told =
+          fill !== null &&
+          (event.filled
+            ? fill.kind === "partly_filled"
+            : fill.kind === "venue_refused" || fill.kind === "cancelled_unfilled");
         out.push({
           ...meta(event),
-          // The contract only knows that the executor recorded a result, not where the order went.
-          title: event.filled ? "Filled" : "Did not fill",
-          detail: event.filled
-            ? event.filledCents === null
-              ? "The executor recorded a fill too large to show."
-              : `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
-            : refused
-              ? "The executor refuses intents like this one, flagged above, so it recorded that the order did not fill; its amount went back to the budget."
-              : "The executor recorded that the order did not fill; its amount went back to the budget.",
+          title: told ? fill.words.step : event.filled ? "Filled" : "Did not fill",
+          detail: told
+            ? fill.words.detail
+            : event.filled
+              ? event.filledCents === null
+                ? "The executor recorded a fill too large to show."
+                : `The executor recorded a fill of ${formatUsdCents(event.filledCents)}.`
+              : refused
+                ? "The executor refuses intents like this one, flagged above, so it recorded that the order did not fill; its amount went back to the budget."
+                : "The executor recorded that the order did not fill; its amount went back to the budget.",
           tone: event.filled ? "good" : "neutral",
           ...(event.filled ? { fill: source } : {}),
         });
         break;
+      }
       default:
         break;
     }
+  }
+  // Filled at the venue and not recorded onchain yet: the executor's journal says so, with its own time.
+  if (fill?.kind === "recording" && journal.order !== undefined) {
+    const at = Date.parse(journal.order.updatedAt);
+    out.push({
+      key: `journal:${journal.order.clientOrderId}`,
+      title: fill.words.step,
+      detail: fill.words.detail,
+      tone: "good",
+      timestamp: Number.isNaN(at) ? (out.at(-1)?.timestamp ?? 0) : Math.floor(at / 1000),
+      blockNumber: null,
+      txHash: null,
+    });
   }
   return out;
 }
@@ -704,7 +734,8 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
   const market = intent.market ? describeMarket(intent.market, namingCategory(intent)) : null;
   const venueOrder: VenueOrderView | undefined = chain.venueOrders[intent.id];
   const source = fillSource(chain, snapshot.network, intent.id);
-  const timeline = steps(chain, intent.id, source);
+  const fill = intentFill(intent, venueOrder);
+  const timeline = steps(chain, intent.id, source, { fill, order: venueOrder });
   const flags = intentFlags(intent);
   const settlement: SettlementView | undefined = chain.settlements[intent.id];
   const result = positionResult(intent, settlement, now);
@@ -717,10 +748,10 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
       </ViewLink>
       <PageHeader
         title={title}
-        description={`${market?.title ?? "Unknown market"}. ${statusDescriptions[intent.status]}`}
+        description={`${market?.title ?? "Unknown market"}. ${fill?.words.sentence ?? statusDescriptions[intent.status]}`}
         meta={
           <>
-            <StatusChip status={intent.status} reason={intent.reason} />
+            <StatusChip status={intent.status} reason={intent.reason} {...fillChipProps(fill)} />
             <FlaggedBadge flags={flags} />
             <span>
               Proposed <When inSentence at={intent.proposedAt} date />
@@ -747,7 +778,11 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               <dd>{categoryName(intent.category)}</dd>
               <dt>Order</dt>
               <dd>
-                <OrderSummary intent={intent} placedHundredths={venueOrder?.quantityHundredths ?? null} />
+                <OrderSummary
+                  intent={intent}
+                  placedHundredths={venueOrder?.quantityHundredths ?? null}
+                  partFilledHundredths={partFilledHundredths(fill)}
+                />
               </dd>
               <dt>Amount</dt>
               <dd>
@@ -829,21 +864,28 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                   </p>
                   {step.detail ? <p className={styles.stepDetail}>{step.detail}</p> : null}
                   <p className={styles.stepMeta}>
-                    <Advanced
-                      fallback={
-                        <>
-                          <When at={step.timestamp} />
-                          <ExplorerLink kind="tx" value={step.txHash}>
-                            Transaction
-                          </ExplorerLink>
-                        </>
-                      }
-                    >
-                      <span>
-                        <When at={step.timestamp} />, block {formatCount(step.blockNumber)}
-                      </span>
-                      <HexValue value={step.txHash} kind="tx" />
-                    </Advanced>
+                    {step.txHash === null || step.blockNumber === null ? (
+                      <>
+                        <When at={step.timestamp} />
+                        <span>From the executor&rsquo;s journal, not onchain yet</span>
+                      </>
+                    ) : (
+                      <Advanced
+                        fallback={
+                          <>
+                            <When at={step.timestamp} />
+                            <ExplorerLink kind="tx" value={step.txHash}>
+                              Transaction
+                            </ExplorerLink>
+                          </>
+                        }
+                      >
+                        <span>
+                          <When at={step.timestamp} />, block {formatCount(step.blockNumber)}
+                        </span>
+                        <HexValue value={step.txHash} kind="tx" />
+                      </Advanced>
+                    )}
                   </p>
                 </div>
               </li>

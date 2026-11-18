@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { fixtureContext } from "@/fixtures";
 import { sampleHedgePlan } from "@/fixtures/samples";
-import type { ChainView, SealedReason } from "@/lib/live/types";
+import type { ChainView, SealedReason, VenueOrderView } from "@/lib/live/types";
 
 import { executionSummary, intentsCitingPlan, planExecution } from "./execution";
 import { readHedgePlan } from "./plan-schema";
@@ -70,6 +70,40 @@ describe("planExecution", () => {
     expect(executionSummary(execution, plan.orders.length)).toBe(
       "2 of 4 orders proposed, 1 filled, 1 waiting for you, 1 rejected, and 1 other intent cites the plan without matching an order.",
     );
+  });
+
+  it("says how many filled only in part, by the executor's journal, each intent once", () => {
+    const venueOrder = (state: VenueOrderView["state"], filledHundredths: number) =>
+      ({
+        venue: "gemini",
+        environment: "sandbox",
+        state,
+        quantityHundredths: 1_250,
+        filledHundredths,
+        filledCents: 105,
+      }) as VenueOrderView;
+    const chain = {
+      intents: [
+        intent(0, { status: "executed", filledCents: 105 }),
+        intent(1, {
+          market: second?.instrumentSymbol ?? "",
+          amountCents: second?.amountCents ?? 0,
+          status: "executed",
+          filledCents: second?.amountCents ?? 0,
+        }),
+      ],
+      sealed: { 0: sealed(plan.planId), 1: sealed(plan.planId) },
+      venueOrders: { 0: venueOrder("partly_filled", 500), 1: venueOrder("filled", 1_250) },
+    } as unknown as Pick<ChainView, "intents" | "sealed" | "venueOrders">;
+    const execution = planExecution(plan, chain);
+    expect(execution.partlyFilled).toBe(1);
+    expect(execution.orders[0]?.venueOrder?.state).toBe("partly_filled");
+    expect(executionSummary(execution, plan.orders.length)).toBe(
+      "2 of 4 orders proposed, 1 filled, 1 partly filled.",
+    );
+    // Without the journal (the simulated venue), as before.
+    const simulated = planExecution(plan, { intents: chain.intents, sealed: chain.sealed });
+    expect(executionSummary(simulated, plan.orders.length)).toBe("2 of 4 orders proposed, 2 filled.");
   });
 });
 

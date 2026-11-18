@@ -15,6 +15,7 @@ import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { fillChipProps, intentFill } from "@/components/domain/fill";
 import { type Column, Table } from "@/components/ui/Table";
 import { Tabs } from "@/components/ui/Tabs";
 import { When } from "@/components/ui/When";
@@ -101,11 +102,15 @@ const orderColumns: readonly Column<OrderOnChain>[] = [
   {
     key: "chain",
     header: "On chain",
-    cell: ({ intent }) =>
+    cell: ({ intent, venueOrder }) =>
       intent ? (
         <span className={styles.onChain}>
           <IntentLink id={intent.id} />
-          <StatusChip status={intent.status} reason={intent.reason} />
+          <StatusChip
+            status={intent.status}
+            reason={intent.reason}
+            {...fillChipProps(intentFill(intent, venueOrder))}
+          />
         </span>
       ) : (
         <span className={styles.notBought}>Not proposed</span>

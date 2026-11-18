@@ -12,7 +12,10 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { Advanced } from "@/lib/advanced/Advanced";
 
 import { formatCount, formatUsdCents } from "@/lib/format";
+import type { VenueOrderView } from "@/lib/live/types";
 import { categoryName, describeMarket, namingCategory } from "@/lib/markets";
+
+import { fillChipProps, intentFill } from "./fill";
 
 import styles from "./domain.module.css";
 
@@ -98,13 +101,17 @@ function isOutOfRange(intent: OrderFields, field: "amountCents" | "limitPrice"):
  * placed on the venue when there is one (`placedHundredths`, issue #117): it is sized so the cost and
  * Gemini's fee fit the amount, so it can be fewer than the amount buys at the limit, which Advanced view adds.
  * Before an order is placed, and on the simulated venue, it is what the amount buys at the limit.
+ * When only part of the order filled (`partFilledHundredths`), it says how much of it: "Buy NO, 5 of 12.50
+ * filled at 21¢".
  */
 export function OrderSummary({
   intent,
   placedHundredths = null,
+  partFilledHundredths = null,
 }: {
   intent: OrderFields;
   placedHundredths?: number | null;
+  partFilledHundredths?: number | null;
 }) {
   const amountKnown = intent.amountCents !== null || isOutOfRange(intent, "amountCents");
   const limitKnown = intent.limitPrice !== null || isOutOfRange(intent, "limitPrice");
@@ -130,9 +137,14 @@ export function OrderSummary({
       className="num"
       data-testid="order-summary"
       data-placed={placedHundredths === null ? undefined : ""}
+      data-part-filled={partFilledHundredths === null ? undefined : ""}
     >
       {side}
-      {outcome}, {contractsText(shown)} at {intent.limitPrice.toString()}¢
+      {outcome},{" "}
+      {partFilledHundredths === null
+        ? contractsText(shown)
+        : `${contractsText(partFilledHundredths)} of ${contractsText(shown)} filled`}{" "}
+      at {intent.limitPrice.toString()}¢
       {shown === nominal ? null : (
         <Advanced>
           <span className={styles.orderNominal}> ({contractsText(nominal)} before the fee)</span>
@@ -152,15 +164,21 @@ export function amountLabel(intent: Pick<OrderFields, "amountCents" | "outOfRang
 export function OrderAmount({
   intent,
   placedHundredths = null,
+  partFilledHundredths = null,
 }: {
   intent: OrderFields;
   placedHundredths?: number | null;
+  partFilledHundredths?: number | null;
 }) {
   return (
     <span className={styles.orderAmount}>
       <span className="num">{amountLabel(intent)}</span>
       <span className={styles.orderLine}>
-        <OrderSummary intent={intent} placedHundredths={placedHundredths} />
+        <OrderSummary
+          intent={intent}
+          placedHundredths={placedHundredths}
+          partFilledHundredths={partFilledHundredths}
+        />
       </span>
     </span>
   );
@@ -192,11 +210,21 @@ export function FlaggedBadge({ flags }: { flags: readonly string[] }) {
   );
 }
 
-/** The contract's verdict, then "Flagged" beside it when the MCP server could not have sent the intent. */
-export function IntentVerdict({ intent }: { intent: IntentView }) {
+/**
+ * The contract's verdict, then "Flagged" beside it when the MCP server could not have sent the intent. With
+ * the executor's order (`order`), the chip says what its journal adds: "Partly filled", or a fill not
+ * recorded onchain yet, and why an order did not fill.
+ */
+export function IntentVerdict({ intent, order }: { intent: IntentView; order?: VenueOrderView | undefined }) {
+  const fill = intentFill(intent, order);
   return (
     <span className={styles.verdict}>
-      <StatusChip status={intent.status} reason={intent.reason} className={styles.verdictChip} />
+      <StatusChip
+        status={intent.status}
+        reason={intent.reason}
+        {...fillChipProps(fill)}
+        className={styles.verdictChip}
+      />
       <FlaggedBadge flags={intentFlags(intent)} />
     </span>
   );

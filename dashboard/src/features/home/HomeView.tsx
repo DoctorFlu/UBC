@@ -3,6 +3,7 @@
 import type { IntentView } from "@mandate/shared";
 
 import { IntentLink, IntentVerdict, MarketName, OrderSummary, amountLabel } from "@/components/domain/Intent";
+import { orderLine } from "@/components/domain/fill";
 import { RulesSchedule } from "@/components/domain/RulesSchedule";
 import { RulesSummary } from "@/components/domain/RulesSummary";
 import { ChainUnavailable, NoPolicyYet } from "@/components/states/ChainStates";
@@ -30,7 +31,8 @@ const timeColumn: Column<IntentView> = {
   nowrap: true,
 };
 
-const recentColumns: readonly Column<IntentView>[] = [
+/** The recent intents' columns; the verdict says what the executor's order adds (a partial fill). */
+const recentColumns = (venueOrders: Readonly<Record<number, VenueOrderView>>): Column<IntentView>[] => [
   { key: "id", header: "Intent", cell: (intent) => <IntentLink id={intent.id} />, nowrap: true },
   {
     key: "market",
@@ -46,7 +48,11 @@ const recentColumns: readonly Column<IntentView>[] = [
     role: "primary",
   },
   { key: "amount", header: "Amount", cell: (intent) => amountLabel(intent), align: "end", nowrap: true },
-  { key: "verdict", header: "Verdict", cell: (intent) => <IntentVerdict intent={intent} /> },
+  {
+    key: "verdict",
+    header: "Verdict",
+    cell: (intent) => <IntentVerdict intent={intent} order={venueOrders[intent.id]} />,
+  },
   timeColumn,
 ];
 
@@ -55,9 +61,7 @@ function orderColumn(venueOrders: Readonly<Record<number, VenueOrderView>>): Col
   return {
     key: "order",
     header: "Order",
-    cell: (intent) => (
-      <OrderSummary intent={intent} placedHundredths={venueOrders[intent.id]?.quantityHundredths ?? null} />
-    ),
+    cell: (intent) => <OrderSummary intent={intent} {...orderLine(intent, venueOrders[intent.id])} />,
     nowrap: true,
   };
 }
@@ -184,8 +188,12 @@ export function HomeView({ preview }: { preview?: ConsoleSnapshot }) {
             captionHidden
             columns={
               advanced
-                ? [...recentColumns.slice(0, 3), orderColumn(chain.venueOrders), ...recentColumns.slice(3)]
-                : recentColumns
+                ? [
+                    ...recentColumns(chain.venueOrders).slice(0, 3),
+                    orderColumn(chain.venueOrders),
+                    ...recentColumns(chain.venueOrders).slice(3),
+                  ]
+                : recentColumns(chain.venueOrders)
             }
             rows={recent}
             rowKey={(intent) => intent.id.toString()}

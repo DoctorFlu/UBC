@@ -5,6 +5,7 @@ import {
   type IntentStatus,
   type IntentView,
   type Settlement,
+  countFills,
   settlementTotals,
 } from "@mandate/shared";
 import { Inbox } from "lucide-react";
@@ -12,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { IntentLink, IntentVerdict, MarketName, OrderAmount } from "@/components/domain/Intent";
+import { orderLine } from "@/components/domain/fill";
 import { FillSharesTag } from "@/components/domain/FillSourceTag";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
@@ -75,17 +77,19 @@ function IntentCell({ intent }: { intent: IntentView }) {
  */
 function VerdictCell({
   intent,
+  order,
   advanced,
   decide,
 }: {
   intent: IntentView;
+  order: VenueOrderView | undefined;
   advanced: boolean;
   decide: ((id: number) => void) | null;
 }) {
   return (
     <span className={styles.verdictCell}>
       <span className={styles.verdictLine}>
-        <IntentVerdict intent={intent} />
+        <IntentVerdict intent={intent} order={order} />
         {decide && intent.status === "needs_approval" ? (
           <button
             type="button"
@@ -141,15 +145,20 @@ function activityColumns({
       key: "order",
       header: "Order",
       // Not nowrap: an order the MCP server could not have sent reads longer, and wraps rather than widening.
-      cell: (intent) => (
-        <OrderAmount intent={intent} placedHundredths={venueOrders[intent.id]?.quantityHundredths ?? null} />
-      ),
+      cell: (intent) => <OrderAmount intent={intent} {...orderLine(intent, venueOrders[intent.id])} />,
       align: "end",
     },
     {
       key: "verdict",
       header: "Verdict",
-      cell: (intent) => <VerdictCell intent={intent} advanced={advanced} decide={decides ? null : decide} />,
+      cell: (intent) => (
+        <VerdictCell
+          intent={intent}
+          order={venueOrders[intent.id]}
+          advanced={advanced}
+          decide={decides ? null : decide}
+        />
+      ),
     },
   ];
   if (statuses.includes("executed")) {
@@ -226,6 +235,9 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
     0,
   );
   const executed = countByStatus(intents, ["executed"]);
+  const { partlyFilled } = countFills(
+    intents.map((intent) => ({ intent, order: chain.venueOrders[intent.id] })),
+  );
 
   return (
     <div className={styles.view}>
@@ -250,7 +262,8 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           value={formatUsdCents(filledCents)}
           hint={
             <span className={styles.statHint}>
-              {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded`}
+              {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded` +
+                (partlyFilled > 0 ? `, ${formatCount(partlyFilled)} partly filled` : "")}
               <FillSharesTag shares={fillShares(chain, snapshot.network, filledIntentIds(chain))} />
             </span>
           }
