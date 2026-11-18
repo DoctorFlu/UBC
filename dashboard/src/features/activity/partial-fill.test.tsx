@@ -3,6 +3,8 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { fixtureSnapshot } from "@/fixtures";
+import { AdvancedProvider } from "@/lib/advanced/Advanced";
+import { ADVANCED_COOKIE } from "@/lib/advanced/cookie";
 import { LiveConsoleProvider } from "@/lib/live/LiveConsole";
 import type { ChainView, ConsoleSnapshot, VenueOrderView } from "@/lib/live/types";
 
@@ -119,11 +121,15 @@ function onGemini(): ConsoleSnapshot {
   };
 }
 
-function renderWith(snapshot: ConsoleSnapshot, view: "activity" | number) {
+function renderWith(snapshot: ConsoleSnapshot, view: "activity" | number, advanced = false) {
+  // In a browser the preference reads the cookie itself; the server passes the one it read.
+  document.cookie = `${ADVANCED_COOKIE}=${advanced ? "on" : "off"}; path=/`;
   return render(
-    <LiveConsoleProvider initial={snapshot} follow={false}>
-      {view === "activity" ? <ActivityView /> : <IntentDetailView intentId={view} />}
-    </LiveConsoleProvider>,
+    <AdvancedProvider cookie={advanced ? `${ADVANCED_COOKIE}=on` : null}>
+      <LiveConsoleProvider initial={snapshot} follow={false}>
+        {view === "activity" ? <ActivityView /> : <IntentDetailView intentId={view} />}
+      </LiveConsoleProvider>
+    </AdvancedProvider>,
   );
 }
 
@@ -154,6 +160,12 @@ describe("a snapshot shaped like hosted's reads as before", () => {
     expect(chips[2]?.title).toBe("Approved, but the executor recorded that the order did not fill.");
     expect(within(activityRow(0)).getByTestId("order-summary").textContent).toBe("Buy NO, 40 at 31¢");
     expect(screen.getByText(/fills recorded/).textContent).toMatch(/^2 fills recorded(?!,)/);
+  });
+
+  it("Advanced view keeps the contract's word for a failed intent", () => {
+    renderWith(hostedShaped(), "activity", true);
+    expect(chipOf(activityRow(2))?.textContent).toBe("Failed");
+    expect(chipOf(activityRow(0))?.textContent).toBe("Executed");
   });
 
   it("the intent page: the same description, order and steps as before", () => {

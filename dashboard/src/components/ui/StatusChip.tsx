@@ -1,5 +1,6 @@
 import { INTENT_STATUS_LABELS, type IntentStatus, NOT_FILLED, describeReason } from "@mandate/shared";
 
+import { Advanced } from "@/lib/advanced/Advanced";
 import { cx } from "@/lib/cx";
 
 import styles from "./StatusChip.module.css";
@@ -55,7 +56,14 @@ export function StatusChip({ status, reason, label, description, fill, className
       data-fill={fill}
     >
       <span className={styles.lamp} aria-hidden />
-      <span>{label ?? statusLabels[status]}</span>
+      <span>
+        {status === "failed" && (label === undefined || label === NOT_FILLED) ? (
+          // The contract's own word in Advanced view, where the console shows what the contract emitted.
+          <Advanced fallback={NOT_FILLED}>{INTENT_STATUS_LABELS.failed}</Advanced>
+        ) : (
+          (label ?? statusLabels[status])
+        )}
+      </span>
       {reason ? (
         <span className={styles.code} data-reason>
           <span className="visually-hidden">, reason </span>
