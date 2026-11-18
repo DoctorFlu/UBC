@@ -2,7 +2,7 @@
 .wrap {
   /* The containing block for visually hidden text in cells, so a wide table scrolls here, never the page. */
   position: relative;
-  container-type: inline-size;
+  container: table / inline-size;
   overflow-x: auto;
   max-width: 100%;
   overscroll-behavior-x: contain;

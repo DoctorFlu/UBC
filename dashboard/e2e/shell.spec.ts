@@ -301,6 +301,34 @@ test.describe("layout", () => {
       expect(overflow).toBeLessThanOrEqual(0);
     });
 
+    test(`at ${width.toString()} px, Waiting fits its card: Approve and Reject are both in view`, async ({
+      page,
+      baseURL,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+      await page.getByRole("tab", { name: /^Waiting/ }).click();
+      const panel = page.getByRole("tabpanel");
+      // A held intent never has a payout yet: Waiting leaves the At expiry column out.
+      await expect(panel.getByRole("columnheader", { name: "Decision" })).toBeVisible();
+      await expect(panel.getByRole("columnheader", { name: "At expiry" })).toHaveCount(0);
+      const wrap = panel.getByRole("region").filter({ has: page.getByRole("table") });
+      const fit = await wrap.evaluate((element) => element.scrollWidth - element.clientWidth);
+      expect(fit).toBeLessThanOrEqual(0);
+      const card = await wrap.boundingBox();
+      if (!card) throw new Error("no table");
+      for (const name of [/^Approve /, /^Reject /]) {
+        const button = await panel.getByRole("button", { name }).first().boundingBox();
+        if (!button) throw new Error(`no ${name.source} button`);
+        expect(button.x).toBeGreaterThanOrEqual(card.x);
+        expect(button.x + button.width).toBeLessThanOrEqual(card.x + card.width);
+      }
+      // Executed lists filled positions: it has their payouts and no decision to make.
+      await page.getByRole("tab", { name: /^Executed/ }).click();
+      await expect(panel.getByRole("columnheader", { name: "At expiry" })).toBeVisible();
+      await expect(panel.getByRole("columnheader", { name: "Decision" })).toHaveCount(0);
+    });
+
     test(`at ${width.toString()} px, Home's figures sit in one row or one column, never two and one`, async ({
       page,
     }) => {
