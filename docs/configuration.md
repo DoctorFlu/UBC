@@ -102,6 +102,7 @@ It is resumable and never deploys twice by accident:
 `--dry-run` runs all three on a throwaway local anvil fork of Arc's public RPC, with the real keys loaded in the process, then the doctor on that fork, and sends nothing to Arc.
 The address it prints is the one a real run would get, while the deployer's nonce does not change.
 On 2026-11-18 at 02:05 UTC it used 3,092,050 gas at most (about 0.055 USDC spent at 20 gwei on the fork; up to 0.116 USDC with headroom) and ended with the doctor's `READY`.
+The real run on 18 November 2026 deployed `0x9a240b2aaa2a936DBf4543940341Bb725C92412d` in block 72777078, with three confirmed transactions and the doctor's `READY` against Arc testnet; the hosted demo uses it.
 
 ### Which RPC each service uses, and what it costs
 

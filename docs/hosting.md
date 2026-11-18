@@ -883,6 +883,28 @@ Compare each printed hash with `sed -n 's/^AGENT_PRIVATE_KEY=//p' .env | tr -d '
 The demo compose file ignores both lines (its agent key is in `compose.demo.yml`), so setting them changes nothing until the switch.
 After the switch, the laptop must not run its own stack against Arc with the same keys: two processes signing with one key race for its nonces.
 
+Before the switch, check on the machine that each stored key is the one whose address holds the role, and stop on any mismatch.
+A throwaway container without network reads the env file, derives each address inside the process and prints only the addresses (put the agent's and the executor's addresses from `arc:keygen` in `want`):
+
+```sh
+check='const { parseEnv } = require("node:util"); const { readFileSync } = require("node:fs");
+const { privateKeyToAccount } = require("viem/accounts");
+const env = parseEnv(readFileSync("/run/mandate.env", "utf8"));
+const want = { AGENT_PRIVATE_KEY: "0x<agent address>", EXECUTOR_PRIVATE_KEY: "0x<executor address>" };
+let ok = true;
+for (const [name, address] of Object.entries(want)) {
+  let got = "not set";
+  try { if (env[name]) got = privateKeyToAccount(env[name]).address; } catch { got = "not a key"; }
+  if (got.toLowerCase() !== address.toLowerCase()) ok = false;
+  console.log(name, "->", got, got.toLowerCase() === address.toLowerCase() ? "matches" : "DOES NOT MATCH");
+}
+process.exit(ok ? 0 : 1);'
+docker run --rm --network none --user "$(id -u):$(id -g)" -v /data/mandate/mandate.env:/run/mandate.env:ro \
+  -w /app --entrypoint node mandate-services:latest --no-warnings -e "$check" || echo "a key is wrong: do not switch"
+```
+
+It reads the file the way Compose does (`parseEnv` removes the quotes `set-secret.sh` writes), so it also catches a value that the hash comparison above would pass but Compose would read differently.
+
 ### 4. Switch
 
 In `/data/mandate/mandate.env`, with an editor (none of these is a secret):
@@ -912,7 +934,16 @@ docker compose --env-file /data/mandate/mandate.env up -d --build --remove-orpha
 ```
 
 Compose refuses to start while `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_PRIVATE_KEY` or `EXECUTOR_PRIVATE_KEY` is missing, and the MCP server and the executor refuse to start with one of anvil's published keys.
-`docker compose --env-file /data/mandate/mandate.env logs executor` shows `serving 0x571d...82f3 from block 72740419`, or `not the executor yet` with the call the owner still has to make.
+`docker compose --env-file /data/mandate/mandate.env logs executor` shows `serving 0x571d...82f3 from block 72740419` (or our own instance's address and block), or `not the executor yet` with the call the owner still has to make.
+
+The hosted machine switched on 18 November 2026, to our own instance `0x9a24…412d` (block 72777078), measured as follows:
+
+- with the Arc console and services images built ahead while the demo served (50 s and 16 s), the site and the compose build before the swap took 36 s, all from the cache;
+- `docker compose build` first and then `up -d --remove-orphans` kept the outage short: measured from outside once a second, the console and `/mcp` answered 502 for about 9 seconds, and Caddy was recreated within the same 10 seconds;
+- the executor logged `SIMULATED executor ... on Arc testnet (public RPC) as 0x0F7e…4390; serving 0x9a24…412d` and `serving ... from block 72777078`, and the console `reading Policy 0x9a24…412d on Arc testnet from block 72777078`;
+- `/` sends a signed-out visitor to `/sign-in`, which offers the passkey sign-in, a new workspace, a recovery code and the claim; the smoke test, `get_setup_state` through the public URL, and the doctor (`READY`) passed before the owner's claim.
+
+Set `NEXT_PUBLIC_SCORECARD_AGENT` to the Arc agent's address and rebuild the site (`build-site.sh`) in the same step, or the landing page keeps linking to the demo chain's agent.
 
 ### 5. Claim and check
 
@@ -923,7 +954,7 @@ Compose refuses to start while `POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`, `AGENT_P
 
 ### Back to the demo chain
 
-Put `COMPOSE_FILE` back to `compose.yml:compose.demo.yml:compose.gateway.yml` and run the same `up -d --build --remove-orphans`.
+Put `COMPOSE_FILE` back to `compose.yml:compose.demo.yml:compose.gateway.yml` (with `:compose.site.yml` if the landing page is served) and `NEXT_PUBLIC_SCORECARD_AGENT` back to the demo agent (or remove the line), rebuild the site with `build-site.sh`, and run the same `up -d --build --remove-orphans`.
 The demo chain, its contract and its database are as they were left; the Arc lines in the env file are ignored by the demo compose file.
 If a QuickNode Stream exists, pause and delete it first, because a paused one bills every block it missed when it resumes ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
 
