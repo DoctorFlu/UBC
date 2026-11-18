@@ -4,6 +4,7 @@ import { CircleAlert, Power, RefreshCw, Wallet } from "lucide-react";
 
 import { useLiveConsole } from "@/lib/live/LiveConsole";
 import { useOwnerAccess } from "@/lib/owner/access";
+import { useWalletState } from "@/lib/wallet/useWalletState";
 
 import styles from "./Shell.module.css";
 
@@ -61,14 +62,22 @@ export function FeedNotice() {
 
 /**
  * Says in the page, not only in a disabled button's tooltip, why no owner control works while the owner's
- * wallet is on another network, and what one step fixes it.
+ * wallet is on another network or did not answer, and what one step fixes it.
  */
 export function WalletNotice() {
   const access = useOwnerAccess();
+  const wallet = useWalletState();
   const { snapshot } = useLiveConsole();
   return (
     <div aria-live="polite">
-      {access.kind === "wrong-network" ? (
+      {access.kind === "disconnected" && wallet.kind === "disconnected" && wallet.unanswered ? (
+        <p className={styles.feedNotice} data-tone="waiting" data-testid="wallet-notice">
+          <Wallet aria-hidden />
+          <span>
+            {wallet.unanswered} did not answer. Open it to unlock, then press &ldquo;Connect wallet&rdquo;.
+          </span>
+        </p>
+      ) : access.kind === "wrong-network" ? (
         <p className={styles.feedNotice} data-tone="waiting" data-testid="wallet-notice">
           <Wallet aria-hidden />
           <span>

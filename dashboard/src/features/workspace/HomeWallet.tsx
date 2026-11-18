@@ -55,7 +55,11 @@ export function MandateOwnerLine({ owner }: { owner: Address | null }) {
     case "disconnected":
       line = (
         <>
-          <span>Connect the owner wallet to approve and change rules</span>
+          <span>
+            {state.unanswered
+              ? `${state.unanswered} did not answer. Open it to unlock, then connect the owner wallet to approve and change rules`
+              : "Connect the owner wallet to approve and change rules"}
+          </span>
           <Button
             size="sm"
             variant="secondary"
