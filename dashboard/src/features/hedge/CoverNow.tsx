@@ -73,7 +73,7 @@ export function CoverNowCard({
         <p className={styles.sentence} role="status">
           {assessment
             ? coverSentence(assessment, settles)
-            : "Cover cannot be measured until Gemini's quotes for this ladder load."}
+            : "Cover cannot be measured now: Gemini's market data for this ladder is unavailable."}
         </p>
         {assessment && assessment.state !== "nothing_to_cover" ? (
           <Meter
