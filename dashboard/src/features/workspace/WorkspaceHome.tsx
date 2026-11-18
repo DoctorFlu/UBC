@@ -7,6 +7,7 @@ import { Stat, StatGroup } from "@/components/ui/Stat";
 import { formatUsdCents } from "@/lib/format";
 import { mandatePath } from "@/lib/mandate-path";
 
+import { coverText, goalsCoveredText, totalCover } from "./cover-text";
 import { HomeWallet, MandateOwnerLine } from "./HomeWallet";
 import styles from "./workspace.module.css";
 import type { MandateSummary, WorkspaceHomeData } from "./types";
@@ -20,36 +21,6 @@ function signerText(summary: MandateSummary): string {
     default:
       return "No contract yet";
   }
-}
-
-function coverText(cover: MandateSummary["cover"]): { value: string; hint: string } {
-  if (cover.goals === 0) return { value: "No goals", hint: "No current hedge goal" };
-  if (cover.unavailable === cover.goals) return { value: "Unknown", hint: "Can't measure it right now" };
-  return {
-    value: `${String(cover.met)} of ${String(cover.goals)}`,
-    hint:
-      cover.unavailable > 0
-        ? `goals covered; ${String(cover.unavailable)} can't be measured now`
-        : cover.goals === 1
-          ? "goal covered"
-          : "goals covered",
-  };
-}
-
-/**
- * The headline across every mandate, by the same rule as each row: a goal whose cover cannot be measured
- * (Gemini's quotes unavailable) is never counted as not covered.
- */
-function goalsCoveredText(cover: Pick<MandateSummary["cover"], "goals" | "met" | "unavailable">): {
-  value: string;
-  hint?: string;
-} {
-  if (cover.goals === 0) return { value: "None set" };
-  if (cover.unavailable === cover.goals) return { value: "Unknown", hint: "Can't measure it right now" };
-  const value = `${String(cover.met)} of ${String(cover.goals)}`;
-  return cover.unavailable > 0
-    ? { value, hint: `${String(cover.unavailable)} can't be measured now` }
-    : { value };
 }
 
 function committedText(summary: MandateSummary): { value: string; hint: string } {
@@ -118,14 +89,7 @@ function MandateRow({ summary }: { summary: MandateSummary }) {
 export function WorkspaceHome({ data }: { data: WorkspaceHomeData }) {
   const waiting = data.mandates.reduce((sum, row) => sum + row.waiting, 0);
   const committed = data.mandates.reduce((sum, row) => sum + (row.committedCents ?? 0), 0);
-  const cover = data.mandates.reduce(
-    (sum, row) => ({
-      goals: sum.goals + row.cover.goals,
-      met: sum.met + row.cover.met,
-      unavailable: sum.unavailable + row.cover.unavailable,
-    }),
-    { goals: 0, met: 0, unavailable: 0 },
-  );
+  const cover = totalCover(data.mandates);
   const count = data.mandates.length;
   // Wallet-owned mandates need the owner's wallet: Home offers it, as a mandate's top bar does.
   const walletOwned = data.mandates.filter((row) => row.mandate.ownerSigner === "wallet");
