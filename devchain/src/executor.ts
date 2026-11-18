@@ -121,7 +121,11 @@ export interface ExecutorOptions {
   fillDelayMs?: number;
   /** How often an open order is checked again. */
   fillPollMs?: number;
-  /** How long to wait before checking again when the venue could not be reached. */
+  /**
+   * How long to wait before checking again when the venue could not be reached. While an intent's market
+   * cannot be checked (Gemini's market data unavailable), the wait doubles with each failure, up to 10
+   * minutes, and starts again from this once a check succeeds.
+   */
   venueRetryMs?: number;
   /**
    * How often the settlement timer looks for a position that is due. A look is local: the venue and the
@@ -180,6 +184,14 @@ function ladderOf(market: string): string {
 }
 
 /**
+ * The wait before asking again after `waitsSoFar` waits in a row: `baseMs`, doubling each time, at most 10
+ * minutes (or `baseMs`, when that is longer).
+ */
+export function growingRetryDelayMs(baseMs: number, waitsSoFar: number): number {
+  return Math.min(baseMs * 2 ** waitsSoFar, Math.max(baseMs, 10 * MINUTE_MS));
+}
+
+/**
  * Watches for approvals and fills, handles each approval, and settles filled positions once their
  * market has resolved. A failure on one intent never stops the others.
  */
@@ -202,6 +214,8 @@ export function startExecutor(options: ExecutorOptions): Executor {
   const retries = new Map<number, ReturnType<typeof setTimeout>>();
   /** How many times in a row each intent was held by the venue, for growing waits. */
   const holds = new Map<number, number>();
+  /** How many times in a row each intent's market could not be checked, for growing waits. */
+  const marketWaits = new Map<number, number>();
   let stopped = false;
   // Read through a function so the compiler does not narrow `stopped` across awaits.
   const isStopped = (): boolean => stopped;
@@ -218,11 +232,16 @@ export function startExecutor(options: ExecutorOptions): Executor {
     );
   }
 
-  /** Waits while the venue holds an intent: `venueRetryMs`, doubling each time, at most 10 minutes. */
+  /** The next of the growing waits counted in `waits`. */
+  function growingDelay(waits: Map<number, number>, intentId: number): number {
+    const count = waits.get(intentId) ?? 0;
+    waits.set(intentId, count + 1);
+    return growingRetryDelayMs(venueRetryMs, count);
+  }
+
+  /** Waits while the venue holds an intent. */
   function holdDelay(intentId: number): number {
-    const count = holds.get(intentId) ?? 0;
-    holds.set(intentId, count + 1);
-    return Math.min(venueRetryMs * 2 ** count, Math.max(venueRetryMs, 10 * MINUTE_MS));
+    return growingDelay(holds, intentId);
   }
 
   /**
@@ -238,19 +257,26 @@ export function startExecutor(options: ExecutorOptions): Executor {
     let placing = false;
     try {
       const intent = await reads.run(() => client.getIntent(intentId));
-      if (intent?.status !== "approved") return; // already recorded, for example after a restart
+      if (intent?.status !== "approved") {
+        marketWaits.delete(intentId);
+        return; // already recorded, for example after a restart
+      }
 
       let check: IntentCheck;
       try {
         check = await checkApprovedIntent(intent, venue);
       } catch (error) {
+        // Gemini's market data is unavailable (an outage, maintenance): asking every few seconds for hours
+        // helps nobody, so the waits grow, as for a venue hold.
+        const delayMs = growingDelay(marketWaits, intentId);
         log(
           `${tag} intent #${intentId}: could not check the market on Gemini (${errorText(error)}); ` +
-            `not placing it, trying again in ${Math.round(venueRetryMs / 1000)} s`,
+            `not placing it, trying again in ${formatWait(delayMs)}`,
         );
-        retryLater(intentId);
+        retryLater(intentId, delayMs);
         return;
       }
+      marketWaits.delete(intentId);
 
       if (!check.ok) {
         const { txHash } = await client.recordResult({

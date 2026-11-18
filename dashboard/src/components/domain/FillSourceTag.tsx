@@ -17,7 +17,8 @@ const LABELS: Record<FillSource, { text: string; share: string; title: string; t
   sandbox: {
     text: "Sandbox fill",
     share: "on the sandbox",
-    title: "Filled on Gemini's sandbox, with test funds, not real money.",
+    // Only what the executor's journal proves; who took the other side is not a fact the console has.
+    title: "Filled on Gemini's sandbox, with test funds.",
     testId: "sandbox-fill",
   },
   unknown: {

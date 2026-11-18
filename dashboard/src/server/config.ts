@@ -6,6 +6,8 @@ import { inspect } from "node:util";
 import { WAKE_DEFAULT_DAILY_CAP, WakeTarget } from "@mandate/shared";
 import type { EnvVars } from "@mandate/shared/node";
 
+import { SANDBOX_LIQUIDITY, type SandboxLiquidity } from "@/lib/live/types";
+
 /**
  * Settings of the console backend, read once from the environment. Chain settings (`POLICY_ADDRESS`,
  * `POLICY_DEPLOY_BLOCK`, `ARC_RPC_URL`, `POLICY_DEPLOYMENT_FILE`) are read by `resolvePolicyDeployment` in
@@ -76,6 +78,12 @@ export interface ConsoleConfig {
    * Setup to ask while `MCP_PUBLIC_URL` is not set; null when it is, or in tests.
    */
   mcpLocalUrl: string | null;
+  /**
+   * How this deployment gets liquidity on Gemini's sandbox, as its operator declares it (`SANDBOX_LIQUIDITY`):
+   * "mirror-maker" when the mirror maker runs for it (docs/gemini-venue.md), else null. The console never
+   * infers it; the venue badge's details describe the maker only when it is declared.
+   */
+  sandboxLiquidity: SandboxLiquidity | null;
   accounts: AccountsConfig;
   /** Event wake-ups of the Grok Bot routine (issue #40). */
   wake: WakeConfig;
@@ -299,10 +307,23 @@ export function readConsoleConfig(env: EnvVars = process.env): ConsoleConfig {
     publicUrl,
     mcpPublicUrl: optional(env.MCP_PUBLIC_URL),
     mcpLocalUrl: optional(env.MCP_PUBLIC_URL) === null ? localMcpUrl(env) : null,
+    sandboxLiquidity: readSandboxLiquidity(env.SANDBOX_LIQUIDITY),
     accounts,
     wake,
     mandates: readMandatesConfig(env),
   };
+}
+
+/** `SANDBOX_LIQUIDITY`: unset or empty for none declared, or "mirror-maker"; anything else is refused. */
+function readSandboxLiquidity(value: string | undefined): SandboxLiquidity | null {
+  const declared = optional(value);
+  if (declared === null) return null;
+  if (!(SANDBOX_LIQUIDITY as readonly string[]).includes(declared)) {
+    throw new Error(
+      `SANDBOX_LIQUIDITY must be unset or one of ${SANDBOX_LIQUIDITY.map((kind) => `"${kind}"`).join(", ")}, got "${declared}"`,
+    );
+  }
+  return declared as SandboxLiquidity;
 }
 
 /**
@@ -334,6 +355,7 @@ export function testConsoleConfig(
     publicUrl,
     mcpPublicUrl: null,
     mcpLocalUrl: null,
+    sandboxLiquidity: null,
     wake: readWakeConfig({}),
     mandates: readMandatesConfig({}),
     ...rest,

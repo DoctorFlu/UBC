@@ -84,3 +84,17 @@ describe("the MCP server's addresses", () => {
     });
   });
 });
+
+describe("SANDBOX_LIQUIDITY", () => {
+  const dev = { CONSOLE_MODE: "development" };
+  it("is declared by the operator or not at all, and refuses anything else, naming the setting", () => {
+    expect(readConsoleConfig(dev).sandboxLiquidity).toBeNull();
+    expect(readConsoleConfig({ ...dev, SANDBOX_LIQUIDITY: " " }).sandboxLiquidity).toBeNull();
+    expect(readConsoleConfig({ ...dev, SANDBOX_LIQUIDITY: "mirror-maker" }).sandboxLiquidity).toBe(
+      "mirror-maker",
+    );
+    expect(() => readConsoleConfig({ ...dev, SANDBOX_LIQUIDITY: "gemini" })).toThrow(
+      'SANDBOX_LIQUIDITY must be unset or one of "mirror-maker", got "gemini"',
+    );
+  });
+});
