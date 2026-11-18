@@ -10,10 +10,15 @@ Suggested schedule for the demo: Hourly, every hour of the day.
 Hourly is the shortest schedule Grok Bot offers; a webhook trigger (issue #40) covers anything faster.
 Each run buys at most one signal (0.001 USDC), so a full day of hourly runs stays near the server's daily signal budget of 0.02 USDC; when the budget is used up the run plans without a signal.
 Replace the values in angle brackets before saving.
+Grok's web client attaches every connector on the account to an automation, and its checkboxes cannot be changed (seen on 2026-11-17).
+With a second Mandate connector on the account (for example "Mandate Local", for a laptop), the run could otherwise pick either one, so the prompt names the connector.
+For an automation that serves another console, put that connector's name in its place.
 
 ---
 
 Use the Mandate hedging skill.
+Use only the "Mandate Hosted" connector for every tool call in this run.
+Never call a tool of any other connector, such as "Mandate Local", even when it has tools of the same names: they reach another console and another contract.
 My standing goal: keep my <ASSET> holding protected below <FLOOR PRICE> for the nearest expiry, spending at most <MAX COST> per plan.
 I approve this goal in advance, so do not ask me before executing a plan that meets it.
 

@@ -6,7 +6,7 @@ The MCP server sends shorter operating rules on every connection; this skill add
 
 Where it applies (checked live on 2026-11-15): a skill saved in Settings is not visible to the Grok Bot chat thread.
 In chat, the agent works from the MCP server's instructions and tool descriptions only, so anything it must do in chat belongs in `agent/src/instructions.ts`.
-Skills are attached to an automation (the routine in `routine.md`) when the automation is created.
+Skills are attached to an automation (the routine in `routine.md`) when the automation is created; the web client attaches every skill on the account to every automation (seen on 2026-11-17), so the daily digest's prompt sets this one aside.
 
 Skill form values:
 
