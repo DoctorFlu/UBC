@@ -76,9 +76,10 @@ services:
       POLICY_DEPLOY_BLOCK: ${POLICY_DEPLOY_BLOCK:?the Arc testnet setup needs POLICY_DEPLOY_BLOCK, the block the Policy contract was deployed in, in deploy/.env}
       ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.io}
       EXECUTOR_PRIVATE_KEY: ${EXECUTOR_PRIVATE_KEY:?the Arc testnet setup needs EXECUTOR_PRIVATE_KEY, the executor account's key, in deploy/.env (npm run arc:keygen)}
-      # How often it asks the chain for new approvals: two RPC calls each time (docs/configuration.md, Arc
-      # testnet, for what that costs on a provider; the public RPC costs nothing).
-      SIM_EXECUTOR_POLL_MS: ${SIM_EXECUTOR_POLL_MS:-1000}
+      # How often it asks the chain for new approvals: two RPC calls each time. Unset, the executor's own
+      # default for Arc applies (5 s): the public RPC rate-limits an address that polls every second
+      # (docs/configuration.md, "Which RPC each service uses, and what it costs").
+      SIM_EXECUTOR_POLL_MS: ${SIM_EXECUTOR_POLL_MS:-}
       # Where it records orders and settlements: the console's executor API, on the private network.
       CONSOLE_URL: http://console:3000
       EXECUTOR_SETTLE_MS: ${EXECUTOR_SETTLE_MS:-60000}

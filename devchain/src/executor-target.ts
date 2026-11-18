@@ -12,14 +12,25 @@
  * The devchain uses Arc testnet's chain id, so where the executor signs, not the chain id, decides.
  * Never prints a key.
  */
-import { PolicyClient, arcTestnet, devchain, type WriteLane } from "@mandate/shared";
+import {
+  ARC_RECEIPT_FIRST_POLL_MS,
+  PolicyClient,
+  type ChainHead,
+  type HeadCache,
+  arcTestnet,
+  devchain,
+  politeHttp,
+  rpcGate,
+  sharedHead,
+  type WriteLane,
+} from "@mandate/shared";
 import {
   type ResolvedDeployment,
   isDevchainRpc,
   isLoopbackUrl,
   wellKnownKeyRefusal,
 } from "@mandate/shared/node";
-import { type Address, type Chain, type Hex, createPublicClient, createWalletClient, http } from "viem";
+import { type Address, type Chain, type Hex, createPublicClient, createWalletClient } from "viem";
 import { type PrivateKeyAccount, privateKeyToAccount } from "viem/accounts";
 import { devAccount } from "./accounts";
 
@@ -118,14 +129,52 @@ export function executorTarget(
 /** The executor's `PolicyClient` for the target's contract, signing with its key. */
 export function executorPolicyClient(target: ExecutorTarget, lane?: WriteLane): PolicyClient {
   const chain = { ...target.chain, rpcUrls: { default: { http: [target.rpcUrl] } } };
-  const transport = http(target.rpcUrl, target.local ? {} : { timeout: 10_000, retryCount: 1 });
+  // Behind the process's rate-limit gate: after a refusal every request waits for it (up to a minute)
+  // instead of asking again at once, and a refused transaction is sent again once it opens.
+  const transport = politeHttp(target.rpcUrl, {
+    ...(target.local ? {} : { timeout: 10_000 }),
+    retryCount: target.local ? 3 : 2,
+    maxWaitMs: RPC_GATE_WAIT_MS,
+  });
   return new PolicyClient({
     address: target.policy,
     // Anvil mines at once; on Arc a block takes about half a second.
     publicClient: createPublicClient({ chain, transport, pollingInterval: target.local ? 100 : 1_000 }),
     walletClient: createWalletClient({ chain, transport, account: target.account }),
     ...(lane === undefined ? {} : { lane }),
+    ...executorReceiptPolling(target),
   });
+}
+
+/** How the executor's writes wait for their receipts: from half a second on Arc, at once on anvil. */
+export function executorReceiptPolling(target: Pick<ExecutorTarget, "local">): {
+  receiptFirstPollMs?: number;
+} {
+  return target.local ? {} : { receiptFirstPollMs: ARC_RECEIPT_FIRST_POLL_MS };
+}
+
+/** Most one chain request of the executor waits for the RPC's rate-limit gate to open. */
+export const RPC_GATE_WAIT_MS = 60_000;
+
+/**
+ * The latest block, read once per polling interval for every contract the executor serves, and the
+ * rate-limit gate of its endpoint: what each contract's watcher shares.
+ */
+export function executorHead(
+  target: ExecutorTarget,
+  client: PolicyClient,
+): { head: (maxAgeMs: number) => Promise<bigint>; gate: ReturnType<typeof rpcGate> } {
+  const cache: HeadCache = sharedHead(
+    `${String(target.chain.id)}:${target.rpcUrl}`,
+    async (): Promise<ChainHead> => {
+      const block = await client.publicClient.getBlock({ blockTag: "latest" });
+      return { number: block.number, timestamp: block.timestamp };
+    },
+  );
+  return {
+    head: async (maxAgeMs) => (await cache.latest(maxAgeMs)).number,
+    gate: rpcGate(target.rpcUrl),
+  };
 }
 
 /** How often the executor reads `executor()` again while its key does not hold the role. */
