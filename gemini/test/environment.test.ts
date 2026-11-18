@@ -7,6 +7,7 @@ describe("the stack's market data source", () => {
       environment: "production",
       venue: "simulated",
       baseUrl: GEMINI_HOSTS.production,
+      productionBaseUrl: GEMINI_HOSTS.production,
       settings: "EXECUTOR_VENUE=simulated (the default)",
     });
     // The owner's .env holds GEMINI_ENV=sandbox for the executor; the simulated stack keeps live prices.
@@ -17,6 +18,8 @@ describe("the stack's market data source", () => {
     expect(marketDataSource({ EXECUTOR_VENUE: "gemini" })).toMatchObject({
       environment: "sandbox",
       baseUrl: GEMINI_HOSTS.sandbox,
+      // Spot always comes from production's exchange, whose index every ladder settles on.
+      productionBaseUrl: GEMINI_HOSTS.production,
       settings: "EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox",
     });
     expect(marketDataSource({ EXECUTOR_VENUE: " Gemini ", GEMINI_ENV: "production" })).toMatchObject({
@@ -30,9 +33,11 @@ describe("the stack's market data source", () => {
     expect(marketDataSource({ ...sandbox, GEMINI_API_URL: "https://api.sandbox.gemini.com/" }).baseUrl).toBe(
       GEMINI_HOSTS.sandbox,
     );
-    expect(marketDataSource({ ...sandbox, GEMINI_API_URL: "http://127.0.0.1:9255" }).baseUrl).toBe(
-      "http://127.0.0.1:9255",
-    );
+    // A loopback stand-in answers for both exchanges, so a test never reaches production.
+    expect(marketDataSource({ ...sandbox, GEMINI_API_URL: "http://127.0.0.1:9255" })).toMatchObject({
+      baseUrl: "http://127.0.0.1:9255",
+      productionBaseUrl: "http://127.0.0.1:9255",
+    });
     expect(() => marketDataSource({ ...sandbox, GEMINI_API_URL: "https://api.gemini.com" })).toThrow(
       "GEMINI_API_URL is https://api.gemini.com, but EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox means " +
         "Gemini's sandbox (https://api.sandbox.gemini.com). Unset GEMINI_API_URL, or set it to that same host.",
