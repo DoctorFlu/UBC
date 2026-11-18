@@ -140,6 +140,32 @@ With nothing held this is the full staircase; with the full staircase held it is
 The planner then buys `missing_i` at each strike under the usual cost cap, budget, trade size and depth limits.
 The property tests in `planner/test/cover.test.ts` check that planning after a plan was executed buys nothing, that any partial execution is completed with only the missing contracts, and that the payout below the floor never goes beyond `max(held, target)`.
 
+## Depth and slippage
+
+A rung's NO price is the listing's quote (`noBuyCents`); the contracts offered at it are the top of the book.
+Gemini's books are often thin at the top and deep right behind it: on 18 November 2026 at 12:39 UTC the daily's $63,000 strike offered 5 NO at 21c, then 25 at 22c and 657 at 24c.
+`plan_hedge` reads every level of each book it needs (`depth.noOffers` on the ladder, each YES bid as a NO offer at `100 - bid`, cheapest first).
+
+`slippageCents` (0 to 10, default 0) is how many cents above a rung's NO price the plan may pay.
+Above 0, a rung takes every level priced at or below `min(99, noBuyCents + slippageCents)`, cheapest first, and never more than the goal still needs there (`planner/src/depth.ts`).
+Its limit price is the price of the deepest level it uses, never rounded down, so the order reaches every contract it counts on.
+Each order's amount is `ceil(quantity x limit)`, as before: that is what the intent commits and what the mandate's approval line, per-trade limit and budget are checked against.
+`expectedFillCents` is what the orders cost if they fill at the prices the book showed, which a limit order takes cheapest first; it is at most the amount.
+
+Slippage is no longer a cushion against the price moving between the plan and the placement.
+When the top level covers a rung, its limit is the best price whatever the slippage, so a plan commits no more budget than the book requires; if the book moves before placement, the order may not fill, and the next plan sees the new book.
+
+At slippage 0, with the depth given by hand (`depthHundredths`), or without the book's levels, a rung is sized as before: the top of the book at `min(99, noBuyCents + slippageCents)`.
+The listing's quote and the book are read at different moments and can disagree by a cent; at slippage 0 the top of the book is taken at the listing's price, as before, and above 0 the book's own levels and prices decide.
+Plans made at slippage 0 are exactly what they were: the same id, orders, quantities, limits, amounts and warnings (`planner/test/depth.test.ts` replays plans main made before this change).
+The id never covers the added fields, and a sealed decision context holds no plan or book fields, so stored plans and the hashes onchain still verify.
+
+When the book is too thin for the goal (`thin_depth`), the plan carries `depthOptions`: the planner run again at each higher slippage up to 10 cents, so each option respects the cost cap, the budget, the per-trade limit and the depth exactly as a plan made there would.
+Only slippages that buy a different quantity are kept, and `coversAtSlippageCents` is the smallest that covers the goal within the cap, or null.
+The `thin_depth` sentence says the same, for example "At the best price this plan covers 80%. Paying up to 1 cent above the best price covers 100%, for $28.52 committed (about $28.42 expected)."
+`plan_hedge` adds, for each option, how many orders would wait for the owner, and the warning `slippage_needs_approval` for an order above the approval line at its limit that would not be at the best price.
+The agent's instructions say how Grok picks a slippage from these, with or without the owner present.
+
 ## Execution never goes beyond the goal
 
 A plan remembers the intents it counted as held (its basis).

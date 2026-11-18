@@ -58,7 +58,13 @@ export interface HedgeInput {
    * any depth already on the ladder. Rungs without a depth figure are treated as unlimited.
    */
   depthHundredths?: Readonly<Record<string, number>>;
-  /** Cents added to each NO price to form the limit price (capped at 99). Default 0. */
+  /**
+   * How many cents above each rung's NO price the plan may pay (the limit never exceeds 99). Default 0.
+   * Above 0, with the book's levels on the ladder (`depth.noOffers`), it buys depth: a rung takes every
+   * level priced within it, cheapest first, up to what the goal needs, and its limit is the deepest level
+   * used, so an order commits no more than the book requires (no cushion for a move before placement).
+   * Without the levels, or for a rung in `depthHundredths`, the limit is the NO price plus this, as before.
+   */
   slippageCents?: number;
   /**
    * A paid hedge signal for this ladder. When given, the plan rates each rung's price against the
@@ -272,6 +278,27 @@ export interface PlannedOrder {
   amountCents: number;
 }
 
+/**
+ * What the same plan would be at a higher slippage (`HedgePlan.depthOptions`): the planner run again with
+ * only `slippageCents` changed, so the spending cap, budget, per-trade limit and depth all apply.
+ */
+export interface DepthOption {
+  slippageCents: number;
+  /** The cover it gives, in basis points: as `withPlanCoverBps` with positions held, else at the floor. */
+  coverBps: number | null;
+  /** What its orders commit: the sum of their amounts, as the contract checks them. */
+  totalAmountCents: number;
+  /** What they cost if they fill at the prices the book showed. */
+  expectedFillCents: number;
+  orderCount: number;
+  /** Each order's amount, in order, for checking them against the mandate's lines. */
+  orderAmountsCents: number[];
+  /** Strikes still short of the goal for depth, the spending cap or the budget. */
+  shortStrikesCents: number[];
+  /** True when nothing is short for those reasons: the goal is covered within the cap. */
+  coversGoal: boolean;
+}
+
 /** One strike of the staircase. A rung may be split into several orders to respect `maxTradeCents`. */
 export interface PlannedRung {
   instrumentSymbol: string;
@@ -290,6 +317,15 @@ export interface PlannedRung {
   coversFromCents: number;
   coversToCents: number;
   orders: PlannedOrder[];
+  /** The rung's NO price (the listing's quote) the slippage is measured from. Absent on older plans. */
+  bestPriceCents?: number | null;
+  /** Book levels the rung takes (1 at the best price). Absent on older plans. */
+  levelsUsed?: number;
+  /**
+   * What the rung costs if it fills at the prices the book showed, rounded up to the cent; at most
+   * `amountCents`. Without the book's levels, quantity x limit. Absent on older plans.
+   */
+  expectedFillCents?: number;
 }
 
 export interface PayoffPoint {
@@ -373,6 +409,8 @@ export interface HedgePlan {
     payoutBelowFloorCents: number;
     /** payoutBelowFloorCents / lossAtFloorCents in basis points (10000 = 100 %). */
     coverageAtFloorBps: number | null;
+    /** Sum of the rungs' `expectedFillCents`. Absent on older plans. */
+    expectedFillCents?: number;
   };
   payoff: PayoffPoint[];
   breakEven: {
@@ -388,4 +426,11 @@ export interface HedgePlan {
   signal?: PlanSignalUse;
   /** The cover already held and what this plan adds. Present only when `held` was given. */
   cover?: PlanCover;
+  /**
+   * When the book is too thin somewhere (`thin_depth`): what the same plan would be at each higher
+   * slippage up to 10 cents, kept only where its orders change. Absent otherwise, and on older plans.
+   */
+  depthOptions?: DepthOption[];
+  /** The smallest slippage in `depthOptions` that covers the goal within the cap, or null. */
+  coversAtSlippageCents?: number | null;
 }

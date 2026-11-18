@@ -89,6 +89,14 @@ The definition of "covered" is in [cover.md](cover.md).
 This changed what the tools return and the descriptions of `plan_hedge` and `execute_plan`, not any tool name or input schema.
 The Bot reads descriptions only when the connector is added, so until it is added again it sees the old descriptions; the behaviour does not depend on them, because the server instructions arrive on every connection and every result says what to do next.
 
+## Slippage buys depth
+
+`plan_hedge`'s `slippageCents` lets a plan pay up to that many cents above a rung's best NO price for the contracts behind it, and each order's limit is the deepest price it uses ([cover.md](cover.md#depth-and-slippage)).
+When the book is too thin, the plan returns `depthOptions` (what each higher slippage would cover, commit and expect to pay, and how many orders would wait for the owner) and `coversAtSlippageCents`.
+The server instructions tell the Bot to take the smallest slippage that covers the goal within the owner's cap, or the one with the most cover if none does, never one above the cap, and to say which it chose, what it commits and expects to pay, and what the plan covered at the best price.
+It asks the owner first only in a live conversation, and only when the slippage changes whether an order needs their approval; the hourly routine chooses by these rules and reports it.
+This added output fields and changed the description of `plan_hedge`, not any tool name or input schema.
+
 ## Daily digest (issue #97)
 
 A second routine sends the owner one short notification a day: what is protected, what was spent, what settled, and what waits for the owner.

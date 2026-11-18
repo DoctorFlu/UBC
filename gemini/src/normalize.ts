@@ -266,11 +266,16 @@ export function normalizeBook(instrumentSymbol: string, raw: RawOrderBook, fetch
   };
 }
 
-/** Top-of-book depth for a rung, from its YES-side book. */
+/** A rung's depth from its YES-side book: top of book, and every NO offer behind it (`RungDepth`). */
 export function depthFromBook(book: OrderBook): RungDepth {
   return {
     noBuyHundredths: book.bids[0]?.quantityHundredths ?? 0,
     yesBuyHundredths: book.asks[0]?.quantityHundredths ?? 0,
+    // `bids` is highest first, so the NO offers come out cheapest first. A bid of 0 or 100 cents is no
+    // NO offer a buyer can take.
+    noOffers: book.bids
+      .filter((level) => level.priceCents > 0 && level.priceCents < 100)
+      .map((level) => ({ priceCents: 100 - level.priceCents, quantityHundredths: level.quantityHundredths })),
   };
 }
 

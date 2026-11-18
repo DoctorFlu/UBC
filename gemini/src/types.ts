@@ -169,12 +169,18 @@ export interface SpotPrice {
   fetchedAt: string;
 }
 
-/** Top-of-book size at the best price, in hundredths of a contract. */
+/** Top-of-book size at the best price, in hundredths of a contract, and the NO offers behind it. */
 export interface RungDepth {
   /** Size available to a NO buyer at `noBuyCents` (the size of the best YES bid). */
   noBuyHundredths: number;
   /** Size available to a YES buyer at `yesBuyCents` (the size of the best YES ask). */
   yesBuyHundredths: number;
+  /**
+   * Every level a NO buyer can take, cheapest first: each YES bid as a NO offer at `100 - bid` cents (bids
+   * are rounded down, so these prices round up). The first is the top of book above. Present when the
+   * book was read; a depth made by hand may leave it out, and is then top of book only.
+   */
+  noOffers?: BookLevel[];
 }
 
 export interface LadderRung {

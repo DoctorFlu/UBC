@@ -1,5 +1,11 @@
-import { type DecisionContext, type PolicyEvent, reduceEvents } from "@mandate/shared";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import type { HedgePlan } from "@mandate/planner";
+import { type DecisionContext, type PolicyEvent, reduceEvents, verifyContext } from "@mandate/shared";
 import { describe, expect, it } from "vitest";
+
+import { readHedgePlan } from "@/lib/hedge/plan-schema";
 
 import { fixtureContext, fixtureRules } from "@/fixtures";
 import { sampleHedgePlan } from "@/fixtures/samples";
@@ -207,6 +213,36 @@ describe("evidenceChain", () => {
     expect(chainHeadline(evidence)).toBe(
       "Nothing to verify yet: no intent on the chain carries out this plan.",
     );
+  });
+
+  it("still verifies a plan and a sealed reason as main wrote them before slippage bought depth", () => {
+    // Made by main 1ca2f48 (`planner/test/fixtures/main-1ca2f48`): no `expectedFillCents`, `levelsUsed`,
+    // `bestPriceCents` or `depthOptions`, which every reader must take as optional.
+    const fixtures = new URL("../../../../planner/test/fixtures/main-1ca2f48/", import.meta.url);
+    const read = (file: string) =>
+      JSON.parse(readFileSync(fileURLToPath(new URL(file, fixtures)), "utf8")) as unknown;
+    const plans = read("plans.json") as Record<string, HedgePlan>;
+    const sealed = read("decision-context.json") as { hash: `0x${string}`; document: DecisionContext };
+    const stored = readHedgePlan(plans["production 12:39, 0.05 BTC"]);
+    expect(stored).not.toBeNull();
+    if (stored === null) return;
+    // The sealed document still hashes to what went onchain, and names the plan by the id main gave it.
+    expect(verifyContext(sealed.document, sealed.hash)).toBe(true);
+    expect(sealed.document.planId).toBe(stored.planId);
+    const first = stored.orders[0];
+    if (first === undefined) throw new Error("the stored plan has no order");
+    const old = { planId: stored.planId, plan: stored, ...made };
+    const chain = chainOf([{ market: first.instrumentSymbol, amountCents: first.amountCents }], {
+      0: {
+        status: "verified",
+        source: "onchain",
+        hash: sealed.hash,
+        document: sealed.document,
+        storedAt: "2026-11-18T12:40:01.000Z",
+      },
+    });
+    const evidence = evidenceChain(old, chain, []);
+    expect(evidence.intents.map((intent) => [intent.seal, intent.orderIndex])).toEqual([["verified", 0]]);
   });
 
   it("verifies a plan without a paid signal on its plan id alone", () => {

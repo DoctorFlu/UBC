@@ -1,0 +1,90 @@
+{
+  "hash": "0x4a54d4f57dfbdea020202b197a82942ba062c0fed512aa3a2fa5474de2683c1d",
+  "document": {
+    "version": 1,
+    "requestText": "Protect my 0.05 BTC down to $63,000 on today's daily, spending at most $50.",
+    "planId": "plan_9c4f7799ca935d80",
+    "rungIndex": 0,
+    "ladderSummary": {
+      "eventTicker": "BTC2611182200",
+      "observedAt": "2026-11-18T08:38:02.400Z",
+      "rungs": [
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI63000",
+          "label": "$63,000 or above",
+          "yesBidCents": 79,
+          "yesAskCents": 93
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI63250",
+          "label": "$63,250 or above",
+          "yesBidCents": 73,
+          "yesAskCents": 90
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI63500",
+          "label": "$63,500 or above",
+          "yesBidCents": 66,
+          "yesAskCents": 84
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI63750",
+          "label": "$63,750 or above",
+          "yesBidCents": 59,
+          "yesAskCents": 81
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI64000",
+          "label": "$64,000 or above",
+          "yesBidCents": 53,
+          "yesAskCents": 76
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI64250",
+          "label": "$64,250 or above",
+          "yesBidCents": 44,
+          "yesAskCents": 68
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI64500",
+          "label": "$64,500 or above",
+          "yesBidCents": 56,
+          "yesAskCents": 59
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI64750",
+          "label": "$64,750 or above",
+          "yesBidCents": 47,
+          "yesAskCents": 51
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI65000",
+          "label": "$65,000 or above",
+          "yesBidCents": 38,
+          "yesAskCents": 42
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI65250",
+          "label": "$65,250 or above",
+          "yesBidCents": 29,
+          "yesAskCents": 33
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI65500",
+          "label": "$65,500 or above",
+          "yesBidCents": 22,
+          "yesAskCents": 25
+        },
+        {
+          "instrumentSymbol": "GEMI-BTC2611182200-HI65750",
+          "label": "$65,750 or above",
+          "yesBidCents": 16,
+          "yesAskCents": 20
+        }
+      ]
+    },
+    "signalReceiptIds": [],
+    "reason": "Top rung of the staircase: offsets the fall from spot to $64,250.",
+    "createdAt": "2026-11-18T12:40:00.000Z"
+  }
+}
