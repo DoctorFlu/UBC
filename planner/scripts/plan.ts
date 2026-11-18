@@ -21,7 +21,7 @@ import { parseArgs } from "node:util";
 import { createGeminiClient, LADDER_KINDS, toCents, type LadderKind } from "@mandate/gemini";
 import {
   formatContracts,
-  formatExpiry,
+  formatEasternTime,
   formatPrice,
   formatUsd,
   planHedge,
@@ -99,7 +99,7 @@ if (values.json) {
 
 const pad = (text: string, width: number) => text.padStart(width);
 console.log(
-  `Ladder   ${ladder.eventTicker} (${ladder.kind}), "${ladder.title}", settles ${formatExpiry(ladder.expiry)}`,
+  `Ladder   ${ladder.eventTicker} (${ladder.kind}), "${ladder.title}", settles ${formatEasternTime(ladder.expiry)}`,
 );
 console.log(
   `Spot     ${formatUsd(ladder.spot.midCents)} (Gemini ${ladder.spot.symbol} mid; settles on ${ladder.settlementIndex ?? "n/a"})`,

@@ -215,9 +215,16 @@ describe("get_ladder", () => {
       noBuyCents: 3,
     });
     expect(ladder["otherLadders"]).toEqual([
-      { eventTicker: "BTC2611152200", kind: "daily", expiry: "2026-11-15T22:00:00.000Z" },
+      {
+        eventTicker: "BTC2611152200",
+        kind: "daily",
+        expiry: "2026-11-15T22:00:00.000Z",
+        expiryText: "Sun Nov 15, 2026, 5:00 PM ET",
+      },
     ]);
-    expect(summary).toMatch(/^BTC weekly ladder BTC2611202200 settles Nov 20, 2026 22:00 UTC; spot \$64,000/);
+    expect(summary).toMatch(
+      /^BTC weekly ladder BTC2611202200 settles Fri Nov 20, 2026, 5:00 PM ET; spot \$64,000/,
+    );
   });
 
   it("says plainly when nobody quotes the ladder on Gemini's sandbox", async () => {
@@ -671,7 +678,7 @@ describe("settlements in get_activity, get_intent and get_portfolio (issue #92)"
       ],
     });
     expect(summary).toContain(
-      `Ladder ${LADDER_TICKER} (expired 2026-11-20T22:00:00.000Z) settled: 2 positions, cost $34.00, paid $40.00, net +$6.00.`,
+      `Ladder ${LADDER_TICKER} (expired Fri Nov 20, 2026, 5:00 PM ET) settled: 2 positions, cost $34.00, paid $40.00, net +$6.00.`,
     );
     expect(structured["nextAction"]).toMatchObject({
       actor: "agent",
@@ -679,7 +686,9 @@ describe("settlements in get_activity, get_intent and get_portfolio (issue #92)"
     });
 
     const intent = await getIntent.run({ intentId: 0 }, h.ctx);
-    expect(intent.summary).toContain("At expiry it resolved NO: cost $12.40, paid $40.00, net +$27.60.");
+    expect(intent.summary).toContain(
+      "At expiry, Fri Nov 20, 2026, 5:00 PM ET, it resolved NO: cost $12.40, paid $40.00, net +$27.60.",
+    );
 
     const portfolio = await getPortfolio.run({}, h.ctx);
     expect(portfolio.structured["settled"]).toMatchObject({
@@ -763,7 +772,7 @@ describe("settlements in get_activity, get_intent and get_portfolio (issue #92)"
       ],
     });
     expect(summary).toContain(
-      `Settled: Ladder ${LADDER_TICKER} (expired 2026-11-20T22:00:00.000Z) settled: 1 position, cost $21.60, paid $0.00, net -$21.60.`,
+      `Settled: Ladder ${LADDER_TICKER} (expired Fri Nov 20, 2026, 5:00 PM ET) settled: 1 position, cost $21.60, paid $0.00, net -$21.60.`,
     );
   });
 });
@@ -990,6 +999,7 @@ describe("the daily digest's fields (issue #97)", () => {
         asset: "BTC",
         eventTicker: LADDER_TICKER,
         expiresAt: EXPIRY,
+        expiresText: "Fri Nov 20, 2026, 5:00 PM ET",
         floorCents: 6_300_000,
         state: "partly_met",
         coverBps: 4_615,
@@ -1002,10 +1012,10 @@ describe("the daily digest's fields (issue #97)", () => {
       expect.objectContaining({ asset: "ETH", state: "unavailable", coverBps: null }),
     ]);
     expect(summary).toContain(
-      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER}: covered 46% (positions pay $30.00 of $65.00, $20.00 of it from orders waiting for the owner's approval), $35.00 missing.`,
+      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): covered 46% (positions pay $30.00 of $65.00, $20.00 of it from orders waiting for the owner's approval), $35.00 missing.`,
     );
     expect(summary).toContain(
-      `ETH below $3,000.00 on ${LADDER_TICKER}: the console cannot measure the cover right now; do not report it as covered or not.`,
+      `ETH below $3,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): the console cannot measure the cover right now; do not report it as covered or not.`,
     );
 
     // Met within the tolerance (99.5%): it reads as met, never as "99%" (issue #88).
@@ -1024,7 +1034,7 @@ describe("the daily digest's fields (issue #97)", () => {
     });
     const metSummary = (await getPortfolio.run({}, met.ctx)).summary;
     expect(metSummary).toContain(
-      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER}: covered, the goal is met (positions pay $64.70 of $65.00).`,
+      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): covered, the goal is met (positions pay $64.70 of $65.00).`,
     );
     expect(metSummary).not.toContain("99%");
     expect((await getPortfolio.run({}, harness().ctx)).structured["cover"]).toEqual([]);

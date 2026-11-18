@@ -10,7 +10,7 @@ export {
   type RecordedIntent,
 } from "./cover";
 export { hedgePayoutCents, planHedge } from "./plan";
-export { formatExpiry, summarizePlan } from "./summary";
+export { formatEasternTime, summarizePlan } from "./summary";
 export type {
   CoverAssessment,
   CoverRung,
