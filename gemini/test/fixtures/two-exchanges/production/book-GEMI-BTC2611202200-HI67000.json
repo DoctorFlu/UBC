@@ -1,1 +1,11 @@
-{"bids":[{"price":"0.14","amount":"250.0","timestamp":"1794991146"},{"price":"0.11","amount":"4545.0","timestamp":"1794991146"},{"price":"0.1","amount":"25.0","timestamp":"1794991146"}],"asks":[{"price":"0.18","amount":"250.0","timestamp":"1794991146"},{"price":"0.2","amount":"650.0","timestamp":"1794991146"}]}
+{
+  "bids": [
+    { "price": "0.14", "amount": "250.0", "timestamp": "1794991146" },
+    { "price": "0.11", "amount": "4545.0", "timestamp": "1794991146" },
+    { "price": "0.1", "amount": "25.0", "timestamp": "1794991146" }
+  ],
+  "asks": [
+    { "price": "0.18", "amount": "250.0", "timestamp": "1794991146" },
+    { "price": "0.2", "amount": "650.0", "timestamp": "1794991146" }
+  ]
+}
