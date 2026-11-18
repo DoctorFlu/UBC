@@ -28,6 +28,7 @@ import {
 import { formatContractsHundredths, formatUsdCents } from "@/lib/format";
 import type { AgentPlanView } from "@/lib/hedge/types";
 import { useSnapshot } from "@/lib/live/LiveConsole";
+import { type FillSource, fillSource } from "@/lib/network";
 import { isoFromUnix } from "@/lib/live/derive";
 import type { ConsoleNetwork, ConsoleSnapshot } from "@/lib/live/types";
 import { describeMarket, namingCategory } from "@/lib/markets";
@@ -35,6 +36,7 @@ import { paymentHref } from "@/lib/payments/links";
 import { formatUsdc } from "@/lib/payments/usdc";
 import { clip } from "@/lib/text";
 
+import { FillSourceTag } from "@/components/domain/FillSourceTag";
 import styles from "./evidence.module.css";
 
 /** Agent-supplied and onchain strings are clipped to these lengths; the full value stays copyable. */
@@ -326,7 +328,7 @@ function PlanLink({
   );
 }
 
-function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
+function IntentRecord({ entry, index, fill }: { entry: ChainIntent; index: number; fill: FillSource }) {
   const { intent } = entry;
   // The title never quotes onchain text: a market that is not a Gemini symbol reads "Not a Gemini market".
   const title =
@@ -437,7 +439,8 @@ function IntentRecord({ entry, index }: { entry: ChainIntent; index: number }) {
                       "a result out of range"
                     ) : (
                       <Money cents={entry.fill.pnlCents} sign="always" />
-                    )}
+                    )}{" "}
+                    <FillSourceTag source={fill} />
                   </>
                 ) : (
                   "Did not fill"
@@ -493,7 +496,12 @@ export function EvidenceView({ view, preview }: { view: AgentPlanView; preview?:
         <SignalLink view={view} evidence={evidence} />
         <PlanLink view={view} evidence={evidence} current={current} />
         {evidence.intents.map((entry, index) => (
-          <IntentRecord key={entry.intent.id} entry={entry} index={4 + index} />
+          <IntentRecord
+            key={entry.intent.id}
+            entry={entry}
+            index={4 + index}
+            fill={snapshot.chain ? fillSource(snapshot.chain, snapshot.network, entry.intent.id) : "unknown"}
+          />
         ))}
         {evidence.intents.length === 0 ? (
           <ChainLink index={4} tone="muted" title="Intents" testId="evidence-no-intents">

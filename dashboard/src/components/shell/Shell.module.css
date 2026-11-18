@@ -342,6 +342,22 @@ button.footLink:disabled {
   color: var(--color-danger);
 }
 
+/* Pretend fills, recorded onchain but seen by no exchange: the simulated-fill tag's dashed amber family. */
+.venueBadgeSimulated {
+  border-style: dashed;
+  border-color: var(--color-held-text);
+  background: var(--color-held-soft);
+  color: var(--color-held-text);
+}
+
+/* The executor never said where it fills: neutral, dashed, so it reads as a gap, not a venue. */
+.venueBadgeUnknown {
+  border-style: dashed;
+  border-color: var(--color-text-muted);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
 /* Phones: the icon alone, a 2rem square, so the strip still fits beside the lamp, Dev and the isolator. */
 .venueBadgeShort {
   justify-content: center;

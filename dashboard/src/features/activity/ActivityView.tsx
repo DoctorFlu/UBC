@@ -11,7 +11,7 @@ import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { IntentLink, IntentVerdict, MarketName, OrderAmount } from "@/components/domain/Intent";
-import { SimulatedFill } from "@/components/domain/SimulatedFill";
+import { FillSourceTag } from "@/components/domain/FillSourceTag";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
@@ -27,7 +27,7 @@ import { useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, countByStatus, newestFirst, todayUsage } from "@/lib/live/derive";
 import type { ConsoleSnapshot, VenueOrderView } from "@/lib/live/types";
-import { fillsAreSimulated } from "@/lib/network";
+import { filledIntentIds, fillsSource } from "@/lib/network";
 import { verifiedSettlements } from "@/lib/settlement/settlement";
 
 import styles from "./activity.module.css";
@@ -235,13 +235,10 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           hint={
             <>
               {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded`}
-              {intents.some(
-                (intent) =>
-                  intent.status === "executed" &&
-                  fillsAreSimulated(snapshot.network, chain.venueOrders[intent.id] !== undefined),
-              ) ? (
-                <SimulatedFill className={styles.statMarker} />
-              ) : null}
+              <FillSourceTag
+                source={fillsSource(chain, snapshot.network, filledIntentIds(chain))}
+                className={styles.statMarker}
+              />
             </>
           }
         />
@@ -249,12 +246,20 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           label="Paid at expiry"
           value={formatUsdCents(settled.payoutCents)}
           hint={
-            settled.positions === 0
-              ? "Nothing has settled yet"
-              : `${formatCount(settled.positions)} settled, cost ${formatUsdCents(settled.costCents)}, ` +
-                (settled.feesEstimated ? `fees ${formatUsdCents(settled.feeCents)}, ` : "") +
-                `net ${formatUsdCents(settled.pnlCents, { sign: "always" })}` +
-                (settled.feesEstimated ? " (fees estimated)" : "")
+            settled.positions === 0 ? (
+              "Nothing has settled yet"
+            ) : (
+              <>
+                {`${formatCount(settled.positions)} settled, cost ${formatUsdCents(settled.costCents)}, ` +
+                  (settled.feesEstimated ? `fees ${formatUsdCents(settled.feeCents)}, ` : "") +
+                  `net ${formatUsdCents(settled.pnlCents, { sign: "always" })}` +
+                  (settled.feesEstimated ? " (fees estimated)" : "")}
+                <FillSourceTag
+                  source={fillsSource(chain, snapshot.network, settlements.keys())}
+                  className={styles.statMarker}
+                />
+              </>
+            )
           }
         />
       </StatGroup>
