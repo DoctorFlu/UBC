@@ -3,7 +3,14 @@ import { formatEasternTime, verifyContext, type Intent, type IntentView } from "
 import { ok, reason, summarizeVerdict, unavailable, verdictSchema, type NextAction } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
-import { amountText, intentRow, IntentRowSchema, limitPriceText, type IntentRow } from "../support/intents";
+import {
+  amountText,
+  fillSourceText,
+  intentRow,
+  IntentRowSchema,
+  limitPriceText,
+  type IntentRow,
+} from "../support/intents";
 import { AFTER_REJECTION } from "../support/rules";
 import { orderSentence, readOrders } from "../support/orders";
 import { moneyLine, readSettlements } from "../support/settlements";
@@ -80,10 +87,10 @@ export const getIntent = defineTool({
         : undefined,
       // An approved intent may have an order resting on Gemini; a pending or rejected one never has.
       intent.status === "approved" || intent.status === "executed" || intent.status === "failed"
-        ? readOrders(ctx).then((orders) => orders?.get(input.intentId))
+        ? readOrders(ctx)
         : undefined,
     ]);
-    const row = intentRow(intent, view, record, settled, order);
+    const row = intentRow(intent, view, record, settled, order?.byIntent.get(input.intentId), order);
 
     let context: z.infer<typeof ContextCheckSchema> | null = null;
     if (row.contextHash !== null) {
@@ -109,7 +116,7 @@ export const getIntent = defineTool({
     const filled = row.filledCents !== null && row.filledCents > 0;
     const result =
       row.status === "executed" || row.status === "failed"
-        ? ` Filled ${amountText(row.filledCents)}.` +
+        ? ` Filled ${amountText(row.filledCents)}${fillSourceText(row.fillSource)}.` +
           (filled && row.settlement === null && row.side === "buy"
             ? " No result yet: the position is open until its market expires and the executor records the outcome."
             : "")

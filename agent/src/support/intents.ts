@@ -6,6 +6,9 @@ import {
   INTENT_STATUS_LABELS,
   INTENT_STATUSES,
   type AgentOrder,
+  FILL_SOURCES,
+  type FillSource,
+  fillSourceOf,
   type Intent,
   type IntentView,
   type Settlement,
@@ -14,7 +17,7 @@ import { isGeminiSymbol } from "../markets/gemini";
 import type { IntentRecord } from "../state/ledger";
 import { isoFromUnix } from "./format";
 import { reasonCode } from "./rules";
-import { OrderRowSchema, orderRow } from "./orders";
+import { OrderRowSchema, type OrdersRead, orderRow } from "./orders";
 import { SettlementRowSchema, settlementRow } from "./settlements";
 
 export const IntentRowSchema = z.object({
@@ -58,6 +61,15 @@ export const IntentRowSchema = z.object({
       "placed for (sized so the cost and Gemini's fee fit the amount) and how much filled. null when none was " +
       "placed on a real venue (the simulated venue keeps no orders), or when the console cannot say.",
   ),
+  fillSource: z
+    .enum(FILL_SOURCES)
+    .nullable()
+    .describe(
+      "Where the fill came from, from what the executor signed (the contract records a fill either way): " +
+        "simulated (the executor's simulated venue recorded it; no exchange saw the order), sandbox (Gemini's " +
+        "test funds), live (real money on Gemini) or unknown (the executor has not said). Whenever you mention " +
+        "a fill that is not live, say which. null when nothing filled or the console cannot say.",
+    ),
   settlement: SettlementRowSchema.nullable().describe(
     "What the filled position paid when its market resolved, as the executor signed it and the console " +
       "stored it (the contract cannot record a payout). null until it settles, or when the console cannot say.",
@@ -101,8 +113,10 @@ export function intentRow(
   record: IntentRecord | undefined,
   settlement?: Settlement,
   order?: AgentOrder,
+  orders?: OrdersRead | null,
 ): IntentRow {
   const hasResult = intent.status === "executed" || intent.status === "failed";
+  const filled = intent.status === "executed" && (intent.filledCents ?? 0) > 0;
   const rejectionReason = intent.status === "rejected" ? (view?.reason ?? null) : null;
   return {
     id: intent.id,
@@ -123,8 +137,26 @@ export function intentRow(
     outOfRange: intent.outOfRange ?? null,
     flags: intentFlags(intent),
     order: order === undefined ? null : orderRow(order),
+    fillSource:
+      filled && orders
+        ? fillSourceOf({ order, settlementVenue: settlement?.venue, announced: orders.venue })
+        : null,
     settlement: settlement === undefined ? null : settlementRow(settlement),
   };
+}
+
+/** How a sentence names a fill's source: nothing for real money, a few words otherwise. */
+export function fillSourceText(source: FillSource | null): string {
+  switch (source) {
+    case "simulated":
+      return " (a simulated fill: the executor's simulated venue recorded it, and no exchange saw the order)";
+    case "sandbox":
+      return " (on Gemini's sandbox, with test funds)";
+    case "unknown":
+      return " (fill source unknown: the executor has not said which venue fills its orders)";
+    default:
+      return "";
+  }
 }
 
 function nonZero(hash: `0x${string}` | null): `0x${string}` | null {

@@ -3,6 +3,7 @@
  * and handed to the browser in the console snapshot. Nothing here is fixed at build time, so one build
  * serves the local devchain and Arc testnet alike.
  */
+import { type FillSource, fillSourceOf } from "@mandate/shared";
 import { type Chain, defineChain } from "viem";
 
 import type { ChainView, ConsoleNetwork, NetworkKind } from "@/lib/live/types";
@@ -18,7 +19,7 @@ export const NETWORK_TAGS: Record<NetworkKind, string> = { local: "Local", "arc-
  * - `live`: Gemini, with real money.
  * - `unknown`: the executor never said, so the console cannot say whether an exchange saw the order.
  */
-export type FillSource = "simulated" | "sandbox" | "live" | "unknown";
+export type { FillSource };
 
 /**
  * Where intent `intentId`'s fill came from, from what the executor signed, never from the chain: the order
@@ -31,12 +32,13 @@ export function fillSource(
   network: Pick<ConsoleNetwork, "kind">,
   intentId: number,
 ): FillSource {
-  const order = chain.venueOrders[intentId];
-  if (order) return order.environment === "production" ? "live" : "sandbox";
   const settlement = chain.settlements[intentId];
-  if (settlement?.status === "verified" && settlement.document.venue === "simulated") return "simulated";
-  if (chain.venue) return chain.venue.venue === "simulated" ? "simulated" : "unknown";
-  return network.kind === "local" ? "simulated" : "unknown";
+  return fillSourceOf({
+    order: chain.venueOrders[intentId],
+    settlementVenue: settlement?.status === "verified" ? settlement.document.venue : null,
+    announced: chain.venue,
+    fallback: network.kind === "local" ? "simulated" : "unknown",
+  });
 }
 
 /**

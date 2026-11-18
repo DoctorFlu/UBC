@@ -29,6 +29,7 @@ import {
 import { type Address, type Hex, isAddressEqual } from "viem";
 
 import { hedgePlanSchema } from "@/lib/hedge/plan-schema";
+import type { ExecutorVenueView } from "@/lib/live/types";
 import { mandatePath } from "@/lib/mandate-path";
 
 import type { Agent, Mandate } from "../accounts/store";
@@ -358,7 +359,14 @@ export const getSettlements = agentRoute((_request, service, { mandate }) =>
 
 /** The orders the executor placed for the agent's mandate (issue #117); only versions that still verify. */
 export const getOrders = agentRoute((_request, service, { mandate }) =>
-  Promise.resolve(json(ordersResponseSchema.parse({ orders: service.verifiedVenueOrders(mandate) }))),
+  Promise.resolve(
+    json(
+      ordersResponseSchema.parse({
+        orders: service.verifiedVenueOrders(mandate),
+        venue: announcedVenue(service.snapshot(mandate).chain?.venue ?? null),
+      }),
+    ),
+  ),
 );
 
 // ------------------------------------------------------------------ the owner's view (#97)
@@ -388,4 +396,9 @@ export function getSummary(
       }),
     );
   })(request, service);
+}
+
+/** The executor's announced venue as the agent reads it: which venue, and which Gemini. */
+function announcedVenue(venue: ExecutorVenueView | null) {
+  return venue === null ? null : { venue: venue.venue, environment: venue.environment };
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { decisionContextSchema } from "./context";
-import { settlementSchema, signatureSchema } from "./settlement";
+import { SETTLEMENT_VENUES, settlementSchema, signatureSchema } from "./settlement";
 import {
   executorVenueSchema,
   VENUE_ENVIRONMENTS,
@@ -433,6 +433,14 @@ export type AgentOrder = z.infer<typeof agentOrderSchema>;
 export const ordersResponseSchema = z.strictObject({
   /** By intent id. Intents filled by the simulated venue have none. */
   orders: z.array(agentOrderSchema),
+  /**
+   * The venue the executor last announced for the agent's contract, or null before it has: with the
+   * orders, where each fill came from (`fillSourceOf`). Absent from a console older than this field.
+   */
+  venue: z
+    .strictObject({ venue: z.enum(SETTLEMENT_VENUES), environment: z.enum(VENUE_ENVIRONMENTS).nullable() })
+    .nullable()
+    .optional(),
 });
 export type OrdersResponse = z.infer<typeof ordersResponseSchema>;
 
