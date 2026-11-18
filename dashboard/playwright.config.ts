@@ -50,7 +50,13 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "smoke", testMatch: /(smoke|shell|icons|accounts)\.spec\.ts/, use: { storageState: owner } },
+    // Two workers: more share one `next dev` and an 8-core laptop so thinly that renders outlast a check's 5 s.
+    {
+      name: "smoke",
+      testMatch: /(smoke|shell|icons|accounts)\.spec\.ts/,
+      workers: 2,
+      use: { storageState: owner },
+    },
     { name: "screenshots", testMatch: /screenshots\.spec\.ts/, use: { storageState: owner } },
     { name: "prod", testMatch: /prod\.spec\.ts/, use: { storageState: owner } },
     // One worker: each spec starts its own `next dev` on this folder's `.next`, so they run one after the other.
