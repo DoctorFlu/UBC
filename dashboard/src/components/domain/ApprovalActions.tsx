@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { formatUsdCents } from "@/lib/format";
 import { describeMarket, namingCategory } from "@/lib/markets";
 import { ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
+import { useMandateUrls } from "@/lib/mandate/MandateContext";
 import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 
 import styles from "./domain.module.css";
@@ -33,6 +34,7 @@ export function ApprovalActions({
   warn?: boolean;
 }) {
   const toast = useToast();
+  const urls = useMandateUrls();
   const { state, send, working, access } = useOwnerTx();
   const blocked = ownerBlockedReason(access);
   const amount = intent.amountCents === null ? "this intent" : formatUsdCents(intent.amountCents);
@@ -56,6 +58,11 @@ export function ApprovalActions({
         title: `Refused by the contract: ${reason.label}`,
         description: `The contract checked ${subject} again and rejected it. ${reason.explanation}`,
         tone: "danger",
+        // It leaves Waiting as it ends rejected; the link says where it went.
+        link: {
+          label: `See intent #${intent.id.toString()}`,
+          href: urls.href(`/activity/${intent.id.toString()}`),
+        },
       });
     } else {
       toast({ title: "Approved", description: `${subject}.`, tone: "success" });
