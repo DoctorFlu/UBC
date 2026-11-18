@@ -31,7 +31,7 @@ import {
   type TradeIntentInput,
 } from "@mandate/shared";
 import { HttpConsoleClient } from "../src/console/client";
-import { createAppContext, type AppContext, type ToolContext } from "../src/context";
+import { createAppContext, type AppContext, type Clock, type ToolContext } from "../src/context";
 import { silentLogger } from "../src/logger";
 import { CallDeadline } from "../src/mcp/deadline";
 import { toolContext } from "../src/mcp/tool";
@@ -436,6 +436,9 @@ export function harness(
     payments?: Services["payments"];
     /** The cover the console reports for current goals (`GET /summary`). */
     cover?: FakeConsoleOptions["cover"];
+    /** Market data other than the in-memory fake, such as the real client on a recording. */
+    marketsClient?: MarketsClient;
+    clock?: Clock;
   } = {},
 ): Harness {
   const env = {
@@ -445,12 +448,13 @@ export function harness(
     ...options.env,
   };
   const config = testConfig(env);
+  const clock = options.clock ?? fixedClock;
   const policy = options.policy === null ? undefined : (options.policy ?? new FakePolicy());
   const markets = new FakeMarkets();
   const fakeConsole = createFakeConsole({
     token: CONSOLE_TOKEN,
     holdings: options.holdings ?? [{ asset: "BTC", quantity: "0.05", note: "cold wallet" }],
-    now: () => fixedClock.now(),
+    now: () => clock.now(),
     ...(options.cover === undefined ? {} : { cover: options.cover }),
     isContractAgent: (address) =>
       policy !== undefined && address.toLowerCase() === policy.contractAgent.toLowerCase(),
@@ -465,12 +469,12 @@ export function harness(
         });
   const services: Partial<Services> = {
     policy,
-    markets,
+    markets: options.marketsClient ?? markets,
     planner: createHedgePlanner(),
     console: consoleClient,
     payments: options.payments,
   };
-  const app = createAppContext(config, silentLogger, { clock: fixedClock, ...services });
+  const app = createAppContext(config, silentLogger, { clock, ...services });
   return {
     ctx: toolContext(app, new CallDeadline({ budgetMs: config.limits.toolDeadlineMs }), {
       requestId: "test",
