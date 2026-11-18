@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
-import { routePath, routes, schemes, viewports } from "./routes";
+import { laptopWidths, routePath, routes, schemes, viewports } from "./routes";
 
 /**
  * Writes docs/screenshots/<route>-<width>-<scheme>.png for every route, and <...>-advanced.png for every
@@ -48,3 +48,23 @@ for (const scheme of schemes) {
     });
   }
 }
+
+test.describe("laptop widths, light", () => {
+  test.use({ colorScheme: "light" });
+  for (const width of laptopWidths) {
+    for (const route of routes.filter((each) => each.name === "home" || each.name === "activity")) {
+      test(`${route.name} at ${width.toString()} px`, async ({ page, baseURL }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(await routePath(route, baseURL ?? ""));
+        await expect(page.getByRole("heading", { level: 1, name: route.heading })).toBeVisible();
+        await page.waitForLoadState("networkidle");
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({
+          path: `${outDir}${route.name}-${width.toString()}-light.png`,
+          fullPage: true,
+          animations: "disabled",
+        });
+      });
+    }
+  }
+});

@@ -17,6 +17,7 @@ import type { ChainView } from "@/lib/live/types";
 import { useMandateUrls } from "@/lib/mandate/MandateContext";
 import { ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
+import { OwnerTxStatus } from "@/components/domain/OwnerTxStatus";
 
 import styles from "./rules.module.css";
 import { BacktestPanel } from "./BacktestPanel";
@@ -76,7 +77,7 @@ function RequestCard({
 }) {
   const toast = useToast();
   const { api } = useMandateUrls();
-  const { request: ownerRequest, pending, access } = useOwnerRequest();
+  const { request: ownerRequest, pending, status, access } = useOwnerRequest();
   const [reviewing, setReviewing] = useState(false);
   const blocked = ownerBlockedReason(access);
   const next: PolicyRules | null = rules ? { ...rules, ...request.proposed } : null;
@@ -96,6 +97,7 @@ function RequestCard({
       "POST",
       "change-request.dismiss",
       { id: request.id },
+      "Dismiss the request",
     );
     toast(
       result.ok
@@ -170,6 +172,7 @@ function RequestCard({
                 {ownerActionLabel(access, "Dismiss")}
               </Button>
               {blocked && access.kind !== "loading" ? <p className={styles.blockedNote}>{blocked}</p> : null}
+              <OwnerTxStatus state={status} />
             </div>
           ) : (
             <p className={styles.resolved}>

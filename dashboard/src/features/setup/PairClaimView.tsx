@@ -15,6 +15,7 @@ import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { PairingView } from "@/lib/live/types";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
+import { OwnerTxStatus } from "@/components/domain/OwnerTxStatus";
 
 import styles from "./setup.module.css";
 
@@ -27,7 +28,7 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
   const snapshot = useSnapshot();
   const toast = useToast();
   const router = useRouter();
-  const { request, pending, access } = useOwnerRequest();
+  const { request, pending, status, access } = useOwnerRequest();
   const latest = snapshot.offchain.pairing;
   const pairing = latest && isAddressEqual(latest.agentAddress, address) ? latest : initial;
   const blocked = ownerBlockedReason(access);
@@ -53,9 +54,13 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
   }
 
   const confirm = async () => {
-    const result = await request("/api/console/pairing/confirm", "POST", "pairing.confirm", {
-      agentAddress: pairing.agentAddress,
-    });
+    const result = await request(
+      "/api/console/pairing/confirm",
+      "POST",
+      "pairing.confirm",
+      { agentAddress: pairing.agentAddress },
+      "Confirm the agent",
+    );
     // The live snapshot carries only the latest pairing: refresh so this page shows this one confirmed.
     if (result.ok) router.refresh();
     toast(
@@ -137,6 +142,9 @@ export function PairClaimView({ address, initial }: { address: Address; initial:
               </Button>
               {blocked && access.kind !== "loading" ? <span className={styles.muted}>{blocked}</span> : null}
             </div>
+          ) : null}
+          {pairing.status === "pending" ? (
+            <OwnerTxStatus state={status} />
           ) : (
             <ButtonLink view href="/setup" variant="secondary">
               Back to setup

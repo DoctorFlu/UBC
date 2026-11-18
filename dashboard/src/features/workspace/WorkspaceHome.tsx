@@ -7,6 +7,7 @@ import { Stat, StatGroup } from "@/components/ui/Stat";
 import { formatUsdCents } from "@/lib/format";
 import { mandatePath } from "@/lib/mandate-path";
 
+import { HomeWallet, MandateOwnerLine } from "./HomeWallet";
 import styles from "./workspace.module.css";
 import type { MandateSummary, WorkspaceHomeData } from "./types";
 
@@ -57,7 +58,11 @@ function MandateRow({ summary }: { summary: MandateSummary }) {
               {mandate.name}
             </Link>
           </h2>
-          <p className={styles.rowMeta}>{signerText(summary)}</p>
+          {mandate.ownerSigner === "wallet" ? (
+            <MandateOwnerLine owner={summary.owner} />
+          ) : (
+            <p className={styles.rowMeta}>{signerText(summary)}</p>
+          )}
         </div>
         {summary.paused ? (
           <span className={styles.paused} data-testid="mandate-paused">
@@ -100,20 +105,29 @@ export function WorkspaceHome({ data }: { data: WorkspaceHomeData }) {
   const goals = data.mandates.reduce((sum, row) => sum + row.cover.goals, 0);
   const met = data.mandates.reduce((sum, row) => sum + row.cover.met, 0);
   const count = data.mandates.length;
+  // Wallet-owned mandates need the owner's wallet: Home offers it, as a mandate's top bar does.
+  const walletOwned = data.mandates.filter((row) => row.mandate.ownerSigner === "wallet");
+  const owners = walletOwned.flatMap((row) => (row.owner ? [row.owner] : []));
+  const create = data.canCreate ? (
+    <ButtonLink href="/mandates/new" variant="primary" icon={<Plus aria-hidden />}>
+      New mandate
+    </ButtonLink>
+  ) : count >= data.limit ? (
+    <p className={styles.limit}>
+      {String(count)} of {String(data.limit)} mandates: this workspace&apos;s limit.
+    </p>
+  ) : null;
   return (
     <div className={styles.view}>
       <PageHeader
         title="Home"
         description={`${String(count)} ${count === 1 ? "mandate" : "mandates"} in ${data.workspaceName}. Each has its own contract, agent and rules.`}
         actions={
-          data.canCreate ? (
-            <ButtonLink href="/mandates/new" variant="primary" icon={<Plus aria-hidden />}>
-              New mandate
-            </ButtonLink>
-          ) : count >= data.limit ? (
-            <p className={styles.limit}>
-              {String(count)} of {String(data.limit)} mandates: this workspace&apos;s limit.
-            </p>
+          walletOwned.length > 0 || create ? (
+            <div className={styles.headerActions}>
+              {walletOwned.length > 0 ? <HomeWallet owners={owners} /> : null}
+              {create}
+            </div>
           ) : undefined
         }
       />
