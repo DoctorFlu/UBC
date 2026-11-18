@@ -33,8 +33,10 @@ export interface FillIntent {
  * - `as_status`: nothing to add to the contract's status.
  * - `partly_filled`: executed onchain, and the journal says only part of the order filled.
  * - `recording`: the order closed with something filled at the venue, and the result is not onchain yet.
- * - `refused_before_sending`: not filled, and the intent is one the executor refuses without sending an order
- *   (`flags`: why, as the console words its anomalies).
+ * - `no_reason`: not filled, and the executor journalled no order for it, so the console holds no reason:
+ *   it refuses before sending anything (a market that is closed or not listed, a price off the grid, too
+ *   small an order), and only its own log says why. `flags`: what the console's own checks find wrong with
+ *   the intent, which the executor refuses too; never presented as the executor's reason.
  * - `venue_refused`: not filled, because the venue refused the order (`detail`: the executor's note).
  * - `cancelled_unfilled`: not filled: the order rested at the venue and closed with nothing filled.
  */
@@ -54,7 +56,7 @@ export type FillOutcome =
       filledHundredths: number;
       quantityHundredths: number;
     }
-  | { kind: "refused_before_sending"; flags: readonly string[] }
+  | { kind: "no_reason"; flags: readonly string[] }
   | { kind: "venue_refused"; venue: string; detail: string | null }
   | { kind: "cancelled_unfilled"; venue: string };
 
@@ -64,8 +66,8 @@ export function venueName(environment: JournalOrder["environment"]): string {
 }
 
 /**
- * `flags`: why the executor would refuse the intent without sending an order (the console's anomalies, for
- * example "Gemini does not list this market"); only a failed intent uses them.
+ * `flags`: what the console's own checks find wrong with the intent (its anomalies, for example "Gemini does
+ * not list this market"); only a failed intent uses them.
  */
 export function fillOutcome(
   intent: FillIntent,
@@ -78,9 +80,7 @@ export function fillOutcome(
     }
     if (order?.state === "cancelled")
       return { kind: "cancelled_unfilled", venue: venueName(order.environment) };
-    if (flags.length > 0 && (order === null || order === undefined)) {
-      return { kind: "refused_before_sending", flags };
-    }
+    if (order === null || order === undefined) return { kind: "no_reason", flags };
     return { kind: "as_status" };
   }
   if (order === null || order === undefined) return { kind: "as_status" };
@@ -163,14 +163,17 @@ export function fillWords(outcome: FillOutcome): FillWords | null {
         label: outcome.partly ? `Partly filled at ${outcome.venue}` : `Filled at ${outcome.venue}`,
         sentence: `${what}; recording the result onchain.`,
         step: `${outcome.partly ? "Partly filled" : "Filled"} at ${outcome.venue}; recording the result onchain`,
-        detail: "The executor records the result onchain next; until then the budget still holds the full amount.",
+        detail:
+          "The executor records the result onchain next; until then the budget still holds the full amount.",
       };
     }
-    case "refused_before_sending":
+    case "no_reason":
       return told(
         NOT_FILLED,
-        "Refused by the executor",
-        `the executor refused it before sending any order, because ${outcome.flags.join("; ")}. ${RELEASED}`,
+        "Did not fill",
+        outcome.flags.length === 0
+          ? `the executor recorded that the order did not fill and sent the console no reason. ${RELEASED}`
+          : `the executor sent the console no reason, and it refuses intents like this one: ${outcome.flags.join("; ")}. ${RELEASED}`,
       );
     case "venue_refused":
       return told(

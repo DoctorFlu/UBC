@@ -220,11 +220,14 @@ function summedDay(
 /**
  * What the executor's journal adds to the contract's status, in the console's words (`@mandate/shared`
  * fill-words): an order that filled only in part, a fill not recorded onchain yet, why an order did not fill.
+ * Only for intents the journal holds an order for: the others read exactly as their status.
  */
 function journalText(intents: readonly Intent[], orders: OrdersRead | null): string {
   if (orders === null) return "";
   const told = intents.flatMap((intent) => {
-    const words = fillWords(fillOutcome(intent, orders.byIntent.get(intent.id)));
+    const order = orders.byIntent.get(intent.id);
+    if (order === undefined) return [];
+    const words = fillWords(fillOutcome(intent, order));
     return words === null ? [] : [`#${intent.id}: ${words.sentence}`];
   });
   return told.length === 0 ? "" : ` ${told.join(" ")}`;

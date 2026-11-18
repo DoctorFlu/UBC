@@ -59,10 +59,11 @@ describe("how a fill reads", () => {
   });
 
   it("reads exactly as the status without a journal row (the simulated venue), or when the journal agrees", () => {
+    // A failed intent without a row says the console has no reason (below).
     const intents = [
       { status: "executed", amountCents: 980, filledCents: 980 },
       { status: "approved", amountCents: 980, filledCents: null },
-      { status: "failed", amountCents: 980, filledCents: null },
+      { status: "rejected", amountCents: 980, filledCents: null },
     ] as const;
     for (const intent of intents) {
       expect(fillWords(fillOutcome(intent, null))).toBeNull();
@@ -74,14 +75,18 @@ describe("how a fill reads", () => {
 
   it("a failed intent says why it did not fill when the executor or the venue said so", () => {
     const failed = { status: "failed", amountCents: 980, filledCents: 0 } as const;
+    // A refusal before any order leaves no journal row: the console holds no reason and says so.
     expect(fillWords(fillOutcome(failed, null, ["Gemini does not list this market"]))).toEqual({
       label: "Not filled",
       sentence:
-        "Not filled: the executor refused it before sending any order, because Gemini does not list this market. Its amount went back to the budget.",
-      step: "Refused by the executor",
+        "Not filled: the executor sent the console no reason, and it refuses intents like this one: Gemini does not list this market. Its amount went back to the budget.",
+      step: "Did not fill",
       detail:
-        "The executor refused it before sending any order, because Gemini does not list this market. Its amount went back to the budget.",
+        "The executor sent the console no reason, and it refuses intents like this one: Gemini does not list this market. Its amount went back to the budget.",
     });
+    expect(fillWords(fillOutcome(failed, null))?.sentence).toBe(
+      "Not filled: the executor recorded that the order did not fill and sent the console no reason. Its amount went back to the budget.",
+    );
     expect(
       fillWords(
         fillOutcome(failed, {
@@ -103,8 +108,7 @@ describe("how a fill reads", () => {
       detail:
         "The order rested on Gemini sandbox and was cancelled with nothing filled. Its amount went back to the budget.",
     });
-    // Flags never apply to an intent that was not refused, and a failed intent with nothing said reads as today.
-    expect(fillWords(fillOutcome(failed, null))).toBeNull();
+    // Flags never apply to an intent that did not fail.
     expect(
       fillWords(fillOutcome({ status: "rejected", amountCents: 980, filledCents: null }, null, ["x"])),
     ).toBeNull();

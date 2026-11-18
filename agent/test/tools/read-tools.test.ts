@@ -1390,7 +1390,10 @@ describe("a partial fill in get_activity, in the console's words", () => {
   it("reads exactly as before without a journal row", async () => {
     const h = harness();
     propose(h, "executed", 263);
+    const failed = propose(h, "executed", 0);
+    Object.assign(h.policy.intents[failed] ?? {}, { status: "failed" });
     const { summary } = await getActivity.run({}, h.ctx);
+    expect(summary).not.toContain("Not filled");
     expect(summary).not.toContain("partly");
     expect(summary).not.toContain("Partly");
     expect(summary).not.toContain("recording the result");

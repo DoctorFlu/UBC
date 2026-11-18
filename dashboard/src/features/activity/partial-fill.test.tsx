@@ -155,9 +155,19 @@ describe("a snapshot shaped like hosted's reads as before", () => {
       "Rejected, reason over max trade size",
       "Rejected, reason category not allowed",
     ]);
-    expect(chips.map((chip) => chip?.dataset.fill ?? null)).toEqual([null, null, null, null, null, null]);
+    expect(chips.map((chip) => chip?.dataset.fill ?? null)).toEqual([
+      null,
+      null,
+      "no_reason",
+      null,
+      null,
+      null,
+    ]);
     expect(chips[0]?.title).toBe("Approved, and the executor recorded a fill.");
-    expect(chips[2]?.title).toBe("Approved, but the executor recorded that the order did not fill.");
+    // A refusal before any order leaves no journal row, so the console has no reason to give, and says so.
+    expect(chips[2]?.title).toBe(
+      "Not filled: the executor recorded that the order did not fill and sent the console no reason. Its amount went back to the budget.",
+    );
     expect(within(activityRow(0)).getByTestId("order-summary").textContent).toBe("Buy NO, 40 at 31¢");
     expect(screen.getByText(/fills recorded/).textContent).toMatch(/^2 fills recorded(?!,)/);
   });
