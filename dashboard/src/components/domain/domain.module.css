@@ -53,8 +53,8 @@
 
 /*
  * "Flagged" sits beside the verdict chip in tables, wrapping under it when the column is narrow.
- * A verdict never takes a table's width from the order: past 15rem the contract's reason ends in an
- * ellipsis, with the whole of it in the chip's title and on the intent page.
+ * A verdict never takes a table's width from the order: past 15rem the contract's reason wraps,
+ * whole, under the status.
  */
 .verdict {
   display: inline-flex;
@@ -68,9 +68,28 @@
   min-width: 0;
 }
 
-/* The chip's reason truncates inside it rather than pushing it wider. */
-.verdictChip > :last-child {
-  min-width: 0;
+/* A table on a laptop card (narrower than 62rem): the verdict is narrower, so every column fits. */
+@container table (width >= 36rem) and (width < 62rem) {
+  .verdict {
+    max-width: 10rem;
+  }
+
+  /*
+   * The reason has its own line under the status, in line with its word, and wraps whole. A grid, so the
+   * chip is only as wide as its longer line.
+   */
+  .verdict .verdictChip {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    column-gap: var(--space-1-5, 0.375rem);
+    row-gap: var(--space-0-5);
+  }
+
+  .verdict .verdictChip > [data-reason] {
+    grid-column: 2;
+    padding-inline-start: 0;
+    border-inline-start: 0;
+  }
 }
 
 /* A table stacked on a phone aligns its values to the end: wrap the badge there too. */
