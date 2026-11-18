@@ -6,15 +6,32 @@ import { shortId } from "./signal";
 import type { HedgePlan, PlanSignalUse, SignalRungRating as SignalRung } from "./types";
 import { formatContracts, formatPrice, formatUsd } from "./units";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** Gemini's markets, and the owners they serve, keep US Eastern time. */
+const EASTERN = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
 
-/** "Nov 20, 2026 22:00 UTC". Fixed format so summaries do not depend on the host locale. */
-export function formatExpiry(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const hh = date.getUTCHours().toString().padStart(2, "0");
-  const mm = date.getUTCMinutes().toString().padStart(2, "0");
-  return `${MONTHS[date.getUTCMonth()] ?? ""} ${date.getUTCDate().toString()}, ${date.getUTCFullYear().toString()} ${hh}:${mm} UTC`;
+/**
+ * "Fri Nov 20, 2026, 5:00 PM ET" for 2026-11-20T22:00:00Z: weekday, date and time in US Eastern time,
+ * whatever the host's locale and zone. Every text an agent reads a date from gives it whole, weekday
+ * included, for the agent to copy: a model that works the weekday out from an ISO time can get it wrong
+ * ("settles Thu Nov 20" for a Friday). Built from the parts, so the text is the same on every ICU
+ * version (newer ones put a narrow no-break space before "PM"). Text that is not a date comes back as is.
+ */
+export function formatEasternTime(when: string | Date): string {
+  const date = typeof when === "string" ? new Date(when) : when;
+  if (Number.isNaN(date.getTime())) return String(when);
+  const parts = EASTERN.formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("weekday")} ${part("month")} ${part("day")}, ${part("year")}, ${part("hour")}:${part("minute")} ${part("dayPeriod").toUpperCase()} ET`;
 }
 
 function percent(bps: number): string {
@@ -55,7 +72,7 @@ export function summarizePlan(plan: HedgePlan): string {
       ? `at ${formatPrice(highest)}`
       : `across ${plan.rungs.length.toString()} strikes from ${formatPrice(highest)} down to ${formatPrice(lowest)}`;
   sentences.push(
-    `To protect your ${holding} (spot ${formatPrice(plan.spotCents)}), buy ${formatContracts(totals.contractsHundredths)} NO contracts ${span} for ${formatUsd(totals.costCents)}, settling ${formatExpiry(plan.expiry)}.`,
+    `To protect your ${holding} (spot ${formatPrice(plan.spotCents)}), buy ${formatContracts(totals.contractsHundredths)} NO contracts ${span} for ${formatUsd(totals.costCents)}, settling ${formatEasternTime(plan.expiry)}.`,
   );
 
   if (cover !== undefined && cover.state === "partly_met" && cover.measuredBelowCents !== null) {

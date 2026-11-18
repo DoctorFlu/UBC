@@ -1,11 +1,12 @@
 import * as z from "zod";
 import { LADDER_KINDS, type Ladder, type LadderRung } from "@mandate/gemini";
-import { formatExpiry, formatPrice } from "@mandate/planner";
+import { formatEasternTime, formatPrice } from "@mandate/planner";
 import { Category, isCategoryAllowed } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, verdictSchema, type Reason } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
+import { DateTextSchema } from "../support/format";
 import { NO_PRICES_HINT, noPricesReason, pricedRungCount } from "../support/no-prices";
 
 const MAX_RUNGS = 25;
@@ -32,6 +33,7 @@ const LadderViewSchema = z.object({
   asset: z.string(),
   kind: z.string().describe("hourly, daily, weekly or month-end"),
   expiry: z.string(),
+  expiryText: DateTextSchema,
   spotCents: z.int().describe("Gemini spot mid price; the ladder settles on settlementIndex"),
   settlementIndex: z.string().nullable(),
   rungCount: z.int(),
@@ -43,7 +45,9 @@ const LadderViewSchema = z.object({
     .describe("Which Gemini these prices come from: the sandbox when the executor trades there"),
   rungs: z.array(RungSchema).describe("The strikes nearest spot, lowest first"),
   truncated: z.boolean(),
-  otherLadders: z.array(z.object({ eventTicker: z.string(), kind: z.string(), expiry: z.string() })),
+  otherLadders: z.array(
+    z.object({ eventTicker: z.string(), kind: z.string(), expiry: z.string(), expiryText: DateTextSchema }),
+  ),
 });
 
 /** The `max` rungs closest to spot, kept in strike order. */
@@ -131,6 +135,7 @@ export const getLadder = defineTool({
       asset: ladder.asset,
       kind: ladder.kind,
       expiry: ladder.expiry,
+      expiryText: formatEasternTime(ladder.expiry),
       spotCents: ladder.spot.midCents,
       settlementIndex: ladder.settlementIndex,
       rungCount: ladder.rungs.length,
@@ -148,12 +153,17 @@ export const getLadder = defineTool({
       otherLadders: others
         .filter((l) => l.eventTicker !== ladder.eventTicker && l.openStrikeCount > 0)
         .slice(0, MAX_OTHER_LADDERS)
-        .map((l) => ({ eventTicker: l.eventTicker, kind: l.kind, expiry: l.expiry })),
+        .map((l) => ({
+          eventTicker: l.eventTicker,
+          kind: l.kind,
+          expiry: l.expiry,
+          expiryText: formatEasternTime(l.expiry),
+        })),
     };
     const strikes = ladder.rungs.map((r) => r.strikeCents);
     return {
       structured: { ...v, ladder: view },
-      summary: `${ladder.asset} ${ladder.kind} ladder ${ladder.eventTicker} settles ${formatExpiry(ladder.expiry)}; spot ${formatPrice(ladder.spot.midCents)}; ${ladder.rungs.length} strikes from ${formatPrice(Math.min(...strikes))} to ${formatPrice(Math.max(...strikes))}${view.truncated ? `, the ${rungs.length} nearest spot listed` : ""}.${reasons.length > 0 ? ` ${reasons.map((r) => r.message).join(" ")}` : ""}`,
+      summary: `${ladder.asset} ${ladder.kind} ladder ${ladder.eventTicker} settles ${view.expiryText}; spot ${formatPrice(ladder.spot.midCents)}; ${ladder.rungs.length} strikes from ${formatPrice(Math.min(...strikes))} to ${formatPrice(Math.max(...strikes))}${view.truncated ? `, the ${rungs.length} nearest spot listed` : ""}.${reasons.length > 0 ? ` ${reasons.map((r) => r.message).join(" ")}` : ""}`,
     };
   },
 });

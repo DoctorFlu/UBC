@@ -71,9 +71,12 @@ describe.each(["legacy", "auto"] as const)("MCP round trip (%s era negotiation)"
     expect(result.structuredContent).toEqual({
       status: "ok",
       serverTime: "2026-11-15T12:00:00.000Z",
+      serverTimeText: "Sun Nov 15, 2026, 7:00 AM ET",
       version: SERVER_VERSION,
     });
-    expect(text(result)).toContain("is up");
+    expect(text(result)).toContain(
+      "is up. Server time Sun Nov 15, 2026, 7:00 AM ET (2026-11-15T12:00:00.000Z).",
+    );
   });
 
   it("calls whoami without ever returning the key", async () => {

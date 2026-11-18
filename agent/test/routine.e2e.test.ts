@@ -258,7 +258,7 @@ describe("settling an expired ladder and rolling to the next (issue #92)", () =>
     // The next run reports the settlement and plans on the next ladder only.
     const activity = await s.call("get_activity");
     expect(activity.text).toContain(
-      `Ladder ${LADDER_TICKER} (expired 2026-11-20T22:00:00.000Z) settled: 3 positions`,
+      `Ladder ${LADDER_TICKER} (expired Fri Nov 20, 2026, 5:00 PM ET) settled: 3 positions`,
     );
     expect(field(activity.structured, "settlements", "positions")).toBe(3);
     const second = await routineRun(s);

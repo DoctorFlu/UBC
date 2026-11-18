@@ -1,3 +1,4 @@
+import { formatEasternTime } from "@mandate/planner";
 import {
   ARC_TESTNET,
   hedgeSignalQuerySchema,
@@ -20,6 +21,7 @@ import { NotEnoughTime } from "../mcp/deadline";
 import { ToolError } from "../mcp/errors";
 import { describeIssues, defineTool } from "../mcp/tool";
 import { describeFailure, unavailableFor } from "../support/failures";
+import { DateTextSchema } from "../support/format";
 import type { BudgetState, BuySignalOutcome } from "../x402/payments";
 import { SignalSellerError } from "../x402/payments";
 
@@ -59,6 +61,7 @@ const SignalSchema = z.object({
   eventTicker: z.string(),
   horizon: z.string(),
   expiry: z.string(),
+  expiryText: DateTextSchema,
   asOf: z.string(),
   spotCents: z.number().int(),
   realizedVolBps: z.number().int().describe("Annualized realised volatility, in basis points (4500 = 45 %)"),
@@ -361,6 +364,7 @@ function compact(signal: HedgeSignal): z.input<typeof SignalSchema> {
     eventTicker: signal.eventTicker,
     horizon: signal.horizon,
     expiry: signal.expiry,
+    expiryText: formatEasternTime(signal.expiry),
     asOf: signal.asOf,
     spotCents: signal.spot.midCents,
     realizedVolBps: signal.volatility.annualizedBps,

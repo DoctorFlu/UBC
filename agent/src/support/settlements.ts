@@ -4,6 +4,7 @@
  * per intent (the fill). These helpers read the console's list, never guess one, and say it plainly.
  */
 import * as z from "zod";
+import { formatEasternTime } from "@mandate/planner";
 import { formatCents, type Settlement, settlementTotals, type StoredSettlement } from "@mandate/shared";
 import type { ToolContext } from "../context";
 import { describeFailure } from "./failures";
@@ -120,8 +121,8 @@ export function moneyLine(totals: {
   );
 }
 
-/** "Ladder BTC2611202200 (expired 2026-11-20T22:00:00.000Z) settled: 2 positions, cost ..., paid ..., net ...." */
+/** "Ladder BTC2611202200 (expired Fri Nov 20, 2026, 5:00 PM ET) settled: 2 positions, cost ..., paid ..., net ...." */
 export function ladderSentence(ladder: LadderSettlement): string {
   const count = `${ladder.positions} ${ladder.positions === 1 ? "position" : "positions"}`;
-  return `Ladder ${ladder.eventTicker} (expired ${ladder.expiresAt}) settled: ${count}, ${moneyLine(ladder)}.`;
+  return `Ladder ${ladder.eventTicker} (expired ${formatEasternTime(ladder.expiresAt)}) settled: ${count}, ${moneyLine(ladder)}.`;
 }
