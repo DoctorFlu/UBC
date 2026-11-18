@@ -51,7 +51,8 @@ export function Footer() {
             <span className={styles.brandName}>Mandate</span>
           </a>
           <p className={styles.footerNote}>
-            Built for the UBC 2026 Hackathon. Test networks only: fills are simulated and no real money moves.
+            Built for the UBC 2026 Hackathon. Test networks only: orders go to Gemini's sandbox with test
+            funds, and no real money moves.
           </p>
         </div>
         <ul className={styles.footerLinks}>

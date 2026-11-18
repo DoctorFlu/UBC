@@ -74,13 +74,16 @@ const OWNER_ONLY = [
 const PARTNERS = [
   {
     name: "Arc",
-    body: "The contract is built for Arc testnet. Today it runs on a local chain with Arc's chain id.",
+    body: "The Policy contract runs on Arc testnet. Every proposal, approval and fill record is a transaction there.",
   },
   { name: "Grok Bot", body: "Trades through the Mandate MCP server today." },
-  { name: "Gemini prediction markets", body: "Live market data, read only. Order fills are simulated." },
+  {
+    name: "Gemini prediction markets",
+    body: "Live market data, and approved orders placed on Gemini's sandbox with test funds.",
+  },
   {
     name: "QuickNode Streams",
-    body: "A stream of the contract's events is built and switches on once the contract is on Arc testnet.",
+    body: "A stream of the contract's events is built and tested, and not switched on yet.",
   },
   {
     name: "x402",
@@ -112,7 +115,8 @@ export default function Home() {
               </a>
             </div>
             <p className={styles.note}>
-              A hackathon build on test networks. Fills are simulated; no real money moves.
+              A hackathon build on test networks. Orders go to Gemini's sandbox with test funds; no real money
+              moves.
             </p>
           </div>
           <div className={styles.heroGate}>
