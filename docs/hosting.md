@@ -406,7 +406,8 @@ That leaves 12 GB, enough for a rebuild with new dependencies (about 4 GB more) 
 
 ### Deploy
 
-The repository is private, so copy the code from a checkout on your computer instead of cloning it on the machine:
+Copy the code from a checkout on your computer, so the machine runs exactly the commit you tested.
+The repository is public, so cloning it on the machine works too, but an archive of `HEAD` also carries work you have not pushed:
 
 ```sh
 git archive --format=tar.gz -o mandate-src.tgz HEAD
