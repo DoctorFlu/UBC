@@ -216,6 +216,8 @@ export function startExecutor(options: ExecutorOptions): Executor {
   const holds = new Map<number, number>();
   /** How many times in a row each intent's market could not be checked, for growing waits. */
   const marketWaits = new Map<number, number>();
+  /** How many times in a row each intent's result could not be recorded, for growing waits. */
+  const recordWaits = new Map<number, number>();
   let stopped = false;
   // Read through a function so the compiler does not narrow `stopped` across awaits.
   const isStopped = (): boolean => stopped;
@@ -253,12 +255,16 @@ export function startExecutor(options: ExecutorOptions): Executor {
   async function handle(intentId: number): Promise<void> {
     if (isStopped() || inFlight.has(intentId)) return;
     inFlight.add(intentId);
-    /** Set once an order may have reached the venue: from then on a failure is never retried blindly. */
+    /**
+     * Set once an order may have reached the venue: from then on a failure is retried only through the
+     * venue's `placeOrder`, which finds the order an earlier pass placed and never places a second one.
+     */
     let placing = false;
     try {
       const intent = await reads.run(() => client.getIntent(intentId));
       if (intent?.status !== "approved") {
         marketWaits.delete(intentId);
+        recordWaits.delete(intentId);
         return; // already recorded, for example after a restart
       }
 
@@ -348,6 +354,7 @@ export function startExecutor(options: ExecutorOptions): Executor {
         filledCents,
         pnlCents: 0,
       });
+      recordWaits.delete(intentId);
       log(
         `${tag} intent #${intentId} ${intent.isBuy ? "buy" : "sell"} ${check.outcome} ${intent.market} ` +
           `${formatCents(check.amountCents)} at ${check.limitPrice}c: ${fill.detail}, ` +
@@ -361,7 +368,15 @@ export function startExecutor(options: ExecutorOptions): Executor {
         log(`${tag} intent #${intentId}: ${errorText(error)}; trying again in ${formatWait(delayMs)}`);
         retryLater(intentId, delayMs);
       } else {
-        log(`${tag} intent #${intentId}: ${errorText(error)}`);
+        // The order reached the venue and ended there, but its result is not onchain yet (the RPC refused
+        // the write, or it timed out). The next pass asks the venue again, which finds this order and never
+        // sends a second one, and records what it ended as; until then the approval stays committed.
+        const delayMs = growingDelay(recordWaits, intentId);
+        log(
+          `${tag} intent #${intentId}: the order is at the venue but its result could not be recorded onchain ` +
+            `(${errorText(error)}); no order is sent again, recording it again in ${formatWait(delayMs)}`,
+        );
+        retryLater(intentId, delayMs);
       }
     } finally {
       inFlight.delete(intentId);

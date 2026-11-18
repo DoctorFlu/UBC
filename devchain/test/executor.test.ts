@@ -651,9 +651,9 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
     lines = [];
   });
 
-  const start = (): Executor => {
+  const start = (client: PolicyClient = chain.executor): Executor => {
     const executor = startExecutor({
-      client: chain.executor,
+      client,
       venue: geminiVenue({
         publicClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
         productionClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
@@ -759,5 +759,75 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
     fake.fill(placed.orderId);
     const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
     expect(statuses.get(id)).toBe("executed");
+  });
+
+  /** The executor's client, whose next `failures` result writes are refused as the public RPC does. */
+  const refusingWrites = (failures: number): PolicyClient => {
+    let left = failures;
+    return new Proxy(chain.executor, {
+      get(target, property) {
+        if (property === "recordResult") {
+          return (result: Parameters<PolicyClient["recordResult"]>[0]) => {
+            if (left > 0) {
+              left -= 1;
+              return Promise.reject(new Error("HTTP request failed. Status: 429. Details: rate limited"));
+            }
+            return target.recordResult(result);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+  };
+
+  it("records a fill whose first writes the RPC refused, after growing waits, and never sends a second order", async () => {
+    start(refusingWrites(2));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
+    await vi.waitFor(() => {
+      expect(fake.orders.size).toBe(1);
+    });
+    const [placed] = [...fake.orders.values()];
+    if (placed === undefined) throw new Error("no order");
+    fake.fill(placed.orderId, 2_000);
+    fake.cancelOpen();
+
+    const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+    expect(statuses.get(id)).toBe("executed");
+    const recorded = await chain.outsider.getIntent(id);
+    // Half the order filled: the record carries its cost, and the rest of the amount is released.
+    expect(recorded?.filledCents).toBe(620);
+    expect((await chain.outsider.getSnapshot()).committedCents).toBe(620);
+    expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
+    const refused = lines.filter((line) => line.includes("could not be recorded onchain"));
+    expect(refused).toHaveLength(2);
+    expect(refused.every((line) => /no order is sent again, recording it again in \S+/.test(line))).toBe(
+      true,
+    );
+    await vi.waitFor(() => {
+      expect(lines.filter((line) => line.includes(`intent #${String(id)} buy NO`))).toHaveLength(1);
+    });
+  });
+
+  it("records the fill after a restart when the first executor never could, from the journal", async () => {
+    const first = start(refusingWrites(Number.POSITIVE_INFINITY));
+    const id = await proposeRaw(chain.agent, order({ outcome: "NO", amountCents: 1_300n, limitPrice: 31n }));
+    await vi.waitFor(() => {
+      expect(fake.orders.size).toBe(1);
+    });
+    const [placed] = [...fake.orders.values()];
+    if (placed === undefined) throw new Error("no order");
+    fake.fill(placed.orderId);
+    await vi.waitFor(() => {
+      expect(lines.some((line) => line.includes("could not be recorded onchain"))).toBe(true);
+    });
+    first.stop();
+    expect((await chain.outsider.getIntent(id))?.status).toBe("approved");
+
+    start();
+    const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+    expect(statuses.get(id)).toBe("executed");
+    expect((await chain.outsider.getIntent(id))?.filledCents).toBe(1_240);
+    expect(fake.callsTo("/v1/prediction-markets/order")).toHaveLength(1);
   });
 });
