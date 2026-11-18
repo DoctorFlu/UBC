@@ -39,6 +39,7 @@ export const STEPS = {
   "gemini.ladders": ["gemini", "the list of ladders"],
   "gemini.ladder": ["gemini", "the strike ladder and its order books"],
   "gemini.spot": ["gemini", "the spot price"],
+  "gemini.production_strikes": ["gemini", "the strikes Gemini's production exchange lists"],
   "gemini.market": ["gemini", "the market's listing"],
   "chain.capabilities": ["chain", "the contract's extensions"],
   "chain.snapshot": ["chain", "the mandate's rules and spend"],

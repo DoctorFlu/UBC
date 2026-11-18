@@ -27,7 +27,8 @@ export function coverNow(input: {
     "asset" | "eventTicker" | "floorCents" | "ceilingCents" | "spotCents" | "holdingQuantity"
   >;
   holdingQuantity: string | null;
-  quotes: Pick<LadderQuotes, "asset" | "eventTicker" | "spotCents" | "rungs">;
+  quotes: Pick<LadderQuotes, "asset" | "eventTicker" | "spotCents" | "rungs"> &
+    Partial<Pick<LadderQuotes, "elsewhere">>;
   intents: readonly IntentView[];
 }): CoverNow | null {
   const { quotes } = input;
@@ -37,6 +38,7 @@ export function coverNow(input: {
     ladder: { asset: quotes.asset, eventTicker: quotes.eventTicker, rungs: quotes.rungs },
     spotCents: quotes.spotCents,
     intents: input.intents,
+    elsewhere: new Map((quotes.elsewhere ?? []).map((s) => [s.instrumentSymbol, s.strikeCents])),
   });
 }
 

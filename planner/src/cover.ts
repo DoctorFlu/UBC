@@ -20,7 +20,7 @@
  * where T_i is the staircase's payout just below K_i. With nothing held this is the full staircase;
  * with the whole staircase held it is nothing.
  */
-import type { Ladder } from "@mandate/gemini";
+import { eventTickerCandidates, type Ladder } from "@mandate/gemini";
 import {
   designStaircase,
   resolveCeiling,
@@ -83,27 +83,40 @@ export interface IntentPosition extends HeldPosition {
 }
 
 /**
- * The NO buys on this ladder that still count, one position per intent:
- * - executed: the contracts its recorded fill buys at its limit price,
- * - approved and waiting for the executor, or waiting for the owner: the contracts its amount buys at
- *   its limit price,
- * - rejected, failed, sells, YES, other ladders and numbers that do not fit: nothing.
- *
- * Contracts are `floor(cents x 100 / limitPrice)` hundredths: the most the money buys at the limit, in
- * Gemini's 0.01-contract increments. For an order the planner sized, that is at least the planned
- * quantity, so a plan executed in full always reads as at least the cover it planned.
+ * A position on this ladder whose strike neither the ladder nor `elsewhere` gives. Cover cannot be
+ * measured without it: a caller that counted cover without the position could buy the same protection
+ * twice, so it refuses instead (the agent plans nothing, the console shows cover as unavailable).
  */
-export function positionsFromIntents(
+export class UnresolvedPositionError extends Error {
+  override readonly name = "UnresolvedPositionError";
+  constructor(readonly instrumentSymbols: readonly string[]) {
+    super(
+      `${instrumentSymbols.join(", ")} ${instrumentSymbols.length === 1 ? "is" : "are"} held on this ladder, but ` +
+        "neither the venue nor Gemini's production exchange lists the strike now, so cover cannot be measured.",
+    );
+  }
+}
+
+/** Whether an instrument symbol belongs to the event `eventTicker` (`GEMI-<event ticker>-<contract>`). */
+function onEvent(instrumentSymbol: string, eventTicker: string): boolean {
+  return eventTickerCandidates(instrumentSymbol).includes(eventTicker);
+}
+
+/** The intents that count as cover, with the cents they count for, before their strikes are known. */
+function counted(
   intents: Iterable<RecordedIntent>,
-  ladder: Pick<CoverLadder, "rungs">,
-): IntentPosition[] {
-  const strikeOf = new Map(ladder.rungs.map((r) => [r.instrumentSymbol, r.strikeCents]));
-  const positions: IntentPosition[] = [];
+): { intent: RecordedIntent; market: string; cents: number; price: number; state: PositionState }[] {
+  const out: {
+    intent: RecordedIntent;
+    market: string;
+    cents: number;
+    price: number;
+    state: PositionState;
+  }[] = [];
   for (const intent of intents) {
     if (intent.market === null || intent.outcome !== "NO" || intent.isBuy !== true) continue;
-    const strikeCents = strikeOf.get(intent.market);
     const price = intent.limitPrice;
-    if (strikeCents === undefined || price === null || price < 1 || price > 99) continue;
+    if (price === null || price < 1 || price > 99) continue;
     let state: PositionState;
     let cents: number | null;
     if (intent.status === "executed") {
@@ -119,10 +132,65 @@ export function positionsFromIntents(
       continue;
     }
     if (cents === null || !Number.isSafeInteger(cents) || cents <= 0) continue;
-    const hundredths = Math.floor((cents * 100) / price);
-    if (hundredths < 1) continue;
-    positions.push({ intentId: intent.id, instrumentSymbol: intent.market, strikeCents, hundredths, state });
+    if (Math.floor((cents * 100) / price) < 1) continue;
+    out.push({ intent, market: intent.market, cents, price, state });
   }
+  return out;
+}
+
+/**
+ * The symbols of positions on this ladder's event that the ladder does not list: positions filled where
+ * the ladder was not read, such as the simulated venue's fills (listed on Gemini's production exchange)
+ * on a stack that now reads the sandbox. A strike belongs to its symbol on every exchange, so the caller
+ * looks these up on production and passes them to `positionsFromIntents` as `elsewhere`. Empty when the
+ * ladder lists every one, which is the usual case: then nothing more is read.
+ */
+export function symbolsMissingFromLadder(
+  intents: Iterable<RecordedIntent>,
+  ladder: Pick<CoverLadder, "eventTicker" | "rungs">,
+): string[] {
+  const listed = new Set(ladder.rungs.map((r) => r.instrumentSymbol));
+  const missing = new Set<string>();
+  for (const { market } of counted(intents)) {
+    if (!listed.has(market) && onEvent(market, ladder.eventTicker)) missing.add(market);
+  }
+  return [...missing].sort();
+}
+
+/**
+ * The NO buys on this ladder that still count, one position per intent:
+ * - executed: the contracts its recorded fill buys at its limit price,
+ * - approved and waiting for the executor, or waiting for the owner: the contracts its amount buys at
+ *   its limit price,
+ * - rejected, failed, sells, YES, other ladders and numbers that do not fit: nothing.
+ *
+ * A position's strike comes from the ladder, or for a symbol the ladder does not list, from `elsewhere`
+ * (strikes Gemini's production exchange lists on the same event, `symbolsMissingFromLadder`). A position
+ * on this event whose strike neither gives throws `UnresolvedPositionError`: it is never dropped quietly.
+ *
+ * Contracts are `floor(cents x 100 / limitPrice)` hundredths: the most the money buys at the limit, in
+ * Gemini's 0.01-contract increments. For an order the planner sized, that is at least the planned
+ * quantity, so a plan executed in full always reads as at least the cover it planned.
+ */
+export function positionsFromIntents(
+  intents: Iterable<RecordedIntent>,
+  ladder: Pick<CoverLadder, "eventTicker" | "rungs">,
+  elsewhere: ReadonlyMap<string, number> = new Map(),
+): IntentPosition[] {
+  const strikeOf = new Map(ladder.rungs.map((r) => [r.instrumentSymbol, r.strikeCents]));
+  const positions: IntentPosition[] = [];
+  const unresolved = new Set<string>();
+  for (const { intent, market, cents, price, state } of counted(intents)) {
+    const strikeCents =
+      strikeOf.get(market) ?? (onEvent(market, ladder.eventTicker) ? elsewhere.get(market) : undefined);
+    if (strikeCents === undefined) {
+      if (onEvent(market, ladder.eventTicker)) unresolved.add(market);
+      continue;
+    }
+    const hundredths = Math.floor((cents * 100) / price);
+    positions.push({ intentId: intent.id, instrumentSymbol: market, strikeCents, hundredths, state });
+  }
+  if (unresolved.size > 0) throw new UnresolvedPositionError([...unresolved].sort());
   return positions;
 }
 
@@ -289,6 +357,8 @@ export function coverOfPlan(input: {
   ladder: Pick<CoverLadder, "asset" | "eventTicker" | "rungs">;
   spotCents: number;
   intents: Iterable<RecordedIntent>;
+  /** Strikes of positions the ladder does not list, from production (`symbolsMissingFromLadder`). */
+  elsewhere?: ReadonlyMap<string, number>;
 }): { assessment: CoverAssessment; positions: IntentPosition[] } | null {
   const { plan, ladder } = input;
   if (plan.floorCents === null || ladder.eventTicker !== plan.eventTicker) return null;
@@ -296,8 +366,9 @@ export function coverOfPlan(input: {
     plan.ceilingCents !== null && plan.ceilingCents !== plan.spotCents
       ? { floorCents: plan.floorCents, ceilingCents: plan.ceilingCents }
       : { floorCents: plan.floorCents };
-  const positions = positionsFromIntents(input.intents, ladder);
   try {
+    // A position whose strike is unknown throws here too: no cover is shown rather than a short one.
+    const positions = positionsFromIntents(input.intents, ladder, input.elsewhere);
     const assessment = assessCover({
       holding: { asset: plan.asset, quantity: input.holdingQuantity ?? plan.holdingQuantity },
       ladder,
@@ -307,7 +378,8 @@ export function coverOfPlan(input: {
     });
     return { assessment, positions };
   } catch {
-    // A holding or goal the planner refuses (for example a quantity edited to nonsense) has no cover.
+    // A holding or goal the planner refuses (for example a quantity edited to nonsense), or a position on
+    // this ladder whose strike nobody lists, has no cover.
     return null;
   }
 }

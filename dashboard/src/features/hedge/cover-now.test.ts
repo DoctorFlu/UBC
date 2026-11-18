@@ -16,6 +16,8 @@ function quotes(spotCents: number): LadderQuotes {
     title: "BTC price on November 20",
     expiry: "2026-11-20T22:00:00.000Z",
     spotCents,
+    spotBasis: "mid",
+    elsewhere: [],
     fetchedAt: "2026-11-17T02:07:00.000Z",
     rungs: [66_000, 65_500, 65_000, 64_500, 64_000, 63_500, 63_000, 62_500].map((k) => ({
       instrumentSymbol: symbol(k),
@@ -147,6 +149,32 @@ describe("cover now", () => {
         holdingQuantity: "0.05",
         quotes: { ...quotes(6_464_000), eventTicker: "OTHER" },
         intents: [],
+      }),
+    ).toBeNull();
+  });
+
+  it("counts the simulated venue's fill on a strike only production lists, and never drops it silently", () => {
+    // After the switch to the sandbox: $64,250 is held from a simulated fill, and the sandbox's ladder
+    // (`quotes`) does not list it. Production does (`elsewhere`).
+    const held = [intent(64_250, 1_000, 40, "executed")];
+    const elsewhere = [{ instrumentSymbol: symbol(64_250), strikeCents: 6_425_000 }];
+    const counted = coverNow({
+      plan,
+      holdingQuantity: "0.05",
+      quotes: { ...quotes(6_466_000), elsewhere },
+      intents: held,
+    });
+    expect(must(counted).positions.map((p) => [p.instrumentSymbol, p.strikeCents])).toEqual([
+      [symbol(64_250), 6_425_000],
+    ]);
+    expect(must(counted).assessment.heldPayoutCents).toBe(2_500);
+    // Production could not be read: no cover is shown, rather than one that leaves the position out.
+    expect(
+      coverNow({
+        plan,
+        holdingQuantity: "0.05",
+        quotes: { ...quotes(6_466_000), elsewhere: null },
+        intents: held,
       }),
     ).toBeNull();
   });

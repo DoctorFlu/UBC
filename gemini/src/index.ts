@@ -1,5 +1,7 @@
 export {
   createGeminiClient,
+  MAX_LAST_TRADE_AGE_MS,
+  MAX_SPOT_SPREAD_BPS,
   DEFAULT_BASE_URL,
   eventPath,
   type CacheTtls,
@@ -34,6 +36,12 @@ export {
   type GeminiEnvironment,
   type MarketDataSource,
 } from "./environment";
+export {
+  createMarketDataClient,
+  createProductionClient,
+  spotSourceText,
+  type MarketDataClientOptions,
+} from "./market-data";
 export { GeminiError, isGeminiError, type GeminiErrorCode } from "./errors";
 export type { FetchLike } from "./http";
 export {

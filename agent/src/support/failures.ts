@@ -6,7 +6,7 @@
  */
 import { BaseError, InsufficientFundsError } from "viem";
 import { isGeminiError } from "@mandate/gemini";
-import { PlannerInputError } from "@mandate/planner";
+import { PlannerInputError, UnresolvedPositionError } from "@mandate/planner";
 import { PolicyClientError, PolicyRevertError, formatWait, rateLimitOf } from "@mandate/shared";
 import { ConsoleClientError } from "../console/client";
 import type { ToolContext } from "../context";
@@ -126,9 +126,30 @@ function classify(error: unknown): Failure | null {
         },
       };
     }
+    // Said as it happened: an error on Gemini's side reads differently from a call that timed out.
+    const what =
+      error.code === "http" && error.status !== undefined && error.status >= 500
+        ? `Gemini's market data is unavailable: Gemini answered with an error on its side (HTTP ${String(error.status)}).`
+        : error.code === "rate_limited"
+          ? "Gemini's market data is unavailable: Gemini is limiting how often this server may ask."
+          : error.code === "invalid_response"
+            ? "Gemini's market data is unavailable: Gemini answered with data this server could not read."
+            : "Gemini's market data is unavailable: Gemini did not answer in time.";
     return {
-      reason: reason("MARKET_DATA_UNAVAILABLE", "Gemini's public market data did not answer in time."),
-      nextAction: { actor: "agent", hint: "Try this call once more in a minute." },
+      reason: reason("MARKET_DATA_UNAVAILABLE", `${what} Nothing was planned or proposed.`),
+      nextAction: {
+        actor: "agent",
+        hint: "Tell the owner Gemini's market data is unavailable right now, and try this call again in a few minutes. Do not guess prices or strikes meanwhile.",
+      },
+    };
+  }
+  if (error instanceof UnresolvedPositionError) {
+    return {
+      reason: reason("POSITIONS_UNRESOLVED", error.message),
+      nextAction: {
+        actor: "agent",
+        hint: "Do not buy on this ladder now: what is already held there cannot be counted. Tell the owner, and try again later.",
+      },
     };
   }
   if (error instanceof PlannerInputError) {

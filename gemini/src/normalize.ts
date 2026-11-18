@@ -286,6 +286,7 @@ export function normalizeTicker(asset: string, raw: RawTicker, fetchedAt: string
     midCents = lastCents;
   }
   if (midCents === null) return null;
+  const quoted = bidCents !== null && askCents !== null && bidCents > 0 && askCents >= bidCents;
   return {
     asset,
     symbol: spotSymbol(asset),
@@ -293,6 +294,8 @@ export function normalizeTicker(asset: string, raw: RawTicker, fetchedAt: string
     askCents,
     lastCents,
     midCents,
+    basis: quoted ? "mid" : "last",
+    ...(quoted ? { spreadBps: Math.round(((askCents - bidCents) * 10_000) / midCents) } : {}),
     fetchedAt,
   };
 }

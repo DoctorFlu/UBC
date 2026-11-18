@@ -17,7 +17,7 @@ import {
 } from "../mcp/envelope";
 import { PROPOSAL_RESERVE_MS, reserveWithin } from "../mcp/scoped-services";
 import { defineTool } from "../mcp/tool";
-import type { AgentPolicy } from "../services";
+import type { AgentPolicy, MarketsClient } from "../services";
 import { ladderLockKey, PLAN_EXECUTABLE_FOR_MS, type OrderOutcome, type StoredPlan } from "../state/plans";
 import {
   describeFailure,
@@ -100,9 +100,17 @@ function executionView(
  * Intents on the plan's ladder that hold protection the plan did not count when it was made: neither in
  * its basis nor one of its own orders. Empty when the plan is still exactly the missing part.
  */
-async function newerPositions(policy: AgentPolicy, stored: StoredPlan): Promise<number[]> {
+async function newerPositions(
+  policy: AgentPolicy,
+  markets: Pick<MarketsClient, "productionStrikes"> | undefined,
+  stored: StoredPlan,
+): Promise<number[]> {
   const own = new Set(stored.outcomes.map((o) => o.intentId));
-  const positions = await heldPositions(policy, { rungs: stored.strikes });
+  const { positions } = await heldPositions(
+    policy,
+    { eventTicker: stored.plan.eventTicker, rungs: stored.strikes },
+    markets,
+  );
   return positions
     .map((p) => p.intentId)
     .filter((id) => !own.has(id) && !stored.basis.has(id))
@@ -167,7 +175,7 @@ async function runOrders(
     const runStep = async (): Promise<OrderStep> => {
       let newer: number[];
       try {
-        newer = await newerPositions(policy, stored);
+        newer = await newerPositions(policy, ctx.markets, stored);
       } catch (error) {
         return { kind: "unreadable", failure: describeFailure(error, ctx) };
       }

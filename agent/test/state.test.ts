@@ -173,7 +173,7 @@ describe("Gemini market resolution", () => {
         { id: "1", instrumentSymbol: "GEMI-NFL-2611152125-SF-DAL-M-SF", label: "SF", ticker: "SF" },
       ],
     };
-    const markets = createGeminiMarkets({
+    const markets = createGeminiMarkets(undefined, {
       maxRetries: 0,
       fetch: (input) => {
         const path = new URL(input).pathname;

@@ -42,6 +42,17 @@ let clock: { now: number };
 let fake: FakeGeminiPrivate;
 let journal: ReturnType<typeof memoryOrderJournal>;
 let events: MarketEvent[];
+/** What Gemini's production exchange lists, where simulated fills are resolved. Default: `events`. */
+let productionEvents: MarketEvent[] | undefined;
+/** The event tickers each exchange was asked for. */
+let asked: { venue: string[]; production: string[] };
+
+function lookup(list: MarketEvent[], ticker: string): Promise<MarketEvent> {
+  const event = list.find((candidate) => candidate.ticker === ticker);
+  return event
+    ? Promise.resolve(event)
+    : Promise.reject(new GeminiError("not_found", `no event ${ticker}`, { status: 404 }));
+}
 let trading: ReturnType<typeof createGeminiPrivateClient>;
 
 function venue(options: { orderTtlMs?: number; matchByTerms?: boolean } = {}): Venue {
@@ -49,10 +60,14 @@ function venue(options: { orderTtlMs?: number; matchByTerms?: boolean } = {}): V
   return geminiVenue({
     publicClient: {
       getEvent: (ticker) => {
-        const event = events.find((candidate) => candidate.ticker === ticker);
-        return event
-          ? Promise.resolve(event)
-          : Promise.reject(new GeminiError("not_found", `no event ${ticker}`, { status: 404 }));
+        asked.venue.push(ticker);
+        return lookup(events, ticker);
+      },
+    },
+    productionClient: {
+      getEvent: (ticker) => {
+        asked.production.push(ticker);
+        return lookup(productionEvents ?? events, ticker);
       },
     },
     trading,
@@ -105,6 +120,8 @@ const position = (patch: Partial<HeldPosition> = {}): HeldPosition => ({
 });
 
 beforeEach(() => {
+  productionEvents = undefined;
+  asked = { venue: [], production: [] };
   clock = { now: Date.parse("2026-11-17T08:00:00Z") };
   fake = new FakeGeminiPrivate({ apiKey: KEY, apiSecret: SECRET, now: () => clock.now });
   journal = memoryOrderJournal();
@@ -618,5 +635,73 @@ describe("settling a position", () => {
     expect(outcome).toMatchObject({ status: "resolved", venue: "simulated", contractsHundredths: 4_000 });
     expect(outcome).not.toHaveProperty("feeCents");
     expect(fake.requests).toHaveLength(0);
+  });
+
+  /** The settled ladder as the sandbox lists it: without HI68000, which only production lists. */
+  function sandboxWithout(symbol: string): MarketEvent {
+    return { ...SETTLED, contracts: SETTLED.contracts.filter((c) => c.instrumentSymbol !== symbol) };
+  }
+  const PRODUCTION_ONLY = "GEMI-BTC2611132200-HI68000";
+
+  it("resolves a simulated fill on production, never 'unlisted', when the sandbox does not list its symbol", async () => {
+    // Tonight's switch: the 9 intents filled by the simulated venue stay, on strikes the sandbox lacks.
+    events = [OPEN, sandboxWithout(PRODUCTION_ONLY)];
+    productionEvents = [OPEN, SETTLED];
+    const gemini = venue();
+    const outcome = await gemini.positionOutcome(position({ market: PRODUCTION_ONLY }));
+    // $68,000 and below resolved YES: a NO position there paid nothing.
+    expect(outcome).toMatchObject({
+      status: "resolved",
+      venue: "simulated",
+      resolution: "yes",
+      contractsHundredths: 4_000,
+      payoutCents: 0,
+    });
+    expect(asked.venue).toEqual([]);
+    expect(await gemini.outcomeSource?.(position({ market: PRODUCTION_ONLY }))).toBe("simulated");
+  });
+
+  it("resolves a sandbox fill and a simulated fill side by side, each on the exchange that filled it", async () => {
+    events = [OPEN, sandboxWithout(PRODUCTION_ONLY)];
+    // Production resolves HI68500 the other way, so a sandbox fill read there would settle wrong.
+    productionEvents = [
+      OPEN,
+      {
+        ...SETTLED,
+        contracts: SETTLED.contracts.map((c) =>
+          c.instrumentSymbol === SETTLED_NO ? { ...c, resolutionSide: "yes" } : c,
+        ),
+      },
+    ];
+    const gemini = await filledOn(SETTLED_NO); // intent 7, journaled: filled on the sandbox
+    fake.settle(SETTLED_NO, "no", "BTC2611132200");
+    const sandboxFill = position({ intentId: 7, market: SETTLED_NO });
+    const simulatedFill = position({ intentId: 8, market: PRODUCTION_ONLY, costCents: 620, limitPrice: 31 });
+
+    expect(await gemini.positionOutcome(sandboxFill)).toMatchObject({
+      status: "resolved",
+      resolution: "no",
+      contractsHundredths: 4_000,
+      payoutCents: 4_000,
+      feeCents: 60,
+    });
+    expect(await gemini.positionOutcome(sandboxFill)).not.toHaveProperty("venue");
+    expect(await gemini.positionOutcome(simulatedFill)).toMatchObject({
+      status: "resolved",
+      venue: "simulated",
+      resolution: "yes",
+      contractsHundredths: 2_000,
+      payoutCents: 0,
+    });
+    expect(asked.production).toEqual(["BTC2611132200"]);
+    expect(await gemini.outcomeSource?.(sandboxFill)).toBe("sandbox");
+    expect(await gemini.outcomeSource?.(simulatedFill)).toBe("simulated");
+  });
+
+  it("never takes a fill for a simulated one while the order journal cannot be read", async () => {
+    const gemini = await filledOn(SETTLED_NO);
+    journal.failing = "the console did not answer";
+    await expect(gemini.positionOutcome(position())).rejects.toThrow("the console did not answer");
+    expect(asked.production).toEqual([]);
   });
 });

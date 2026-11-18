@@ -68,6 +68,8 @@ function scopedMarkets(markets: MarketsClient, deadline: CallDeadline): MarketsC
     listLadders: (asset) => deadline.step("gemini.ladders", (signal) => markets.listLadders(asset, signal)),
     getLadder: (options) => deadline.step("gemini.ladder", (signal) => markets.getLadder(options, signal)),
     getSpot: (asset) => deadline.step("gemini.spot", (signal) => markets.getSpot(asset, signal)),
+    productionStrikes: (ticker) =>
+      deadline.step("gemini.production_strikes", (signal) => markets.productionStrikes(ticker, signal)),
     resolveMarket: (symbol) =>
       deadline.step("gemini.market", (signal) => markets.resolveMarket(symbol, signal)),
   };

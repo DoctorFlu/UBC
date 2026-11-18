@@ -81,7 +81,7 @@ async function hedgeMarket(
   const body: HedgeMarketResponse = {
     asset,
     eventTicker,
-    quotes: lookup.ok ? ladderQuotes(lookup.ladder) : null,
+    quotes: lookup.ok ? ladderQuotes(lookup.ladder, lookup.elsewhere) : null,
     error: lookup.ok ? null : lookup.error,
     preview,
   };

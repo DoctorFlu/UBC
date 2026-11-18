@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createGeminiClient, marketDataSource } from "@mandate/gemini";
+import { createMarketDataClient, marketDataSource } from "@mandate/gemini";
 import { loadEnv } from "@mandate/shared";
 import { createSignalsApp } from "./app";
 import { readSignalsConfig } from "./config";
@@ -17,10 +17,10 @@ const marketData = marketDataSource(process.env);
  * Public Gemini market data, cached so that request volume never turns into Gemini volume: at most
  * one events listing a minute, one event and one spot ticker every five seconds per ladder and asset,
  * and one candle series every five minutes per asset. The client's token bucket stays under Gemini's
- * public limit of 120 requests a minute regardless.
+ * public limit of 120 requests a minute regardless. Books and listings come from the venue's exchange,
+ * spot and candles from production's, whose index the ladders settle on (`createMarketDataClient`).
  */
-const gemini = createGeminiClient({
-  baseUrl: marketData.baseUrl,
+const gemini = createMarketDataClient(marketData, {
   cacheTtlMs: { events: 60_000, event: 5_000, spot: 5_000, candles: 300_000 },
 });
 
