@@ -9,6 +9,8 @@ import { useToast } from "@/components/ui/Toast";
 
 import styles from "@/components/shell/Shell.module.css";
 
+import { useWalletRestore } from "./restore";
+
 /** Whether the person said no in their wallet (EIP-1193 code 4001), however the wallet library wrapped it. */
 export function declined(error: unknown): boolean {
   for (
@@ -51,6 +53,7 @@ export function useConnectWallet(): ConnectWallet {
   const connectors = useConnectors();
   const { mutate: connect, isPending } = useConnect();
   const toast = useToast();
+  const restore = useWalletRestore();
   const [chooserOpen, setChooserOpen] = useState(false);
   const choices = walletChoices(connectors);
 
@@ -58,7 +61,10 @@ export function useConnectWallet(): ConnectWallet {
     connect(
       { connector },
       {
-        onSuccess: () => setChooserOpen(false),
+        onSuccess: () => {
+          restore.connected(connector.uid);
+          setChooserOpen(false);
+        },
         onError: (error) =>
           toast(
             declined(error)
@@ -74,6 +80,7 @@ export function useConnectWallet(): ConnectWallet {
   const start = () => {
     const [first, ...others] = choices;
     if (!first) return;
+    restore.connectStarted();
     if (others.length === 0) connectWith(first);
     else setChooserOpen(true);
   };
