@@ -20,6 +20,7 @@ import { Tabs } from "@/components/ui/Tabs";
 import { When } from "@/components/ui/When";
 import { evidenceHref } from "@/lib/evidence/chain";
 import { type OrderOnChain, executionSummary, planExecution } from "@/lib/hedge/execution";
+import { assetGoals } from "@/lib/hedge/goals";
 import type { AgentPlanView, PreviewState } from "@/lib/hedge/types";
 import {
   formatContractPrice,
@@ -38,6 +39,7 @@ import { useOwnerMode } from "@/lib/owner/access";
 import { useNow } from "@/lib/useNow";
 
 import { CoverNowCard } from "./CoverNow";
+import { GoalRow } from "./GoalRow";
 import styles from "./hedge.module.css";
 import { HoldingsEditor } from "./HoldingsEditor";
 import { LiveLadder, ladderCaption } from "./LiveLadder";
@@ -357,18 +359,35 @@ function NoPlanCard({
   );
 }
 
-/** One asset's hedge: the agent's plan or an honest empty state, its payoff, and the live ladder. */
+/**
+ * One asset's hedge: the goal shown (with a row to pick another when the asset has several), its cover,
+ * the agent's plan for it or an honest empty state, its payoff, and the live ladder.
+ */
 function AssetHedge({
   asset,
   snapshot,
   isPreviewPage,
+  initialGoal,
 }: {
   asset: string;
   snapshot: ConsoleSnapshot;
   isPreviewPage: boolean;
+  initialGoal: string | undefined;
 }) {
   const agentName = snapshot.offchain.pairing?.agentName ?? "The agent";
-  const agentPlan = snapshot.offchain.plans.find((plan) => plan.asset === asset) ?? null;
+  const now = useNow();
+  // Before the browser clock (server HTML, first render) every goal counts as open, soonest first.
+  const goals = assetGoals(snapshot.offchain.plans, asset, now ?? 0);
+  const [chosen, setChosen] = useState<string | null>(initialGoal ?? null);
+  const agentPlan = goals.find((goal) => goal.plan.eventTicker === chosen) ?? goals[0] ?? null;
+  const choose = (eventTicker: string) => {
+    setChosen(eventTicker);
+    // `?goal=` keeps the choice on reload and in a shared link, without a navigation.
+    const url = new URL(window.location.href);
+    url.searchParams.set("asset", asset);
+    url.searchParams.set("goal", eventTicker);
+    window.history.replaceState(window.history.state, "", url);
+  };
   const holding = snapshot.offchain.holdings.find((candidate) => candidate.asset === asset)?.quantity ?? null;
   const market = useHedgeMarket({
     asset,
@@ -384,8 +403,13 @@ function AssetHedge({
   const preview = market.status === "ready" ? market.data.preview : null;
   const previewPlan = preview?.status === "ready" ? preview.plan : null;
   const shown = agentPlan?.plan ?? previewPlan;
-  const quotes = market.status === "ready" ? market.data.quotes : null;
-  const now = useNow();
+  // Right after another goal is picked the last answer stays on screen, for the previous goal's event.
+  const fresh =
+    market.status === "ready" && (agentPlan === null || market.data.eventTicker === agentPlan.plan.eventTicker);
+  const quotes = fresh ? market.data.quotes : null;
+  const states = new Map(
+    market.status === "ready" ? market.data.goals.map((goal) => [goal.eventTicker, goal.state] as const) : [],
+  );
   const expiry = agentPlan
     ? ladderSettlement(snapshot.chain, agentPlan.plan, now)
     : { state: "open" as const };
@@ -396,13 +420,24 @@ function AssetHedge({
 
   return (
     <div className={styles.asset}>
+      {agentPlan && goals.length > 1 ? (
+        <GoalRow
+          asset={asset}
+          goals={goals}
+          states={states}
+          selected={agentPlan.plan.eventTicker}
+          onSelect={choose}
+          now={now ?? 0}
+        />
+      ) : null}
       {agentPlan && expiry.state !== "open" ? (
         <ExpiredLadderCard state={expiry} agentName={agentName} />
       ) : agentPlan ? (
         <CoverNowCard
           view={agentPlan}
-          holdingQuantity={holding}
+          holdingQuantity={holding ?? agentPlan.plan.holdingQuantity}
           quotes={quotes}
+          loading={market.status === "loading" || (market.status === "ready" && !fresh)}
           intents={snapshot.chain?.intents ?? []}
         />
       ) : null}
@@ -471,10 +506,13 @@ function insideSummary(plan: HedgePlan | null, market: HedgeMarketState): string
 export function HedgeView({
   preview,
   initialAsset,
+  initialGoal,
 }: {
   preview?: ConsoleSnapshot;
   /** The asset to open on, from `?asset=` (the evidence chain links back to its plan this way). */
   initialAsset?: string | undefined;
+  /** The goal to open on, by its ladder's event, from `?goal=`. */
+  initialGoal?: string | undefined;
 }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
@@ -514,11 +552,23 @@ export function HedgeView({
           tabs={assets.map((asset) => ({
             id: asset,
             label: asset,
-            content: <AssetHedge asset={asset} snapshot={snapshot} isPreviewPage={preview !== undefined} />,
+            content: (
+              <AssetHedge
+                asset={asset}
+                snapshot={snapshot}
+                isPreviewPage={preview !== undefined}
+                initialGoal={initialGoal}
+              />
+            ),
           }))}
         />
       ) : (
-        <AssetHedge asset={current} snapshot={snapshot} isPreviewPage={preview !== undefined} />
+        <AssetHedge
+          asset={current}
+          snapshot={snapshot}
+          isPreviewPage={preview !== undefined}
+          initialGoal={initialGoal}
+        />
       )}
     </div>
   );

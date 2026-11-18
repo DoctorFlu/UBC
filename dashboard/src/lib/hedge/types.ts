@@ -3,6 +3,7 @@
  * quotes with an optional preview (from GET /api/console/hedge/market). Plain JSON only.
  */
 import type { HedgePlan } from "@mandate/planner";
+import type { CoverNowView } from "@mandate/shared";
 
 /** A plan the agent's MCP server posted (POST /api/agent/v1/plans), as stored. */
 export interface AgentPlanView {
@@ -84,6 +85,11 @@ export interface HedgeMarketResponse {
   quotes: LadderQuotes | null;
   error: MarketDataError | null;
   preview: PreviewState;
+  /**
+   * The cover state of each of the asset's goals, soonest first, when it has more than one (the goal
+   * row); empty otherwise.
+   */
+  goals: { eventTicker: string; state: CoverNowView["state"] }[];
 }
 
 /** The protection a preview assumes: from spot down to this far below it. */

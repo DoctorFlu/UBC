@@ -472,7 +472,10 @@ export function EvidenceView({ view, preview }: { view: AgentPlanView; preview?:
   const status = STATUS[evidence.status];
   return (
     <div className={styles.view}>
-      <ViewLink href={`/hedge?asset=${encodeURIComponent(view.asset)}`} className={styles.back}>
+      <ViewLink
+        href={`/hedge?asset=${encodeURIComponent(view.asset)}&goal=${encodeURIComponent(view.plan.eventTicker)}`}
+        className={styles.back}
+      >
         <ArrowLeft aria-hidden className={styles.backIcon} strokeWidth={2} />
         Hedge
       </ViewLink>

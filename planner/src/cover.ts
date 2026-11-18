@@ -308,6 +308,7 @@ export function measureCover(args: {
   const base = {
     reason: null,
     belowFloor: null,
+    missingBelowVenue: false,
     asset: args.asset,
     eventTicker: args.eventTicker,
     spotCents: args.spotCents,
@@ -413,9 +414,16 @@ export function assessCover(input: CoverInput): CoverAssessment {
       : { ceilingCents: null, floorCents: cover.floorCents, designed: [] }),
   });
   const addable = onVenue.reason === null ? onVenue.missingPayoutCents : 0;
-  if (addable > 0) return { ...cover, addablePayoutCents: addable };
+  // Whether the part a plan cannot buy lies only below every strike the venue lists.
+  const venueStrikes = new Set(input.ladder.rungs.map((r) => r.strikeCents));
+  const lowestOnVenue = Math.min(...venueStrikes);
+  const unlisted = cover.rungs.filter((r) => r.missingHundredths > 0 && !venueStrikes.has(r.strikeCents));
+  const missingBelowVenue =
+    listed && unlisted.length > 0 && unlisted.every((r) => r.strikeCents < lowestOnVenue);
+  if (addable > 0) return { ...cover, addablePayoutCents: addable, missingBelowVenue };
   return {
     ...cover,
+    missingBelowVenue,
     // Nothing held pays and nothing can be bought: the goal cannot be hedged now, for the venue's reason.
     state: cover.heldPayoutCents === 0 ? "cannot_hedge" : cover.state,
     reason: onVenue.reason ?? "no_more_strikes",

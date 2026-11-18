@@ -525,6 +525,12 @@ export const coverNowSchema = z.strictObject({
     .strictObject({ plannedSpotCents: z.int(), paysAtSpotCents: z.int() })
     .nullable()
     .default(null),
+  /**
+   * With `no_more_strikes` or a partial `addable`: true when what cannot be bought lies only below the
+   * lowest strike the exchange that takes the orders lists (Gemini's production exchange lists lower
+   * strikes than its sandbox).
+   */
+  missingBelowVenue: z.boolean().default(false),
 });
 export type CoverNowView = z.infer<typeof coverNowSchema>;
 

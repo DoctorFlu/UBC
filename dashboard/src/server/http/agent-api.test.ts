@@ -773,6 +773,7 @@ describe("agent API: the owner's view (#97)", () => {
       heldByState: null,
       coverBps: null,
       missingPayoutCents: null,
+      missingBelowVenue: false,
     });
   });
 

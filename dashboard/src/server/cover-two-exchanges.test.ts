@@ -1,17 +1,22 @@
 import { GEMINI_HOSTS } from "@mandate/gemini";
 import {
+  AFTER_DAILY_EXPIRY,
+  DAILY,
   HOSTED_HOLDING,
   HOSTED_INTENTS,
+  type HostedIntent,
   HOSTED_WEEKLY_PLAN,
   TWO_EXCHANGES_AT,
   type TwoExchangeOptions,
   WEEKLY,
   twoExchangeFetch,
 } from "@mandate/gemini/two-exchanges";
-import type { IntentView } from "@mandate/shared";
+import { planHedge } from "@mandate/planner";
+import { type IntentView, selectGoalPlans } from "@mandate/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { coverNow, coverSentence } from "@/features/hedge/cover-now";
+import { goalsCoveredText } from "@/features/workspace/cover-text";
 import type { AgentPlanView } from "@/lib/hedge/types";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 
@@ -80,8 +85,8 @@ const weeklyGoal: AgentPlanView = {
   plan: HOSTED_WEEKLY_PLAN.plan as unknown as AgentPlanView["plan"],
 };
 
-function intentViews(): IntentView[] {
-  return HOSTED_INTENTS.map(
+function intentViews(intents: readonly HostedIntent[] = HOSTED_INTENTS): IntentView[] {
+  return intents.map(
     (intent) =>
       ({
         ...intent,
@@ -165,7 +170,7 @@ describe("cover of the hosted weekly goal, with positions on strikes only produc
     const { state, sentence } = await hedgeSentence({ intents: intentViews() });
     // 0.05 BTC x ($64,662 - $61,000): every strike there is lies above the floor, so the staircase ends at $61,000.
     expect(sentence).toBe(
-      "Covered. If BTC settles below $61,000 on Nov 20, 22:00 UTC, the contracts you hold pay $247.63, more than the $183.08 your 0.05 BTC loses from today's $64,662 down to $61,000, the lowest strike there is (your floor $57,992 is below every strike). Nothing more is needed.",
+      "Covered. If BTC settles below $61,000 on Nov 20, 22:00 UTC, the contracts you hold pay $247.63, more than the $183.08 your 0.05 BTC loses from today's $64,662 down to $61,000, the lowest strike there is (your floor $57,992 is below every strike). No lower strike is listed, so nothing more can be added.",
     );
     expect(state).toBe("met");
   });
@@ -275,3 +280,160 @@ async function homeCover(ladder: LadderSource) {
   const coverOf = (id: string) => home.mandates.find((row) => row.mandate.id === id)?.cover;
   return { held: coverOf(held.id), bare: coverOf(bare.id) };
 }
+
+describe("a goal per asset and ladder: the hosted weekly, then a daily for the same holding", () => {
+  const mirrored = { sandboxDailyBooks: "mirrored" } as const;
+  const FLOOR = 6_300_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The daily plan_hedge makes on the sandbox, its books mirrored from production's by the maker. */
+  async function dailyGoal(): Promise<AgentPlanView> {
+    const lookup = await quotesOn("sandbox", mirrored)("BTC", DAILY);
+    if (!lookup.ok) throw new Error("the sandbox daily did not answer");
+    const plan = planHedge({
+      holding: HOSTED_HOLDING,
+      ladder: lookup.ladder,
+      elsewhere: lookup.elsewhere ?? [],
+      goal: { floorCents: FLOOR },
+      maxCostCents: 10_000,
+      limits: { maxTradeCents: 2_500, remainingBudgetCents: 13_520, categoryAllowed: true },
+      held: [],
+    });
+    return {
+      planId: "plan_daily",
+      asset: "BTC",
+      requestText: "Protect my 0.05 BTC down to $63,000 through today.",
+      createdAt: new Date(NOW).toISOString(),
+      storedAt: new Date(NOW + 60_000).toISOString(),
+      plan: plan as unknown as AgentPlanView["plan"],
+    };
+  }
+
+  /**
+   * The daily's whole staircase on the sandbox's strikes, filled at 50 cents: the $64,250 rung for the
+   * fall from spot, then 12.50 contracts on each strike down to the floor. Ids follow the hosted ones.
+   */
+  function staircaseFilled(spotCents: number): HostedIntent[] {
+    const sizes: [number, number][] = [
+      [64250, Math.floor((5 * (spotCents - 6_425_000)) / 100)],
+      ...[64000, 63750, 63500, 63250, 63000].map((strike): [number, number] => [strike, 1_250]),
+    ];
+    return sizes.map(([strike, hundredths], index) => {
+      if (hundredths % 2 !== 0) throw new Error("50-cent fills need an even number of hundredths");
+      return {
+        id: HOSTED_INTENTS.length + index,
+        market: `GEMI-${DAILY}-HI${String(strike)}`,
+        outcome: "NO",
+        isBuy: true,
+        amountCents: hundredths / 2,
+        limitPrice: 50,
+        status: "executed",
+        filledCents: hundredths / 2,
+      };
+    });
+  }
+
+  /** Home's headline for one mandate whose stored plans (newest first) and intents are these. */
+  async function home(stored: AgentPlanView[], proposed: string[], intents: HostedIntent[]) {
+    const plans = selectGoalPlans(
+      stored,
+      (view) => ({ planId: view.planId, asset: view.asset, eventTicker: view.plan.eventTicker }),
+      new Set(proposed),
+    );
+    const covers = await coverOfSnapshot(
+      snapshot({ intents: intentViews(intents), plans }),
+      quotesOn("sandbox", mirrored),
+      Date.now(),
+    );
+    const met = covers.filter((cover) => cover.state === "met").length;
+    const unavailable = covers.filter((cover) => cover.state === "unavailable").length;
+    return {
+      headline: goalsCoveredText({ goals: covers.length, met, unavailable }).value,
+      goals: covers.map((cover) => [cover.eventTicker, cover.state]),
+    };
+  }
+
+  it("sizes the daily's $64,250 rung for the whole fall from spot, where the sandbox lacks $64,500", async () => {
+    const daily = await dailyGoal();
+    const spot = daily.plan.spotCents;
+    expect(spot).toBeGreaterThan(6_450_000);
+    // Production lists $64,500 below spot; the sandbox does not, so its highest rung below spot is $64,250.
+    const top = daily.plan.rungs[0];
+    expect(top?.strikeCents).toBe(6_425_000);
+    expect(top?.designedHundredths).toBe(Math.floor((5 * (spot - 6_425_000)) / 100));
+    for (const order of daily.plan.orders) expect(order.instrumentSymbol).toContain(`GEMI-${DAILY}-`);
+
+    // The plan's own orders filled.
+    const planned = new Set(daily.plan.orders.map((order) => order.instrumentSymbol));
+    const lookup = await quotesOn("sandbox", mirrored)("BTC", DAILY);
+    if (!lookup.ok) throw new Error("the sandbox daily did not answer");
+    const cover = coverNow({
+      plan: daily.plan,
+      holdingQuantity: HOSTED_HOLDING.quantity,
+      quotes: ladderQuotes(lookup.ladder, lookup.elsewhere, lookup.listed),
+      intents: intentViews(staircaseFilled(daily.plan.spotCents).filter((i) => planned.has(i.market ?? ""))),
+    });
+    if (!cover) throw new Error("no cover");
+    // Production's recorded books, which the maker mirrors, offer no NO on four of the sandbox's strikes:
+    // the plan as made skips them, and what is missing is exactly their four 12.50-contract slices.
+    expect(daily.plan.warnings.map((w) => w.code)).toContain("no_price");
+    expect(cover.assessment).toMatchObject({ state: "partly_met", reason: null, missingPayoutCents: 4 * 1_250 });
+
+    // The sandbox's whole staircase filled: the goal, over every strike there is, is met.
+    const whole = await coverOfSnapshot(
+      snapshot({ intents: intentViews(staircaseFilled(spot)), plans: [daily] }),
+      quotesOn("sandbox", mirrored),
+      NOW,
+    );
+    expect(whole[0]?.state).toBe("met");
+    const quotes = ladderQuotes(lookup.ladder, lookup.elsewhere, lookup.listed);
+    const met = coverNow({
+      plan: daily.plan,
+      holdingQuantity: HOSTED_HOLDING.quantity,
+      quotes,
+      intents: intentViews(staircaseFilled(spot)),
+    });
+    if (!met) throw new Error("no cover");
+    expect(coverSentence(met.assessment, null)).toMatch(/down to \$63,000\. Nothing more is needed\.$/);
+  });
+
+  it("counts on Home 1 of 1, then 1 of 2, 2 of 2, and after the daily settles 1 of 1, never no goals", async () => {
+    const weekly = weeklyGoal.planId;
+    const daily = await dailyGoal();
+    // The weekly, executed.
+    expect(await home([weeklyGoal], [weekly], [...HOSTED_INTENTS])).toEqual({
+      headline: "1 of 1",
+      goals: [[WEEKLY, "met"]],
+    });
+    // The daily planned, nothing proposed yet: two goals, soonest first, the daily not covered.
+    expect(await home([daily, weeklyGoal], [weekly], [...HOSTED_INTENTS])).toEqual({
+      headline: "1 of 2",
+      goals: [
+        [DAILY, "not_met"],
+        [WEEKLY, "met"],
+      ],
+    });
+    // The daily's staircase proposed and filled.
+    const both = [...HOSTED_INTENTS, ...staircaseFilled(daily.plan.spotCents)];
+    expect(await home([daily, weeklyGoal], [weekly, daily.planId], both)).toEqual({
+      headline: "2 of 2",
+      goals: [
+        [DAILY, "met"],
+        [WEEKLY, "met"],
+      ],
+    });
+    // After 22:00 UTC the daily has settled and tomorrow's is not listed yet: the weekly is still a goal.
+    vi.setSystemTime(AFTER_DAILY_EXPIRY);
+    expect(await home([daily, weeklyGoal], [weekly, daily.planId], both)).toEqual({
+      headline: "1 of 1",
+      goals: [[WEEKLY, "met"]],
+    });
+  });
+});

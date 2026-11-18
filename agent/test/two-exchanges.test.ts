@@ -208,6 +208,7 @@ describe("get_portfolio for each cause", () => {
     planId: HOSTED_WEEKLY_PLAN.plan_id,
     floorCents: 5_799_180,
     spotCents: 6_469_037,
+    missingBelowVenue: false,
     measuredBelowCents: null,
     targetPayoutCents: 0,
     heldPayoutCents: 0,
@@ -266,7 +267,7 @@ describe("get_portfolio for each cause", () => {
     });
     const { summary } = await getPortfolio.run({}, h.ctx);
     expect(summary).toContain(
-      `${head}covered 45% (positions pay $82.68 of $183.08), $100.40 missing; nothing more can be bought for it now: the exchange that takes this mandate's orders lists no strike below today's price.`,
+      `${head}covered 45% (positions pay $82.68 of $183.08), $100.40 missing; the goal protects only down to $61,000.00, the lowest strike there is (the floor $57,991.80 is below every strike); nothing more can be bought for it now: the exchange that takes this mandate's orders lists no strike below today's price.`,
     );
   });
 

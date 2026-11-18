@@ -182,6 +182,12 @@ export interface CoverAssessment {
    * strikes: less when the rest lies on strikes it does not list, 0 when nothing can be added.
    */
   addablePayoutCents: number;
+  /**
+   * True when what cannot be added lies only on strikes below the lowest one the exchange that takes the
+   * orders lists (production lists lower strikes than the sandbox). False otherwise, and when everything
+   * missing can be added.
+   */
+  missingBelowVenue: boolean;
   rungs: CoverRung[];
 }
 

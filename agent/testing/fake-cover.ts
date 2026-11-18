@@ -76,11 +76,12 @@ export function coverFromPlans(sources: {
           heldByState: null,
           coverBps: null,
           missingPayoutCents: null,
+          missingBelowVenue: false,
         };
         if (intents === null) return unavailable;
         const ladder = await sources.ladder(plan.asset, plan.eventTicker).catch(() => null);
         if (ladder === null) return unavailable;
-        const holding = state.holdings.find((h) => h.asset === plan.asset)?.quantity ?? null;
+        const holding = state.holdings.find((h) => h.asset === plan.asset)?.quantity ?? plan.holdingQuantity;
         const cover = coverOfPlan({
           plan,
           holdingQuantity: holding,
@@ -106,6 +107,7 @@ export function coverFromPlans(sources: {
           },
           coverBps: assessment.coverBps,
           missingPayoutCents: assessment.missingPayoutCents,
+          missingBelowVenue: assessment.missingBelowVenue,
         };
       }),
     );

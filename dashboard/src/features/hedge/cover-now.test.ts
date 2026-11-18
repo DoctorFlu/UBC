@@ -136,7 +136,7 @@ describe("cover now", () => {
       intents: hosted,
     });
     expect(coverSentence(must(cover).assessment, null)).toMatch(
-      /^Covered\. If BTC settles below \$62,500, the contracts you hold pay \$165, more than the \$[0-9.]+ your 0\.05 BTC loses from today's \$64,710 down to \$62,500, the lowest strike there is \(your floor \$61,475 is below every strike\)\. Nothing more is needed\.$/,
+      /^Covered\. If BTC settles below \$62,500, the contracts you hold pay \$165, more than the \$[0-9.]+ your 0\.05 BTC loses from today's \$64,710 down to \$62,500, the lowest strike there is \(your floor \$61,475 is below every strike\)\. No lower strike is listed, so nothing more can be added\.$/,
     );
   });
 
@@ -178,5 +178,43 @@ describe("cover now", () => {
         intents: held,
       }),
     ).toBeNull();
+  });
+
+  it("says the real exchange lists lower strikes than the sandbox when what is missing lies there", () => {
+    // The sandbox lists nothing below $64,000; production lists $63,500 and $63,000 too.
+    const sandbox = quotes(6_466_000);
+    const lower = [63_500, 63_000];
+    const onSandbox: LadderQuotes = {
+      ...sandbox,
+      rungs: sandbox.rungs.filter((r) => r.strikeCents >= 6_400_000),
+      elsewhere: lower.map((k) => ({ instrumentSymbol: symbol(k), strikeCents: k * 100 })),
+    };
+    const topTwo = [intent(64_500, 320, 40, "executed"), intent(64_000, 1_000, 40, "executed")];
+    const cover = must(
+      coverNow({ plan: { ...plan, ceilingCents: null }, holdingQuantity: "0.05", quotes: onSandbox, intents: topTwo }),
+    );
+    expect(cover.assessment).toMatchObject({
+      state: "partly_met",
+      reason: "no_more_strikes",
+      missingBelowVenue: true,
+      addablePayoutCents: 0,
+    });
+    expect(coverSentence(cover.assessment, null)).toMatch(
+      /^Partly covered\. If BTC settles below \$63,000, the contracts you hold pay \$33, 40% of the \$83 .* down to \$63,000\. Nothing more can be bought for it now: Gemini's real exchange lists lower strikes that the sandbox your orders go to does not, and what is missing lies on those\.$/,
+    );
+  });
+
+  it("ends a goal met at the lowest strike there is with why nothing more can be added", () => {
+    // Every strike lies above a $62,000 floor: the staircase stops at $62,500.
+    const lowFloor = { ...plan, floorCents: 6_200_000 };
+    const cover = must(
+      coverNow({ plan: lowFloor, holdingQuantity: "0.05", quotes: quotes(6_466_000), intents: hosted }),
+    );
+    expect(coverSentence(cover.assessment, null)).toMatch(
+      /down to \$62,500, the lowest strike there is \(your floor \$62,000 is below every strike\)\. No lower strike is listed, so nothing more can be added\.$/,
+    );
+    // A staircase that reaches the floor keeps the short ending.
+    const reaches = must(coverNow({ plan, holdingQuantity: "0.05", quotes: quotes(6_466_000), intents: hosted }));
+    expect(coverSentence(reaches.assessment, null)).toMatch(/down to \$63,000\. Nothing more is needed\.$/);
   });
 });
