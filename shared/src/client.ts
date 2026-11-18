@@ -6,7 +6,6 @@ import {
   encodeFunctionData,
   getContractError,
   keccak256,
-  parseEventLogs,
   type Account,
   type Address,
   type Chain,
@@ -20,7 +19,7 @@ import {
 import { policyAbi } from "./abi";
 import { raceAbort } from "./abort";
 import { evaluateIntent, headroom, type Headroom, type PolicyState, type RuleInput } from "./evaluate";
-import { decodePolicyLogs, rulesFromTuple, rulesToChain } from "./events";
+import { decodePolicyLogs, parsePolicyLogs, rulesFromTuple, rulesToChain, type ParseOptions } from "./events";
 import { ARC_MIN_MAX_FEE_PER_GAS, applyFeeFloor } from "./fees";
 import { intentStatusFromCode, verdictFromCode } from "./reasons";
 import {
@@ -358,8 +357,14 @@ export class PolicyClient {
     return verdict === "rejected" ? { verdict, reason, source: "contract" } : { verdict, source: "contract" };
   }
 
-  /** Decoded Policy events in `[fromBlock, toBlock]`, split into ranges the RPC accepts. */
-  async getEvents(range: { fromBlock: bigint; toBlock?: bigint }): Promise<PolicyEvent[]> {
+  /**
+   * Decoded Policy events in `[fromBlock, toBlock]`, split into ranges the RPC accepts. A log of this
+   * contract that cannot be read throws, unless `onUndecodable` takes it (see `ParseOptions`).
+   */
+  async getEvents(
+    range: { fromBlock: bigint; toBlock?: bigint },
+    options: Pick<ParseOptions, "onUndecodable"> = {},
+  ): Promise<PolicyEvent[]> {
     const toBlock = range.toBlock ?? (await this.publicClient.getBlockNumber());
     const logs: Log[] = [];
     for (let start = range.fromBlock; start <= toBlock; start += this.maxLogBlockRange) {
@@ -371,12 +376,15 @@ export class PolicyClient {
     return decodePolicyLogs(logs, {
       address: this.address,
       blockTimestamps: await this.blockTimestamps(logs),
+      ...options,
     });
   }
 
   /**
    * Polls for new events and calls `onEvents` with each non-empty batch, in chain order. Starts at
-   * `fromBlock` (default: the next block). Returns a function that stops watching.
+   * `fromBlock` (default: the next block). Returns a function that stops watching. A log of this contract
+   * that cannot be read is reported to `onError` as an `EventDecodeError` and skipped, so one bad log never
+   * stops the watch.
    */
   watchEvents(options: {
     onEvents: (events: PolicyEvent[]) => void | Promise<void>;
@@ -395,7 +403,14 @@ export class PolicyClient {
           const latest = await this.publicClient.getBlockNumber({ cacheTime: 0 });
           next ??= latest + 1n;
           if (latest >= next) {
-            const events = await this.getEvents({ fromBlock: next, toBlock: latest });
+            const events = await this.getEvents(
+              { fromBlock: next, toBlock: latest },
+              {
+                onUndecodable: (_log, error) => {
+                  (options.onError ?? defaultWatchError)(error);
+                },
+              },
+            );
             next = latest + 1n;
             if (events.length > 0 && !isStopped()) await options.onEvents(events);
           }
@@ -651,17 +666,29 @@ export class PolicyClient {
     }
   }
 
+  /**
+   * This contract's events in a receipt, and the reasons any of its logs could not be read. Only the verdict
+   * events matter here; an unreadable log is named only if the verdict is missing, and the console's reader
+   * reports it in Audit either way.
+   */
   private receiptEvents(receipt: TransactionReceipt) {
-    return parseEventLogs({
-      abi: policyAbi,
-      logs: receipt.logs.filter((log) => log.address.toLowerCase() === this.address.toLowerCase()),
-      strict: true,
+    const unreadable: string[] = [];
+    const events = parsePolicyLogs(receipt.logs, {
+      address: this.address,
+      onUndecodable: (_log, error) => unreadable.push(error.message),
     });
+    const missing = (what: string) =>
+      new PolicyClientError(
+        `transaction ${receipt.transactionHash} emitted no ${what}` +
+          (unreadable.length > 0 ? `; it has logs this code cannot read: ${unreadable.join(" ")}` : ""),
+      );
+    return { events, missing };
   }
 
   /** The id of the intent a proposal created, from its verdict event (present on every contract). */
   private verdictIntentId(receipt: TransactionReceipt): number {
-    for (const log of this.receiptEvents(receipt)) {
+    const { events, missing } = this.receiptEvents(receipt);
+    for (const log of events) {
       if (
         log.eventName === "IntentApproved" ||
         log.eventName === "IntentRejected" ||
@@ -670,19 +697,18 @@ export class PolicyClient {
         return toSafeNumber(log.args.intentId, "intentId");
       }
     }
-    throw new PolicyClientError(`transaction ${receipt.transactionHash} emitted no verdict event`);
+    throw missing("verdict event");
   }
 
   private verdictFor(receipt: TransactionReceipt, intentId: number): ChainVerdict {
-    for (const log of this.receiptEvents(receipt)) {
+    const { events, missing } = this.receiptEvents(receipt);
+    for (const log of events) {
       if (!("intentId" in log.args) || log.args.intentId !== BigInt(intentId)) continue;
       if (log.eventName === "IntentApproved") return { verdict: "approved" };
       if (log.eventName === "IntentNeedsApproval") return { verdict: "needs_approval" };
       if (log.eventName === "IntentRejected") return { verdict: "rejected", reason: log.args.reason };
     }
-    throw new PolicyClientError(
-      `transaction ${receipt.transactionHash} emitted no verdict for intent ${intentId}`,
-    );
+    throw missing(`verdict for intent ${intentId}`);
   }
 
   private async blockTimestamps(logs: readonly Log[]): Promise<Map<bigint, number>> {

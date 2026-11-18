@@ -3,6 +3,7 @@ import { encodeFunctionData, toEventSignature, toFunctionSignature, type AbiFunc
 import {
   decodePolicyLogs,
   EventDecodeError,
+  parsePolicyLogs,
   policyAbi,
   policyBaseAbi,
   policyEventSchema,
@@ -190,7 +191,7 @@ describe("decodePolicyLogs", () => {
     ]);
   });
 
-  it("skips logs from other contracts and unrelated events", () => {
+  it("skips other contracts' logs, and without an address, events that are not Policy events", () => {
     const other = "0x0000000000000000000000000000000000000001";
     const ours = makeLog("Paused", { paused: true }, { blockNumber: 1, logIndex: 0, blockTimestamp: 1 });
     const theirs = makeLog(
@@ -198,10 +199,61 @@ describe("decodePolicyLogs", () => {
       { paused: false },
       { blockNumber: 1, logIndex: 1, blockTimestamp: 1, address: other },
     );
-    const foreign = { ...ours, logIndex: 2, topics: [`0x${"11".repeat(32)}`] as [`0x${string}`] };
+    const foreign = { ...theirs, logIndex: 2, topics: [`0x${"11".repeat(32)}`] as [`0x${string}`] };
 
     expect(decodePolicyLogs([ours, theirs, foreign], { address: POLICY_ADDRESS })).toHaveLength(1);
     expect(decodePolicyLogs([ours, theirs, foreign])).toHaveLength(2);
+  });
+
+  describe("a log of the Policy contract that this code cannot read", () => {
+    const at = (logIndex: number) => ({ blockNumber: 1_204, logIndex, blockTimestamp: 1 });
+    const paused = makeLog("Paused", { paused: true }, at(0));
+    const unknownEvent = {
+      ...makeLog("Paused", { paused: false }, at(1)),
+      topics: [`0x${"11".repeat(32)}`] as [`0x${string}`],
+    };
+    // The topic of PolicyUpdated with one word of data: what a contract with another struct would emit.
+    const wrongData = {
+      ...makeLog("Paused", { paused: false }, at(2)),
+      topics: makeLog("PolicyUpdated", { ...rulesToChain(RULES_FOR_RANGE_TEST) }, at(2)).topics,
+    };
+    const noTopic = { ...makeLog("Paused", { paused: false }, at(3)), topics: [] as [] };
+
+    it("is reported with its place and the reason, never dropped, when the reader keeps moving", () => {
+      const reported: { index: number | null; message: string }[] = [];
+      const events = decodePolicyLogs([paused, unknownEvent, wrongData, noTopic], {
+        address: POLICY_ADDRESS,
+        onUndecodable: (log, error) => reported.push({ index: log.logIndex, message: error.message }),
+      });
+      expect(events.map((event) => event.type)).toEqual(["Paused"]);
+      expect(reported.map((entry) => entry.index)).toEqual([1, 2, 3]);
+      expect(reported[0]?.message).toMatch(
+        /^Log 1 in block 1,204 \(transaction 0x[0-9a-f]{64}\) cannot be read: its event \(topic 0x1111/,
+      );
+      expect(reported[0]?.message).toContain("may not be the expected Policy");
+      expect(reported[1]?.message).toContain("its data does not match the PolicyUpdated event");
+      expect(reported[2]?.message).toContain("it has no event topic");
+    });
+
+    it("throws without a reader that keeps moving", () => {
+      expect(() => decodePolicyLogs([paused, wrongData], { address: POLICY_ADDRESS })).toThrow(
+        EventDecodeError,
+      );
+      expect(() => parsePolicyLogs([paused, unknownEvent], { address: POLICY_ADDRESS })).toThrow(
+        /cannot be read: its event/,
+      );
+    });
+
+    it("is read the same way from a receipt, which has no timestamps", () => {
+      const fromReceipt = [paused, unknownEvent].map(({ blockTimestamp: _, ...log }) => log);
+      const reasons: string[] = [];
+      const parsed = parsePolicyLogs(fromReceipt, {
+        address: POLICY_ADDRESS,
+        onUndecodable: (_log, error) => reasons.push(error.message),
+      });
+      expect(parsed.map((log) => log.eventName)).toEqual(["Paused"]);
+      expect(reasons).toHaveLength(1);
+    });
   });
 
   it("takes timestamps from the log, else from the lookup, else fails loudly", () => {
@@ -284,9 +336,16 @@ describe("decodePolicyLogs", () => {
     const logs = [makeLog("PolicyUpdated", huge, at(0)), makeLog("Paused", { paused: true }, at(1))];
     expect(() => decodePolicyLogs(logs)).toThrow(UnitError);
     const skipped: number[] = [];
-    const events = decodePolicyLogs(logs, { onUndecodable: (log) => skipped.push(log.logIndex ?? -1) });
+    const reasons: string[] = [];
+    const events = decodePolicyLogs(logs, {
+      onUndecodable: (log, error) => {
+        skipped.push(log.logIndex ?? -1);
+        reasons.push(error.message);
+      },
+    });
     expect(events.map((event) => event.type)).toEqual(["Paused"]);
     expect(skipped).toEqual([0]);
+    expect(reasons[0]).toContain("budgetCents");
   });
 });
 

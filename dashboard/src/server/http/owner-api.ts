@@ -1,7 +1,6 @@
 import "server-only";
 
-import { decodePolicyLogs, txHashSchema } from "@mandate/shared";
-import { isAddressEqual } from "viem";
+import { parsePolicyLogs, rulesFromChain, txHashSchema, UnitError } from "@mandate/shared";
 import { z } from "zod";
 
 import {
@@ -71,8 +70,10 @@ export const dismissChangeRequest = consoleRoute(async (request, service, scope,
 
 /**
  * Closes a change request as applied once the owner's `setPolicy` transaction is onchain. The server
- * checks the receipt itself: a successful transaction from `user()` to the mandate's Policy contract whose
- * `PolicyUpdated` event carries every value the agent asked for.
+ * checks the receipt itself: a successful transaction in which the mandate's Policy contract emitted a
+ * `PolicyUpdated` event carrying every value the agent asked for. Only the contract's `user()` at that
+ * moment can make it emit one, so the event is the proof: it holds for a smart-account owner (whose
+ * transaction is to its own account) and for an owner who has since handed the role on with `setUser`.
  */
 export const markChangeRequestApplied = consoleRoute(async (request, service, scope, params) => {
   const { mandate } = scope;
@@ -97,21 +98,25 @@ export const markChangeRequestApplied = consoleRoute(async (request, service, sc
   } catch {
     return apiError(422, "unknown_transaction", "That transaction is not onchain yet.");
   }
-  if (
-    receipt.status !== "success" ||
-    !receipt.to ||
-    !isAddressEqual(receipt.to, client.address) ||
-    !isAddressEqual(receipt.from, chain.roles.user)
-  ) {
-    return apiError(422, "not_applied", "That transaction is not a successful setPolicy from the owner.");
+  if (receipt.status !== "success") {
+    return apiError(422, "not_applied", "That transaction did not succeed.");
   }
-  const updated = decodePolicyLogs(
-    receipt.logs.map((log) => ({ ...log, blockTimestamp: 0n })),
-    { address: client.address },
-  ).find((event) => event.type === "PolicyUpdated");
-  if (!updated) return apiError(422, "not_applied", "That transaction did not change the rules.");
+  // Only the rules event matters here; any other log of the contract the console cannot read is
+  // reported in Audit by the console's reader.
+  const updated = parsePolicyLogs(receipt.logs, {
+    address: client.address,
+    onUndecodable: () => undefined,
+  }).find((log) => log.eventName === "PolicyUpdated");
+  if (!updated) return apiError(422, "not_applied", "That transaction did not change this mandate's rules.");
+  let rules;
+  try {
+    rules = rulesFromChain(updated.args);
+  } catch (error) {
+    if (!(error instanceof UnitError)) throw error;
+    return apiError(422, "not_applied", "The new rules hold values too large for the console to compare.");
+  }
   const mismatched = Object.entries(existing.proposed).filter(
-    ([key, value]) => updated.rules[key as keyof typeof updated.rules] !== value,
+    ([key, value]) => rules[key as keyof typeof rules] !== value,
   );
   if (mismatched.length > 0) {
     return apiError(
