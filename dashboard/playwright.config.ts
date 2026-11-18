@@ -86,7 +86,8 @@ export default defineConfig({
         {
           name: "console",
           command: prod
-            ? `npx next build && npx next start --port ${PORT.toString()}`
+            ? // The idle keep-alive the hosted console has (KEEP_ALIVE_TIMEOUT in deploy/Dockerfile).
+              `npx next build && npx next start --port ${PORT.toString()} --keepAliveTimeout 130000`
             : `npx next dev --port ${PORT.toString()}`,
           url: baseURL,
           reuseExistingServer: false,
