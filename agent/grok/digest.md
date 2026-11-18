@@ -28,10 +28,13 @@ On each run:
 1. Call `get_setup_state`. If `ready` is not true, the digest is one line that says setup is incomplete and what is missing, then stop.
 2. Call `get_policy`. Note whether the mandate is paused and the budget left, as its summary gives them.
 3. Call `get_portfolio`. Its `cover` lists the cover held now for each current goal, as the console measured it:
-   `state` (`met`, `partly_met`, `not_met`, `nothing_to_cover` or `unavailable`), `coverBps` (10000 is 100%), `floorCents`, `eventTicker`, `expiresAt`, `heldByState.awaitingOwnerCents` (the part that waits for the owner's approval), `missingPayoutCents` and `link`.
+   `state` (`met`, `partly_met`, `not_met`, `nothing_to_cover`, `cannot_hedge` or `unavailable`), `reason` (why a goal has no staircase, or why nothing can be added to it), `belowFloor` (set when the price is at or below the floor and positions are held), `coverBps` (10000 is 100%), `floorCents`, `eventTicker`, `expiresAt`, `heldByState.awaitingOwnerCents` (the part that waits for the owner's approval), `missingPayoutCents` and `link`.
    The summary has the same thing as a sentence after "Cover now:".
    If `state` is `met`, write "covered" and no percentage: the goal is met even when `coverBps` is a little under 10000.
    If `state` is `partly_met` or `not_met`, give `coverBps` as a percent and what is missing.
+   If `belowFloor` is set, the price is at or below the floor: give the summary's sentence, which says what the positions pay if it settles there against the goal as planned.
+   If `state` is `nothing_to_cover`, say there is nothing to protect now, in the summary's words; never call it covered.
+   If `state` is `cannot_hedge`, the goal is not covered and nothing can be bought for it: give the summary's sentence, which says why.
    If `state` is `unavailable` or `cover` is null, say the cover is unknown; never call it covered or not covered.
    If `cover` is an empty list, there is no current goal: say so.
 4. Call `get_activity` with `limit` 1. Its `last24h` is the last 24 hours, already summed by the server:

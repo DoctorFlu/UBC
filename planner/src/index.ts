@@ -2,6 +2,7 @@ export {
   assessCover,
   COVER_TOLERANCE_BPS,
   coverOfPlan,
+  coverStrikes,
   positionsFromIntents,
   symbolsMissingFromLadder,
   UnresolvedPositionError,
@@ -15,6 +16,7 @@ export { hedgePayoutCents, planHedge } from "./plan";
 export { summarizePlan } from "./summary";
 export type {
   CoverAssessment,
+  CoverReason,
   CoverRung,
   CoverState,
   HedgeInput,

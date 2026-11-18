@@ -58,7 +58,16 @@ export interface StrikeRef {
  * production, null when production could not be read. Absent counts as empty.
  */
 export type LadderLookup =
-  | { ok: true; ladder: Ladder; elsewhere?: readonly StrikeRef[] | null }
+  | {
+      ok: true;
+      ladder: Ladder;
+      elsewhere?: readonly StrikeRef[] | null;
+      /**
+       * False when the venue does not list this event at all and the ladder is production's, with no
+       * rungs: its strikes are then in `elsewhere`, for the cover of positions held there. Default true.
+       */
+      listed?: boolean;
+    }
   | { ok: false; error: MarketDataError };
 
 interface Entry {
@@ -170,13 +179,38 @@ export class MarketQuotes {
           ladder,
           elsewhere: await this.elsewhere(ladder),
         }),
-        (error: unknown): LadderLookup => {
+        async (error: unknown): Promise<LadderLookup> => {
+          const unlisted = eventTicker === null ? null : await this.unlisted(asset, eventTicker, error);
+          if (unlisted !== null) return unlisted;
           entry.ttl = this.errorTtlMs;
           return { ok: false, error: describeFailure(error) };
         },
       );
     this.remember(key, entry, time);
     return entry.result;
+  }
+
+  /**
+   * An event the venue does not list (404) but production does: production's ladder without rungs, its
+   * strikes as `elsewhere`, so positions held there are still measured and a goal with none reads as one
+   * nothing can be bought for. Null otherwise, and on a stack whose venue is production.
+   */
+  private async unlisted(asset: string, eventTicker: string, error: unknown): Promise<LadderLookup | null> {
+    if (this.production === null || !isGeminiError(error) || error.code !== "not_found") return null;
+    try {
+      const ladder = await this.production.getLadder({ asset, eventTicker });
+      return {
+        ok: true,
+        ladder: { ...ladder, rungs: [] },
+        elsewhere: ladder.rungs.map((rung) => ({
+          instrumentSymbol: rung.instrumentSymbol,
+          strikeCents: rung.strikeCents,
+        })),
+        listed: false,
+      };
+    } catch {
+      return null;
+    }
   }
 
   /** The strikes production lists on this ladder's event that the ladder lacks, or null when unreadable. */
@@ -255,9 +289,14 @@ export function describeFailure(error: unknown): MarketDataError {
 }
 
 /** The parts of a ladder the hedge view draws, highest strike first like the plan's rungs. */
-export function ladderQuotes(ladder: Ladder, elsewhere: readonly StrikeRef[] | null = []): LadderQuotes {
+export function ladderQuotes(
+  ladder: Ladder,
+  elsewhere: readonly StrikeRef[] | null = [],
+  listed = true,
+): LadderQuotes {
   return {
     asset: ladder.asset,
+    listed,
     eventTicker: ladder.eventTicker,
     title: ladder.title,
     expiry: ladder.expiry,

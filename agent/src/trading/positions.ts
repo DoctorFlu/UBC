@@ -37,6 +37,14 @@ export async function heldPositions(
   policy: AgentPolicy,
   ladder: Pick<CoverLadder, "eventTicker" | "rungs">,
   markets: Pick<MarketsClient, "productionStrikes"> | undefined,
+  options: {
+    /**
+     * Read every strike production lists on the event that the ladder lacks, not only those of positions
+     * held: a goal on another venue is designed over them (`CoverLadder.elsewhere`). Throws when production
+     * cannot be read, so cover is never measured on a goal cut short.
+     */
+    wholeEvent?: boolean;
+  } = {},
 ): Promise<HeldOnLadder> {
   const views = [...(await policy.intentEvents()).values()].filter((view) => COUNTED.has(view.status));
   const complete = await Promise.all(
@@ -50,7 +58,11 @@ export async function heldPositions(
   );
   const missing = symbolsMissingFromLadder(complete, ladder);
   let elsewhere: ReadonlyMap<string, number> = new Map();
-  if (missing.length > 0 && markets !== undefined) {
+  if (options.wholeEvent === true && markets !== undefined) {
+    const listed = new Set(ladder.rungs.map((rung) => rung.instrumentSymbol));
+    const strikes = await markets.productionStrikes(ladder.eventTicker);
+    elsewhere = new Map([...strikes].filter(([symbol]) => !listed.has(symbol)));
+  } else if (missing.length > 0 && markets !== undefined) {
     const strikes = await markets.productionStrikes(ladder.eventTicker);
     elsewhere = new Map(
       missing.flatMap((symbol) => {

@@ -19,6 +19,12 @@
  *
  * where T_i is the staircase's payout just below K_i. With nothing held this is the full staircase;
  * with the whole staircase held it is nothing.
+ *
+ * The staircase is designed on the ladder's strikes plus the strikes of the positions held
+ * (`coverStrikes`): what is covered is a fact about the positions, each resolved on the exchange that
+ * lists it, so a goal held at strikes the order venue does not list (Gemini's sandbox lists fewer than
+ * production) is measured by those positions, not read as having nothing to cover. What can be added is
+ * a different question: `planHedge` buys only on the ladder's own strikes.
  */
 import { eventTickerCandidates, type Ladder } from "@mandate/gemini";
 import {
@@ -30,7 +36,9 @@ import {
 } from "./staircase";
 import type {
   CoverAssessment,
+  CoverReason,
   CoverRung,
+  CoverState,
   HeldPosition,
   Holding,
   PositionState,
@@ -51,6 +59,17 @@ export interface CoverLadder {
   eventTicker: string;
   rungs: readonly StrikeRung[];
   spot?: Pick<Ladder["spot"], "midCents">;
+  /**
+   * False when the exchange that takes the orders does not list this ladder at all: nothing can be
+   * added, and the goal's strikes are `elsewhere`'s. Default true.
+   */
+  listed?: boolean;
+  /**
+   * Strikes Gemini's production exchange lists on the same event that `rungs` lacks, when the orders go
+   * to another exchange. The goal is designed over `rungs` and these, so it never depends on which of
+   * them are held; contracts are only ever bought on `rungs`.
+   */
+  elsewhere?: readonly StrikeRung[];
 }
 
 export interface CoverInput {
@@ -214,6 +233,61 @@ function emptyByState(): Record<PositionState, number> {
 }
 
 /**
+ * The strikes a goal is designed over: the ladder's, and those production lists on the same event that
+ * it lacks (`CoverLadder.elsewhere`), one per symbol. Never the positions held: a goal that grew or shrank
+ * with what is held would read covered by whatever is held.
+ */
+export function coverStrikes(
+  rungs: readonly StrikeRung[],
+  elsewhere: readonly StrikeRung[] = [],
+): StrikeRung[] {
+  const bySymbol = new Map<string, StrikeRung>();
+  for (const r of [...rungs, ...elsewhere]) {
+    if (!bySymbol.has(r.instrumentSymbol)) {
+      bySymbol.set(r.instrumentSymbol, { instrumentSymbol: r.instrumentSymbol, strikeCents: r.strikeCents });
+    }
+  }
+  return [...bySymbol.values()];
+}
+
+/** The staircase a goal calls for on these strikes, from spot, as `planHedge` designs it. */
+function staircaseOn(
+  units: bigint,
+  spotCents: number,
+  goal: ProtectionGoal,
+  strikes: readonly StrikeRung[],
+): { ceilingCents: number | null; floorCents: number; designed: DesignedRung<StrikeRung>[] } {
+  const ascending = strikes
+    .map((r) => ({ instrumentSymbol: r.instrumentSymbol, strikeCents: r.strikeCents }))
+    .sort((a, b) => a.strikeCents - b.strikeCents);
+  const floorCents = resolveFloor(goal, spotCents);
+  const ceilingCents = resolveCeiling(units, spotCents, goal.ceilingCents, ascending, () => undefined);
+  const designed =
+    ceilingCents === null || floorCents >= ceilingCents
+      ? []
+      : designStaircase(units, [...ascending].reverse(), ceilingCents, floorCents).designed;
+  return { ceilingCents, floorCents, designed };
+}
+
+/** Why a staircase is empty, or null when it is not. */
+function emptyReason(args: {
+  spotCents: number;
+  ceilingCents: number | null;
+  floorCents: number | null;
+  listed: boolean;
+  designed: readonly DesignedRung<StrikeRung>[];
+  target: number;
+}): CoverReason | null {
+  // A floor at or above spot calls for nothing on any ladder, so it is the reason before any about strikes.
+  if (args.floorCents !== null && args.floorCents >= args.spotCents) return "floor_not_below_ceiling";
+  if (args.ceilingCents === null) return args.listed ? "no_strike_below_spot" : "ladder_not_listed";
+  if (args.floorCents !== null && args.floorCents >= args.ceilingCents) return "floor_not_below_ceiling";
+  if (args.designed.length === 0) return args.listed ? "no_strike_below_spot" : "ladder_not_listed";
+  if (args.target === 0) return "holding_too_small";
+  return null;
+}
+
+/**
  * The cover of a staircase already designed. `planHedge` calls this with its own staircase, so a plan
  * and an assessment of the same goal can never disagree.
  */
@@ -226,10 +300,14 @@ export function measureCover(args: {
   floorCents: number | null;
   designed: readonly DesignedRung<StrikeRung>[];
   held: readonly HeldPosition[];
+  /** False when the order venue does not list the ladder (`CoverLadder.listed`). Default true. */
+  listed?: boolean;
 }): CoverAssessment {
   checkHeld(args.held);
   const { designed, held } = args;
   const base = {
+    reason: null,
+    belowFloor: null,
     asset: args.asset,
     eventTicker: args.eventTicker,
     spotCents: args.spotCents,
@@ -239,10 +317,13 @@ export function measureCover(args: {
   };
   const target = designed.reduce((sum, d) => sum + d.designedHundredths, 0);
   const bottom = designed.at(-1)?.rung.strikeCents;
-  if (bottom === undefined || target === 0) {
+  const reason = emptyReason({ ...args, listed: args.listed ?? true, target });
+  if (bottom === undefined || reason !== null) {
+    const state: CoverState = reason === "floor_not_below_ceiling" ? "nothing_to_cover" : "cannot_hedge";
     return {
       ...base,
-      state: "nothing_to_cover",
+      state,
+      reason: reason ?? "no_strike_below_spot",
       measuredBelowCents: null,
       targetPayoutCents: 0,
       heldPayoutCents: 0,
@@ -251,6 +332,7 @@ export function measureCover(args: {
       toleranceCents: 0,
       coverBps: null,
       missingPayoutCents: 0,
+      addablePayoutCents: 0,
       rungs: [],
     };
   }
@@ -296,6 +378,7 @@ export function measureCover(args: {
     toleranceCents: tolerance,
     coverBps: Math.floor((heldPayout * 10_000) / target),
     missingPayoutCents: bought,
+    addablePayoutCents: bought,
     rungs,
   };
 }
@@ -314,23 +397,81 @@ export function assessCover(input: CoverInput): CoverAssessment {
   if (spotCents === undefined)
     throw new PlannerInputError("spotCents is required when the ladder has no spot");
   requireInteger(spotCents, "spotCents", 1);
-  const ascending = [...input.ladder.rungs].sort((a, b) => a.strikeCents - b.strikeCents);
-  const floorCents = resolveFloor(input.goal, spotCents);
-  const ceilingCents = resolveCeiling(units, spotCents, input.goal.ceilingCents, ascending, () => undefined);
-  const designed =
-    ceilingCents === null || floorCents >= ceilingCents
-      ? []
-      : designStaircase(units, [...ascending].reverse(), ceilingCents, floorCents).designed;
-  return measureCover({
-    asset,
-    eventTicker: input.ladder.eventTicker,
-    spotCents,
-    units,
-    ceilingCents,
-    floorCents: ceilingCents === null ? null : floorCents,
-    designed,
-    held: input.held,
+  const listed = input.ladder.listed ?? true;
+  const common = { asset, eventTicker: input.ladder.eventTicker, spotCents, units, held: input.held, listed };
+  // What is covered: the goal over every strike there is, whatever is held.
+  const cover = measureCover({
+    ...common,
+    ...staircaseOn(units, spotCents, input.goal, coverStrikes(input.ladder.rungs, input.ladder.elsewhere)),
   });
+  if (cover.reason !== null || cover.state === "met") return cover;
+  // What can be added: the same goal on the strikes of the exchange that takes the orders only.
+  const onVenue = measureCover({
+    ...common,
+    ...(listed
+      ? staircaseOn(units, spotCents, input.goal, input.ladder.rungs)
+      : { ceilingCents: null, floorCents: cover.floorCents, designed: [] }),
+  });
+  const addable = onVenue.reason === null ? onVenue.missingPayoutCents : 0;
+  if (addable > 0) return { ...cover, addablePayoutCents: addable };
+  return {
+    ...cover,
+    // Nothing held pays and nothing can be bought: the goal cannot be hedged now, for the venue's reason.
+    state: cover.heldPayoutCents === 0 ? "cannot_hedge" : cover.state,
+    reason: onVenue.reason ?? "no_more_strikes",
+    addablePayoutCents: 0,
+  };
+}
+
+/**
+ * The cover of a goal whose price is at or below its floor, with positions held: the moment a hedge is
+ * for. Measured from today's spot the goal calls for nothing, which would read as if nothing were held.
+ * Instead the goal is the staircase as planned (from the spot the plan read down to the floor), and the
+ * held contracts count by what they pay if the price settles at today's spot: every one whose strike is
+ * above it. Met when that is at least the planned staircase's payout, within the usual tolerance.
+ * Nothing is missing to buy: below the floor the goal calls for no more contracts. Null when the case
+ * does not apply.
+ */
+function belowFloorCover(args: {
+  today: CoverAssessment;
+  plan: PlanGoal;
+  holding: { asset: string; quantity: string };
+  ladder: Pick<CoverLadder, "asset" | "eventTicker" | "rungs" | "listed" | "elsewhere">;
+  goal: ProtectionGoal;
+  positions: readonly IntentPosition[];
+}): CoverAssessment | null {
+  const { today, plan } = args;
+  if (today.reason !== "floor_not_below_ceiling" || plan.floorCents === null) return null;
+  if (today.spotCents > plan.floorCents || plan.spotCents <= plan.floorCents) return null;
+  if (!args.positions.some((p) => p.hundredths > 0)) return null;
+  const planned = assessCover({
+    holding: args.holding,
+    ladder: args.ladder,
+    spotCents: plan.spotCents,
+    goal: args.goal,
+    held: args.positions,
+  });
+  if (planned.measuredBelowCents === null || planned.targetPayoutCents === 0) return null;
+  const paying = args.positions.filter((p) => p.strikeCents > today.spotCents);
+  const pays = paying.reduce((sum, p) => sum + p.hundredths, 0);
+  const heldByState = emptyByState();
+  for (const p of paying) heldByState[p.state] += p.hundredths;
+  const target = planned.targetPayoutCents;
+  const shortfall = Math.max(0, target - pays);
+  return {
+    ...planned,
+    state: shortfall <= planned.toleranceCents ? "met" : pays === 0 ? "not_met" : "partly_met",
+    reason: null,
+    spotCents: today.spotCents,
+    heldPayoutCents: pays,
+    heldByState,
+    shortfallCents: shortfall,
+    coverBps: Math.floor((pays * 10_000) / target),
+    missingPayoutCents: 0,
+    addablePayoutCents: 0,
+    rungs: planned.rungs.map((rung) => ({ ...rung, missingHundredths: 0 })),
+    belowFloor: { plannedSpotCents: plan.spotCents, paysAtSpotCents: pays },
+  };
 }
 
 /** The goal a stored plan was made for: its holding, ladder, floor, ceiling and the spot it read. */
@@ -354,10 +495,13 @@ export function coverOfPlan(input: {
   plan: PlanGoal;
   /** The holding as saved now, or null to use the plan's. */
   holdingQuantity: string | null;
-  ladder: Pick<CoverLadder, "asset" | "eventTicker" | "rungs">;
+  ladder: Pick<CoverLadder, "asset" | "eventTicker" | "rungs" | "listed">;
   spotCents: number;
   intents: Iterable<RecordedIntent>;
-  /** Strikes of positions the ladder does not list, from production (`symbolsMissingFromLadder`). */
+  /**
+   * Strikes production lists on the plan's event that the ladder lacks, by symbol: they resolve
+   * positions held there and are part of the goal (`CoverLadder.elsewhere`).
+   */
   elsewhere?: ReadonlyMap<string, number>;
 }): { assessment: CoverAssessment; positions: IntentPosition[] } | null {
   const { plan, ladder } = input;
@@ -369,14 +513,25 @@ export function coverOfPlan(input: {
   try {
     // A position whose strike is unknown throws here too: no cover is shown rather than a short one.
     const positions = positionsFromIntents(input.intents, ladder, input.elsewhere);
+    const holding = { asset: plan.asset, quantity: input.holdingQuantity ?? plan.holdingQuantity };
+    const onEvent = {
+      ...ladder,
+      elsewhere: [...(input.elsewhere ?? new Map<string, number>())].map(
+        ([instrumentSymbol, strikeCents]) => ({
+          instrumentSymbol,
+          strikeCents,
+        }),
+      ),
+    };
     const assessment = assessCover({
-      holding: { asset: plan.asset, quantity: input.holdingQuantity ?? plan.holdingQuantity },
-      ladder,
+      holding,
+      ladder: onEvent,
       spotCents: input.spotCents,
       goal,
       held: positions,
     });
-    return { assessment, positions };
+    const below = belowFloorCover({ today: assessment, plan, holding, ladder: onEvent, goal, positions });
+    return { assessment: below ?? assessment, positions };
   } catch {
     // A holding or goal the planner refuses (for example a quantity edited to nonsense), or a position on
     // this ladder whose strike nobody lists, has no cover.

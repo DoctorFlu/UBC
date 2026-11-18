@@ -34,6 +34,7 @@ import { orderBySignal, rateRung, readSignal, shortId, type SignalContext } from
 import { designStaircase, resolveCeiling, resolveFloor, type DesignedRung as Designed } from "./staircase";
 import type {
   CoverAssessment,
+  HeldPosition,
   HedgeInput,
   HedgePlan,
   PayoffPoint,
@@ -123,6 +124,8 @@ export function planHedge(input: HedgeInput): HedgePlan {
     cover: null,
   };
   if (signal !== null) warnIfIgnored(ctx, signal);
+  // The goal is designed over the ladder's strikes and production's for the same event (`elsewhere`).
+  const onEvent = { ...input.ladder, elsewhere: input.elsewhere ?? [] };
 
   if (!input.limits.categoryAllowed) {
     warn(
@@ -134,7 +137,7 @@ export function planHedge(input: HedgeInput): HedgePlan {
     if (input.held !== undefined) {
       ctx.cover = assessCover({
         holding: input.holding,
-        ladder: input.ladder,
+        ladder: onEvent,
         spotCents,
         goal: input.goal,
         held: input.held,
@@ -143,9 +146,27 @@ export function planHedge(input: HedgeInput): HedgePlan {
     return finalize(ctx);
   }
 
+  // What is covered: the goal over the ladder's strikes and production's (`coverStrikes`). What can be
+  // added: the ladder's strikes only, below.
+  const heldCover =
+    input.held === undefined
+      ? null
+      : assessCover({
+          holding: input.holding,
+          ladder: onEvent,
+          spotCents,
+          goal: input.goal,
+          held: input.held,
+        });
   const ascending = [...input.ladder.rungs].sort((a, b) => a.strikeCents - b.strikeCents);
   const descending = [...ascending].reverse();
   const floorCents = resolveFloor(input.goal, spotCents);
+  // A floor at or above spot calls for nothing on any ladder: said first, before anything about strikes.
+  if (input.goal.ceilingCents === undefined && floorCents >= spotCents) {
+    ctx.floorCents = floorCents;
+    warn(ctx, "floor_not_below_ceiling", floorAtOrAboveSpot(floorCents, spotCents, input.held));
+    return finalizeWithCover(ctx, heldCover);
+  }
   const ceilingCents = resolveCeiling(
     units,
     spotCents,
@@ -155,7 +176,7 @@ export function planHedge(input: HedgeInput): HedgePlan {
       warn(ctx, code, message);
     },
   );
-  if (ceilingCents === null) return finalizeWithCover(ctx, []);
+  if (ceilingCents === null) return finalizeWithCover(ctx, heldCover);
   ctx.ceilingCents = ceilingCents;
   ctx.floorCents = floorCents;
   if (floorCents >= ceilingCents) {
@@ -164,12 +185,19 @@ export function planHedge(input: HedgeInput): HedgePlan {
       "floor_not_below_ceiling",
       `The floor ${formatPrice(floorCents)} is not below where protection starts (${formatPrice(ceilingCents)}), so there is nothing to protect.`,
     );
-    return finalizeWithCover(ctx, []);
+    return finalizeWithCover(ctx, heldCover);
   }
 
   const designed = design(ctx, descending, ceilingCents, floorCents);
-  if (input.held !== undefined) {
-    const cover = measureCover({
+  if (input.held !== undefined && heldCover !== null) {
+    ctx.cover = heldCover;
+    if (heldCover.state === "met") {
+      warn(ctx, "already_covered", alreadyCovered(heldCover));
+      return finalize(ctx);
+    }
+    // The top-up on the ladder's own strikes: positions at strikes it does not list still pay below
+    // each of its strikes, so they count toward every rung under them.
+    const onLadder = measureCover({
       asset,
       eventTicker: input.ladder.eventTicker,
       spotCents,
@@ -179,33 +207,40 @@ export function planHedge(input: HedgeInput): HedgePlan {
       designed,
       held: input.held,
     });
-    ctx.cover = cover;
-    if (cover.state === "met") {
-      warn(ctx, "already_covered", alreadyCovered(cover));
-      return finalize(ctx);
-    }
-    const missing = new Map(cover.rungs.map((r) => [r.instrumentSymbol, r.missingHundredths]));
+    const missing = new Map(onLadder.rungs.map((r) => [r.instrumentSymbol, r.missingHundredths]));
     for (const d of designed) d.wantHundredths = missing.get(d.rung.instrumentSymbol) ?? 0;
   }
   buy(ctx, designed, slippage);
   return finalize(ctx);
 }
 
-/** Finalizes a plan that never reached the staircase, measuring cover against an empty one. */
-function finalizeWithCover(ctx: Context, designed: DesignedRung[]): HedgePlan {
-  if (ctx.input.held !== undefined) {
-    ctx.cover = measureCover({
-      asset: ctx.asset,
-      eventTicker: ctx.input.ladder.eventTicker,
-      spotCents: ctx.spotCents,
-      units: ctx.units,
-      ceilingCents: ctx.ceilingCents,
-      floorCents: ctx.floorCents,
-      designed,
-      held: ctx.input.held,
-    });
+/**
+ * Finalizes a plan that buys nothing on this ladder (no staircase on its strikes), with the cover the
+ * positions held give, measured on their own strikes too.
+ */
+function finalizeWithCover(ctx: Context, heldCover: CoverAssessment | null): HedgePlan {
+  if (heldCover !== null) {
+    ctx.cover = heldCover;
+    if (heldCover.state === "met") warn(ctx, "already_covered", alreadyCovered(heldCover));
   }
   return finalize(ctx);
+}
+
+/**
+ * Why a plan buys nothing when the price is at or below the floor. With positions held that pay below
+ * today's price, never "nothing to protect": that is the moment the protection is for.
+ */
+function floorAtOrAboveSpot(
+  floorCents: number,
+  spotCents: number,
+  held: readonly HeldPosition[] | undefined,
+): string {
+  const pays = (held ?? [])
+    .filter((p) => p.strikeCents > spotCents)
+    .reduce((sum, p) => sum + p.hundredths, 0);
+  return pays > 0
+    ? `The price (${formatPrice(spotCents)}) is at or below the floor ${formatPrice(floorCents)}, so a plan buys nothing more: the goal calls for no contracts below the floor. The contracts held pay ${formatPrice(pays)} if it settles at today's price.`
+    : `The floor ${formatPrice(floorCents)} is not below where protection starts (${formatPrice(spotCents)}), so there is nothing to protect.`;
 }
 
 /** The warning for a goal the positions already cover, in plain words with the numbers. */

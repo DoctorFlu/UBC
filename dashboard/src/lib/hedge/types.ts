@@ -31,6 +31,11 @@ export interface QuoteRung {
 export interface LadderQuotes {
   asset: string;
   eventTicker: string;
+  /**
+   * False when the exchange orders go to does not list this ladder: `rungs` is then empty and the strikes
+   * are production's, in `elsewhere`, for the cover of positions held there.
+   */
+  listed: boolean;
   title: string;
   expiry: string;
   /**

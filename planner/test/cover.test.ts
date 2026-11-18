@@ -379,7 +379,8 @@ describe("cover invariants", PROPERTY_TIMEOUT, () => {
         const held = positionsFromIntents(intentsOf(first, "executed"), base.ladder);
         const again = planHedge({ ...base, held });
         expect(again.orders).toEqual([]);
-        expect(["met", "nothing_to_cover"]).toContain(again.cover?.state);
+        // Met, or a goal with no staircase (nothing to protect, or a holding too small to buy for).
+        expect(["met", "nothing_to_cover", "cannot_hedge"]).toContain(again.cover?.state);
       }),
       RUNS,
     );
@@ -440,7 +441,12 @@ describe("cover invariants", PROPERTY_TIMEOUT, () => {
     fc.assert(
       fc.property(caseArb, ({ input: base, held }) => {
         const cover = assessCover({ ...base, held });
-        if (cover.state === "nothing_to_cover") return;
+        if (cover.measuredBelowCents === null) {
+          expect(["nothing_to_cover", "cannot_hedge"]).toContain(cover.state);
+          expect(cover.reason).not.toBeNull();
+          return;
+        }
+        expect(cover.reason).toBeNull();
         const tolerance = Math.floor((cover.targetPayoutCents * COVER_TOLERANCE_BPS) / 10_000);
         expect(cover.toleranceCents).toBe(tolerance);
         expect(cover.state === "met").toBe(cover.targetPayoutCents - cover.heldPayoutCents <= tolerance);
@@ -495,7 +501,8 @@ describe("cover invariants", PROPERTY_TIMEOUT, () => {
         };
         expect(measured).toEqual(cover);
         expect(cover.ceilingCents).toBe(plan.ceilingCents);
-        expect(cover.floorCents).toBe(plan.floorCents);
+        // The cover always states the goal's floor; a plan with no staircase states none.
+        expect(plan.floorCents ?? cover.floorCents).toBe(cover.floorCents);
       }),
       RUNS,
     );

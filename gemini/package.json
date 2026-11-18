@@ -10,7 +10,8 @@
     "./maker": "./src/maker/index.ts",
     "./testing": "./testing/fake-private.ts",
     "./live": "./testing/live-gemini.ts",
-    "./recorded": "./testing/recorded-public.ts"
+    "./recorded": "./testing/recorded-public.ts",
+    "./two-exchanges": "./testing/two-exchanges.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

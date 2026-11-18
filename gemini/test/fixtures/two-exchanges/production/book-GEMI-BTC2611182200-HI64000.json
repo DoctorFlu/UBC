@@ -1,0 +1,11 @@
+{
+  "bids": [
+    { "price": "0.72", "amount": "250.0", "timestamp": "1794991145" },
+    { "price": "0.71", "amount": "5.0", "timestamp": "1794991145" },
+    { "price": "0.65", "amount": "769.0", "timestamp": "1794991145" }
+  ],
+  "asks": [
+    { "price": "0.75", "amount": "250.0", "timestamp": "1794991145" },
+    { "price": "0.76", "amount": "2338.0", "timestamp": "1794991145" }
+  ]
+}

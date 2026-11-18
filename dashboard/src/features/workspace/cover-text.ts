@@ -1,6 +1,19 @@
+import type { CoverNowView } from "@mandate/shared";
+
 import type { MandateSummary } from "./types";
 
 type Cover = Pick<MandateSummary["cover"], "goals" | "met" | "unavailable">;
+
+/**
+ * One mandate's goals, counted for Home. Only a goal its positions cover is covered: a goal that calls
+ * for no contracts now (`nothing_to_cover`: the floor is not below spot) or for which nothing can be
+ * bought (`cannot_hedge`) is not, and one that cannot be measured now is neither.
+ */
+export function coverCounts(cover: readonly Pick<CoverNowView, "state">[]): MandateSummary["cover"] {
+  const met = cover.filter((goal) => goal.state === "met").length;
+  const unavailable = cover.filter((goal) => goal.state === "unavailable").length;
+  return { goals: cover.length, met, short: cover.length - met - unavailable, unavailable };
+}
 
 /** Every mandate's goals, added up for Home's headline. */
 export function totalCover(mandates: readonly Pick<MandateSummary, "cover">[]): Cover {

@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { LADDER_KINDS, type Ladder } from "@mandate/gemini";
+import { type GeminiEnvironment, isGeminiError, LADDER_KINDS, type Ladder } from "@mandate/gemini";
 import type { HedgePlan, IntentPosition, PlanCover, ProtectionGoal } from "@mandate/planner";
 import {
   Category,
@@ -9,6 +9,7 @@ import {
   isCategoryAllowed,
   type PolicySnapshot,
 } from "@mandate/shared";
+import type { MarketsClient } from "../services";
 import { ToolError } from "../mcp/errors";
 import { ok, reason, summarizeVerdict, verdictSchema, type Reason } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
@@ -43,8 +44,22 @@ const PlannedOrderSchema = z.object({
 const CoverSchema = z
   .object({
     state: z
-      .enum(["met", "partly_met", "not_met", "nothing_to_cover"])
-      .describe("met: the goal is already covered and the plan has no orders"),
+      .enum(["met", "partly_met", "not_met", "nothing_to_cover", "cannot_hedge"])
+      .describe(
+        "met: the goal is already covered and the plan has no orders. nothing_to_cover: the floor is not below spot. cannot_hedge: not covered, and nothing can be bought for it on this ladder (reason says why)",
+      ),
+    reason: z
+      .enum([
+        "floor_not_below_ceiling",
+        "no_strike_below_spot",
+        "ladder_not_listed",
+        "holding_too_small",
+        "no_more_strikes",
+      ])
+      .nullable()
+      .describe(
+        "Why there is no staircase, for nothing_to_cover and cannot_hedge; for partly_met and not_met, why nothing can be added on the exchange that takes this mandate's orders (no_more_strikes: what is missing lies on strikes it does not list); null otherwise",
+      ),
     measuredBelowCents: z
       .int()
       .nullable()
@@ -68,6 +83,7 @@ const CoverSchema = z
 function coverView(cover: PlanCover): z.infer<typeof CoverSchema> {
   return {
     state: cover.state,
+    reason: cover.reason,
     measuredBelowCents: cover.measuredBelowCents,
     targetPayoutCents: cover.targetPayoutCents,
     heldPayoutCents: cover.heldPayoutCents,
@@ -257,14 +273,21 @@ export const planHedge = defineTool({
         }),
       ]);
     } catch (error) {
-      return none(describeFailure(error, ctx));
+      const unlisted =
+        input.eventTicker === undefined
+          ? null
+          : await notListedHere(error, input.eventTicker, ctx.config.marketData.environment, ctx.markets);
+      return none(unlisted ?? describeFailure(error, ctx));
     }
 
     // What is already held on this ladder, from the chain. Without it the plan could buy twice.
     let held: IntentPosition[];
     let elsewhere: ReadonlyMap<string, number>;
     try {
-      ({ positions: held, elsewhere } = await heldPositions(ctx.policy, ladder, ctx.markets));
+      // On another venue than production, the goal is designed over production's strikes too.
+      ({ positions: held, elsewhere } = await heldPositions(ctx.policy, ladder, ctx.markets, {
+        wholeEvent: ctx.config.marketData.environment !== "production",
+      }));
     } catch (error) {
       return none(describeFailure(error, ctx));
     }
@@ -290,6 +313,10 @@ export const planHedge = defineTool({
       plan = ctx.planner.plan({
         holding: { asset, quantity },
         ladder,
+        elsewhere: [...elsewhere].map(([instrumentSymbol, strikeCents]) => ({
+          instrumentSymbol,
+          strikeCents,
+        })),
         goal,
         maxCostCents: input.maxCostCents,
         limits: {
@@ -387,7 +414,13 @@ export const planHedge = defineTool({
     }
     const covered = plan.cover?.state === "met";
     const environment = ctx.config.marketData.environment;
-    const noPrices = plan.orders.length === 0 && !covered ? noPricesReason(ladder, environment) : null;
+    // Prices matter only on a ladder that could protect at all: with no strike below spot, or a floor not
+    // below it, that is the reason to give first, not the empty books.
+    const structural = plan.warnings.some(
+      (w) => w.code === "no_strike_below_spot" || w.code === "floor_not_below_ceiling",
+    );
+    const noPrices =
+      plan.orders.length === 0 && !covered && !structural ? noPricesReason(ladder, environment) : null;
     const v = covered
       ? ok(
           [
@@ -463,3 +496,30 @@ export const planHedge = defineTool({
     };
   },
 });
+
+/**
+ * A ladder the exchange that takes this mandate's orders does not list, while production does: nothing
+ * can be bought for its goal there, and it is never planned on production's strikes instead. Positions
+ * already held on it still count in its cover (the console measures them on production's strikes).
+ * Null for any other failure, and on a stack whose orders go to production.
+ */
+async function notListedHere(
+  error: unknown,
+  eventTicker: string,
+  environment: GeminiEnvironment,
+  markets: Pick<MarketsClient, "productionStrikes">,
+): Promise<Failure | null> {
+  if (!isGeminiError(error) || error.code !== "not_found" || environment === "production") return null;
+  const strikes = await markets.productionStrikes(eventTicker).catch(() => null);
+  if (strikes === null || strikes.size === 0) return null;
+  return {
+    reason: reason(
+      "LADDER_NOT_LISTED",
+      `Nothing can be bought for ${eventTicker} now: the exchange that takes this mandate's orders (Gemini's ${environment}) does not list this ladder. Gemini's production exchange lists it, and contracts already held on it still count in its cover. Nothing was planned.`,
+    ),
+    nextAction: {
+      actor: "agent",
+      hint: "Tell the owner nothing can be added to this goal on the exchange that takes the mandate's orders. Do not plan it on another exchange; get_ladder lists the ladders it does list.",
+    },
+  };
+}

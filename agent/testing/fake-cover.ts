@@ -55,6 +55,8 @@ export function coverFromPlans(sources: {
         const unavailable: CoverNowView = {
           ...goal,
           state: "unavailable",
+          reason: null,
+          belowFloor: null,
           spotCents: null,
           measuredBelowCents: null,
           targetPayoutCents: null,
@@ -79,6 +81,8 @@ export function coverFromPlans(sources: {
         return {
           ...goal,
           state: assessment.state,
+          reason: assessment.reason,
+          belowFloor: assessment.belowFloor,
           spotCents: assessment.spotCents,
           measuredBelowCents: assessment.measuredBelowCents,
           targetPayoutCents: assessment.targetPayoutCents,
