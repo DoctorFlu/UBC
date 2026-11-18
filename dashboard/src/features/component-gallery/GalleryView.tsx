@@ -216,7 +216,7 @@ export function GalleryView() {
             tone="ink"
             showHint
             confirmedLabel="Approved"
-            armedLabel="Confirm approval"
+            armedLabel="Press again to approve"
             onConfirm={() => toast({ title: "Approved", tone: "success" })}
           >
             Approve

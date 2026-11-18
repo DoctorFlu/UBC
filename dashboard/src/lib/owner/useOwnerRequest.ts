@@ -10,6 +10,7 @@ import { useMandateScope, useMandateUrls } from "@/lib/mandate/MandateContext";
 import { type OwnerAction, newNonce, ownerRequestMessage } from "@/lib/owner-request";
 
 import { useOwnerAccess } from "./access";
+import type { OwnerTxState } from "./useOwnerTx";
 import { PasskeyFailure, confirmWithPasskey } from "./passkey";
 
 export type OwnerRequestResult<T> = { ok: true; data: T } | { ok: false; message: string; cancelled?: true };
@@ -36,6 +37,8 @@ export function useOwnerRequest() {
   const { api } = useMandateUrls();
   const { snapshot, refresh } = useLiveConsole();
   const [pending, setPending] = useState(false);
+  // What the open prompt is for, so the page says it next to the button, as an owner transaction does.
+  const [status, setStatus] = useState<OwnerTxState>({ phase: "idle" });
 
   const request = useCallback(
     async <T>(
@@ -43,6 +46,8 @@ export function useOwnerRequest() {
       method: "POST" | "PUT",
       action: OwnerAction,
       payload: unknown,
+      /** What the owner is doing, for the status line: "Save the holdings". */
+      label: string,
     ): Promise<OwnerRequestResult<T>> => {
       if (access.kind !== "owner") {
         return { ok: false, message: "reason" in access ? access.reason : "Connect the owner wallet first." };
@@ -50,6 +55,7 @@ export function useOwnerRequest() {
       const policyAddress = snapshot.contract?.address;
       if (!policyAddress) return { ok: false, message: "No Policy contract is configured yet." };
       setPending(true);
+      setStatus({ phase: "signing", label, via: access.signer });
       try {
         if (access.signer === "passkey") {
           // The console holds this mandate's owner key (#95): one passkey prompt confirms this very change.
@@ -104,10 +110,11 @@ export function useOwnerRequest() {
         };
       } finally {
         setPending(false);
+        setStatus({ phase: "idle" });
       }
     },
     [access, api, config, mandateId, refresh, snapshot.contract?.address, snapshot.network.chainId],
   );
 
-  return { request, pending, access };
+  return { request, pending, status, access };
 }

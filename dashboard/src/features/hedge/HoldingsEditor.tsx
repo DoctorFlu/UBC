@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { When } from "@/components/ui/When";
 import { ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerRequest } from "@/lib/owner/useOwnerRequest";
+import { OwnerTxStatus } from "@/components/domain/OwnerTxStatus";
 import { useHydrated } from "@/lib/useHydrated";
 
 import styles from "./hedge.module.css";
@@ -65,7 +66,7 @@ export function HoldingsEditor({
 }) {
   const toast = useToast();
   const hydrated = useHydrated();
-  const { request, pending, access } = useOwnerRequest();
+  const { request, pending, status, access } = useOwnerRequest();
   const blocked = ownerBlockedReason(access);
   const idBase = useId();
   const [rows, setRows] = useState(() => toRows(holdings));
@@ -101,7 +102,13 @@ export function HoldingsEditor({
         ...(row.note ? { note: row.note } : {}),
       })),
     };
-    const result = await request("/api/console/holdings", "PUT", "holdings.save", payload);
+    const result = await request(
+      "/api/console/holdings",
+      "PUT",
+      "holdings.save",
+      payload,
+      "Save the holdings",
+    );
     if (result.ok) {
       setAttempted(false);
       setEdited(new Set());
@@ -210,6 +217,7 @@ export function HoldingsEditor({
           {access.kind === "owner" && access.signer === "passkey" ? "Save with passkey" : "Sign and save"}
         </Button>
       </div>
+      <OwnerTxStatus state={status} />
       {/* What the agent reads now, against what is only on this screen: edits count once signed and saved. */}
       <p className={styles.muted} data-testid="holdings-status" aria-live="polite">
         {blocked && access.kind !== "loading" && dirty ? (

@@ -85,7 +85,7 @@ export function ApprovalActions({
           block={block}
           icon={<Check aria-hidden />}
           confirmedLabel="Approving"
-          armedLabel={ownerActionLabel(access, "Confirm approval")}
+          armedLabel={ownerActionLabel(access, "Press again to approve")}
           aria-label={`Approve ${subject}${byPasskey}`}
           disabled={working || blocked !== null}
           onConfirm={() => void approve()}
@@ -98,7 +98,7 @@ export function ApprovalActions({
           block={block}
           icon={<X aria-hidden />}
           confirmedLabel="Rejecting"
-          armedLabel={ownerActionLabel(access, "Confirm rejection")}
+          armedLabel={ownerActionLabel(access, "Press again to reject")}
           aria-label={`Reject ${subject}${byPasskey}`}
           disabled={working || blocked !== null}
           onConfirm={() => void reject()}
