@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { FORMAT_REASON_CODES, REASON_CODES } from "@mandate/shared";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { laptopWidths, routePath, routes, schemes } from "./routes";
 import { firstMandatePath } from "./support/console";
@@ -328,6 +329,29 @@ test.describe("layout", () => {
           await expect(panel.getByRole("columnheader", { name: "At expiry" })).toHaveCount(
             tab === "All" || tab === "Executed" ? 1 : 0,
           );
+          // Why the contract said no is never cut short.
+          await expectReasonsWhole(wrap, tab);
+        }
+        // Every reason the contract can give, the longest included, is whole on a laptop card, and the
+        // table still fits. The seeded intents have three of them; the rest are written into their chips.
+        if (width <= 1084) {
+          await page.getByRole("tab", { name: /^Rejected/ }).click();
+          const wrap = panel.getByRole("region", { name: "Rejected intents" });
+          for (const reason of [...REASON_CODES, ...FORMAT_REASON_CODES]) {
+            await wrap.locator("[data-reason]").evaluateAll((elements, text) => {
+              for (const element of elements) {
+                const words = [...element.childNodes].findLast((node) => node.nodeType === Node.TEXT_NODE);
+                if (words) words.textContent = text;
+              }
+            }, reason);
+            await expect(wrap.locator("[data-reason]").first()).toContainText(reason);
+            await expectReasonsWhole(wrap, reason);
+            const fit = await wrap.evaluate((element) => element.scrollWidth - element.clientWidth);
+            expect(
+              fit,
+              `"${reason}": the table is ${fit.toString()} px wider than its card`,
+            ).toBeLessThanOrEqual(0);
+          }
         }
         // Waiting's Approve and Reject are both inside the card.
         await page.getByRole("tab", { name: /^Waiting/ }).click();
@@ -610,4 +634,31 @@ for (const scheme of schemes) {
       expect(violations).toEqual([]);
     });
   });
+}
+
+/**
+ * Each of the contract's reasons in a table is shown whole: nothing hides any of it (no ellipsis, no
+ * clipping), and it stays inside its own cell, so it never runs under the next column.
+ */
+async function expectReasonsWhole(wrap: Locator, what: string) {
+  const reasons = await wrap.locator("[data-reason]").evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      const cell = element.closest("td")?.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        text: element.textContent,
+        clipped: element.scrollWidth - element.clientWidth,
+        hides:
+          style.textOverflow === "ellipsis" || style.overflowX !== "visible" || style.overflowY !== "visible",
+        outside: cell ? Math.max(cell.left - box.left, box.right - cell.right) : 0,
+      };
+    }),
+  );
+  for (const reason of reasons) {
+    const detail = `${what}: ${JSON.stringify(reason)}`;
+    expect(reason.clipped, detail).toBeLessThanOrEqual(0);
+    expect(reason.hides, detail).toBe(false);
+    expect(reason.outside, detail).toBeLessThanOrEqual(0);
+  }
 }
