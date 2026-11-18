@@ -13,9 +13,11 @@ Built for the UBC 2026 Hackathon: track **Agentic Payments & AI**, **Best use of
 - App: https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech, the console, and the MCP server at `/mcp`.
 - Site: https://8081-agq6mxapjuxoy3aavoouae6yri.instabox.tech, the landing page.
 
-The hosted demo runs the demo chain in gateway mode, as described in [docs/hosting.md](docs/hosting.md#instabox).
+The hosted demo runs on **Arc testnet** since 18 November 2026, against our own instance of the Policy contract, [`0x9a240b2aaa2a936DBf4543940341Bb725C92412d`](https://explorer.testnet.arc.io/address/0x9a240b2aaa2a936DBf4543940341Bb725C92412d) (deploy block 72777078), in gateway mode as described in [docs/hosting.md](docs/hosting.md#arc-testnet).
+It is built from the same source, `contracts/src/Policy.sol`, and `npm run arc:doctor` checks its code byte for byte against that build ([docs/configuration.md](docs/configuration.md#our-own-instance-or-the-teams)).
+The team's first deployment, `0x571D…82f3` in [contracts/README.md](contracts/README.md), is the same contract; ours exists so that its roles name the stack's own keys.
 The console needs a passkey sign-in, and a workspace there is opened with a code from the operator ([docs/accounts.md](docs/accounts.md#sign-in)).
-Two pages need no sign-in: the landing page, and the agent's public scorecard at [`/agent/0x70997970C51812dc3A010C7d01b50e0d17dc79C8`](https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech/agent/0x70997970C51812dc3A010C7d01b50e0d17dc79C8), which the landing page links to.
+Two pages need no sign-in: the landing page, and the agent's public scorecard at [`/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E`](https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E), which the landing page links to.
 
 <!-- #96 (members, roles and hosted sign-up): when it is merged, say here how a visitor signs up on the hosted demo. -->
 
@@ -123,12 +125,13 @@ The owner has entered a holding in the console, for example 0.05 BTC, and saved 
 
 | Piece | State today |
 | --- | --- |
-| Policy contract | The real contract from `contracts/` (Policy v2), on a local anvil chain that uses Arc testnet's chain id (5042002), both locally and on the hosted demo. Policy v2 is deployed on Arc testnet at [`0x571D8ea7C86c80a230C10818743f8861084F82f3`](https://explorer.testnet.arc.io/address/0x571D8ea7C86c80a230C10818743f8861084F82f3) (block 72740419); its owner, agent and executor are all still the deployer's address, so the agent and executor roles are pending, and no run has used it yet. Moving to it is configuration only ([docs/configuration.md](docs/configuration.md#chain)). |
-| Order placement | Simulated by default: the executor checks each approved intent against Gemini's listing, records a fill marked "Simulated fill", and places no order. With `EXECUTOR_VENUE=gemini` it places orders on Gemini's sandbox, with test funds. |
+| Chain and Policy contract | **Real, on the hosted demo**: Arc testnet (chain id 5042002), our instance of the contract from `contracts/` at [`0x9a240b2aaa2a936DBf4543940341Bb725C92412d`](https://explorer.testnet.arc.io/address/0x9a240b2aaa2a936DBf4543940341Bb725C92412d), deployed in [`0xd254165e...e0b81ff0`](https://explorer.testnet.arc.io/tx/0xd254165ef9972a8d9c5656d9d4f4d4f61ee95d4c9b30629159458ce3e0b81ff0) (block 72777078). The team's first deployment of the same contract is [`0x571D8ea7C86c80a230C10818743f8861084F82f3`](https://explorer.testnet.arc.io/address/0x571D8ea7C86c80a230C10818743f8861084F82f3) (block 72740419). Locally, `npm run dev:stack` runs the same contract on an anvil chain with Arc testnet's chain id. |
+| Onchain transactions | **Real Arc testnet transactions**, paid in testnet USDC: the agent's proposals (agent [`0x2fa2...a82E`](https://explorer.testnet.arc.io/address/0x2fa2cE1F4780014414207e544C1057B05809a82E)), the owner's approvals, rule changes and pause from the owner's own browser wallet, and the executor's `recordResult` (executor [`0x0F7e...4390`](https://explorer.testnet.arc.io/address/0x0F7e3266fda16E0655E1817c98B7B0b0ada44390)). |
+| Order placement | **Simulated on the hosted demo**: the executor checks each approved intent against Gemini's listing, records a simulated fill with `recordResult` on Arc testnet, and places no order. With `EXECUTOR_VENUE=gemini` it places orders on Gemini's sandbox, with test funds; that venue is proven (next row) but not switched on on the hosted machine. |
 | Gemini sandbox run | Measured on 17 November 2026 ([docs/gemini-venue.md](docs/gemini-venue.md#what-a-sandbox-demo-can-show)): $9.73 approved at 97c, 10 contracts placed and filled at 0.97, a fee of $0.03 equal to the estimate, and at expiry a payout of $10.00, net +$0.27 after fees, matching the sandbox balance to the cent. |
 | Gemini market data | Gemini's public endpoints, read only. |
 | x402 signal payments | Arc testnet with testnet USDC through Circle Gateway. A paid run on 15 November 2026 bought one signal for 0.001 USDC, settled in batch transaction [`0xa99bcd21...41e5ec12b`](https://explorer.testnet.arc.io/tx/0xa99bcd21ab5a60c3749c1c9fcb743768e6cffb5513a3dd7d3ab87d541e5ec12b) ([docs/x402.md](docs/x402.md#a-paid-run-of-the-hedge-signal)). |
-| QuickNode Stream | The filter, configuration, management script and signed webhook receiver are in the repository and tested; no Stream has been created or activated yet ([docs/quicknode-streams.md](docs/quicknode-streams.md)). The console reads Policy events by RPC poll today, and a Stream cannot see the local chain. |
+| QuickNode Stream | The filter, configuration, management script and signed webhook receiver are in the repository and tested; no Stream has been created or activated yet ([docs/quicknode-streams.md](docs/quicknode-streams.md)). The owner approved the credits for demo windows; until a window starts, the console reads Policy events by RPC poll from Arc's public RPC. |
 | Grok Bot | A real Grok Bot plans and proposes through the connector ([docs/grok-bot.md](docs/grok-bot.md#verified-by-hand-issue-4)). |
 | Console sign-in | Passkeys (WebAuthn) for each workspace member ([docs/accounts.md](docs/accounts.md)). |
 
@@ -165,7 +168,7 @@ The owner has entered a holding in the console, for example 0.05 BTC, and saved 
 ## How the sponsor technologies are used
 
 **Arc.**
-The Policy contract is written for Arc, where gas is paid in USDC ([docs/contract-interface.md](docs/contract-interface.md)), and the local and hosted demo chains use Arc testnet's chain id, 5042002.
+The Policy contract is written for Arc, where gas is paid in USDC ([docs/contract-interface.md](docs/contract-interface.md)); the hosted demo runs on Arc testnet itself, and the local chain uses Arc testnet's chain id, 5042002.
 The x402 payments for signals settle on Arc testnet, and the QuickNode Stream is configured for Arc testnet.
 
 **Circle Gateway and x402.**
