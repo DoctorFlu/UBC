@@ -181,6 +181,7 @@ How it quotes, for each rung of a ladder in scope:
   The maker withdraws only its own quote on that side, and never competes with that order; its quote on the other side stays at production's price and size.
   When production's price there reaches that order, the quote is sent as a plain limit order instead of maker only, and fills against it once, at that order's price.
   Every cap still applies, so the inventory caps stop it filling such orders again and again.
+  The sandbox's listing shows only the best price on each side, so an order at the maker's own price, or behind it, is taken for the maker's own: the maker keeps its quote there, ahead of that order, as production's resting quote would be.
 - Daily ladders only by default (`MAKER_KINDS`); weekly and month-end on request; never hourly or shorter, where the sandbox's own maker is.
 
 Every 15 seconds it reads production's books and the sandbox's listing (public), and its account's open orders and positions, then changes only what differs.
