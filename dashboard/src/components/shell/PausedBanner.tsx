@@ -78,6 +78,11 @@ export function WalletNotice() {
             then.
           </span>
         </p>
+      ) : access.kind === "not-owner" ? (
+        <p className={styles.feedNotice} data-tone="waiting" data-testid="wallet-notice">
+          <Wallet aria-hidden />
+          <span>{access.reason} Approving, rejecting, changing the rules and pausing are off for now.</span>
+        </p>
       ) : null}
     </div>
   );
