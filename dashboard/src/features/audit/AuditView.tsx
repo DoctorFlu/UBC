@@ -10,6 +10,7 @@ import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Advanced, useAdvanced, useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Field";
+import { ExplorerLink } from "@/components/ui/ExplorerLink";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
@@ -88,7 +89,14 @@ const columns: readonly Column<AuditRow>[] = [
             <FlaggedBadge flags={row.flags} />
           </span>
         ) : null}
-        <Advanced>
+        <Advanced
+          fallback={
+            // Advanced view has the hash, with its own link, in the Transaction column.
+            <ExplorerLink kind="tx" value={row.txHash} className={styles.txLink}>
+              Transaction
+            </ExplorerLink>
+          }
+        >
           <span className={`mono ${styles.eventCode}`}>{row.event}</span>
         </Advanced>
       </span>

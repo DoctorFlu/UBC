@@ -191,6 +191,47 @@ test("on Arc with the simulated venue, the top bar, Activity, the intent, Audit 
   await expect(page.getByTestId("count-filled").getByTestId("simulated-fill")).toBeVisible();
 });
 
+test("on a public chain, every onchain step, Audit row and role links to the explorer, in the default view", async ({
+  page,
+}) => {
+  const explorer = "https://explorer.testnet.arc.io";
+  const txLink = /^https:\/\/explorer\.testnet\.arc\.io\/tx\/0x[0-9a-f]{64}$/;
+
+  // The intent's steps (proposed, filled) each open their own transaction, and the agent its address.
+  await page.goto(await firstMandatePath(baseURL, `/activity/${filledId.toString()}`));
+  const steps = page.getByTestId("intent-timeline").getByTestId("explorer-link");
+  expect(await steps.count()).toBeGreaterThanOrEqual(2);
+  for (const link of await steps.all()) {
+    await expect(link).toHaveAttribute("href", txLink);
+    await expect(link).toHaveAttribute("target", "_blank");
+  }
+  await expect(
+    page.getByTestId("explorer-link").filter({ hasText: devAccount("agent").address.slice(0, 6) }),
+  ).toHaveAttribute("href", new RegExp(`/address/${devAccount("agent").address}$`, "i"));
+
+  // Every Audit row links its transaction.
+  await page.goto(await firstMandatePath(baseURL, "/audit"));
+  const rows = page.getByRole("row").filter({ has: page.getByTestId("explorer-link") });
+  expect(await rows.count()).toBeGreaterThanOrEqual(3);
+  for (const link of await page.getByTestId("explorer-link").filter({ visible: true }).all()) {
+    await expect(link).toHaveAttribute("href", txLink);
+  }
+
+  // Setup links the contract and each role.
+  await page.goto(await firstMandatePath(baseURL, "/setup"));
+  for (const [name, address] of [
+    ["Policy contract", chain.address],
+    ["Owner", devAccount("user").address],
+    ["Agent", devAccount("agent").address],
+    ["Executor", devAccount("executor").address],
+  ] as const) {
+    await expect(page.getByRole("main").getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute(
+      "href",
+      new RegExp(`^${explorer.replaceAll(".", "\\.")}/address/${address}$`, "i"),
+    );
+  }
+});
+
 test("after the switch to Gemini's sandbox, earlier fills still say simulated and the new fill says sandbox, everywhere", async ({
   page,
 }) => {

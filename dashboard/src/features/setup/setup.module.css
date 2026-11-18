@@ -278,3 +278,10 @@
   font-size: var(--text-sm);
   line-height: var(--leading-snug);
 }
+
+/* The contract and its roles on the explorer, in the default view: links that wrap as a group. */
+.explorerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+}

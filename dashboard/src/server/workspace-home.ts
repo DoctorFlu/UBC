@@ -52,6 +52,7 @@ export async function workspaceHome(
       const cover = await coverOfSnapshot(snapshot, quotes);
       return {
         mandate: mandateView(service, mandate),
+        owner: snapshot.contract?.roles?.user ?? null,
         waiting: needsOwner(snapshot).total,
         paused: snapshot.chain?.paused ?? null,
         committedCents: snapshot.chain?.committedCents ?? null,

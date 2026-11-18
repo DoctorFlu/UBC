@@ -10,7 +10,7 @@ import {
 } from "@mandate/shared";
 import { ArrowLeft, SearchX, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { ViewLink } from "@/components/ui/ViewLink";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { Hex } from "viem";
 
 import { AgentReason } from "@/components/domain/AgentReason";
@@ -22,6 +22,7 @@ import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Advanced } from "@/lib/advanced/Advanced";
 import { ArrowLink } from "@/components/ui/ArrowLink";
 import { Card } from "@/components/ui/Card";
+import { ExplorerLink } from "@/components/ui/ExplorerLink";
 import { HexValue } from "@/components/ui/HexValue";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -35,7 +36,7 @@ import {
   formatUsdCents,
   shortenHex,
 } from "@/lib/format";
-import { useSnapshot } from "@/lib/live/LiveConsole";
+import { useNetwork, useSnapshot } from "@/lib/live/LiveConsole";
 import { intentEvents } from "@/lib/live/derive";
 import type {
   ChainView,
@@ -167,6 +168,18 @@ function steps(chain: ChainView, intentId: number, source: FillSource): Step[] {
 }
 
 /** A YES price from the agent's document, which is untrusted: shown as-is when it is not a valid price. */
+/** A fact that only links to the explorer: nothing at all on a chain without one. */
+function ExplorerFact({ label, children }: { label: string; children: ReactNode }) {
+  const network = useNetwork();
+  if (!network?.explorerUrl) return null;
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </>
+  );
+}
+
 function yesPrice(cents: number | null): string {
   if (cents === null) return "-";
   return Number.isInteger(cents) && cents >= 0 && cents <= 100
@@ -768,7 +781,15 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
               ) : null}
               {venueOrder ? <VenueOrderFacts order={venueOrder} /> : null}
               {intent.agent ? (
-                <Advanced>
+                <Advanced
+                  fallback={
+                    <ExplorerFact label="Agent">
+                      <ExplorerLink kind="address" value={intent.agent}>
+                        {shortenHex(intent.agent)}
+                      </ExplorerLink>
+                    </ExplorerFact>
+                  }
+                >
                   <dt>Agent</dt>
                   <dd>
                     <HexValue value={intent.agent} kind="address" />
@@ -808,7 +829,16 @@ export function IntentDetailView({ intentId, preview }: { intentId: number; prev
                   </p>
                   {step.detail ? <p className={styles.stepDetail}>{step.detail}</p> : null}
                   <p className={styles.stepMeta}>
-                    <Advanced fallback={<When at={step.timestamp} />}>
+                    <Advanced
+                      fallback={
+                        <>
+                          <When at={step.timestamp} />
+                          <ExplorerLink kind="tx" value={step.txHash}>
+                            Transaction
+                          </ExplorerLink>
+                        </>
+                      }
+                    >
                       <span>
                         <When at={step.timestamp} />, block {formatCount(step.blockNumber)}
                       </span>

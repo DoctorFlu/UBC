@@ -35,6 +35,12 @@
   display: flex;
 }
 
+/* The row's transaction on the explorer, in the default view: on its own line, never stretched. */
+.txLink {
+  align-self: flex-start;
+  font-size: var(--text-xs);
+}
+
 /* The contract's own event name, for matching a row against the explorer's decoded logs. */
 .eventCode {
   font-size: var(--text-xs);
