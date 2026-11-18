@@ -196,7 +196,7 @@ export function FlaggedBadge({ flags }: { flags: readonly string[] }) {
 export function IntentVerdict({ intent }: { intent: IntentView }) {
   return (
     <span className={styles.verdict}>
-      <StatusChip status={intent.status} reason={intent.reason} />
+      <StatusChip status={intent.status} reason={intent.reason} className={styles.verdictChip} />
       <FlaggedBadge flags={intentFlags(intent)} />
     </span>
   );

@@ -51,12 +51,26 @@
   align-self: flex-start;
 }
 
-/* Beside the verdict chip in tables, wrapping under it when the column is narrow. */
+/*
+ * "Flagged" sits beside the verdict chip in tables, wrapping under it when the column is narrow.
+ * A verdict never takes a table's width from the order: past 15rem the contract's reason ends in an
+ * ellipsis, with the whole of it in the chip's title and on the intent page.
+ */
 .verdict {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1-5);
+  max-width: 15rem;
+}
+
+.verdict > * {
+  min-width: 0;
+}
+
+/* The chip's reason truncates inside it rather than pushing it wider. */
+.verdictChip > :last-child {
+  min-width: 0;
 }
 
 /* A table stacked on a phone aligns its values to the end: wrap the badge there too. */
@@ -105,9 +119,11 @@
   gap: var(--space-0-5);
 }
 
+/* "Buy NO, 157.89 at 19¢" reads as one phrase: it never breaks; the Market column gives way instead. */
 .orderLine {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 /* What the amount buys at the limit, after the order placed when the two differ (Advanced view). */

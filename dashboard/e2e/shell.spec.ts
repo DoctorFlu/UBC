@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-import { routePath, routes, schemes } from "./routes";
+import { laptopWidths, routePath, routes, schemes } from "./routes";
 import { firstMandatePath } from "./support/console";
 import { watchConsole } from "./support/problems";
 import { ownerCookie } from "./support/session";
@@ -272,6 +272,56 @@ test.describe("hedge disclosure", () => {
 });
 
 test.describe("layout", () => {
+  for (const width of laptopWidths) {
+    test(`at ${width.toString()} px, an order reads on one line beside a rejected and a held verdict`, async ({
+      page,
+      baseURL,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+      // Activity opens on Waiting while something is held: every row, rejected ones too, is under All.
+      await page.getByRole("tab", { name: /^All/ }).click();
+      const table = page.getByRole("tabpanel").getByRole("table");
+      for (const status of ["rejected", "needs_approval"]) {
+        await expect(table.locator(`[data-status="${status}"]`).first()).toBeVisible();
+      }
+      const summaries = table.getByTestId("order-summary");
+      expect(await summaries.count()).toBeGreaterThan(0);
+      for (const summary of await summaries.all()) {
+        // An inline box has one client rect per line it spans.
+        const lines = await summary.evaluate(
+          (element) => new Set([...element.getClientRects()].map((rect) => Math.round(rect.top))).size,
+        );
+        expect(lines, await summary.innerText()).toBe(1);
+      }
+      // And the page never scrolls sideways for it.
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+
+    test(`at ${width.toString()} px, Home's figures sit in one row or one column, never two and one`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      const groups = page.getByRole("main").locator("dl");
+      expect(await groups.count()).toBeGreaterThan(1);
+      for (const group of await groups.all()) {
+        const boxes = await group.evaluate((element) =>
+          [...element.children].map((child) => {
+            const box = child.getBoundingClientRect();
+            return { top: Math.round(box.top), left: Math.round(box.left) };
+          }),
+        );
+        const rows = new Set(boxes.map((box) => box.top)).size;
+        const columns = new Set(boxes.map((box) => box.left)).size;
+        expect(rows === 1 || columns === 1, JSON.stringify(boxes)).toBe(true);
+      }
+    });
+  }
+
   for (const width of [1440, 1024, 768, 390]) {
     test(`a held approval card on Overview is as tall as its content at ${width.toString()} px`, async ({
       page,

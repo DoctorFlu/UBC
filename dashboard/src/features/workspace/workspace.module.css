@@ -12,6 +12,7 @@
 }
 
 .totals {
+  container-type: inline-size;
   padding-block-end: var(--space-2);
   border-bottom: 1px solid var(--color-rule);
 }
@@ -112,12 +113,33 @@
 }
 
 .rowStats {
+  container-type: inline-size;
   min-width: 0;
 }
 
+/*
+ * Home's figures come in threes: one row while three fit, else one column, never two and an orphan under
+ * the first. The thresholds are three columns at their narrowest plus the gaps.
+ */
+.totals > dl {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .statGroup {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3) var(--space-5);
+}
+
+@container (width < 28rem) {
+  .totals > dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (width < 24rem) {
+  .statGroup {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .inlineLink {
