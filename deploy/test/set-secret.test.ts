@@ -126,6 +126,18 @@ describe.skipIf(!hasBash)("deploy/set-secret.sh", () => {
     expect(read()).toBe("A=1\nGEMINI_API_SECRET='s3cr3t'\nB=  spaced value # comment");
   });
 
+  it.each([["GEMINI_MAKER_API_KEY"], ["GEMINI_MAKER_API_SECRET"]])(
+    "takes the mirror maker's sandbox key %s, and prints only length and hash",
+    (name) => {
+      const value = "account-maker-value-1234";
+      const result = run([name], `${value}\n`);
+      expect(result.status).toBe(0);
+      expect(storedValue(read(), name)).toBe(value);
+      expect(result.output).toContain(`${name} set in`);
+      expect(result.output).not.toContain(value);
+    },
+  );
+
   it.each([
     ["CONSOLE_PASSWORD_HASH"],
     ["MCP_AUTH_TOKEN"],
@@ -138,7 +150,7 @@ describe.skipIf(!hasBash)("deploy/set-secret.sh", () => {
     const result = run([name], "some-value-here\n");
     expect(result.status).toBe(2);
     expect(result.output).toContain(
-      "NAME is one of: GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY QUICKNODE_STREAM_SECURITY_TOKEN",
+      "NAME is one of: GROK_WEBHOOK_URL GROK_WEBHOOK_KEY GEMINI_API_KEY GEMINI_API_SECRET GEMINI_MAKER_API_KEY GEMINI_MAKER_API_SECRET AGENT_PRIVATE_KEY EXECUTOR_PRIVATE_KEY QUICKNODE_STREAM_SECURITY_TOKEN",
     );
     expect(read()).toBe(before);
   });
