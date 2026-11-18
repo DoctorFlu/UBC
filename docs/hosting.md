@@ -63,6 +63,24 @@ The signal API is not routed at all.
 Only the MCP server buys signals, it reaches the API inside the Docker network, and x402 settlement goes through Circle Gateway with no callback to this host.
 Publishing it would only give strangers a way to spend its Gemini rate limit.
 
+### Idle connections
+
+Caddy keeps its connections to the console and the MCP server open between requests, and reuses an idle one for up to 2 minutes, its default.
+A server that closes an idle connection sooner races Caddy: a request sent just as the server closes the connection never arrives, and Caddy answers 502.
+Node closes idle connections after 5 seconds by default, so both servers keep them open longer:
+
+| Server | Idle keep-alive | Set in |
+| --- | --- | --- |
+| console | 130 s | `KEEP_ALIVE_TIMEOUT=130000` in the console stage of [`deploy/Dockerfile`](../deploy/Dockerfile), read by Next.js's standalone server |
+| MCP server | 130 s | `KEEP_ALIVE_TIMEOUT_MS` in [`agent/src/main.ts`](../agent/src/main.ts), which also outlasts cloudflared's 90 s in local development |
+
+The console's responses say so in their `Keep-Alive: timeout=130` header, and the production e2e run (`npm run e2e:prod`) checks it.
+
+`headersTimeout` stays at Node's default of 60 seconds.
+Advice to set it above the keep-alive time comes from older Node releases, where that timer could also run while a connection sat idle between requests.
+In current Node it measures only how long a request takes to send its headers, and the console runs on Node 24.
+A longer `headersTimeout` would only let a slow client hold a connection open longer.
+
 ### State
 
 Every file the product writes is in a named Docker volume, so `docker compose down` and image updates keep it.
