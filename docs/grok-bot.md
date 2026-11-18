@@ -51,6 +51,8 @@ Checked live on 2026-11-15:
 - A skill can also be created by hand under Settings, Skills, New Skill. The form takes a name in kebab case, a description and Markdown instructions; pasted Markdown is rendered as headings and lists.
 - The Grok Bot chat thread does not see that skill. Asked directly, the Bot answered that its skill list was empty.
 - A new automation lists the skill and selects it by default, next to the Mandate connector.
+  Seen on 2026-11-17 in the web client: an automation gets every connector and every skill on the account, and their checkboxes are disabled.
+  So each routine's prompt names its connector ("Mandate Hosted"), and the daily digest's prompt sets the hedging skill aside; with a second connector on the account, such as "Mandate Local" for a laptop, a prompt that named none could use either.
 - So in chat the Bot works from the MCP server's `instructions` and the tool descriptions only. Anything it must do in chat belongs in `agent/src/instructions.ts`; the skill serves the routine.
 
 ## Routines
@@ -112,7 +114,7 @@ To create it in Grok:
 
 1. Open Settings, then Automations, and create a new automation.
 2. Name it, for example `Mandate daily digest`, and set the schedule to Daily at the hour the owner wants it, for example 8:00 AM.
-3. Keep only the "Mandate Hosted" connector, and unselect the Mandate hedging skill, which is for the hourly hedge check.
+3. Leave the connectors and skills as they are: the web client attaches all of them and does not let them be changed, so the prompt names the "Mandate Hosted" connector and sets the hedging skill aside.
 4. Paste everything below the line in `agent/grok/digest.md` as the instruction and save.
 5. **Test** runs it immediately.
 
