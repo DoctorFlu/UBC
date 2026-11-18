@@ -75,7 +75,8 @@
   cursor: pointer;
 }
 
-.proposal {
+/* The proposal's hash reads as a footnote to the verdict: smaller and quieter than the hash elsewhere. */
+.proposal > span {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
