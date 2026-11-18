@@ -94,22 +94,36 @@ describe("the simulated venue's outcomes", () => {
     await expect(down.positionOutcome(position("GEMI-BTC2611202200-HI65000"))).rejects.toThrow("down");
   });
 
-  it("fills every order in full at once, and places nothing", async () => {
+  const order = (market = "GEMI-BTC2611202200-HI65000") => ({
+    intentId: 3,
+    market,
+    outcome: "NO" as const,
+    isBuy: true,
+    amountCents: 1_240,
+    limitPrice: 31,
+  });
+
+  it("fills every order on a trading contract in full at once, and places nothing", async () => {
     const venue = venueAt("2026-11-17T00:00:00Z");
-    const order = {
-      intentId: 3,
-      market: "GEMI-BTC2611202200-HI65000",
-      outcome: "NO" as const,
-      isBuy: true,
-      amountCents: 1_240,
-      limitPrice: 31,
-    };
-    const placement = await venue.placeOrder(order);
-    if (placement.status !== "placed") throw new Error("the simulated venue places every order");
+    const placement = await venue.placeOrder(order());
+    if (placement.status !== "placed") throw new Error("the simulated venue fills a trading contract");
     expect(await venue.readFill(placement.placed)).toEqual({
       state: "closed",
       filledCents: 1_240,
       detail: "simulated full fill",
+    });
+  });
+
+  it("fills nothing the real exchange could not: a contract that stopped trading, or one not listed", async () => {
+    // An order approved hours after it was priced, once its ladder closed: Gemini would refuse it.
+    const venue = venueAt("2026-11-17T00:00:00Z");
+    expect(await venue.placeOrder(order("GEMI-BTC2611132200-HI68500"))).toEqual({
+      status: "refused",
+      detail: "GEMI-BTC2611132200-HI68500 no longer trades on Gemini (its market is closed)",
+    });
+    expect(await venue.placeOrder(order("GEMI-NOPE2611202200-X"))).toEqual({
+      status: "refused",
+      detail: "Gemini does not list GEMI-NOPE2611202200-X",
     });
   });
 });
