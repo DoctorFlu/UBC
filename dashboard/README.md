@@ -56,8 +56,10 @@ Each suite starts anvil with the production Policy contract and its own console 
 - `smoke` (port 3100, chain 8645) seeds a demo history with every verdict, plays the MCP server once (announces the agent and links a decision context), then checks every route in both themes at 390 px and 1440 px.
 - `live` (port 3102, chain 8646) starts from an empty contract and runs the owner's loop: sign the first mandate, see a proposal within 2 seconds without a refresh, approve, reject, see a fill, pause, watch the contract refuse the next proposal, and restart the console to check it rebuilds identical state.
 - `screenshots` uses the smoke seed on a production build.
+- The `live` project also runs `wallet.spec.ts` (port 3103, chain 8647): a console built without the dev signer, and a stand-in browser wallet on another network that has never heard of the console's.
+  The owner is asked to switch, the network is added, and only then can the owner sign.
 
-Override the ports with `E2E_PORT`, `E2E_CHAIN_PORT`, `E2E_LIVE_PORT` and `E2E_LIVE_CHAIN_PORT` when they are taken.
+Override the ports with `E2E_PORT`, `E2E_CHAIN_PORT`, `E2E_LIVE_PORT`, `E2E_LIVE_CHAIN_PORT`, `E2E_WALLET_PORT` and `E2E_WALLET_CHAIN_PORT` when they are taken.
 
 ## Environment
 
