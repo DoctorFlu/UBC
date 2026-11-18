@@ -36,6 +36,22 @@ function coverText(cover: MandateSummary["cover"]): { value: string; hint: strin
   };
 }
 
+/**
+ * The headline across every mandate, by the same rule as each row: a goal whose cover cannot be measured
+ * (Gemini's quotes unavailable) is never counted as not covered.
+ */
+function goalsCoveredText(cover: Pick<MandateSummary["cover"], "goals" | "met" | "unavailable">): {
+  value: string;
+  hint?: string;
+} {
+  if (cover.goals === 0) return { value: "None set" };
+  if (cover.unavailable === cover.goals) return { value: "Unknown", hint: "Can't measure it right now" };
+  const value = `${String(cover.met)} of ${String(cover.goals)}`;
+  return cover.unavailable > 0
+    ? { value, hint: `${String(cover.unavailable)} can't be measured now` }
+    : { value };
+}
+
 function committedText(summary: MandateSummary): { value: string; hint: string } {
   if (summary.committedCents === null) return { value: "Unknown", hint: "The chain is not readable now" };
   return {
@@ -102,8 +118,14 @@ function MandateRow({ summary }: { summary: MandateSummary }) {
 export function WorkspaceHome({ data }: { data: WorkspaceHomeData }) {
   const waiting = data.mandates.reduce((sum, row) => sum + row.waiting, 0);
   const committed = data.mandates.reduce((sum, row) => sum + (row.committedCents ?? 0), 0);
-  const goals = data.mandates.reduce((sum, row) => sum + row.cover.goals, 0);
-  const met = data.mandates.reduce((sum, row) => sum + row.cover.met, 0);
+  const cover = data.mandates.reduce(
+    (sum, row) => ({
+      goals: sum.goals + row.cover.goals,
+      met: sum.met + row.cover.met,
+      unavailable: sum.unavailable + row.cover.unavailable,
+    }),
+    { goals: 0, met: 0, unavailable: 0 },
+  );
   const count = data.mandates.length;
   // Wallet-owned mandates need the owner's wallet: Home offers it, as a mandate's top bar does.
   const walletOwned = data.mandates.filter((row) => row.mandate.ownerSigner === "wallet");
@@ -135,10 +157,7 @@ export function WorkspaceHome({ data }: { data: WorkspaceHomeData }) {
         <StatGroup>
           <Stat label="Waiting for you" value={String(waiting)} />
           <Stat label="Committed" value={formatUsdCents(committed)} />
-          <Stat
-            label="Goals covered"
-            value={goals === 0 ? "None set" : `${String(met)} of ${String(goals)}`}
-          />
+          <Stat label="Goals covered" {...goalsCoveredText(cover)} />
         </StatGroup>
       </section>
       <ul className={styles.rows}>
