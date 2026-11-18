@@ -339,6 +339,11 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
   await expect(row(page, 1)).toContainText("Waiting");
   await expect(row(page, 2)).toContainText("Waiting");
 
+  // All lists them with the rest; one step opens Waiting, where they are decided, on the first one.
+  await row(page, 1).getByRole("button", { name: "Decide on intent #1 in Waiting" }).click();
+  await expect(page.getByRole("tab", { name: /^Waiting/ })).toHaveAttribute("aria-selected", "true");
+  await expect(row(page, 1).getByRole("button", { name: /^Approve \$22\.00/ })).toBeFocused();
+
   // Approve by pressing twice: the alternative to holding, for keyboards and screen readers. The
   // first press arms the button without moving it, says what the second press does, and the second
   // press still counts well after the 5 seconds the old window allowed.
@@ -354,7 +359,7 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
   await expect(approve).toHaveAttribute("data-phase", "armed");
   await approve.click();
   await expect(toast(page)).toContainText("Approved");
-  await expect(row(page, 1)).toContainText("Approved");
+  await expect(row(page, 1)).toHaveCount(0);
 
   // Rejecting is a signed transaction too, so it takes the same two steps.
   const reject = row(page, 2).getByRole("button", { name: /^Reject \$24\.00/ });
@@ -362,6 +367,11 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
   await expect(reject.locator("span[data-active]")).toHaveText("Press again to reject");
   await expect(row(page, 2)).toContainText("Waiting");
   await reject.click();
+  await expect(row(page, 2)).toHaveCount(0);
+
+  // Both have left Waiting; All has each with its verdict.
+  await page.getByRole("tab", { name: /^All/ }).click();
+  await expect(row(page, 1)).toContainText("Approved");
   await expect(row(page, 2)).toContainText("rejected by user");
 });
 
