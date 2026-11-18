@@ -1,12 +1,18 @@
 import "server-only";
 
-import { PolicyClient, type PolicyRules, policyAbi, revertErrorName, signerAccount } from "@mandate/shared";
+import {
+  PolicyClient,
+  type PolicyRules,
+  policyAbi,
+  politeHttp,
+  revertErrorName,
+  signerAccount,
+} from "@mandate/shared";
 import {
   type Address,
   BaseError,
   type Hex,
   createWalletClient,
-  http,
   isAddressEqual,
   numberToHex,
   parseEther,
@@ -349,7 +355,12 @@ export class MandateManager {
     const client = new PolicyClient({
       address: contract.address,
       publicClient: chain.client,
-      walletClient: createWalletClient({ chain: chain.chain, transport: http(chain.rpcUrl), account }),
+      // Behind the endpoint's rate-limit gate: a refused transaction is sent again once it opens.
+      walletClient: createWalletClient({
+        chain: chain.chain,
+        transport: politeHttp(chain.rpcUrl, { retryCount: 1, maxWaitMs: 15_000 }),
+        account,
+      }),
       minMaxFeePerGas: 0n,
       receiptPollingMs: 100,
       receiptTimeoutMs: 60_000,

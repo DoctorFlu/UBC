@@ -1,6 +1,6 @@
 import "server-only";
 
-import { PolicyClient, toSafeNumber } from "@mandate/shared";
+import { PolicyClient, politeHttp, toSafeNumber } from "@mandate/shared";
 import {
   type Abi,
   type Address,
@@ -10,7 +10,6 @@ import {
   type Transport,
   createWalletClient,
   getContractAddress,
-  http,
   isAddressEqual,
   numberToHex,
   parseEther,
@@ -204,7 +203,11 @@ export async function deployFromServer(
       });
     }
   }
-  const wallet = createWalletClient({ chain: access.chain, transport: http(access.rpcUrl), account });
+  const wallet = createWalletClient({
+    chain: access.chain,
+    transport: politeHttp(access.rpcUrl, { retryCount: 1, maxWaitMs: 15_000 }),
+    account,
+  });
   const hash = await wallet.deployContract({
     abi: artifact.abi,
     bytecode: artifact.bytecode,

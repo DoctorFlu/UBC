@@ -23,6 +23,12 @@ import { decodePolicyLogs, parsePolicyLogs, rulesFromTuple, rulesToChain, type P
 import { ARC_MIN_MAX_FEE_PER_GAS, applyFeeFloor } from "./fees";
 import { intentStatusFromCode, verdictFromCode } from "./reasons";
 import {
+  RATE_LIMIT_FIRST_BACKOFF_MS,
+  RATE_LIMIT_MAX_BACKOFF_MS,
+  type RpcGate,
+  rateLimitOf,
+} from "./rpc-limit";
+import {
   policyRulesSchema,
   tradeIntentSchema,
   ZERO_HASH,
@@ -101,8 +107,14 @@ export interface PolicyClientOptions {
   minMaxFeePerGas?: bigint;
   /** How long to wait for a receipt before giving up, in milliseconds. Defaults to 60 seconds. */
   receiptTimeoutMs?: number;
-  /** Longest delay between receipt checks (they back off from 10 ms), in milliseconds. Defaults to 1000. */
+  /** Longest delay between receipt checks (they back off from the first), in milliseconds. Defaults to 1000. */
   receiptPollingMs?: number;
+  /**
+   * Delay before the first receipt check, in milliseconds. Defaults to 10, for anvil, which mines at once.
+   * On Arc, which takes about half a second per block, 500 saves the half-dozen checks that come back
+   * empty, each of them a call the public RPC counts against its rate limit.
+   */
+  receiptFirstPollMs?: number;
   /** Largest block range per `eth_getLogs` call. Defaults to 10,000. */
   maxLogBlockRange?: bigint;
   /**
@@ -175,6 +187,9 @@ const PROBE_SENDER: Address = "0x000000000000000000000000000000000000dEaD";
  * fees no lower than `minMaxFeePerGas`, and awaited until its receipt. Writes from one client are
  * serialized (on the client's `lane`) so concurrent calls never race for the same nonce.
  */
+/** `receiptFirstPollMs` for Arc testnet, which takes about half a second per block. */
+export const ARC_RECEIPT_FIRST_POLL_MS = 500;
+
 export class PolicyClient {
   readonly address: Address;
   readonly publicClient: PublicClient<Transport, Chain>;
@@ -182,6 +197,7 @@ export class PolicyClient {
   private readonly minMaxFeePerGas: bigint;
   private readonly receiptTimeoutMs: number;
   private readonly receiptPollingMs: number;
+  private readonly receiptFirstPollMs: number;
   private readonly maxLogBlockRange: bigint;
   private readonly capabilityOverrides: Partial<Capabilities>;
   private capabilitiesPromise: Promise<Capabilities> | undefined;
@@ -196,6 +212,7 @@ export class PolicyClient {
     this.minMaxFeePerGas = options.minMaxFeePerGas ?? ARC_MIN_MAX_FEE_PER_GAS;
     this.receiptTimeoutMs = options.receiptTimeoutMs ?? 60_000;
     this.receiptPollingMs = options.receiptPollingMs ?? 1_000;
+    this.receiptFirstPollMs = options.receiptFirstPollMs ?? 10;
     this.maxLogBlockRange = options.maxLogBlockRange ?? 10_000n;
     if (this.maxLogBlockRange < 1n) throw new PolicyClientError("maxLogBlockRange must be at least 1");
   }
@@ -388,19 +405,34 @@ export class PolicyClient {
    */
   watchEvents(options: {
     onEvents: (events: PolicyEvent[]) => void | Promise<void>;
-    onError?: (error: unknown) => void;
+    /** After each poll that read the chain up to its head. */
+    onPolled?: () => void;
+    /**
+     * A failed poll, and how long the watcher waits before the next (`retryInMs`). A rate-limit refusal
+     * waits for the endpoint's gate (its `Retry-After`, or a growing jittered backoff) instead of the
+     * polling interval. A log that cannot be read comes here without `retryInMs`: it is skipped, and the
+     * poll goes on.
+     */
+    onError?: (error: unknown, retryInMs?: number) => void;
     fromBlock?: bigint;
     pollingIntervalMs?: number;
+    /** The latest block number, from a head poll shared with other watchers; this client's own by default. */
+    head?: (maxAgeMs: number) => Promise<bigint>;
+    /** The rate-limit gate of this client's endpoint, to wait for after a refusal. */
+    gate?: RpcGate;
   }): () => void {
     const interval = options.pollingIntervalMs ?? 1_000;
+    const head = options.head ?? (() => this.publicClient.getBlockNumber({ cacheTime: 0 }));
     let stopped = false;
     // Read through a function so the compiler does not narrow `stopped` across awaits.
     const isStopped = (): boolean => stopped;
     let next = options.fromBlock;
+    let refusals = 0;
     const loop = async (): Promise<void> => {
       while (!isStopped()) {
+        let wait = interval;
         try {
-          const latest = await this.publicClient.getBlockNumber({ cacheTime: 0 });
+          const latest = await head(interval);
           next ??= latest + 1n;
           if (latest >= next) {
             const events = await this.getEvents(
@@ -414,10 +446,21 @@ export class PolicyClient {
             next = latest + 1n;
             if (events.length > 0 && !isStopped()) await options.onEvents(events);
           }
+          refusals = 0;
+          options.onPolled?.();
         } catch (error) {
-          (options.onError ?? defaultWatchError)(error);
+          const limit = rateLimitOf(error);
+          if (limit) {
+            refusals += 1;
+            const backoff = Math.min(
+              RATE_LIMIT_MAX_BACKOFF_MS,
+              RATE_LIMIT_FIRST_BACKOFF_MS * 2 ** (refusals - 1),
+            );
+            wait = Math.max(interval, options.gate?.remainingMs() ?? 0, limit.retryAfterMs ?? backoff);
+          }
+          (options.onError ?? defaultWatchError)(error, wait);
         }
-        await sleep(interval);
+        await sleep(wait);
       }
     };
     void loop();
@@ -643,8 +686,9 @@ export class PolicyClient {
    */
   private async waitForReceipt(hash: Hex, bound?: AbortSignal): Promise<TransactionReceipt> {
     const deadline = Date.now() + this.receiptTimeoutMs;
-    // Back off from 10 ms: anvil mines within milliseconds, Arc within about a second.
-    let delay = 10;
+    // Anvil mines within milliseconds, Arc within about a second: back off from the first delay.
+    let delay = this.receiptFirstPollMs;
+    if (delay > 10) await raceAbort(sleep(delay), bound).catch(() => undefined);
     for (;;) {
       try {
         return await raceAbort(this.publicClient.getTransactionReceipt({ hash }), bound);

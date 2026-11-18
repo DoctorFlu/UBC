@@ -8,7 +8,6 @@
 import {
   createPublicClient,
   createWalletClient,
-  http,
   type Account,
   type Chain,
   type PublicClient,
@@ -20,7 +19,9 @@ import {
   arcTestnet,
   chainExplorerTxUrl,
   devchain,
+  ARC_RECEIPT_FIRST_POLL_MS,
   PolicyClient,
+  politeHttp,
   signerAccount,
   type AgentSigner,
   type Capabilities,
@@ -45,6 +46,12 @@ import { scopedFetch, shieldCurrentScope, unscoped, withSignal } from "./rpc-sco
  */
 export const RECEIPT_TIMEOUT_MS = 10_000;
 
+/**
+ * Most one chain request waits for the RPC's rate-limit gate to open before it fails at once, unsent,
+ * saying the RPC is rate-limiting us: short against a tool call's deadline.
+ */
+export const RPC_GATE_WAIT_MS = 5_000;
+
 /** A loopback RPC is the local devchain (anvil): no explorer, and receipts arrive in milliseconds. */
 const isLoopback = isLoopbackUrl;
 
@@ -63,6 +70,8 @@ export class ChainAgentPolicy implements AgentPolicy {
     deployBlock?: bigint;
     /** Skip probing for these contract extensions (tests). */
     capabilities?: Partial<Capabilities>;
+    /** Delay before the first receipt check: `ARC_RECEIPT_FIRST_POLL_MS` on Arc, the default locally. */
+    receiptFirstPollMs?: number;
   }) {
     this.policyAddress = options.policyAddress;
     this.agentAddress = options.walletClient?.account.address;
@@ -74,6 +83,7 @@ export class ChainAgentPolicy implements AgentPolicy {
       ...(options.walletClient === undefined ? {} : { walletClient: options.walletClient }),
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
       receiptTimeoutMs: RECEIPT_TIMEOUT_MS,
+      ...(options.receiptFirstPollMs === undefined ? {} : { receiptFirstPollMs: options.receiptFirstPollMs }),
     });
     this.#events = new EventIndex(this.#client, options.deployBlock);
   }
@@ -175,7 +185,14 @@ export function createAgentPolicy(config: Config, signer?: AgentSigner): AgentPo
   const rpcUrl = config.arcRpcUrl.reveal();
   const local = isLoopback(rpcUrl);
   const chain: Chain = local ? { ...devchain, rpcUrls: { default: { http: [rpcUrl] } } } : arcTestnet;
-  const transport = http(rpcUrl, { timeout: 10_000, retryCount: 1, fetchFn: scopedFetch });
+  // Behind the process's rate-limit gate: a refusal makes every call wait (a tool call at most a few
+  // seconds, then it answers that the RPC is rate-limiting us) instead of each one asking again.
+  const transport = politeHttp(rpcUrl, {
+    timeout: 10_000,
+    retryCount: 1,
+    maxWaitMs: RPC_GATE_WAIT_MS,
+    fetchFn: scopedFetch,
+  });
   const publicClient = createPublicClient({ chain, transport, pollingInterval: local ? 100 : 1_000 });
   const key = config.agentPrivateKey;
   const account =
@@ -190,5 +207,6 @@ export function createAgentPolicy(config: Config, signer?: AgentSigner): AgentPo
     publicClient,
     ...(walletClient === undefined ? {} : { walletClient }),
     ...(config.policyDeployBlock === undefined ? {} : { deployBlock: config.policyDeployBlock }),
+    ...(local ? {} : { receiptFirstPollMs: ARC_RECEIPT_FIRST_POLL_MS }),
   });
 }

@@ -110,23 +110,40 @@ Every service reads the same `ARC_RPC_URL`, so one env file decides for the cons
 The default, Arc's public `https://rpc.testnet.arc.io`, costs no credits.
 A QuickNode endpoint on our account costs 20 credits per call on Arc, from the Build plan's 80M credits a month (2.67M a day on average), and overage must never be incurred.
 
-Calls at the default settings, with Arc's blocks every 0.5 s (QuickNode's budget basis; 0.508 s measured over the 11,407 blocks after the deploy block).
+The public RPC is free but rate-limited per address, behind Cloudflare: it answers HTTP 429 "rate limit exceeded", which viem reports as `LimitExceededRpcError` (-32005, "Request exceeds defined limit").
+On 2026-11-18 it refused about one call in ten from the hosted machine while the console and the executor each polled every second (about 256 calls a minute together, from an address the host's other machines may share).
+At 5 s each (about 66 a minute) it refused nothing for ten minutes except one 11 s episode while the executor recorded seven fills at once.
+So the defaults on Arc are a 3 s console poll and a 5 s executor poll, and every client backs off when refused:
+
+- each process has one rate-limit gate per RPC endpoint: after a refusal nothing in the process asks that endpoint again until its `Retry-After` has passed, or, without one, a wait of 2 s that doubles with each refusal in a row up to 60 s, jittered upwards by up to a fifth;
+- a poller waits for the gate instead of its interval and says so once, not once per poll; the console shows "The RPC is rate-limiting us; retrying in N s" (not Offline) and keeps what it has read;
+- a request that may wait (the executor's, up to 60 s; a console owner call or sign-in check, up to 15 s; an MCP tool call, up to 5 s) is sent again once the gate opens, a transaction included, since a 429 proves the node did not take it; one that may not wait fails at once, unsent, with that message;
+- the console's followers share one head read per poll, and so do the executor's watchers; logs are read only up to that head; the roles shown are read again only when a role event arrives (and every 5 minutes as a safety net), while every trust decision reads them fresh;
+- a write's first receipt check waits half a second on Arc (anvil's checks start at 10 ms), which saves the half-dozen empty checks of the old back-off from 10 ms;
+- an owner's sign-in checks a plain wallet's signature without the RPC (against the owner read fresh from the contract); only a smart account's needs the chain.
+
+Calls at the old 1 s settings, with Arc's blocks every 0.5 s (QuickNode's budget basis; 0.508 s measured over the 11,407 blocks after the deploy block).
 The console and the executor rows were measured, not only derived: on 2026-11-17 the real console (`next dev`, a fresh database) and the real executor ran for 60 s against the production Policy on a local anvil that mined a block every 0.5 s, through a proxy that counted every JSON-RPC call; the console made 136 calls (59 `eth_getBlockByNumber`, 59 `eth_getLogs`, 18 `eth_call`) and the executor 120 (60 `eth_blockNumber`, 60 `eth_getLogs`).
 The MCP server's `mcp:smoke` (seven read-only tool calls) made 21.
+The rows at 3 s, 5 s and 15 s are derived from those measured calls per poll (two), not measured again.
 Each row is **per contract**: the console follows, and the executor serves, every mandate's contract with a loop of its own, so two mandates' contracts double the console's and the executor's calls.
 
 | Service | What it calls | Calls a minute | Calls a day | QuickNode credits a day |
 | --- | --- | --- | --- | --- |
-| Console, `CONSOLE_EVENT_SOURCE=rpc`, poll 1 s | each poll: the latest block and `eth_getLogs`; the three roles every 10 s | 136 measured (138 at most) | up to 198,720 | up to 3,974,400 |
-| Console, `CONSOLE_EVENT_SOURCE=stream` | the same poll every 15 s, roles included | 20 | 28,800 | 576,000, plus the Stream's 3,456,000 |
-| Executor, `SIM_EXECUTOR_POLL_MS=1000` | each poll: `eth_blockNumber` and `eth_getLogs` | 120 measured | 172,800 | 3,456,000 |
+| Console, `CONSOLE_EVENT_SOURCE=rpc`, poll 1 s (before) | each poll: the latest block and `eth_getLogs`; the three roles every 10 s | 136 measured (138 at most) | up to 198,720 | up to 3,974,400 |
+| Console, `CONSOLE_EVENT_SOURCE=rpc`, poll 3 s (the Arc default now) | each poll: the latest block and `eth_getLogs`; the roles on a role event, and every 5 minutes | about 41 | about 58,500 | about 1,170,000 |
+| Console, `CONSOLE_EVENT_SOURCE=rpc`, poll 5 s (the hosted setting) | the same | about 25 | about 35,400 | about 708,000 |
+| Console, `CONSOLE_EVENT_SOURCE=stream` | the same poll every 15 s | about 9 | about 12,400 | about 248,000, plus the Stream's 3,456,000 |
+| Executor, `SIM_EXECUTOR_POLL_MS=1000` (before) | each poll: `eth_blockNumber` and `eth_getLogs` | 120 measured | 172,800 | 3,456,000 |
+| Executor, poll 5 s (the Arc default now) | each poll: the latest block and `eth_getLogs` | 24 | 34,560 | 691,200 |
 | MCP server | only during a tool call: about 10 calls for a proposal (fees, simulation, nonce, gas, send, receipt, the event index), about 3 for a read (21 measured for 7) | 0 when idle | about 2,000 at 200 tool calls | about 40,000 |
 
-So the three at their defaults on QuickNode, with one contract, would spend about 7.5M credits a day and use up the month's 80M in 11 days.
+So the three at the old 1 s settings on QuickNode, with one contract, would have spent about 7.5M credits a day and used up the month's 80M in 11 days.
+At the new Arc defaults they would spend about 1.9M a day (57M a month), and at the hosted 5 s settings about 1.44M a day (43M a month): still more than half the month's credits for polling alone.
 **Run all three on the public RPC**, and spend QuickNode credits only on the Stream, in demo windows ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
 If a service must use QuickNode, these settings bound it (credits a day, `I` in seconds):
 
-- the console's poll, `CONSOLE_POLL_INTERVAL_MS`: 20 x 86,400 x (2/I + the roles, 0.3 or 3/I when I is 10 s or more), so 1.21M at 5 s, 864,000 at 10 s, 288,000 at 30 s;
+- the console's poll, `CONSOLE_POLL_INTERVAL_MS`: 20 x 86,400 x (2/I + 0.01 for the roles), so 1.17M at 3 s, 708,000 at 5 s, 363,000 at 10 s, 133,000 at 30 s;
 - `CONSOLE_EVENT_SOURCE=stream`, which slows the poll to 15 s at least;
 - the executor's poll, `SIM_EXECUTOR_POLL_MS`: 20 x 86,400 x 2/I, so 691,200 at 5 s, 230,400 at 15 s, 115,200 at 30 s;
 - the MCP server spends only on tool calls, so its use follows the agent's activity.
@@ -189,7 +206,7 @@ See [agent/README.md](../agent/README.md).
 | `CONSOLE_MANDATE_EXECUTOR` | no | The executor a new mandate's contract names. Defaults to the executor of the server's own contract, so one executor serves every mandate. On Arc this default is not yet proven with two mandates on the testnet. |
 | `CONSOLE_POLICY_ARTIFACTS_DIR` | no | Where the compiled Policy contracts are, as `forge build` writes them. Defaults to `devchain/out` in a checkout (`npm run dev:chain` builds it); the console image sets it to the copy it takes from the contracts build. Without them the console cannot deploy or check a new mandate's contract. |
 | `CONSOLE_EVENT_SOURCE` | no | `rpc` (default) polls the chain for Policy events. `stream` takes the QuickNode Stream webhook as the primary source and keeps a slow RPC poll to fill gaps. |
-| `CONSOLE_POLL_INTERVAL_MS` | no | How often the RPC poller asks for new blocks. Defaults to 250 ms on the local devchain and 1 s on Arc testnet. The hosted demo chain sets 1 s. |
+| `CONSOLE_POLL_INTERVAL_MS` | no | How often the RPC poller asks for new blocks. Defaults to 250 ms on the local devchain and 3 s on Arc testnet, whose public RPC rate-limited 1 s polls ([cost and rate limits](#which-rpc-each-service-uses-and-what-it-costs)). The hosted Arc stack sets 5 s. |
 | `GEMINI_API_URL` | no | Gemini's public REST API, which the console reads (server side, cached for 10 s, no key) for the hedge view's live ladder and preview, and to check each intent's market against Gemini's listing (once per market, in the background; the answer is stored, so each market costs one lookup ever). For ladders it only asks about assets Gemini lists and the events of plans the console stores, and keeps at most 32 ladders. Listing checks have a budget of their own inside the client's 100 requests a minute: at most 24 requests in any 60 s and 12 a minute sustained, counted as the most each lookup could send (4 candidate event tickers, each tried twice) until it says what it sent. Intents waiting for approval are checked first, then the newest, and the queue never holds more than the intents the console shows. So a stream of invented markets from a stolen agent key is checked at one every 40 s and leaves the hedge view at least 81 requests a minute: a public console cannot be made to spend its Gemini rate limit. By default it is the host of the stack's Gemini environment (see [One Gemini for the whole stack](#one-gemini-for-the-whole-stack)): `https://api.gemini.com`, or `https://api.sandbox.gemini.com` when `EXECUTOR_VENUE=gemini`. Set it only to that same host or to a loopback address (`http://127.0.0.1:<port>`); any other host is refused, naming the settings, because it would read one exchange while the executor trades on another. The end-to-end tests point it at a local server that replays recorded responses. The MCP server, the signal API and the dev scripts follow the same rule: `dev:executor` checks approved intents against it and `dev:propose` picks its default market from it. |
 | `MCP_PUBLIC_URL` | no | Public address of the MCP server, shown on the console's Setup page so the owner can add it to Grok Bot. When it is not set, Setup asks the MCP server on the console's machine (at `MCP_HOST` and `MCP_PORT`) and shows its local address, or the public address a tunnel (`npm run dev:tunnel`) last reached it at. |
 | `NEXT_PUBLIC_DEV_SIGNER` | no | `1` adds a test-only owner signer (anvil account 0, a public key) for end-to-end tests and local demos. It is read at build time. Never set it in a deployed build that runs on Arc testnet; the hosted demo chain sets it and keeps the whole console behind sign-in. |
@@ -233,7 +250,7 @@ The executor (`npm run dev:executor`, and the `executor` service of the hosted d
 | `EXECUTOR_SETTLE_MS` | no | How often the executor looks for a filled position that is due to be settled, at least `1000`. Defaults to `60000`. The look is local: Gemini and the console are asked only once a position's market has expired, then with waits of 1, 2, 5, 10 and then every 30 minutes while Gemini has not published the outcome. |
 | `EXECUTOR_DISCOVERY_MS` | no | How often the executor asks the console which mandate contracts name it as their executor (`GET /api/executor/v1/contracts`, signed by its key), at least `1000`. Defaults to `15000`. It checks each contract's `executor()` onchain before serving it, and serves the server's own contract whatever the console says. |
 | `SIM_EXECUTOR_DELAY_MS` | no | How long the executor waits after an approval before filling it. Defaults to `1500`. |
-| `SIM_EXECUTOR_POLL_MS` | no | How often the executor asks the chain for new approvals and fills. Defaults to `1000`. |
+| `SIM_EXECUTOR_POLL_MS` | no | How often the executor asks the chain for new approvals and fills. Defaults to `1000` on the local devchain and `5000` on Arc testnet. |
 
 ## Grok Bot event wake-ups
 
