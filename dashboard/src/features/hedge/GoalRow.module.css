@@ -1,0 +1,84 @@
+/* Up to four goals stay on one row; on a phone the row scrolls rather than wrapping under the indicator. */
+.scroller {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.row {
+  position: relative;
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  box-shadow: var(--shadow-border);
+  isolation: isolate;
+}
+
+.indicator {
+  position: absolute;
+  z-index: -1;
+  top: var(--segmented-control-indicator-top);
+  left: var(--segmented-control-indicator-left);
+  width: var(--segmented-control-indicator-width);
+  height: var(--segmented-control-indicator-height);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-raised);
+  transition-property: top, left, width, height;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .indicator {
+    transition: none;
+  }
+}
+
+.item {
+  display: inline-flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 2.75rem;
+  padding: var(--space-1-5) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+  transition-property: color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: ease-out;
+}
+
+.item:focus-visible {
+  outline-offset: -2px;
+}
+
+.item[data-checked] {
+  color: var(--color-text);
+}
+
+@media (hover: hover) {
+  .item:hover {
+    color: var(--color-text);
+  }
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-stretch: var(--stretch-semi);
+  font-weight: var(--weight-semibold);
+}
+
+.state {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}

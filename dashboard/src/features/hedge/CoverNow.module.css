@@ -9,6 +9,11 @@
   max-width: 68ch;
 }
 
+/* Quotes are on their way: a quiet line, not a verdict. */
+.measuring {
+  color: var(--color-text-muted);
+}
+
 /* The totals, with the fill-source tag after them; on a narrow card the tag wraps under, flush left. */
 .settledTotals {
   display: flex;

@@ -17,6 +17,7 @@ export * from "./env";
 export * from "./evaluate";
 export * from "./events";
 export * from "./fees";
+export * from "./goals";
 export * from "./head";
 export * from "./reasons";
 export * from "./reducer";

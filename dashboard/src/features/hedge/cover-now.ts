@@ -59,18 +59,23 @@ export function coverSentence(cover: CoverAssessment, settles: string | null): s
   const from = ceiling === cover.spotCents ? `today's ${price(ceiling)}` : price(ceiling);
   const spot = `today's ${cover.asset} price of ${price(cover.spotCents)}`;
   // The staircase stops at the lowest strike there is when every strike is above the floor.
-  const downTo =
+  const aboveFloor =
     cover.measuredBelowCents !== null &&
     cover.floorCents !== null &&
-    cover.measuredBelowCents > cover.floorCents
-      ? `${price(cover.measuredBelowCents)}, the lowest strike there is (your floor ${floor} is below every strike)`
-      : floor;
+    cover.measuredBelowCents > cover.floorCents;
+  const downTo = aboveFloor
+    ? `${price(cover.measuredBelowCents ?? 0)}, the lowest strike there is (your floor ${floor} is below every strike)`
+    : floor;
   const loss = `the ${usd(cover.targetPayoutCents)} your ${holding} loses from ${from} down to ${downTo}`;
   const pending = cover.heldByState.awaiting_fill + cover.heldByState.awaiting_owner > 0;
   const held = pending ? "the contracts you hold and your pending orders pay" : "the contracts you hold pay";
   const share = (bps: number | null) => ((bps ?? 0) > 10_000 ? "more than" : `${percent(bps ?? 0)} of`);
   // What a new plan can add on the exchange your orders go to, or why it can add nothing.
   const venue = "the exchange your orders go to";
+  // Only the sandbox lacks strikes production lists (`elsewhere`), so a part no plan can buy is on those.
+  const unlisted = cover.missingBelowVenue
+    ? "Gemini's real exchange lists lower strikes that the sandbox your orders go to does not"
+    : "Gemini's real exchange lists strikes that the sandbox your orders go to does not";
   const addNothing =
     cover.reason === "ladder_not_listed"
       ? `Nothing more can be bought for it now: ${venue} does not list this ladder.`
@@ -78,13 +83,13 @@ export function coverSentence(cover: CoverAssessment, settles: string | null): s
         ? `Nothing more can be bought for it on this ladder now: ${venue} lists no strike below ${spot}.`
         : cover.reason === "holding_too_small"
           ? `Nothing more can be bought for it: your ${holding} is too small for the smallest contract (0.01).`
-          : `Nothing more can be bought for it now: what is missing lies on strikes ${venue} does not list.`;
+          : `Nothing more can be bought for it now: ${unlisted}, and what is missing lies on those.`;
   const toAdd =
     cover.addablePayoutCents === 0
       ? addNothing
       : cover.addablePayoutCents >= cover.missingPayoutCents
         ? `A new plan buys only the missing ${usd(cover.missingPayoutCents)}.`
-        : `A new plan can buy ${usd(cover.addablePayoutCents)} of the missing ${usd(cover.missingPayoutCents)}: ${venue} lists no strike for the rest.`;
+        : `A new plan can buy ${usd(cover.addablePayoutCents)} of the missing ${usd(cover.missingPayoutCents)}: ${unlisted}, and the rest lies on those.`;
   if (cover.belowFloor !== null) {
     const now = `${cover.asset} is at or below the floor: today's ${price(cover.spotCents)} is not above ${floor}.`;
     const protects = `the ${usd(cover.targetPayoutCents)} the goal protects, your ${holding}'s fall from ${price(cover.belowFloor.plannedSpotCents)}, its price when the goal was set, down to ${downTo}`;
@@ -99,7 +104,7 @@ export function coverSentence(cover: CoverAssessment, settles: string | null): s
   }
   switch (cover.state) {
     case "met":
-      return `Covered. If ${cover.asset} settles below ${below}${when}, ${held} ${usd(cover.heldPayoutCents)}, ${share(cover.coverBps)} ${loss}. Nothing more is needed.`;
+      return `Covered. If ${cover.asset} settles below ${below}${when}, ${held} ${usd(cover.heldPayoutCents)}, ${share(cover.coverBps)} ${loss}. ${aboveFloor ? "No lower strike is listed, so nothing more can be added." : "Nothing more is needed."}`;
     case "partly_met":
       return `Partly covered. If ${cover.asset} settles below ${below}${when}, ${held} ${usd(cover.heldPayoutCents)}, ${percent(cover.coverBps ?? 0)} of ${loss}. ${toAdd}`;
     case "not_met":

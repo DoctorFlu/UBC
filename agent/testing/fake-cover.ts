@@ -1,12 +1,13 @@
 /**
  * The cover the fake console reports in `GET /summary` (issue #97), measured the way the real console
- * measures it: the latest plan per asset with a floor, on a ladder not expired yet, against the
+ * measures it: each goal plan (one per asset and event, `selectGoalPlans`) with a floor, on a ladder not
+ * expired yet, soonest expiry first, against the
  * positions the chain records and the ladder Gemini quotes now, with the planner's `coverOfPlan`.
  * A ladder or chain that cannot be read makes the goal `unavailable`, as in the console.
  */
 import type { Ladder } from "@mandate/gemini";
 import { coverOfPlan, type RecordedIntent } from "@mandate/planner";
-import type { CoverNowView } from "@mandate/shared";
+import { type CoverNowView, selectGoalPlans } from "@mandate/shared";
 import * as z from "zod";
 import type { FakeConsoleState } from "./fake-console";
 
@@ -32,15 +33,26 @@ export function coverFromPlans(sources: {
 }): (state: FakeConsoleState) => Promise<CoverNowView[]> {
   return async (state) => {
     const now = (sources.now ?? (() => new Date()))().getTime();
-    const latest = new Map<string, { planId: string; plan: z.infer<typeof planGoalSchema> }>();
-    const stored = [...state.plans.values()].sort((a, b) => b.storedAt.localeCompare(a.storedAt));
-    for (const entry of stored) {
-      const parsed = planGoalSchema.safeParse(entry.plan);
-      if (!parsed.success || latest.has(entry.asset)) continue;
-      latest.set(entry.asset, { planId: entry.planId, plan: parsed.data });
-    }
-    const goals = [...latest.values()]
+    const stored = [...state.plans.values()]
+      .sort((a, b) => b.storedAt.localeCompare(a.storedAt))
+      .flatMap((entry) => {
+        const parsed = planGoalSchema.safeParse(entry.plan);
+        return parsed.success ? [{ planId: entry.planId, plan: parsed.data }] : [];
+      });
+    // Plans with an order proposed to the contract: an intent linked to a context that names the plan.
+    const proposed = new Set(
+      [...state.intentContexts.values()].flatMap((link) => {
+        const context = state.contexts.get(link.hash.toLowerCase()) ?? state.contexts.get(link.hash);
+        return context === undefined ? [] : [context.document.planId];
+      }),
+    );
+    const goals = selectGoalPlans(
+      stored,
+      ({ planId, plan }) => ({ planId, asset: plan.asset, eventTicker: plan.eventTicker }),
+      proposed,
+    )
       .filter(({ plan }) => plan.floorCents !== null && Date.parse(plan.expiry) > now)
+      .sort((a, b) => Date.parse(a.plan.expiry) - Date.parse(b.plan.expiry))
       .slice(0, MAX_GOALS);
     const intents = await sources.intents().catch(() => null);
     return Promise.all(
@@ -64,11 +76,12 @@ export function coverFromPlans(sources: {
           heldByState: null,
           coverBps: null,
           missingPayoutCents: null,
+          missingBelowVenue: false,
         };
         if (intents === null) return unavailable;
         const ladder = await sources.ladder(plan.asset, plan.eventTicker).catch(() => null);
         if (ladder === null) return unavailable;
-        const holding = state.holdings.find((h) => h.asset === plan.asset)?.quantity ?? null;
+        const holding = state.holdings.find((h) => h.asset === plan.asset)?.quantity ?? plan.holdingQuantity;
         const cover = coverOfPlan({
           plan,
           holdingQuantity: holding,
@@ -94,6 +107,7 @@ export function coverFromPlans(sources: {
           },
           coverBps: assessment.coverBps,
           missingPayoutCents: assessment.missingPayoutCents,
+          missingBelowVenue: assessment.missingBelowVenue,
         };
       }),
     );

@@ -56,24 +56,35 @@ export function CoverNowCard({
   view,
   holdingQuantity,
   quotes,
+  loading = false,
   intents,
 }: {
   view: AgentPlanView;
   holdingQuantity: string | null;
   quotes: LadderQuotes | null;
+  /** The goal's quotes have not arrived yet: say so, never "unavailable" before a read has failed. */
+  loading?: boolean;
   intents: readonly IntentView[];
 }) {
   const cover = quotes ? coverNow({ plan: view.plan, holdingQuantity, quotes, intents }) : null;
   const assessment = cover?.assessment ?? null;
+  const measuring = loading && !assessment;
   const settles = describeMarket(view.plan.rungs[0]?.instrumentSymbol ?? "").settles;
   const bps = assessment?.coverBps ?? 0;
   return (
     <Card title="Cover now" headingLevel={2}>
-      <div className={styles.cover} data-testid="cover-now" data-state={assessment?.state ?? "unknown"}>
-        <p className={styles.sentence} role="status">
+      <div
+        className={styles.cover}
+        data-testid="cover-now"
+        data-state={assessment?.state ?? (measuring ? "measuring" : "unknown")}
+        aria-busy={measuring}
+      >
+        <p className={cx(styles.sentence, measuring && styles.measuring)} role="status">
           {assessment
             ? coverSentence(assessment, settles)
-            : "Cover cannot be measured now: Gemini's market data for this ladder is unavailable."}
+            : measuring
+              ? "Measuring cover against Gemini's live quotes…"
+              : "Cover cannot be measured now: Gemini's market data for this ladder is unavailable."}
         </p>
         {assessment && assessment.measuredBelowCents !== null ? (
           <Meter

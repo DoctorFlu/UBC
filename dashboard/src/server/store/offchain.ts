@@ -15,6 +15,8 @@ import {
   proposedRulesSchema,
   putSignalBudgetRequestSchema,
   putSignalPaymentRequestSchema,
+  selectGoalPlans,
+  ZERO_HASH,
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
 import { getAddress } from "viem";
@@ -23,6 +25,12 @@ import { z } from "zod";
 import type { SignalBudgetView, SignalPaymentView } from "@/lib/payments/types";
 
 import { type Database, transaction } from "../db";
+
+/**
+ * How many of a mandate's newest plans goal selection reads. A plan proposed further back than this has
+ * long expired: the agent stores at most one plan per run.
+ */
+const GOAL_PLANS_READ = 500;
 
 /** A decision context exactly as stored. The document is raw JSON so a read can detect tampering. */
 export interface StoredContext {
@@ -235,19 +243,45 @@ export class OffchainStore {
     return row ? planFromRow(row) : null;
   }
 
-  /** The most recently stored plan of each asset, newest first. */
-  latestPlans(mandateId: string): StoredPlan[] {
+  /**
+   * The mandate's goal plans, newest first: one per (asset, event), by the rule in `selectGoalPlans`. The
+   * newest plan of each asset, and every plan with an order proposed to the contract, are candidates. An
+   * order counts when its intent is linked to a decision context naming the plan, on any of the mandate's
+   * contracts, or when its `IntentProposed` event carried such a context's hash (`onchainHashes`), as a
+   * contract that records the hash does.
+   */
+  goalPlans(mandateId: string, onchainHashes: Iterable<string | null> = []): StoredPlan[] {
     const rows = this.db
       .prepare(
-        `SELECT * FROM hedge_plans AS p
-         WHERE p.mandate_id = ? AND p.rowid = (
-           SELECT q.rowid FROM hedge_plans AS q WHERE q.mandate_id = p.mandate_id AND q.asset = p.asset
-           ORDER BY q.stored_at DESC, q.rowid DESC LIMIT 1
-         )
-         ORDER BY p.stored_at DESC, p.rowid DESC`,
+        `SELECT * FROM hedge_plans WHERE mandate_id = ?
+         ORDER BY stored_at DESC, rowid DESC LIMIT ${String(GOAL_PLANS_READ)}`,
       )
       .all(mandateId) as unknown as PlanRow[];
-    return rows.map(planFromRow);
+    const proposed = this.db
+      .prepare(
+        `SELECT DISTINCT json_extract(c.document, '$.planId') AS plan_id
+         FROM intent_context_links AS l
+         JOIN decision_contexts AS c ON c.mandate_id = l.mandate_id AND c.hash = l.hash
+         WHERE l.mandate_id = ?`,
+      )
+      .all(mandateId) as unknown as { plan_id: unknown }[];
+    const hashes = [...onchainHashes].filter(
+      (hash): hash is string => hash !== null && hash.toLowerCase() !== ZERO_HASH,
+    );
+    const sealed = [...this.contexts(mandateId, hashes).values()].map((context) => ({
+      plan_id: (context.document as { planId?: unknown }).planId,
+    }));
+    return selectGoalPlans(
+      rows.map(planFromRow),
+      (plan) => ({
+        planId: plan.planId,
+        asset: plan.asset,
+        eventTicker: typeof plan.plan["eventTicker"] === "string" ? plan.plan["eventTicker"] : "",
+      }),
+      new Set(
+        [...proposed, ...sealed].flatMap((row) => (typeof row.plan_id === "string" ? [row.plan_id] : [])),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------- signal payments (#22)

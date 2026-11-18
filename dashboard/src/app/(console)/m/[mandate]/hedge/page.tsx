@@ -11,9 +11,14 @@ export default async function HedgePage({ searchParams }: PageProps<"/m/[mandate
   const params = await searchParams;
   const preview = previewState(params);
   const asset = typeof params.asset === "string" ? params.asset.slice(0, 16).toUpperCase() : undefined;
+  const goal = typeof params.goal === "string" ? params.goal.slice(0, 64).toUpperCase() : undefined;
   if (preview === "loading") return <ViewSkeleton title="Hedge" />;
   if (preview === "error") return <ViewError title="Hedge" view="The hedge" />;
   return (
-    <HedgeView initialAsset={asset} {...(preview === "empty" ? { preview: emptyFixtureSnapshot } : {})} />
+    <HedgeView
+      initialAsset={asset}
+      initialGoal={goal}
+      {...(preview === "empty" ? { preview: emptyFixtureSnapshot } : {})}
+    />
   );
 }

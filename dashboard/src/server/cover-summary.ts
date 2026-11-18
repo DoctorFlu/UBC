@@ -55,11 +55,14 @@ async function coverOfGoal(
     heldByState: null,
     coverBps: null,
     missingPayoutCents: null,
+    missingBelowVenue: false,
   };
   if (intents === null) return unavailable;
   const lookup = await ladder(plan.asset, plan.eventTicker).catch(() => ({ ok: false as const }));
   if (!lookup.ok) return unavailable;
-  const holding = holdings.find((candidate) => candidate.asset === plan.asset)?.quantity ?? null;
+  // The saved holding, else the one the plan was sized for (a goal planned before any holding was saved).
+  const holding =
+    holdings.find((candidate) => candidate.asset === plan.asset)?.quantity ?? plan.holdingQuantity;
   const cover = coverNow({
     plan,
     holdingQuantity: holding,
@@ -84,5 +87,6 @@ async function coverOfGoal(
     },
     coverBps: assessment.coverBps,
     missingPayoutCents: assessment.missingPayoutCents,
+    missingBelowVenue: assessment.missingBelowVenue,
   };
 }

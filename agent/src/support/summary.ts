@@ -10,6 +10,7 @@ import {
   COVER_REASONS,
   formatCents,
   formatEasternTime,
+  goalLabel,
   type CoverNowView,
   type SummaryResponse,
 } from "@mandate/shared";
@@ -37,6 +38,11 @@ export function consoleLink(summary: SummaryResponse, path: string): string {
 }
 
 export const CoverNowSchema = z.object({
+  goal: z
+    .string()
+    .describe(
+      'The goal in the owner\'s words: "BTC, through today, 22:00 UTC" or "BTC, through Fri 20 Nov". Name goals this way, never by ladder ticker alone',
+    ),
   asset: z.string(),
   eventTicker: z.string().describe("The ladder the goal is on"),
   expiresAt: z.string(),
@@ -65,6 +71,17 @@ export const CoverNowSchema = z.object({
     .describe("heldPayoutCents split by how far each position has come"),
   targetPayoutCents: z.int().nullable().describe("What the goal calls for there"),
   missingPayoutCents: z.int().nullable().describe("What a new plan would add; 0 when met"),
+  downToCents: z
+    .int()
+    .nullable()
+    .describe(
+      "Where the goal's protection ends: the floor, or the lowest strike there is when every strike is above the floor (then the fall below it is not protected, and no lower strike can be bought). Never say the goal protects down to the floor when this is above it. Null when there is no staircase",
+    ),
+  missingBelowVenue: z
+    .boolean()
+    .describe(
+      "With reason no_more_strikes: true when what is missing lies only below the lowest strike the exchange that takes this mandate's orders lists (Gemini's real exchange lists lower strikes than its sandbox)",
+    ),
   belowFloor: z
     .object({
       spotCents: z.int().describe("Today's price, at or below the floor"),
@@ -81,8 +98,9 @@ export const CoverNowSchema = z.object({
 });
 export type CoverNowRow = z.infer<typeof CoverNowSchema>;
 
-export function coverNowRow(cover: CoverNowView, summary: SummaryResponse): CoverNowRow {
+export function coverNowRow(cover: CoverNowView, summary: SummaryResponse, now: number): CoverNowRow {
   return {
+    goal: goalLabel(cover.asset, cover.expiresAt, now),
     asset: cover.asset,
     eventTicker: cover.eventTicker,
     expiresAt: cover.expiresAt,
@@ -95,6 +113,9 @@ export function coverNowRow(cover: CoverNowView, summary: SummaryResponse): Cove
     heldByState: cover.heldByState,
     targetPayoutCents: cover.targetPayoutCents,
     missingPayoutCents: cover.missingPayoutCents,
+    downToCents:
+      cover.measuredBelowCents === null ? null : Math.max(cover.floorCents ?? 0, cover.measuredBelowCents),
+    missingBelowVenue: cover.missingBelowVenue,
     belowFloor:
       cover.belowFloor === null || cover.spotCents === null
         ? null
@@ -112,7 +133,7 @@ const percent = (bps: number) => `${Math.floor(bps / 100)}%`;
 const VENUE = "the exchange that takes this mandate's orders";
 
 /** Why nothing can be added to a goal not met, after its shortfall; empty when something can. */
-function addNothing(reason: CoverNowRow["reason"]): string {
+function addNothing(reason: CoverNowRow["reason"], missingBelowVenue: boolean): string {
   switch (reason) {
     case "ladder_not_listed":
       return `; nothing more can be bought for it now: ${VENUE} does not list this ladder`;
@@ -121,15 +142,19 @@ function addNothing(reason: CoverNowRow["reason"]): string {
     case "holding_too_small":
       return "; nothing more can be bought for it: the holding is too small for the smallest contract (0.01)";
     case "no_more_strikes":
-      return `; nothing more can be bought for it now: what is missing lies on strikes ${VENUE} does not list`;
+      // Only Gemini's sandbox lacks strikes its production exchange lists.
+      return `; nothing more can be bought for it now: Gemini's real exchange lists ${missingBelowVenue ? "lower strikes" : "strikes"} that the sandbox, ${VENUE}, does not, and what is missing lies on those`;
     default:
       return "";
   }
 }
 
-/** "BTC below $63,000.00 on BTC2611272200 (settles Fri Nov 27, 2026, 5:00 PM ET): covered, the goal is met (...)." */
+/**
+ * "BTC, through Fri 20 Nov (protect below $63,000.00; ladder BTC2611272200, settles Fri Nov 27, 2026, 5:00 PM
+ * ET): covered, the goal is met (...)."
+ */
 export function coverSentence(cover: CoverNowRow): string {
-  const goal = `${cover.asset} below ${cover.floorCents === null ? "its floor" : formatCents(cover.floorCents)} on ${cover.eventTicker} (settles ${cover.expiresText})`;
+  const goal = `${cover.goal} (protect below ${cover.floorCents === null ? "its floor" : formatCents(cover.floorCents)}; ladder ${cover.eventTicker}, settles ${cover.expiresText})`;
   const owner = cover.heldByState?.awaitingOwnerCents ?? 0;
   const pending =
     owner > 0 ? `, ${formatCents(owner)} of it from orders waiting for the owner's approval` : "";
@@ -137,6 +162,12 @@ export function coverSentence(cover: CoverNowRow): string {
     cover.heldPayoutCents === null || cover.targetPayoutCents === null
       ? ""
       : ` (positions pay ${formatCents(cover.heldPayoutCents)} of ${formatCents(cover.targetPayoutCents)}${pending})`;
+  // Every strike there is lies above the floor: the goal's protection ends at the lowest one.
+  const aboveFloor =
+    cover.downToCents !== null && cover.floorCents !== null && cover.downToCents > cover.floorCents;
+  const ends = aboveFloor
+    ? `; the goal protects only down to ${formatCents(cover.downToCents ?? 0)}, the lowest strike there is (the floor ${formatCents(cover.floorCents ?? 0)} is below every strike)`
+    : "";
   const below = cover.belowFloor;
   if (below !== null && cover.heldPayoutCents !== null && cover.targetPayoutCents !== null) {
     const now = `${cover.asset} is at or below the floor, at ${formatCents(below.spotCents)}`;
@@ -154,10 +185,10 @@ export function coverSentence(cover: CoverNowRow): string {
   switch (cover.state) {
     case "met":
       // Met is met: a percentage under 100 within the tolerance would read as "not yet fully" (issue #88).
-      return `${goal}: covered, the goal is met${paid}.`;
+      return `${goal}: covered, the goal is met${paid}${ends}.${aboveFloor ? " No lower strike is listed, so nothing more can be added." : ""}`;
     case "partly_met":
     case "not_met":
-      return `${goal}: ${cover.coverBps === null ? "not fully covered" : `covered ${percent(cover.coverBps)}`}${paid}, ${formatCents(cover.missingPayoutCents ?? 0)} missing${addNothing(cover.reason)}.`;
+      return `${goal}: ${cover.coverBps === null ? "not fully covered" : `covered ${percent(cover.coverBps)}`}${paid}, ${formatCents(cover.missingPayoutCents ?? 0)} missing${ends}${addNothing(cover.reason, cover.missingBelowVenue)}.`;
     case "nothing_to_cover":
       return `${goal}: nothing to protect now: the floor is not below today's price, so the goal calls for no contracts.`;
     case "cannot_hedge":

@@ -208,6 +208,7 @@ describe("get_portfolio for each cause", () => {
     planId: HOSTED_WEEKLY_PLAN.plan_id,
     floorCents: 5_799_180,
     spotCents: 6_469_037,
+    missingBelowVenue: false,
     measuredBelowCents: null,
     targetPayoutCents: 0,
     heldPayoutCents: 0,
@@ -216,7 +217,8 @@ describe("get_portfolio for each cause", () => {
     missingPayoutCents: 0,
     belowFloor: null,
   };
-  const head = "Cover now: BTC below $57,991.80 on BTC2611202200 (settles Fri Nov 20, 2026, 5:00 PM ET): ";
+  const head =
+    "Cover now: BTC, through Fri 20 Nov (protect below $57,991.80; ladder BTC2611202200, settles Fri Nov 20, 2026, 5:00 PM ET): ";
 
   it.each([
     [
@@ -265,7 +267,61 @@ describe("get_portfolio for each cause", () => {
     });
     const { summary } = await getPortfolio.run({}, h.ctx);
     expect(summary).toContain(
-      `${head}covered 45% (positions pay $82.68 of $183.08), $100.40 missing; nothing more can be bought for it now: the exchange that takes this mandate's orders lists no strike below today's price.`,
+      `${head}covered 45% (positions pay $82.68 of $183.08), $100.40 missing; the goal protects only down to $61,000.00, the lowest strike there is (the floor $57,991.80 is below every strike); nothing more can be bought for it now: the exchange that takes this mandate's orders lists no strike below today's price.`,
+    );
+  });
+
+  it("says where a met goal's protection ends when every strike is above the floor", async () => {
+    // The hosted weekly at the recording: met, its staircase ending at $61,000, above the $57,991.80 floor.
+    const h = harness({
+      clock,
+      cover: () => [
+        {
+          ...goal,
+          state: "met",
+          reason: null,
+          measuredBelowCents: 6_100_000,
+          targetPayoutCents: 18_308,
+          heldPayoutCents: 24_763,
+          heldByState: { filledCents: 24_763, awaitingFillCents: 0, awaitingOwnerCents: 0 },
+          coverBps: 13_525,
+          missingPayoutCents: 0,
+        },
+      ],
+    });
+    const { structured, summary } = await getPortfolio.run({}, h.ctx);
+    expect(summary).toContain(
+      `${head}covered, the goal is met (positions pay $247.63 of $183.08); the goal protects only down to $61,000.00, the lowest strike there is (the floor $57,991.80 is below every strike). No lower strike is listed, so nothing more can be added.`,
+    );
+    expect((structured["cover"] as Row[])[0]).toMatchObject({
+      goal: "BTC, through Fri 20 Nov",
+      downToCents: 6_100_000,
+      floorCents: 5_799_180,
+    });
+  });
+
+  it("says the real exchange lists lower strikes than the sandbox when the missing part lies there", async () => {
+    const h = harness({
+      clock,
+      cover: () => [
+        {
+          ...goal,
+          floorCents: 6_300_000,
+          state: "partly_met",
+          reason: "no_more_strikes",
+          missingBelowVenue: true,
+          measuredBelowCents: 6_300_000,
+          targetPayoutCents: 8_300,
+          heldPayoutCents: 3_300,
+          heldByState: { filledCents: 3_300, awaitingFillCents: 0, awaitingOwnerCents: 0 },
+          coverBps: 3_975,
+          missingPayoutCents: 5_000,
+        },
+      ],
+    });
+    const { summary } = await getPortfolio.run({}, h.ctx);
+    expect(summary).toContain(
+      "covered 39% (positions pay $33.00 of $83.00), $50.00 missing; nothing more can be bought for it now: Gemini's real exchange lists lower strikes that the sandbox, the exchange that takes this mandate's orders, does not, and what is missing lies on those.",
     );
   });
 

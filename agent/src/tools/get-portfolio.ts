@@ -73,7 +73,8 @@ export const getPortfolio = defineTool({
     }
 
     const [stored, summary] = await Promise.all([readSettlements(ctx), readSummary(ctx)]);
-    const cover = summary === null ? null : summary.cover.map((goal) => coverNowRow(goal, summary));
+    const now = ctx.clock.now().getTime();
+    const cover = summary === null ? null : summary.cover.map((goal) => coverNowRow(goal, summary, now));
     const coverText =
       cover === null
         ? " Cover now: the console cannot say right now, so do not report the cover."

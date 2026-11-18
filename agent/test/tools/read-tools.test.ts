@@ -1070,6 +1070,7 @@ describe("the daily digest's fields (issue #97)", () => {
       floorCents: 6_300_000,
       spotCents: 6_400_000,
       measuredBelowCents: 6_300_000,
+      missingBelowVenue: false,
     };
     const h = harness({
       cover: () => [
@@ -1105,6 +1106,7 @@ describe("the daily digest's fields (issue #97)", () => {
     const { structured, summary } = await getPortfolio.run({}, h.ctx);
     expect(structured["cover"]).toEqual([
       {
+        goal: "BTC, through Fri 20 Nov",
         asset: "BTC",
         eventTicker: LADDER_TICKER,
         expiresAt: EXPIRY,
@@ -1118,15 +1120,17 @@ describe("the daily digest's fields (issue #97)", () => {
         heldByState: { filledCents: 1_000, awaitingFillCents: 0, awaitingOwnerCents: 2_000 },
         targetPayoutCents: 6_500,
         missingPayoutCents: 3_500,
+        downToCents: 6_300_000,
+        missingBelowVenue: false,
         link: "http://localhost:3000/hedge",
       },
       expect.objectContaining({ asset: "ETH", state: "unavailable", coverBps: null }),
     ]);
     expect(summary).toContain(
-      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): covered 46% (positions pay $30.00 of $65.00, $20.00 of it from orders waiting for the owner's approval), $35.00 missing.`,
+      `Cover now: BTC, through Fri 20 Nov (protect below $63,000.00; ladder ${LADDER_TICKER}, settles Fri Nov 20, 2026, 5:00 PM ET): covered 46% (positions pay $30.00 of $65.00, $20.00 of it from orders waiting for the owner's approval), $35.00 missing.`,
     );
     expect(summary).toContain(
-      `ETH below $3,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): the console cannot measure the cover right now; do not report it as covered or not.`,
+      `ETH, through Fri 20 Nov (protect below $3,000.00; ladder ${LADDER_TICKER}, settles Fri Nov 20, 2026, 5:00 PM ET): the console cannot measure the cover right now; do not report it as covered or not.`,
     );
 
     // Met within the tolerance (99.5%): it reads as met, never as "99%" (issue #88).
@@ -1147,7 +1151,7 @@ describe("the daily digest's fields (issue #97)", () => {
     });
     const metSummary = (await getPortfolio.run({}, met.ctx)).summary;
     expect(metSummary).toContain(
-      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): covered, the goal is met (positions pay $64.70 of $65.00).`,
+      `Cover now: BTC, through Fri 20 Nov (protect below $63,000.00; ladder ${LADDER_TICKER}, settles Fri Nov 20, 2026, 5:00 PM ET): covered, the goal is met (positions pay $64.70 of $65.00).`,
     );
     expect(metSummary).not.toContain("99%");
     expect((await getPortfolio.run({}, harness().ctx)).structured["cover"]).toEqual([]);

@@ -13,6 +13,26 @@ That staircase buys `q x (K_prev - max(K, F))` contracts at each strike `K` belo
 The goal is measured from spot, like a plan.
 When spot rises, the loss between spot and the floor grows, so the same positions cover a smaller share of it; when spot falls, they cover more.
 
+## One goal per asset and ladder
+
+A mandate has one goal per asset and ladder (event), so a daily and a weekly hedge of the same holding are two goals, each with its own floor and staircase.
+Each stored plan names its goal: its asset, its ladder and its floor.
+Which stored plans are goals (`selectGoalPlans` in `shared/src/goals.ts`):
+
+- For each asset, its newest plan, and every plan with at least one order proposed to the contract, are candidates.
+  An order is proposed when an intent's decision context names the plan: the context hash its `IntentProposed` event carried, on a contract that records it, or the agent's offchain link otherwise.
+  An intent the contract rejected still counts.
+- Of the candidates, the newest per ladder is that ladder's goal.
+
+So the newest plan for an asset supersedes the asset's older plans that never reached the contract, and a plan that did stays a goal until its ladder expires.
+A weekly hedge that was executed and a daily planned after it are two goals; planning a third ladder while the daily has no proposed order drops the daily; a plan whose every order was rejected stays a goal and reads not covered.
+
+Home, the price wake-ups, the digest and `get_portfolio` measure every goal whose ladder has not expired, soonest expiry first (at most 4).
+Home's "Goals covered" counts each goal.
+The cover uses the saved holding, or the holding the plan was sized for when none is saved.
+Goals are named in words, by when they end: "BTC, through today, 22:00 UTC" on the day the ladder settles, otherwise "BTC, through Fri 20 Nov", never by the ladder's ticker alone (`goalLabel`).
+The Hedge page keeps one tab per asset; inside a tab with more than one goal, a row of goals, soonest first, picks the one the rest of the page shows (`?goal=` keeps the choice).
+
 ## Two questions, two sources of strikes
 
 What is covered and what can be added are different questions, and they read different strikes.
@@ -84,11 +104,13 @@ A goal carries a `reason` when it has no staircase, or when it is not met and no
 | `no_strike_below_spot` | The exchange that takes the orders lists no strike below spot on this ladder. |
 | `ladder_not_listed` | The exchange that takes the orders does not list the ladder at all. Positions held are measured on production's strikes as usual. |
 | `holding_too_small` | The holding is too small for the smallest contract (0.01) on any rung. |
-| `no_more_strikes` | What is still missing lies on strikes the exchange that takes the orders does not list. |
+| `no_more_strikes` | What is still missing lies on strikes the exchange that takes the orders does not list. Only Gemini's sandbox lacks strikes its production exchange lists, so the sentences say so: "Gemini's real exchange lists lower strikes that the sandbox your orders go to does not", with "lower" only when every missing strike lies below the sandbox's lowest (`missingBelowVenue`). |
 
 Only `met` counts as covered: Home's "Goals covered" counts `met` goals, and neither `nothing_to_cover` nor `cannot_hedge` is ever called covered.
 The cover always states the goal's floor, also when no strike lies below spot, so "$0" never stands for a floor.
-When every strike there is lies above the floor, the staircase ends at the lowest one, and the sentences name that strike as where protection ends.
+When every strike there is lies above the floor, the staircase ends at the lowest one, and the sentences name that strike as where protection ends (`downToCents` in `get_portfolio`).
+A goal met there ends "No lower strike is listed, so nothing more can be added.", never "Nothing more is needed.", which is kept for a staircase that reaches the floor.
+While the Hedge page waits for the goal's quotes, "Cover now" says it is measuring; "cannot be measured now" appears only after a read failed.
 
 ## When the price is at or below the floor
 

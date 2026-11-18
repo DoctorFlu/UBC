@@ -25,7 +25,7 @@ export type HedgeMarketState =
  */
 export function useHedgeMarket(input: {
   asset: string;
-  /** The stored plan's event; part of the cache key only, so a new plan asks again at once. */
+  /** The event of the goal shown (one of the asset's goal plans), or null when the agent planned none. */
   eventTicker: string | null;
   preview: boolean;
   /** Changes whenever the preview's inputs (holdings, rules, committed budget) change, to ask again at once. */
@@ -52,7 +52,8 @@ export function useHedgeMarket(input: {
     retry: false,
     queryFn: async ({ signal }): Promise<HedgeMarketResponse> => {
       const params = new URLSearchParams({ asset: input.asset });
-      // No `event`: the console asks for the event of the plan it stores, and refuses any other.
+      // The console refuses any event but those of the goals it stores for the asset.
+      if (input.eventTicker !== null) params.set("event", input.eventTicker);
       if (input.preview) params.set("preview", "1");
       const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}${params.toString()}`, {
         signal,

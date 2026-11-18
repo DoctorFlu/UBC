@@ -11,7 +11,7 @@ The notifier runs inside the console backend (`dashboard/src/server/wake.ts`), w
 - The console already ingests every Policy event into its store, from the RPC poller today and from the QuickNode Stream webhook later (issue #19).
   Both sources end in one function, `ConsoleService.apply`, which receives only the events the store had not seen (an event is identified by its transaction hash and log index).
   The wake-up rules are called there, so a trigger fires once whichever source delivered its event, and a repeated delivery fires nothing.
-- The console already asks Gemini for live ladders through a cached, rate-limited client (`MarketQuotes`), and it holds what cover needs: the agent's latest plan per asset (the current goal), the owner's holdings and the intents.
+- The console already asks Gemini for live ladders through a cached, rate-limited client (`MarketQuotes`), and it holds what cover needs: the mandate's goals (one plan per asset and ladder, [cover.md](cover.md#one-goal-per-asset-and-ladder)), the owner's holdings and the intents.
   The price check reuses that client and the server's cover computation (`coverNow`, which calls `coverOfPlan` from `@mandate/planner`; see [cover.md](cover.md)).
 - The MCP server only answers Grok Bot; it has no view of the chain between calls.
 
@@ -44,8 +44,8 @@ The body is version 1 of `wakeEventSchema` (`shared/src/wake.ts`), usually 300 t
 
 | `kind` | When | `detail` |
 | --- | --- | --- |
-| `price_below_floor` | Spot fell below the floor of the current goal. | `asset`, `eventTicker`, `planId`, `spotCents`, `floorCents` |
-| `cover_lost` | Spot rose and the protection held no longer meets the goal. | `asset`, `eventTicker`, `planId`, `spotCents`, `previousSpotCents`, `state`, `coverBps` |
+| `price_below_floor` | Spot fell below the floor of a goal. | `asset`, `eventTicker`, `planId`, `expiresAt`, `spotCents`, `floorCents` |
+| `cover_lost` | Spot rose and the protection held no longer meets a goal. | `asset`, `eventTicker`, `planId`, `expiresAt`, `previousSpotCents`, `spotCents`, `state`, `coverBps` |
 | `intent_rejected` | The contract rejected an intent when it was proposed, outside a Bot run. | `intents[]`: `id`, `market`, `reason` |
 | `owner_decision` | The owner approved or rejected an order that was waiting for them. | `intents[]`: `id`, `market`, `decision`, `reason` |
 | `mandate_changed` | The owner changed the rules, paused or resumed the agent. | `change` (`rules`, `paused` or `resumed`), `paused` |

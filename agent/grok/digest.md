@@ -27,9 +27,11 @@ On each run:
 
 1. Call `get_setup_state`. If `ready` is not true, the digest is one line that says setup is incomplete and what is missing, then stop.
 2. Call `get_policy`. Note whether the mandate is paused and the budget left, as its summary gives them.
-3. Call `get_portfolio`. Its `cover` lists the cover held now for each current goal, as the console measured it:
-   `state` (`met`, `partly_met`, `not_met`, `nothing_to_cover`, `cannot_hedge` or `unavailable`), `reason` (why a goal has no staircase, or why nothing can be added to it), `belowFloor` (set when the price is at or below the floor and positions are held), `coverBps` (10000 is 100%), `floorCents`, `eventTicker`, `expiresAt`, `heldByState.awaitingOwnerCents` (the part that waits for the owner's approval), `missingPayoutCents` and `link`.
+3. Call `get_portfolio`. Its `cover` lists the cover held now for each current goal, soonest first, as the console measured it:
+   `goal` (the goal in words, such as "BTC, through today, 22:00 UTC" or "BTC, through Fri 20 Nov"), `state` (`met`, `partly_met`, `not_met`, `nothing_to_cover`, `cannot_hedge` or `unavailable`), `reason` (why a goal has no staircase, or why nothing can be added to it), `belowFloor` (set when the price is at or below the floor and positions are held), `coverBps` (10000 is 100%), `floorCents`, `downToCents` (where the goal's protection ends), `eventTicker`, `expiresAt`, `heldByState.awaitingOwnerCents` (the part that waits for the owner's approval), `missingPayoutCents` and `link`.
    The summary has the same thing as a sentence after "Cover now:".
+   Name each goal by its `goal`, never by `eventTicker` alone: an asset can have two goals at once, such as a daily and a weekly ladder.
+   When `downToCents` is above `floorCents`, the goal protects only down to that strike, the lowest there is: say so, and never say it protects down to the floor.
    If `state` is `met`, write "covered" and no percentage: the goal is met even when `coverBps` is a little under 10000.
    If `state` is `partly_met` or `not_met`, give `coverBps` as a percent and what is missing.
    If `belowFloor` is set, the price is at or below the floor: give the summary's sentence, which says what the positions pay if it settles there against the goal as planned.
@@ -56,7 +58,7 @@ If `last24h.flagged` is not empty, the first line must say that intents were wri
 Send the digest as a phone notification, in this shape and order, plain text, no tables, no Markdown headings:
 
 - First line, about 100 characters or fewer, standing alone: the single most important thing. In order of priority: flagged intents, a paused mandate, anything waiting for the owner, a settlement, a cover that is not `met`, otherwise "all covered, quiet day".
-- `Protected:` each goal's asset, floor and ladder expiry, and its cover as step 3 says; add how much of it waits for the owner's approval when `heldByState.awaitingOwnerCents` is above 0.
+- `Protected:` each goal by its `goal`, its floor, and its cover as step 3 says; add how much of it waits for the owner's approval when `heldByState.awaitingOwnerCents` is above 0.
 - `Spent:` `last24h.filledCents` and the number of orders filled, the signals bought and their USDC, and the budget left from `get_policy`.
 - `Settled:` each ladder in `last24h.settled.ladders` with its cost, its fees when `feeCents` is present, what it paid and the net (`pnlCents`, already after fees).
   When any fee is shown, say "fees estimated" once in this line, not per ladder. Leave this line out when nothing settled.

@@ -267,8 +267,15 @@ export async function startStack(options: {
       executorAddress: devAccount("executor").address,
       // The cover the console measures on Gemini's quotes and the chain's intents (issue #97).
       cover: coverFromPlans({
-        // The fixture's ladder expires on a fixed date: measure as if before it, whenever the test runs.
-        now: () => new Date(Math.min(Date.now(), Date.parse(EXPIRY) - 3_600_000)),
+        // The fixture's ladders expire on fixed dates: measure as if an hour before the current one's
+        // expiry, whenever the test runs, and after any ladder `expire` settled.
+        now: () => {
+          const before = Math.min(Date.now(), Date.parse(markets.current.expiry ?? EXPIRY) - 3_600_000);
+          const settled = markets.events
+            .filter((event) => event.status === "settled")
+            .map((event) => Date.parse(event.expiry ?? EXPIRY) + 60_000);
+          return new Date(Math.max(before, ...settled));
+        },
         ladder: (_asset, eventTicker) => Promise.resolve(markets.quote(eventTicker)),
         intents: async () => {
           const count = await reader.getIntentCount();
