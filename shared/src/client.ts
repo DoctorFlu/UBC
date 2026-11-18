@@ -22,6 +22,7 @@ import { evaluateIntent, headroom, type Headroom, type PolicyState, type RuleInp
 import { decodePolicyLogs, parsePolicyLogs, rulesFromTuple, rulesToChain, type ParseOptions } from "./events";
 import { ARC_MIN_MAX_FEE_PER_GAS, applyFeeFloor } from "./fees";
 import { intentStatusFromCode, verdictFromCode } from "./reasons";
+import { RATE_LIMIT_FIRST_BACKOFF_MS, RATE_LIMIT_MAX_BACKOFF_MS, type RpcGate, rateLimitOf } from "./rpc-limit";
 import {
   policyRulesSchema,
   tradeIntentSchema,
@@ -388,19 +389,32 @@ export class PolicyClient {
    */
   watchEvents(options: {
     onEvents: (events: PolicyEvent[]) => void | Promise<void>;
-    onError?: (error: unknown) => void;
+    /** After each poll that read the chain up to its head. */
+    onPolled?: () => void;
+    /**
+     * A failed poll, and how long the watcher waits before the next. A rate-limit refusal waits for the
+     * endpoint's gate (its `Retry-After`, or a growing jittered backoff) instead of the polling interval.
+     */
+    onError?: (error: unknown, retryInMs: number) => void;
     fromBlock?: bigint;
     pollingIntervalMs?: number;
+    /** The latest block number, from a head poll shared with other watchers; this client's own by default. */
+    head?: (maxAgeMs: number) => Promise<bigint>;
+    /** The rate-limit gate of this client's endpoint, to wait for after a refusal. */
+    gate?: RpcGate;
   }): () => void {
     const interval = options.pollingIntervalMs ?? 1_000;
+    const head = options.head ?? (() => this.publicClient.getBlockNumber({ cacheTime: 0 }));
     let stopped = false;
     // Read through a function so the compiler does not narrow `stopped` across awaits.
     const isStopped = (): boolean => stopped;
     let next = options.fromBlock;
+    let refusals = 0;
     const loop = async (): Promise<void> => {
       while (!isStopped()) {
+        let wait = interval;
         try {
-          const latest = await this.publicClient.getBlockNumber({ cacheTime: 0 });
+          const latest = await head(interval);
           next ??= latest + 1n;
           if (latest >= next) {
             const events = await this.getEvents(
@@ -414,10 +428,18 @@ export class PolicyClient {
             next = latest + 1n;
             if (events.length > 0 && !isStopped()) await options.onEvents(events);
           }
+          refusals = 0;
+          options.onPolled?.();
         } catch (error) {
-          (options.onError ?? defaultWatchError)(error);
+          const limit = rateLimitOf(error);
+          if (limit) {
+            refusals += 1;
+            const backoff = Math.min(RATE_LIMIT_MAX_BACKOFF_MS, RATE_LIMIT_FIRST_BACKOFF_MS * 2 ** (refusals - 1));
+            wait = Math.max(interval, options.gate?.remainingMs() ?? 0, limit.retryAfterMs ?? backoff);
+          }
+          (options.onError ?? defaultWatchError)(error, wait);
         }
-        await sleep(interval);
+        await sleep(wait);
       }
     };
     void loop();

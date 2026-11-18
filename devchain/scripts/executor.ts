@@ -47,6 +47,7 @@ import {
   consoleOrderJournal,
   consoleSettlementSink,
   devGeminiClient,
+  executorHead,
   executorPolicyClient,
   executorTarget,
   geminiVenue,
@@ -60,7 +61,7 @@ import {
   type RecordSigner,
   type Venue,
 } from "../src";
-import { executorSettings } from "../src/executor-settings";
+import { defaultExecutorPollMs, executorSettings } from "../src/executor-settings";
 
 function fail(message: string): never {
   console.error(`[executor] ${message}`);
@@ -78,7 +79,7 @@ try {
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 }
-const { fillDelayMs, pollingIntervalMs, settleIntervalMs, consoleUrl, orderTtlMs } = settings;
+const { fillDelayMs, settleIntervalMs, consoleUrl, orderTtlMs } = settings;
 
 let deployment: ResolvedDeployment;
 let target: ExecutorTarget;
@@ -93,6 +94,9 @@ const rpcHost = new URL(target.rpcUrl).host;
 const redact = (text: string): string => text.replaceAll(target.rpcUrl, rpcHost);
 
 const client = executorPolicyClient(target);
+const pollingIntervalMs = settings.pollingIntervalMs ?? defaultExecutorPollMs(target.local);
+/** One head poll for every contract served, and the endpoint's rate-limit gate. */
+const shared = executorHead(target, client);
 const wallet = client.walletClient;
 if (wallet === undefined) fail("The executor's client has no wallet.");
 // Narrowed once here: the functions below use it after the check above.
@@ -213,7 +217,7 @@ if (settings.venue === "gemini") {
 
 console.log(
   `[executor] ${describeVenue}; on ${target.network} as ${executorAddress}; serving ${target.policy} and every mandate's contract that names this ` +
-    `executor (listed by the console at ${consoleUrl}), polling every ${String(pollingIntervalMs ?? 1_000)} ms; ` +
+    `executor (listed by the console at ${consoleUrl}), polling every ${String(pollingIntervalMs)} ms; ` +
     `checks every approved intent against Gemini's ${marketData.environment} first (${marketData.settings}); ` +
     `settles expired positions every ${String(settleIntervalMs / 1_000)} s into the console`,
 );
@@ -263,7 +267,9 @@ async function serve(contract: ExecutorContract): Promise<Executor | { refused: 
     fromBlock: BigInt(contract.deployBlock),
     fillDelayMs,
     settleIntervalMs,
-    ...(pollingIntervalMs === undefined ? {} : { pollingIntervalMs }),
+    pollingIntervalMs,
+    head: shared.head,
+    gate: shared.gate,
   });
 }
 

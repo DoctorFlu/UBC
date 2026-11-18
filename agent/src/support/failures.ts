@@ -7,7 +7,7 @@
 import { BaseError, InsufficientFundsError } from "viem";
 import { isGeminiError } from "@mandate/gemini";
 import { PlannerInputError } from "@mandate/planner";
-import { PolicyClientError, PolicyRevertError } from "@mandate/shared";
+import { PolicyClientError, PolicyRevertError, formatWait, rateLimitOf } from "@mandate/shared";
 import { ConsoleClientError } from "../console/client";
 import type { ToolContext } from "../context";
 import { scrubText } from "../logger";
@@ -173,6 +173,17 @@ function classify(error: unknown): Failure | null {
       nextAction: {
         actor: "agent",
         hint: "Call get_activity in a minute to see whether the intent was recorded. Do not propose it again before that.",
+      },
+    };
+  }
+  const limit = rateLimitOf(error);
+  if (limit !== null) {
+    const wait = limit.retryAfterMs === null ? "a minute" : formatWait(limit.retryAfterMs);
+    return {
+      reason: reason("CHAIN_UNAVAILABLE", `The Arc RPC endpoint is rate-limiting this server; it asks us to wait ${wait}.`),
+      nextAction: {
+        actor: "agent",
+        hint: "Try once more in a minute. If it is refused again, tell the owner the chain RPC is rate-limiting the server.",
       },
     };
   }

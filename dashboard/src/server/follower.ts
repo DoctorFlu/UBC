@@ -9,13 +9,25 @@ import {
   applyEvents,
   decodePolicyLogs,
   emptyPolicyViewState,
+  formatWait,
   intentsMissingDetails,
+  politeHttp,
+  rateLimitOf,
   reduceEvents,
+  rpcGate,
+  sharedHead,
   toSafeNumber,
 } from "@mandate/shared";
 import type { EnvVars, ResolvedDeployment } from "@mandate/shared/node";
 import type { StreamBatch } from "@mandate/streams";
-import { type Address, type Hex, type Log, createPublicClient, http, isAddressEqual } from "viem";
+import {
+  type Address,
+  type Hex,
+  type Log,
+  createPublicClient,
+  isAddressEqual,
+  verifyMessage as verifyEoaMessage,
+} from "viem";
 
 import type { ConsoleNetwork, ContractKind, FeedHealth, FeedStatus } from "@/lib/live/types";
 
@@ -78,8 +90,21 @@ export interface FollowerHooks {
   changed: (options?: { quiet: boolean }) => void;
 }
 
-const ROLES_REFRESH_MS = 10_000;
+/**
+ * Roles change only by an event (`UserChanged`, `AgentChanged`, `ExecutorChanged`), which reads them again
+ * at once; this slow read is only a safety net for a contract that would not emit them.
+ */
+const ROLES_REFRESH_MS = 300_000;
 const MAX_BACKOFF_MS = 30_000;
+/**
+ * Most a chain read waits for the RPC's rate-limit gate before it fails unsent: long enough that an owner's
+ * sign-in or a role check rides out a short refusal, short against an HTTP request's patience.
+ */
+const RPC_GATE_WAIT_MS = 15_000;
+/** The poll interval on Arc testnet when `CONSOLE_POLL_INTERVAL_MS` is unset; see `pollIntervalMs`. */
+export const ARC_POLL_INTERVAL_MS = 3_000;
+/** Events that change a role: the roles are read again on the next poll. */
+const ROLE_EVENTS = new Set<PolicyEvent["type"]>(["UserChanged", "AgentChanged", "ExecutorChanged"]);
 /** With the Stream as the primary source, the RPC only checks for gaps this often. */
 const STREAM_SAFETY_POLL_MS = 15_000;
 /** Longest a browser waits for a feed update that is not news (the synced block moving on). */
@@ -109,6 +134,8 @@ export class ContractFollower {
   private lastPushAt = 0;
 
   private running = false;
+  /** Failed attempts since the last complete poll: the backoff grows with it. */
+  private failures = 0;
   private abort = new AbortController();
   private loop: Promise<void> | null = null;
 
@@ -156,7 +183,8 @@ export class ContractFollower {
   }
 
   private async run(signal: AbortSignal): Promise<void> {
-    let failures = 0;
+    /** After a rate-limit refusal the session is still good: carry on with it, without reading it again. */
+    let resume = false;
     while (!signal.aborted) {
       try {
         const target = await this.hooks.resolve();
@@ -168,12 +196,35 @@ export class ContractFollower {
           continue;
         }
         this.network = target.network;
-        const session = await this.openSession(target.deployment, target.kind, target.fileStamp);
-        failures = 0;
+        const current = this.session;
+        const session =
+          resume && current !== null && sameTarget(current, target)
+            ? current
+            : await this.openSession(target.deployment, target.kind, target.fileStamp);
+        resume = false;
         await this.follow(session, signal);
       } catch (error) {
         if (isAborted(signal)) return;
-        failures += 1;
+        this.failures += 1;
+        const failures = this.failures;
+        const limit = rateLimitOf(error);
+        if (limit !== null) {
+          // Not "offline": the chain is there and the console holds what it read; the RPC asked us to
+          // slow down. Owner actions go through the owner's wallet and stay possible.
+          resume = true;
+          const rpcUrl = this.session?.deployment.rpcUrl;
+          const delay = Math.max(
+            1_000,
+            limit.retryAfterMs ?? 0,
+            rpcUrl === undefined ? 0 : rpcGate(rpcUrl).remainingMs(),
+          );
+          this.setFeed({ health: "lagging", detail: rateLimitedDetail(delay) });
+          if (failures === 1 || failures % 10 === 0) {
+            this.log.warn(`chain read refused: the RPC is rate-limiting us; retrying in ${formatWait(delay)}`);
+          }
+          await sleep(delay, signal);
+          continue;
+        }
         const delay = Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** Math.min(failures - 1, 5));
         this.setFeed({ health: "offline", detail: offlineDetail(error, this.network, delay) });
         if (failures === 1 || failures % 10 === 0) this.log.warn(`chain read failed: ${errorMessage(error)}`);
@@ -189,8 +240,14 @@ export class ContractFollower {
   ): Promise<Session> {
     const client = createPublicClient({
       chain: deployment.chain,
-      // One HTTP request for reads issued together; retries are this follower's job, with backoff.
-      transport: http(deployment.rpcUrl, { batch: { wait: 0 }, retryCount: 0, timeout: 10_000 }),
+      // One HTTP request for reads issued together; retries are this follower's job, with backoff. Behind
+      // the process's rate-limit gate for the endpoint, shared with every other follower and client.
+      transport: politeHttp(deployment.rpcUrl, {
+        batch: { wait: 0 },
+        retryCount: 0,
+        timeout: 10_000,
+        maxWaitMs: RPC_GATE_WAIT_MS,
+      }),
     });
     const latest = await client.getBlockNumber({ cacheTime: 0 });
     const deployBlock =
@@ -271,7 +328,10 @@ export class ContractFollower {
       if (session.deployment.source === "devchain" && deploymentFileStamp(this.env()) !== session.fileStamp) {
         return; // dev:chain restarted or stopped: resolve the deployment again
       }
-      const block = await session.client.getBlock({ blockTag: "latest" });
+      // One head read per interval for every follower of this endpoint in the process.
+      const block = await sharedHead(`${String(session.deployment.chain.id)}:${session.deployment.rpcUrl}`, () =>
+        session.client.getBlock({ blockTag: "latest" }),
+      ).latest(interval);
       const latest = block.number;
       let cursor = this.events.cursor(session.id) ?? session.deployBlock;
       if (latest + 1n < cursor) {
@@ -301,15 +361,27 @@ export class ContractFollower {
       await this.fillIntentDetails(session);
       await this.refreshRoles(session);
       this.markSynced(Number(latest), primaryRpc);
+      this.recovered();
       session.backfilling = false;
       this.hooks.onSynced?.();
       await sleep(primaryRpc ? interval : Math.max(interval, STREAM_SAFETY_POLL_MS), signal);
     }
   }
 
+  /**
+   * `CONSOLE_POLL_INTERVAL_MS`, else 250 ms on the devchain and 3 s on Arc testnet: its public RPC
+   * refused (HTTP 429) the hosted machine polling every second, and each poll is two calls.
+   */
   private pollIntervalMs(session: Session | null): number {
     if (this.config.pollIntervalMs > 0) return this.config.pollIntervalMs;
-    return session?.deployment.source === "devchain" ? 250 : 1_000;
+    return session?.deployment.source === "devchain" ? 250 : ARC_POLL_INTERVAL_MS;
+  }
+
+  /** Says once that the chain answers again after failed reads, and starts the backoff over. */
+  private recovered(): void {
+    if (this.failures === 0) return;
+    this.log.info(`chain reads work again after ${String(this.failures)} failed ${this.failures === 1 ? "attempt" : "attempts"}`);
+    this.failures = 0;
   }
 
   private markSynced(block: number, primaryRpc: boolean): void {
@@ -346,6 +418,7 @@ export class ContractFollower {
    */
   private apply(added: readonly PolicyEvent[], history = false): void {
     if (added.length === 0) return;
+    if (added.some((event) => ROLE_EVENTS.has(event.type))) this.rolesReadAt = 0;
     this.state = applyEvents(this.state, added);
     this.followRoleEvents(added, history);
     const session = this.session;
@@ -501,6 +574,13 @@ export class ContractFollower {
 
   /** Whether `owner` signed `message`. Works for plain wallets and, through the chain, smart accounts. */
   async verifyOwnerSignature(owner: Address, message: string, signature: Hex): Promise<boolean> {
+    // A plain wallet's signature is checked here, with no call to the RPC: signing in keeps working while
+    // the RPC is rate-limiting us. Only a smart account's needs the chain.
+    try {
+      if (await verifyEoaMessage({ address: owner, message, signature })) return true;
+    } catch {
+      // Not a plain 65-byte signature: a smart account's, checked through the chain below.
+    }
     const session = this.session;
     if (!session) return false;
     try {
@@ -561,6 +641,21 @@ export function errorMessage(error: unknown): string {
     return typeof short === "string" ? short : (error.message.split("\n")[0] ?? error.name);
   }
   return String(error);
+}
+
+/** What the owner reads while the RPC refuses us: the console holds what it read and retries on its own. */
+export function rateLimitedDetail(delayMs: number): string {
+  return `The RPC is rate-limiting us; retrying in ${formatWait(delayMs)}. What you see may be a little behind.`;
+}
+
+/** Whether `session` reads the contract `target` names, at the same endpoint, from the same file. */
+function sameTarget(session: Session, target: Extract<FollowTarget, { ok: true }>): boolean {
+  return (
+    session.deployment.rpcUrl === target.deployment.rpcUrl &&
+    session.deployment.chain.id === target.deployment.chain.id &&
+    isAddressEqual(session.deployment.address, target.deployment.address) &&
+    session.fileStamp === target.fileStamp
+  );
 }
 
 function offlineDetail(error: unknown, network: ConsoleNetwork, delayMs: number): string {

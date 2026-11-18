@@ -8,7 +8,6 @@
 import {
   createPublicClient,
   createWalletClient,
-  http,
   type Account,
   type Chain,
   type PublicClient,
@@ -21,6 +20,7 @@ import {
   chainExplorerTxUrl,
   devchain,
   PolicyClient,
+  politeHttp,
   signerAccount,
   type AgentSigner,
   type Capabilities,
@@ -44,6 +44,12 @@ import { scopedFetch, shieldCurrentScope, unscoped, withSignal } from "./rpc-sco
  * transaction still unconfirmed after this is reported as `TX_UNCONFIRMED`, and nothing sends it again.
  */
 export const RECEIPT_TIMEOUT_MS = 10_000;
+
+/**
+ * Most one chain request waits for the RPC's rate-limit gate to open before it fails at once, unsent,
+ * saying the RPC is rate-limiting us: short against a tool call's deadline.
+ */
+export const RPC_GATE_WAIT_MS = 5_000;
 
 /** A loopback RPC is the local devchain (anvil): no explorer, and receipts arrive in milliseconds. */
 const isLoopback = isLoopbackUrl;
@@ -175,7 +181,14 @@ export function createAgentPolicy(config: Config, signer?: AgentSigner): AgentPo
   const rpcUrl = config.arcRpcUrl.reveal();
   const local = isLoopback(rpcUrl);
   const chain: Chain = local ? { ...devchain, rpcUrls: { default: { http: [rpcUrl] } } } : arcTestnet;
-  const transport = http(rpcUrl, { timeout: 10_000, retryCount: 1, fetchFn: scopedFetch });
+  // Behind the process's rate-limit gate: a refusal makes every call wait (a tool call at most a few
+  // seconds, then it answers that the RPC is rate-limiting us) instead of each one asking again.
+  const transport = politeHttp(rpcUrl, {
+    timeout: 10_000,
+    retryCount: 1,
+    maxWaitMs: RPC_GATE_WAIT_MS,
+    fetchFn: scopedFetch,
+  });
   const publicClient = createPublicClient({ chain, transport, pollingInterval: local ? 100 : 1_000 });
   const key = config.agentPrivateKey;
   const account =

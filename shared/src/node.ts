@@ -5,9 +5,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, createWalletClient, http, type Account, type Address, type Chain } from "viem";
+import { createPublicClient, createWalletClient, type Account, type Address, type Chain } from "viem";
 import { arcTestnet, devchain } from "./chains";
 import { PolicyClient, type PolicyClientOptions } from "./client";
+import { politeHttp } from "./rpc-limit";
 import { deploymentFileSchema, type DeploymentFile } from "./deployment";
 import { addressSchema } from "./types";
 
@@ -114,7 +115,8 @@ export function createPolicyClient(
   > = {},
 ): PolicyClient {
   const { account, deployment = resolvePolicyDeployment(), ...rest } = options;
-  const transport = http(deployment.rpcUrl);
+  // Behind the endpoint's rate-limit gate, waiting up to a minute for it as viem's retries would have.
+  const transport = politeHttp(deployment.rpcUrl, { retryCount: 3, maxWaitMs: 60_000 });
   // Anvil mines instantly and Arc settles in under a second, so poll faster than viem's 4 s default.
   const pollingInterval = deployment.source === "devchain" ? 100 : 1_000;
   const publicClient = createPublicClient({ chain: deployment.chain, transport, pollingInterval });

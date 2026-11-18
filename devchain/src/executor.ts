@@ -33,7 +33,10 @@ import {
   settlementMessage,
   type Intent,
   type PolicyClient,
+  type RpcGate,
   type Settlement,
+  formatWait,
+  rpcErrorText,
 } from "@mandate/shared";
 import type { SettlementSink } from "./settlement-sink";
 import type { HeldPosition, PositionOutcome, Venue } from "./venue";
@@ -138,6 +141,10 @@ export interface ExecutorOptions {
    */
   openRecheckMs?: number;
   pollingIntervalMs?: number;
+  /** The latest block number from a head poll shared by every contract served (`executorHead`). */
+  head?: (maxAgeMs: number) => Promise<bigint>;
+  /** The rate-limit gate of the client's endpoint, waited for after a refusal. */
+  gate?: RpcGate;
   /** Clock in milliseconds, for settlement schedules. */
   now?: () => number;
   log?: (line: string) => void;
@@ -510,9 +517,13 @@ export function startExecutor(options: ExecutorOptions): Executor {
     return next;
   }
 
+  let failing = 0;
   const stopWatching = client.watchEvents({
     ...(options.fromBlock === undefined ? {} : { fromBlock: options.fromBlock }),
     ...(options.pollingIntervalMs === undefined ? {} : { pollingIntervalMs: options.pollingIntervalMs }),
+    ...(options.head === undefined ? {} : { head: options.head }),
+    ...(options.gate === undefined ? {} : { gate: options.gate }),
+    onPolled: recovered,
     onEvents: (events) => {
       let newFills = false;
       for (const event of events) {
@@ -527,10 +538,20 @@ export function startExecutor(options: ExecutorOptions): Executor {
       // A new fill is looked at right away, which also learns when its market expires.
       if (newFills && options.settlements !== undefined) void settleNow();
     },
-    onError: (error) => {
-      log(`${tag} polling failed: ${errorText(error)}`);
+    onError: (error, retryInMs) => {
+      failing += 1;
+      // The first failure of a run and every tenth after it: a rate-limited minute is one line, not sixty.
+      if (failing === 1 || failing % 10 === 0) {
+        log(`${tag} polling failed: ${errorText(error)}; retrying in ${formatWait(retryInMs)}`);
+      }
     },
   });
+  /** Says once that polling works again after failures. */
+  function recovered(): void {
+    if (failing === 0) return;
+    log(`${tag} polling works again after ${String(failing)} failed ${failing === 1 ? "poll" : "polls"}`);
+    failing = 0;
+  }
   const settleTimer =
     options.settlements === undefined ? null : setInterval(() => void settleNow(), settleIntervalMs);
 
@@ -546,7 +567,8 @@ export function startExecutor(options: ExecutorOptions): Executor {
   };
 }
 
+/** One line, without the RPC's URL (a provider's holds its key) or the request body viem adds. */
 function errorText(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
+  const text = rpcErrorText(error);
   return text.length > 300 ? `${text.slice(0, 300)}...` : text;
 }
