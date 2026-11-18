@@ -547,6 +547,8 @@ docker builder prune -f --filter until=1h
 
 Measured on the free machine, a swap that recreates every container took 25 to 36 seconds: the console answered 502 for 15 to 27 seconds and `/mcp` for 8 to 19, while the containers were recreated in order, and both for a second more while Caddy was recreated.
 An update that changes only the console recreates only the console and Caddy, for about 4 seconds.
+The console and services images have `pull_policy: build`, so this `up` builds them again before it recreates anything; after the build above every step comes from the cache, which takes a few seconds, but the images get new ids.
+In the update from database 8 to 9 on 17 Nov 2026, measured from outside once a second, the console answered 502 for about 8 seconds and `/mcp` for about 13.
 The prune keeps only the build cache the new version used (see [Update](#update) for why).
 Pick a moment when nothing is scheduled to call the app, such as a Grok Bot routine at the top of the hour.
 The landing page keeps serving the previous build until Caddy is recreated, then the new one.
@@ -658,6 +660,7 @@ The steps were first used for the update from version 5 to 6 (the `settlements` 
 
    The same `diff` as in the rehearsal is expected, with one more line: `signal_budget` changes its hash on every update, because the MCP server sends the console its budget again when it starts.
    Only the times in that row change (`as_of`, `stored_at` and the snapshot's `asOf`), not the amounts.
+   `executor_venues` changes its hash too, because the executor announces its venue again when it starts: only `announcedAt`, `stored_at`, the document's hash and its signature change, while the venue, the contract and the signer stay the same (seen in the update from 8 to 9 on 17 Nov 2026).
 
 If the new version misbehaves after the swap, roll back to the old images and the old `repo`.
 After an update that only adds tables, the old console runs on the upgraded file as it is: its `migrate()` starts at the file's version, finds no step to apply, and ignores tables it does not know.
@@ -880,6 +883,19 @@ In `/data/mandate/mandate.env`, with an editor (none of these is a secret):
 - `COMPOSE_FILE=compose.yml:compose.arc.yml:compose.gateway.yml` (add `:compose.site.yml` if the landing page is served);
 - `POLICY_ADDRESS=0x571D8ea7C86c80a230C10818743f8861084F82f3` and `POLICY_DEPLOY_BLOCK=72740419`;
 - `ARC_RPC_URL=` (empty: Arc's public RPC) and `CONSOLE_EVENT_SOURCE=rpc`.
+
+The Arc console image can be built ahead, while the demo stack serves, so that the switch below finds it in the build cache.
+`compose.arc.yml` cannot be used for that yet, because Compose refuses it without the Arc settings; the same build without Compose is:
+
+```sh
+cd /data/mandate/repo
+docker build -f deploy/Dockerfile --target console --build-arg NEXT_PUBLIC_DEV_SIGNER=0 -t mandate-console:arc .
+```
+
+On the free machine on 17 Nov 2026, right after the demo images were built, it took 32 seconds: only the console's build step ran again, because the test signer setting differs.
+While it ran, the machine still had at least 4.0 GB of its 8 GB of memory available and no swap in use, with the stack serving.
+It added about 0.4 GB on `/data`.
+The build fails if the test signer's key ends up in a build made without it, as in `compose.arc.yml`.
 
 Then build the Arc console image, start, and remove the demo chain's containers (their volumes stay):
 
