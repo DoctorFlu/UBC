@@ -7,11 +7,25 @@ import { HoldButton } from "@/components/ui/HoldButton";
 import { useToast } from "@/components/ui/Toast";
 import { formatUsdCents } from "@/lib/format";
 import { describeMarket, namingCategory } from "@/lib/markets";
-import { ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
+import { type OwnerAccess, ownerActionLabel, ownerBlockedReason } from "@/lib/owner/access";
 import { useOwnerTx } from "@/lib/owner/useOwnerTx";
 
 import styles from "./domain.module.css";
 import { OwnerTxStatus } from "./OwnerTxStatus";
+
+/**
+ * The armed state's words: "Press again", with the action for assistive technology. A hold button is as
+ * wide as its longest label, so the visible words stay shorter than the resting ones and the row keeps its
+ * width (an approval card or table at 1440 px has no room to spare).
+ */
+function pressAgain(access: OwnerAccess, action: "approve" | "reject") {
+  return (
+    <>
+      Press again<span className="visually-hidden"> to {action}</span>
+      {access.kind === "owner" && access.signer === "passkey" ? " with passkey" : null}
+    </>
+  );
+}
 
 /**
  * Approve or reject an intent waiting for the owner, each by holding or pressing twice. Each is an owner-signed
@@ -85,7 +99,7 @@ export function ApprovalActions({
           block={block}
           icon={<Check aria-hidden />}
           confirmedLabel="Approving"
-          armedLabel={ownerActionLabel(access, "Press again to approve")}
+          armedLabel={pressAgain(access, "approve")}
           aria-label={`Approve ${subject}${byPasskey}`}
           disabled={working || blocked !== null}
           onConfirm={() => void approve()}
@@ -98,7 +112,7 @@ export function ApprovalActions({
           block={block}
           icon={<X aria-hidden />}
           confirmedLabel="Rejecting"
-          armedLabel={ownerActionLabel(access, "Press again to reject")}
+          armedLabel={pressAgain(access, "reject")}
           aria-label={`Reject ${subject}${byPasskey}`}
           disabled={working || blocked !== null}
           onConfirm={() => void reject()}

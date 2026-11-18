@@ -82,7 +82,16 @@ for (const scheme of schemes) {
               ).toHaveCount(1);
             }
           } else {
-            await expect(page.getByTestId("owner-address")).toHaveCount(0);
+            // One wallet control per page: in a mandate, the top bar's; on Home, the header's, shown exactly
+            // when Home lists a mandate whose owner's wallet signs (#23); New mandate signs nothing.
+            const walletOwned =
+              route.name === "home" ? await page.getByTestId("mandate-owner-line").count() : 0;
+            await expect(page.getByTestId("owner-address")).toHaveCount(walletOwned > 0 ? 1 : 0);
+            if (walletOwned > 0) {
+              await expect(
+                page.getByRole("main").getByTestId("owner-address").filter({ visible: true }),
+              ).toHaveCount(1);
+            }
             // Outside a mandate (Home, New mandate) the dev signer signs nothing, so it is not shown.
             await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
           }
