@@ -7,15 +7,17 @@ import { useConnection, useConnectors } from "wagmi";
 import { useNetwork } from "@/lib/live/LiveConsole";
 
 import { DEV_SIGNER_ID } from "./flags";
+import { useWalletRestore } from "./restore";
 
 /**
- * The four wallet states the console designs for, plus "loading" while the wallet library
- * restores a previous session after hydration (render a same-size placeholder then).
+ * The four wallet states the console designs for, plus "loading" while the remembered wallet is
+ * restored after hydration, at most `RESTORE_DEADLINE_MS` (render a same-size placeholder then).
  */
 export type WalletState =
   | { kind: "loading" }
   | { kind: "no-wallet" }
-  | { kind: "disconnected" }
+  /** `unanswered` names the wallet that did not answer on load (it may be locked), until one connects. */
+  | { kind: "disconnected"; unanswered: string | null }
   | { kind: "wrong-network"; address: Address; chainId: number | undefined }
   | { kind: "connected"; address: Address; isDevSigner: boolean; walletName: string };
 
@@ -33,6 +35,7 @@ export function useWalletState(): WalletState {
   const network = useNetwork();
   const connection = useConnection();
   const connectors = useConnectors();
+  const restore = useWalletRestore();
   // False on the server and during hydration, true afterwards: avoids a hydration mismatch.
   const mounted = useSyncExternalStore(
     subscribeNoop,
@@ -40,9 +43,9 @@ export function useWalletState(): WalletState {
     () => false,
   );
 
-  if (!mounted || connection.status === "reconnecting" || connection.status === "connecting") {
-    return { kind: "loading" };
-  }
+  // Only the restore on load shows a placeholder, and only until its deadline. A connection the person
+  // started keeps the control actionable (its button shows that it is waiting on the wallet).
+  if (!mounted || restore.restoring) return { kind: "loading" };
 
   if (connection.status === "connected") {
     if (network && connection.chainId !== network.chainId) {
@@ -62,5 +65,5 @@ export function useWalletState(): WalletState {
     (connector) => connector.type === "injected" && connector.id !== "injected",
   );
   if (!hasInjectedProvider() && !hasDiscovered && !hasDevSigner) return { kind: "no-wallet" };
-  return { kind: "disconnected" };
+  return { kind: "disconnected", unanswered: restore.unanswered };
 }

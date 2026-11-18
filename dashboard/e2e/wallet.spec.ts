@@ -101,6 +101,14 @@ interface StandInWallet {
   rdns: string;
   account: string;
   startChainId: number;
+  /**
+   * A wallet that is locked, asleep or busy, as MetaMask can be: it answers nothing until it wakes, and
+   * then answers what is pending. The test wakes it with `wakeWallet`; besides, with "until-opened" the
+   * site's request to connect (`eth_requestAccounts`, `wallet_requestPermissions`) opens it, as a locked
+   * MetaMask asks to be unlocked; "deeply" leaves that request pending too; with "declines" the person
+   * says no to it (4001) and the wallet stays asleep.
+   */
+  asleep?: "until-opened" | "deeply" | "declines";
 }
 
 /** Each stand-in's icon, a data URI as wallets announce them: a coloured square. */
@@ -119,7 +127,7 @@ const PHANTOM = { name: "Phantom", rdns: "app.phantom", icon: iconOf("#ab9ff2") 
  * `wallet_addEthereumChain` adds it. Transactions go to the chain through anvil, which signs for its own
  * accounts. With `announce`, each wallet announces itself (EIP-6963) and answers a request to; `legacy`
  * names the one that also claims `window.ethereum`, as the last extension to load does. Every request a
- * wallet gets is kept in `window.__walletCalls[rdns]`.
+ * wallet gets is kept in `window.__walletCalls[rdns]`; `window.__wakeWallet[rdns]` wakes an asleep one.
  */
 async function installWallets(
   page: Page,
@@ -129,13 +137,14 @@ async function installWallets(
   await page.addInitScript(
     (setup) => {
       const allCalls: Record<string, { method: string; params: unknown }[]> = {};
+      const wakers: Record<string, () => void> = {};
       // A wallet keeps one uuid for the page's life and announces it every time it is asked.
       const providers = setup.wallets.map((wallet) => ({
         wallet,
         uuid: crypto.randomUUID(),
         provider: standIn(wallet, (allCalls[wallet.rdns] = [])),
       }));
-      Object.assign(window, { __walletCalls: allCalls });
+      Object.assign(window, { __walletCalls: allCalls, __wakeWallet: wakers });
       const legacy = providers.find(({ wallet }) => wallet.rdns === setup.legacy);
       if (legacy) Object.assign(window, { ethereum: legacy.provider });
       if (setup.announce) {
@@ -166,6 +175,13 @@ async function installWallets(
           for (const listener of listeners.get(event) ?? []) listener(value);
         };
         const fail = (code: number, message: string) => Object.assign(new Error(message), { code });
+        let awake = wallet.asleep === undefined;
+        const waiting: (() => void)[] = [];
+        const wake = () => {
+          awake = true;
+          for (const answer of waiting.splice(0)) answer();
+        };
+        wakers[wallet.rdns] = wake;
         const permission = `stand-in-wallet:${wallet.rdns}:permitted`;
         const permitted = () => localStorage.getItem(permission) === "1";
         const permit = (allowed: boolean) =>
@@ -200,6 +216,11 @@ async function installWallets(
           },
           async request({ method, params }: { method: string; params?: unknown }) {
             calls.push({ method, params });
+            const toConnect = method === "eth_requestAccounts" || method === "wallet_requestPermissions";
+            if (toConnect && !awake && wallet.asleep === "declines")
+              throw fail(4001, "User rejected the request.");
+            if (toConnect && wallet.asleep === "until-opened") wake();
+            if (!awake) await new Promise<void>((answer) => waiting.push(answer));
             switch (method) {
               case "eth_chainId":
                 return hex(chainId);
@@ -259,6 +280,34 @@ async function walletCalls(page: Page, rdns: string): Promise<{ method: string; 
 
 function methods(calls: { method: string }[]): string[] {
   return calls.map((call) => call.method);
+}
+
+/** Wakes an asleep stand-in wallet: it answers its pending requests, late, as an unlocked wallet does. */
+async function wakeWallet(page: Page, rdns: string) {
+  await page.evaluate((name) => {
+    (window as unknown as { __wakeWallet: Record<string, () => void> }).__wakeWallet[name]?.();
+  }, rdns);
+}
+
+/**
+ * What a browser remembers from an earlier visit, set once before the first page loads (a reload keeps
+ * it): the wallet the console connected last, and each wallet's permission for the site.
+ */
+async function rememberVisit(page: Page, stored: { recent: string; permitted: string[]; legacy?: boolean }) {
+  await page.addInitScript((visit) => {
+    if (sessionStorage.getItem("stand-in-visit")) return;
+    sessionStorage.setItem("stand-in-visit", "1");
+    localStorage.setItem("wagmi.recentConnectorId", JSON.stringify(visit.recent));
+    // The console before the chooser connected through `window.ethereum`, and marked it so.
+    if (visit.legacy) localStorage.setItem("wagmi.injected.connected", "true");
+    for (const rdns of visit.permitted) localStorage.setItem(`stand-in-wallet:${rdns}:permitted`, "1");
+  }, stored);
+}
+
+/** The wallet control never stays a placeholder: no skeleton, and nothing on the page left busy. */
+async function expectActionable(page: Page) {
+  await expect(page.locator('[data-wallet-state="loading"]')).toHaveCount(0);
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
 }
 
 test("a wallet on another network is asked to switch, and to add the console's network, before it can sign", async ({
@@ -441,4 +490,277 @@ test("from Home, the owner's first screen, the owner connects the wallet without
   await expect(chip).toHaveAttribute("data-owner", "true");
   await expect(page.getByTestId("get-started-now")).toHaveCount(0);
   await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
+});
+
+test("a remembered wallet that never answers: within the deadline the console offers to connect, says why, and connecting wakes it", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(
+    page,
+    [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "until-opened" }],
+    {
+      rpcUrl: chain.anvil.rpcUrl,
+      announce: true,
+      legacy: METAMASK.rdns,
+    },
+  );
+
+  // Home: the restore asked MetaMask for its accounts and had no answer; the owner can still act.
+  await page.goto("/");
+  // The header's control (the mandate's row has a Connect button of its own, below).
+  const top = page.getByRole("main").locator("header").getByRole("button", { name: "Connect wallet" });
+  await expect(top).toBeVisible();
+  const line = page.getByTestId("mandate-row").first().getByTestId("mandate-owner-line");
+  await expect(line).toContainText(
+    "MetaMask did not answer. Open it to unlock, then connect the owner wallet",
+  );
+  await expectActionable(page);
+  expect(methods(await walletCalls(page, METAMASK.rdns))).toContain("eth_accounts");
+  expect(methods(await walletCalls(page, METAMASK.rdns))).not.toContain("eth_requestAccounts");
+
+  // In a mandate: the top bar offers to connect, the page says which wallet did not answer, and the pause
+  // control says why it is off.
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await expect(connect).toBeVisible();
+  await expect(page.getByTestId("wallet-notice")).toHaveText(
+    "MetaMask did not answer. Open it to unlock, then press \u201cConnect wallet\u201d.",
+  );
+  const pause = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });
+  await expect(pause).toBeDisabled();
+  await expect(page.locator("span[title]", { has: pause })).toHaveAttribute(
+    "title",
+    "Connect the owner wallet to sign.",
+  );
+  await expectActionable(page);
+
+  // Connecting is the request that opens the wallet: it answers, and the owner signs.
+  await connect.click();
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
+  await expect(pause).toBeEnabled();
+  expect(methods(await walletCalls(page, METAMASK.rdns))).toContain("eth_requestAccounts");
+});
+
+test("a remembered wallet that answers late connects by itself, with no click", async ({ page }) => {
+  const owner = devAccount("user").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(
+    page,
+    [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "until-opened" }],
+    {
+      rpcUrl: chain.anvil.rpcUrl,
+      announce: true,
+      legacy: METAMASK.rdns,
+    },
+  );
+  await page.goto(await firstMandatePath(baseURL));
+  await expect(page.getByTestId("wallet-notice")).toContainText("MetaMask did not answer");
+  await expectActionable(page);
+
+  // The owner unlocks MetaMask from its own window: the restore's request is answered, and it connects.
+  await wakeWallet(page, METAMASK.rdns);
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
+  expect(methods(await walletCalls(page, METAMASK.rdns))).not.toContain("eth_requestAccounts");
+});
+
+test("a wallet the owner picked while another did not answer stays the one connected when that one answers", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  const stranger = devAccount("outsider").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(
+    page,
+    [
+      { ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "until-opened" },
+      { ...PHANTOM, account: stranger, startChainId: CHAIN_ID },
+    ],
+    { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
+  );
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await connect.click();
+  await page
+    .getByRole("dialog", { name: "Choose a wallet" })
+    .getByRole("button", { name: "Phantom" })
+    .click();
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", stranger);
+
+  // MetaMask answers the restore's request now. The console keeps both connections, and Phantom's current.
+  await wakeWallet(page, METAMASK.rdns);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const store = localStorage.getItem("wagmi.store") ?? "";
+        return store.includes('"id":"io.metamask"') && store.includes('"id":"app.phantom"');
+      }),
+    )
+    .toBe(true);
+  await expect(chip).toHaveAttribute("data-address", stranger);
+  await expect(chip).toHaveAttribute("data-owner", "false");
+});
+
+test("a wallet the owner picked and then disconnected is not put back when another answers late", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  const stranger = devAccount("outsider").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(
+    page,
+    [
+      { ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "deeply" },
+      { ...PHANTOM, account: stranger, startChainId: CHAIN_ID },
+    ],
+    { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
+  );
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await connect.click();
+  await page
+    .getByRole("dialog", { name: "Choose a wallet" })
+    .getByRole("button", { name: "Phantom" })
+    .click();
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", stranger);
+  await chip.click();
+  await page.getByRole("button", { name: "Disconnect" }).click();
+  await expect(connect).toBeVisible();
+
+  // MetaMask answers the restore's request now: it is the wallet connected, not the Phantom left behind.
+  await wakeWallet(page, METAMASK.rdns);
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+});
+
+test("a remembered wallet that answers at once is connected even while another never answers", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  const stranger = devAccount("outsider").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(
+    page,
+    [
+      { ...METAMASK, account: owner, startChainId: CHAIN_ID },
+      { ...PHANTOM, account: stranger, startChainId: CHAIN_ID, asleep: "deeply" },
+    ],
+    { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
+  );
+  await page.goto(await firstMandatePath(baseURL));
+  // The restore asked Phantom too, and is still waiting on it; MetaMask answered, so it is the owner's.
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true })).toBeEnabled();
+  expect(methods(await walletCalls(page, PHANTOM.rdns))).toContain("eth_accounts");
+});
+
+test("a wallet that does not answer the request to connect either: the button can be pressed again, says it is waiting, and asks once", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(page, [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "deeply" }], {
+    rpcUrl: chain.anvil.rpcUrl,
+    announce: true,
+    legacy: METAMASK.rdns,
+  });
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await connect.click();
+  // MetaMask has not answered: the button is not left busy, and the page still says which wallet to open.
+  await expectActionable(page);
+  await expect(connect).toBeEnabled();
+  await expect(page.getByTestId("wallet-notice")).toContainText("MetaMask did not answer");
+  await connect.click();
+  await expect(page.getByText("Waiting for your wallet")).toBeVisible();
+  const asks = (await walletCalls(page, METAMASK.rdns)).filter(
+    (call) => call.method === "wallet_requestPermissions" || call.method === "eth_requestAccounts",
+  );
+  expect(asks).toHaveLength(1);
+
+  // The owner opens MetaMask and approves: the request it held connects the owner.
+  await wakeWallet(page, METAMASK.rdns);
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
+});
+
+test("after a Connect the owner declined, the remembered wallet's late answer still connects", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  await rememberVisit(page, { recent: METAMASK.rdns, permitted: [METAMASK.rdns] });
+  await installWallets(page, [{ ...METAMASK, account: owner, startChainId: CHAIN_ID, asleep: "declines" }], {
+    rpcUrl: chain.anvil.rpcUrl,
+    announce: true,
+    legacy: METAMASK.rdns,
+  });
+  await page.goto(await firstMandatePath(baseURL));
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
+  await connect.click();
+  await expect(page.getByText("You declined in MetaMask, so nothing changed.")).toBeVisible();
+  await expectActionable(page);
+
+  await wakeWallet(page, METAMASK.rdns);
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+});
+
+test("a wallet remembered from before the chooser reconnects under its own name", async ({ page }) => {
+  const owner = devAccount("user").address;
+  const stranger = devAccount("outsider").address;
+  // The console once connected MetaMask through `window.ethereum` and remembered it as "injected".
+  await rememberVisit(page, { recent: "injected", permitted: [METAMASK.rdns], legacy: true });
+  await installWallets(
+    page,
+    [
+      { ...METAMASK, account: owner, startChainId: CHAIN_ID },
+      { ...PHANTOM, account: stranger, startChainId: CHAIN_ID },
+    ],
+    { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: METAMASK.rdns },
+  );
+  await page.goto(await firstMandatePath(baseURL));
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await chip.click();
+  await expect(page.getByRole("dialog", { name: "Owner wallet" })).toContainText(
+    "MetaMask, a browser wallet",
+  );
+  // The entry from before the chooser is gone, so it never stands in for an announced wallet again.
+  expect(
+    await page.evaluate(() => [
+      localStorage.getItem("wagmi.recentConnectorId"),
+      localStorage.getItem("wagmi.injected.connected"),
+    ]),
+  ).toEqual([null, null]);
+  expect(methods(await walletCalls(page, PHANTOM.rdns))).not.toContain("eth_requestAccounts");
 });
