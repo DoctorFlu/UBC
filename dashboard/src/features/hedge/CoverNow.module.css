@@ -9,6 +9,14 @@
   max-width: 68ch;
 }
 
+/* The totals, with the fill-source tag after them; on a narrow card the tag wraps under, flush left. */
+.settledTotals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
 /* The share of the goal held, on a plain rail: ink while short of the goal, the approved lamp once met. */
 .meter {
   position: relative;

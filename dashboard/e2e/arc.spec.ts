@@ -129,7 +129,7 @@ test("on Arc, before the executor names its venue, every fill says its source is
   await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
 });
 
-test("on Arc with the simulated venue, the top bar, Activity, the intent and the public scorecard say the fills are simulated", async ({
+test("on Arc with the simulated venue, the top bar, Activity, the intent, Audit and the public scorecard say the fills are simulated", async ({
   page,
 }) => {
   const sign = (hash: `0x${string}`) => devAccount("executor").signMessage({ message: { raw: hash } });
@@ -159,6 +159,10 @@ test("on Arc with the simulated venue, the top bar, Activity, the intent and the
   await page.goto(await firstMandatePath(baseURL, `/activity/${filledId.toString()}`));
   const timeline = page.getByTestId("intent-timeline");
   await expect(timeline.getByTestId("simulated-fill")).toBeVisible();
+
+  // Audit keeps the onchain record word for word, and tags the fill row with where it was filled.
+  await page.goto(await firstMandatePath(baseURL, "/audit"));
+  await expect(page.getByTestId("simulated-fill").filter({ visible: true }).first()).toBeVisible();
 
   await page.goto(`/agent/${devAccount("agent").address}`);
   await expect(page.getByTestId("count-filled").getByTestId("simulated-fill")).toBeVisible();
