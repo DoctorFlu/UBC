@@ -226,6 +226,10 @@ So every part that reads Gemini's public market data follows one rule (`marketDa
 | `gemini` | `sandbox` or unset | `https://api.sandbox.gemini.com` |
 | `gemini` | `production` | `https://api.gemini.com` (real money; the dev and demo executor refuses it) |
 
+That table is for listings, events and order books.
+Spot (and candles) come from `https://api.gemini.com` in every row: every ladder settles on production's index, and the sandbox's own spot market drifts far from it ([gemini-venue.md](gemini-venue.md#one-environment-for-the-whole-stack)).
+With a loopback `GEMINI_API_URL` in tests, that server stands in for both.
+
 Give all four services the same `EXECUTOR_VENUE` and `GEMINI_ENV`; the demo compose file does.
 Each logs the environment it reads when it starts, and the parts check each other:
 
@@ -243,7 +247,7 @@ The executor (`npm run dev:executor`, and the `executor` service of the hosted d
 | `CONSOLE_URL` | no | The console the executor records settlements in, through `PUT /api/executor/v1/settlements/:intentId`, and, on Gemini, its order journal and venue (`/api/executor/v1/orders/:intentId`, `/api/executor/v1/venue`). Defaults to `http://localhost:3000`; the compose files set `http://console:3000`, inside the stack. The route is not public: Caddy answers 404 for `/api/executor/*`. |
 | `EXECUTOR_VENUE` | no | What fills approved orders: `simulated` (default, places nothing anywhere) or `gemini` (Gemini Prediction Markets, on the sandbox unless `GEMINI_ENV` says otherwise; the dev and demo executor refuses production). Run `npm run gemini:doctor` first. |
 | `EXECUTOR_ORDER_TTL_MS` | no | `gemini` only: how long an order may rest unfilled before the rest is cancelled, at least `10000`. Defaults to `600000` (10 minutes), and never later than a minute before the market stops trading. |
-| `GEMINI_ENV` | no | `sandbox` (default, test funds) or `production` (real money, which also needs `GEMINI_LIVE_TRADING=on`). Read by the executor and `npm run gemini:doctor`, and, with `EXECUTOR_VENUE=gemini`, by every service that reads market data. |
+| `GEMINI_ENV` | no | `sandbox` (default, test funds) or `production` (real money, which also needs `GEMINI_LIVE_TRADING=on`). Read by the executor and `npm run gemini:doctor`, and, with `EXECUTOR_VENUE=gemini`, by every service that reads listings and books. Spot is production's on every venue: the ladders settle on production's index ([gemini-venue.md](gemini-venue.md#one-environment-for-the-whole-stack)). |
 | `GEMINI_LIVE_TRADING` | no | `on` to allow `GEMINI_ENV=production`; anything but `on` or empty is refused. The dev and demo executor refuses production even then, and the demo compose file does not pass it. |
 | `GEMINI_API_KEY` | with `gemini` | An account-scoped API key with the Trader role, from a separate account on exchange.sandbox.gemini.com for the sandbox. A secret: never printed or logged. |
 | `GEMINI_API_SECRET` | with `gemini` | The key's secret. Never printed or logged; the doctor shows only whether it is set and its length. |
