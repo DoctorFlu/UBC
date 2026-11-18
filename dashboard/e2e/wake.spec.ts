@@ -281,7 +281,8 @@ test("spot falling below the floor of the agent's plan sends one event", async (
   expect(all[4]).toMatchObject({
     kind: "price_below_floor",
     detail: { asset: "BTC", planId: request.planId, floorCents: floor, spotCents: floor - 50_000 },
-    link: `${baseURL}${await firstMandatePath(baseURL, "/hedge")}`,
+    // The goal's own view on Hedge.
+    link: `${baseURL}${await firstMandatePath(baseURL, `/hedge?asset=BTC&goal=${request.plan.eventTicker}`)}`,
   });
   // Still below on the next checks: the same fall, never sent again.
   await new Promise((resolve) => setTimeout(resolve, 3_000));
