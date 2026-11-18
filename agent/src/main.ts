@@ -12,11 +12,12 @@ const SHUTDOWN_GRACE_MS = 10_000;
  * How long an idle keep-alive connection stays open.
  *
  * It must be longer than the idle timeout of whatever proxy sits in front of this server.
- * Node's default is 5 s, while cloudflared reuses an idle origin connection for up to 90 s.
+ * Node's default is 5 s, while cloudflared reuses an idle origin connection for up to 90 s and
+ * the hosted Caddy for up to 2 minutes; 120 s would only tie with Caddy.
  * With the default, a request that arrives just as Node closes the connection never reaches
  * this process, the proxy answers 502, and the MCP client reports a failed tool call.
  */
-const KEEP_ALIVE_TIMEOUT_MS = 120_000;
+const KEEP_ALIVE_TIMEOUT_MS = 130_000;
 
 /** Runs `build`, and on a configuration problem prints it (never a value) and exits. */
 function orExit<T>(build: () => T, envFile: string): T {

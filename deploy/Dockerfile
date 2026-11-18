@@ -106,9 +106,13 @@ LABEL org.opencontainers.image.title="mandate-console" \
       org.opencontainers.image.source="https://github.com/DoctorFlu/UBC" \
       dev.mandate.dev-signer="${NEXT_PUBLIC_DEV_SIGNER}"
 # HOSTNAME: Docker sets it to the container id, and the standalone server listens on whatever it names.
+# KEEP_ALIVE_TIMEOUT: how long the standalone server keeps an idle connection open, in milliseconds. It must
+# outlast Caddy, which reuses an idle connection to the console for up to 2 minutes; with Node's 5 s default,
+# a request Caddy sends just as Node closes the connection gets a 502 (docs/hosting.md, "Idle connections").
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
+    KEEP_ALIVE_TIMEOUT=130000 \
     CONSOLE_DATA_DIR=/data/console
 # The application files stay owned by root, so the server cannot rewrite its own code.
 COPY --from=console-build /app/dashboard/.next/standalone ./

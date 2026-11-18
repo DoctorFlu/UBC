@@ -14,6 +14,14 @@ test.beforeAll(() => {
   }
 });
 
+test("the console keeps an idle connection open longer than Caddy reuses one", async ({ request }) => {
+  // Caddy reuses an idle connection for up to 2 minutes; the hosted console sets the same 130 s
+  // (KEEP_ALIVE_TIMEOUT in deploy/Dockerfile), so a reused connection is never one Node has closed.
+  const response = await request.get("/api/health");
+  expect(response.ok()).toBe(true);
+  expect(response.headers()["keep-alive"]).toBe("timeout=130");
+});
+
 test.describe("route loading fallback", () => {
   test("shows while a page is on its way, keeps the shell usable, and gives way to the page", async ({
     page,
