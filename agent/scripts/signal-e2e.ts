@@ -15,6 +15,10 @@
  * addresses, receipt ids and transfer ids are printed; keys and the MCP token are never printed.
  *
  *   ENV_FILE=/path/to/.env npm run signal:e2e -- [--asset BTC] [--horizon weekly] [--wait-seconds 90]
+ *
+ * It proves a live run, so it never runs on a recording: when Gemini's live market data is unavailable
+ * (`checkLiveGemini`) it pays nothing, prints "LIVE GEMINI UNAVAILABLE: nothing was run or paid because
+ * ...", and exits 3. A failure of ours exits 1.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
@@ -22,6 +26,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { createGeminiClient } from "@mandate/gemini";
+import { bannerLine, checkLiveGemini, RECORDED_EXIT_CODE } from "@mandate/gemini/live";
 import { formatUsd, planHedge, summarizePlan, type HedgeInput } from "@mandate/planner";
 import { ARC_TESTNET, explorerTxUrl, SIGNAL_HORIZONS, type SignalHorizon } from "@mandate/shared";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -128,6 +133,11 @@ interface BuySignalResult {
 async function main(): Promise<void> {
   if (!SIGNAL_HORIZONS.includes(horizon)) fail(`--horizon must be one of ${SIGNAL_HORIZONS.join(", ")}`);
   if (!Number.isInteger(waitSeconds) || waitSeconds < 0) fail("--wait-seconds must be a whole number");
+  const live = await checkLiveGemini({ asset });
+  if (!live.available) {
+    say(bannerLine("nothing was run or paid", live.reason));
+    process.exit(RECORDED_EXIT_CODE);
+  }
 
   // Children get the environment as it was before the .env file is loaded here, plus ENV_FILE.
   const inherited = { ...process.env };
