@@ -323,7 +323,7 @@ export function ScorecardView({
           </ul>
           <p className={styles.note} data-testid="settled-note">
             {settled.positions === 0
-              ? "No filled position has reached its market's expiry and settled yet."
+              ? "No filled position has reached its market's expiry and settled yet. "
               : `${formatCount(settled.paidOut)} of ${formatCount(settled.positions)} settled ${settled.positions === 1 ? "position" : "positions"} paid out. `}
             Settlements are recorded offchain by the console, each signed by the contract&rsquo;s executor,
             because the contract cannot record a payout: it records each fill with a result of $0, so a

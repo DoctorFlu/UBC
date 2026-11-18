@@ -60,6 +60,7 @@ Each suite starts anvil with the production Policy contract and its own console 
   The owner is asked to switch, the network is added, and only then can the owner sign.
   With two wallets in the browser, the owner picks one, the console remembers it, and only that one is asked to sign.
 - It also runs `arc.spec.ts` (port 3105, chain 8649): the console configured as on Arc (`POLICY_ADDRESS`), where the venue badge and every fill label follow the executor's announced venue, never the chain.
+  It then restarts the console on Gemini's sandbox, as the hosted switch does, and checks that the earlier fill still says simulated and the new, journaled one says sandbox on every page and in the agent API.
 
 Override the ports with `E2E_PORT`, `E2E_CHAIN_PORT`, `E2E_LIVE_PORT`, `E2E_LIVE_CHAIN_PORT`, `E2E_WALLET_PORT`, `E2E_WALLET_CHAIN_PORT`, `E2E_ARC_PORT` and `E2E_ARC_CHAIN_PORT` when they are taken.
 

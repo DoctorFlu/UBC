@@ -142,13 +142,8 @@ function tables(db: Database): string[] {
   return rows.map((row) => row.name);
 }
 
-/** Tables a later migration replaced, and the table that holds their rows now. */
-const RENAMED: Record<string, string> = { executor_venues: "executor_venue_announcements" };
-
-/** The rows of `table`, or of the table that replaced it when a later migration did. */
 function count(db: Database, table: string): number {
-  const name = !tables(db).includes(table) && RENAMED[table] ? RENAMED[table] : table;
-  return (db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get() as { n: number }).n;
+  return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 }
 
 /**
@@ -702,7 +697,8 @@ describe("migration to the executor's venue history (version 9 to 10)", () => {
 
     const db = openDatabase(dataDir);
     expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(10);
-    expect(tables(db)).not.toContain("executor_venues");
+    // The old table stays as it was, so the version before this one still runs on the file after a rollback.
+    expect(db.prepare("SELECT * FROM executor_venues").all()).toEqual(stored);
     const venues = new VenueOrderStore(db);
     expect(venues.venues(DEPLOYMENT)).toEqual([
       {
@@ -722,7 +718,12 @@ describe("migration to the executor's venue history (version 9 to 10)", () => {
   it("appends later announcements, each holding from its own block, the latest in force", () => {
     const db = openDatabase(version9());
     const venues = new VenueOrderStore(db, () => new Date("2026-11-18T09:00:00.000Z"));
-    const record = { hash: hex("1a"), document: { venue: "simulated" }, signature: hex("1b"), signer: OWNER };
+    const record = {
+      hash: hex("1a") as `0x${string}`,
+      document: { venue: "simulated" },
+      signature: hex("1b") as `0x${string}`,
+      signer: OWNER as `0x${string}`,
+    };
     venues.announceVenue(DEPLOYMENT, record, 1_201);
     expect(venues.venues(DEPLOYMENT).map((row) => [row.seq, row.holdsFromBlock, row.hash])).toEqual([
       [0, null, hex("0e")],

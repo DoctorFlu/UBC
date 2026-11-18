@@ -231,6 +231,8 @@ export const MIGRATIONS: readonly Migration[] = [
   // `holds_from_block`: one past the chain head the console read when it stored it. The first of a
   // deployment also covers that contract's earlier fills, so the one announcement a database holds today
   // (holds_from_block NULL: stored before blocks were recorded) keeps covering the fills it covers now.
+  // `executor_venues` stays, no longer written, so the version before this one still runs on the upgraded
+  // file if an update is rolled back (docs/hosting.md); a later migration may drop it.
   `
   CREATE TABLE executor_venue_announcements (
     deployment_id    TEXT    NOT NULL,
@@ -246,7 +248,6 @@ export const MIGRATIONS: readonly Migration[] = [
   INSERT INTO executor_venue_announcements
     (deployment_id, seq, hash, document, signature, signer, stored_at, holds_from_block)
     SELECT deployment_id, 0, hash, document, signature, signer, stored_at, NULL FROM executor_venues;
-  DROP TABLE executor_venues;
   `,
 ];
 
