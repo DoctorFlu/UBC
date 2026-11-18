@@ -256,12 +256,18 @@ export function wakeSummary(detail: WakeDetail, count: number, at?: number): str
   switch (detail.kind) {
     case "price_below_floor": {
       const d = detail.detail;
-      const goal = d.expiresAt === undefined || at === undefined ? "the current goal" : `the goal ${goalLabel(d.asset, d.expiresAt, at)}`;
+      const goal =
+        d.expiresAt === undefined || at === undefined
+          ? "the current goal"
+          : `the goal ${goalLabel(d.asset, d.expiresAt, at)}`;
       return `${d.asset} spot is ${usd(d.spotCents)}, below the ${usd(d.floorCents)} floor of ${goal}.`;
     }
     case "cover_lost": {
       const d = detail.detail;
-      const goal = d.expiresAt === undefined || at === undefined ? "the goal" : `the goal ${goalLabel(d.asset, d.expiresAt, at)}`;
+      const goal =
+        d.expiresAt === undefined || at === undefined
+          ? "the goal"
+          : `the goal ${goalLabel(d.asset, d.expiresAt, at)}`;
       const share = d.coverBps === null ? "" : `, ${String(Math.floor(d.coverBps / 100))}% of it`;
       return `${d.asset} spot rose from ${usd(d.previousSpotCents)} to ${usd(d.spotCents)} and ${goal} is no longer covered${share}.`;
     }

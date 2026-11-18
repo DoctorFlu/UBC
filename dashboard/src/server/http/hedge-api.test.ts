@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { planHedge } from "@mandate/planner";
 import { Category, type PolicyRules, categoryMask } from "@mandate/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { HedgeMarketResponse } from "@/lib/hedge/types";
 
@@ -187,6 +187,61 @@ describe("GET /api/console/hedge/market", () => {
     const named = await getHedgeMarket(get(`asset=BTC&event=${plan.eventTicker}`), service, quotes);
     expect(named.status).toBe(200);
     expect((await getHedgeMarket(get("asset=BTC&event=ETH2611202200"), service, quotes)).status).toBe(422);
+  });
+
+  it("serves any of the asset's goals, the soonest by default, with each goal's cover", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    try {
+      const service = makeService();
+      const quotes = quotesFor(fakeGemini());
+      const mandate = envMandate(service).id;
+      const store = async (planId: string, event: string | null, createdAt: string) => {
+        const lookup = await quotes.ladder("BTC", event);
+        if (!lookup.ok) throw new Error(`no ladder for ${event ?? "the weekly"}`);
+        const plan = planHedge({
+          holding: { asset: "BTC", quantity: "0.05" },
+          ladder: lookup.ladder,
+          goal: { dropPercent: 5 },
+          maxCostCents: 5_000,
+          limits: { maxTradeCents: 2_500, remainingBudgetCents: 20_000, categoryAllowed: true },
+        });
+        service.offchain.putPlan(mandate, {
+          planId,
+          asset: "BTC",
+          requestText: "Protect my BTC",
+          createdAt,
+          plan: { ...plan, planId },
+        });
+        return plan.eventTicker;
+      };
+      const weekly = await store("plan_weekly", null, "2026-11-15T20:20:00.000Z");
+      // The weekly reached the contract, so a monthly planned after it is a second goal, not its successor.
+      const hash = `0x${"c".repeat(64)}` as const;
+      service.offchain.putContext(mandate, hash, { version: 1, planId: "plan_weekly", rungIndex: 0 });
+      service.offchain.linkIntentContext(mandate, "env", 0, hash, `0x${"d".repeat(64)}`);
+      const monthly = await store("plan_monthly", "BTC2611302200", "2026-11-15T20:21:00.000Z");
+      service.changed();
+      expect(envSnapshot(service).offchain.plans.map((p) => p.planId)).toEqual([
+        "plan_monthly",
+        "plan_weekly",
+      ]);
+
+      const soonest = await read(await getHedgeMarket(get("asset=BTC"), service, quotes));
+      expect(soonest.eventTicker).toBe(weekly);
+      // This service reads no chain, so it cannot count what is held: unknown, never guessed.
+      expect(soonest.goals).toEqual([
+        { eventTicker: weekly, state: "unavailable" },
+        { eventTicker: monthly, state: "unavailable" },
+      ]);
+
+      const named = await read(await getHedgeMarket(get(`asset=BTC&event=${monthly}`), service, quotes));
+      expect(named.eventTicker).toBe(monthly);
+      expect(named.quotes?.eventTicker).toBe(monthly);
+      expect((await getHedgeMarket(get("asset=BTC&event=BTC2611272200"), service, quotes)).status).toBe(422);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports Gemini being down as part of the answer, and caches the failure briefly", async () => {

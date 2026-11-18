@@ -49,7 +49,11 @@ export function GoalRow({
       >
         <SegmentedControlIndicator className={styles.indicator} />
         {goals.map((goal) => (
-          <SegmentedControlItem key={goal.plan.eventTicker} value={goal.plan.eventTicker} className={styles.item}>
+          <SegmentedControlItem
+            key={goal.plan.eventTicker}
+            value={goal.plan.eventTicker}
+            className={styles.item}
+          >
             <span className={styles.label}>{goalTitle(goal.plan.expiry, now)}</span>
             <span className={styles.state}>{goalStateText(states.get(goal.plan.eventTicker) ?? null)}</span>
           </SegmentedControlItem>

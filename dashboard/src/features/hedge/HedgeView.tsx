@@ -405,7 +405,8 @@ function AssetHedge({
   const shown = agentPlan?.plan ?? previewPlan;
   // Right after another goal is picked the last answer stays on screen, for the previous goal's event.
   const fresh =
-    market.status === "ready" && (agentPlan === null || market.data.eventTicker === agentPlan.plan.eventTicker);
+    market.status === "ready" &&
+    (agentPlan === null || market.data.eventTicker === agentPlan.plan.eventTicker);
   const quotes = fresh ? market.data.quotes : null;
   const states = new Map(
     market.status === "ready" ? market.data.goals.map((goal) => [goal.eventTicker, goal.state] as const) : [],

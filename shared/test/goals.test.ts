@@ -27,7 +27,12 @@ describe("selectGoalPlans", () => {
     selectGoalPlans(plans, (p) => p, new Set(proposed)).map((p) => p.planId);
 
   it("keeps the newest plan of each asset and each proposed plan, one per event, newest first", () => {
-    const newestFirst = [plan("daily", "D"), plan("weekly-2", "W"), plan("weekly-1", "W"), plan("eth", "E", "ETH")];
+    const newestFirst = [
+      plan("daily", "D"),
+      plan("weekly-2", "W"),
+      plan("weekly-1", "W"),
+      plan("eth", "E", "ETH"),
+    ];
     expect(pick(newestFirst, ["weekly-1"])).toEqual(["daily", "weekly-1", "eth"]);
     expect(pick(newestFirst, ["weekly-1", "weekly-2"])).toEqual(["daily", "weekly-2", "eth"]);
     expect(pick(newestFirst, [])).toEqual(["daily", "eth"]);

@@ -191,7 +191,12 @@ describe("cover now", () => {
     };
     const topTwo = [intent(64_500, 320, 40, "executed"), intent(64_000, 1_000, 40, "executed")];
     const cover = must(
-      coverNow({ plan: { ...plan, ceilingCents: null }, holdingQuantity: "0.05", quotes: onSandbox, intents: topTwo }),
+      coverNow({
+        plan: { ...plan, ceilingCents: null },
+        holdingQuantity: "0.05",
+        quotes: onSandbox,
+        intents: topTwo,
+      }),
     );
     expect(cover.assessment).toMatchObject({
       state: "partly_met",
@@ -214,7 +219,9 @@ describe("cover now", () => {
       /down to \$62,500, the lowest strike there is \(your floor \$62,000 is below every strike\)\. No lower strike is listed, so nothing more can be added\.$/,
     );
     // A staircase that reaches the floor keeps the short ending.
-    const reaches = must(coverNow({ plan, holdingQuantity: "0.05", quotes: quotes(6_466_000), intents: hosted }));
+    const reaches = must(
+      coverNow({ plan, holdingQuantity: "0.05", quotes: quotes(6_466_000), intents: hosted }),
+    );
     expect(coverSentence(reaches.assessment, null)).toMatch(/down to \$63,000\. Nothing more is needed\.$/);
   });
 });

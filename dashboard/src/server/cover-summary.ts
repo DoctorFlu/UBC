@@ -61,7 +61,8 @@ async function coverOfGoal(
   const lookup = await ladder(plan.asset, plan.eventTicker).catch(() => ({ ok: false as const }));
   if (!lookup.ok) return unavailable;
   // The saved holding, else the one the plan was sized for (a goal planned before any holding was saved).
-  const holding = holdings.find((candidate) => candidate.asset === plan.asset)?.quantity ?? plan.holdingQuantity;
+  const holding =
+    holdings.find((candidate) => candidate.asset === plan.asset)?.quantity ?? plan.holdingQuantity;
   const cover = coverNow({
     plan,
     holdingQuantity: holding,

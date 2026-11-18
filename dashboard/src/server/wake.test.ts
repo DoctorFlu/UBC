@@ -219,7 +219,9 @@ describe("event wake-ups from the console's pipeline", () => {
       // The goal's own view, and the goal named by when it ends, never by its ticker.
       link: `http://localhost:3000/m/${envMandate(service).id}/hedge?asset=BTC&goal=${request.plan.eventTicker}`,
     });
-    expect(rx.bodies.at(-1)?.summary).toMatch(/ floor of the goal BTC, through (today, \d\d:\d\d UTC|\w{3} \d{1,2} \w{3})\.$/);
+    expect(rx.bodies.at(-1)?.summary).toMatch(
+      / floor of the goal BTC, through (today, \d\d:\d\d UTC|\w{3} \d{1,2} \w{3})\.$/,
+    );
     await new Promise((resolve) => setTimeout(resolve, 300));
     await service.wake.settled();
     expect(rx.bodies).toHaveLength(before + 1);

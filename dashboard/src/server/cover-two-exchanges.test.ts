@@ -312,7 +312,7 @@ describe("a goal per asset and ladder: the hosted weekly, then a daily for the s
       requestText: "Protect my 0.05 BTC down to $63,000 through today.",
       createdAt: new Date(NOW).toISOString(),
       storedAt: new Date(NOW + 60_000).toISOString(),
-      plan: plan as unknown as AgentPlanView["plan"],
+      plan: plan,
     };
   }
 
@@ -384,7 +384,11 @@ describe("a goal per asset and ladder: the hosted weekly, then a daily for the s
     // Production's recorded books, which the maker mirrors, offer no NO on four of the sandbox's strikes:
     // the plan as made skips them, and what is missing is exactly their four 12.50-contract slices.
     expect(daily.plan.warnings.map((w) => w.code)).toContain("no_price");
-    expect(cover.assessment).toMatchObject({ state: "partly_met", reason: null, missingPayoutCents: 4 * 1_250 });
+    expect(cover.assessment).toMatchObject({
+      state: "partly_met",
+      reason: null,
+      missingPayoutCents: 4 * 1_250,
+    });
 
     // The sandbox's whole staircase filled: the goal, over every strike there is, is met.
     const whole = await coverOfSnapshot(

@@ -244,7 +244,12 @@ describe("priceWakes", () => {
 
   it("names the goal by when it ends, so a daily and a weekly of one asset read apart", () => {
     const at = Date.parse("2026-11-18T15:00:00Z");
-    const daily = { ...goal, planId: "plan_d", eventTicker: "BTC2611182200", expiresAt: "2026-11-18T22:00:00.000Z" };
+    const daily = {
+      ...goal,
+      planId: "plan_d",
+      eventTicker: "BTC2611182200",
+      expiresAt: "2026-11-18T22:00:00.000Z",
+    };
     const weekly = { ...goal, expiresAt: "2026-11-20T22:00:00.000Z" };
     const below = (g: PriceGoal) => {
       const wake = priceWakes(g, initialPriceMemory(g), { spotCents: 6_290_000, cover: null }, at).wakes[0];
@@ -254,7 +259,9 @@ describe("priceWakes", () => {
     expect(below(daily)).toBe(
       "BTC spot is $62,900, below the $63,000 floor of the goal BTC, through today, 22:00 UTC.",
     );
-    expect(below(weekly)).toBe("BTC spot is $62,900, below the $63,000 floor of the goal BTC, through Fri 20 Nov.");
+    expect(below(weekly)).toBe(
+      "BTC spot is $62,900, below the $63,000 floor of the goal BTC, through Fri 20 Nov.",
+    );
     // A wake-up stored before goals carried their expiry still reads.
     expect(below(goal)).toBe("BTC spot is $62,900, below the $63,000 floor of the current goal.");
 
