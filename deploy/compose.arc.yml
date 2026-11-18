@@ -116,6 +116,35 @@ services:
         limits:
           memory: 256M
 
+  # The mirror maker (docs/gemini-venue.md, "The mirror maker"): quotes Gemini's sandbox at the prices
+  # Gemini's production exchange shows, from an account of its own, so that the sandbox's empty ladders
+  # trade at real prices. Off unless started with `--profile maker`. The sandbox host is fixed in its code;
+  # it refuses to start when GEMINI_ENV names anything else, and no live-trading setting reaches it.
+  # GEMINI_API_KEY is passed only so that it can refuse the executor's key as its own; it is never used.
+  # It cancels every order of its own when it stops (SIGTERM), so it is given time to.
+  maker:
+    <<: *node-service
+    profiles: ["maker"]
+    command: ["node", "--import", "tsx", "gemini/scripts/maker.ts"]
+    environment:
+      GEMINI_ENV: ${GEMINI_ENV:-sandbox}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MAKER_API_KEY: ${GEMINI_MAKER_API_KEY:-}
+      GEMINI_MAKER_API_SECRET: ${GEMINI_MAKER_API_SECRET:-}
+      MAKER_KINDS: ${MAKER_KINDS:-daily}
+      MAKER_INTERVAL_MS: ${MAKER_INTERVAL_MS:-15000}
+      MAKER_MAX_QUOTE_CONTRACTS: ${MAKER_MAX_QUOTE_CONTRACTS:-100}
+      MAKER_MAX_QUOTE_USD: ${MAKER_MAX_QUOTE_USD:-50}
+      MAKER_MAX_RESTING_USD: ${MAKER_MAX_RESTING_USD:-1000}
+      MAKER_MAX_RUNG_CONTRACTS: ${MAKER_MAX_RUNG_CONTRACTS:-500}
+      MAKER_MAX_INVENTORY_USD: ${MAKER_MAX_INVENTORY_USD:-2000}
+      NODE_OPTIONS: --max-old-space-size=128
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
 volumes:
   # The console's database on Arc testnet: workspaces, passkeys and agent tokens start empty, so the first
   # workspace is claimed again (docs/hosting.md, Arc testnet).
