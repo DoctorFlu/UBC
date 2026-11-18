@@ -28,7 +28,15 @@ import { SqliteWakeStore } from "./store/wakes";
 export type LadderSource = (
   asset: string,
   eventTicker: string,
-) => Promise<{ ok: true; ladder: Ladder } | { ok: false }>;
+) => Promise<
+  | {
+      ok: true;
+      ladder: Ladder;
+      /** Production's strikes the ladder lacks (`MarketQuotes`); null when production could not be read. */
+      elsewhere?: readonly { instrumentSymbol: string; strikeCents: number }[] | null;
+    }
+  | { ok: false }
+>;
 
 /** What a price check reads from the console's state. */
 export interface PriceInputs {
@@ -180,7 +188,7 @@ export class ConsoleWake {
         problem = "Gemini's quotes were not available at the last check.";
         continue;
       }
-      const quotes = ladderQuotes(lookup.ladder);
+      const quotes = ladderQuotes(lookup.ladder, lookup.elsewhere);
       const holding = inputs.holdings.find((h) => h.asset === plan.asset)?.quantity ?? null;
       const cover = coverNow({ plan, holdingQuantity: holding, quotes, intents: inputs.intents });
       const goal: PriceGoal = {

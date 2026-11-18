@@ -6,8 +6,13 @@
  * orders, lets the executor fill them and then settle them by itself once Gemini publishes the outcome,
  * and prints when Gemini resolved each strike, measured from Gemini's own `resolvedAt` against the expiry
  * (not from when this script happened to look). It stops 45 minutes after expiry at the latest.
+ *
+ * It proves the live API, so it never runs on a recording: when Gemini's live market data is unavailable
+ * (`checkLiveGemini`) it runs nothing, prints "LIVE GEMINI UNAVAILABLE: nothing was run because ...", and
+ * exits 3. A failure of ours exits 1.
  */
 import { createGeminiClient, type MarketEvent } from "@mandate/gemini";
+import { bannerLine, checkLiveGemini, RECORDED_EXIT_CODE } from "@mandate/gemini/live";
 import { planHedge } from "@mandate/planner";
 import { Category, formatCents, settlementTotals, type Settlement } from "@mandate/shared";
 import { DEMO_POLICY, simulatedVenue, startExecutor, type SettlementSink } from "../src";
@@ -19,6 +24,12 @@ const say = (line: string) => {
 
 const horizon = process.argv[2] === "daily" ? "daily" : "hourly";
 const gemini = createGeminiClient({ maxRetries: 2, timeoutMs: 10_000 });
+
+const live = await checkLiveGemini();
+if (!live.available) {
+  say(bannerLine("nothing was run", live.reason));
+  process.exit(RECORDED_EXIT_CODE);
+}
 
 const listings = await gemini.listLadders("BTC");
 say(`BTC ladders: ${listings.map((l) => `${l.eventTicker} (${l.kind}, expires ${l.expiry})`).join("; ")}`);

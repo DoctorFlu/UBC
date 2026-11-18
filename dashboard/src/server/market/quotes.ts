@@ -6,11 +6,13 @@ import {
   type GeminiClient,
   type Ladder,
   type ListingAnswer,
-  createGeminiClient,
+  createMarketDataClient,
+  createProductionClient,
   eventPath,
   eventTickerCandidates,
   findInstrument,
   isGeminiError,
+  ladderRungs,
   marketDataSource,
   type MarketDataSource,
 } from "@mandate/gemini";
@@ -25,7 +27,13 @@ import type { LadderQuotes, MarketDataError } from "@/lib/hedge/types";
  * down or slow becomes an error the view shows next to the agent's stored plan, never a broken page.
  */
 export interface MarketQuotesOptions {
+  /** Where listings and books are read: the venue's exchange. Default production. */
   baseUrl?: string;
+  /**
+   * Gemini production's public API: where spot is read on every venue (the ladders settle on its index),
+   * and where the strikes of the simulated venue's earlier fills are listed. Default `baseUrl`.
+   */
+  productionBaseUrl?: string;
   fetch?: FetchLike;
   now?: () => number;
   /** Waits between retries; tests pass one that returns at once. */
@@ -38,7 +46,20 @@ export interface MarketQuotesOptions {
   maxEntries?: number;
 }
 
-export type LadderLookup = { ok: true; ladder: Ladder } | { ok: false; error: MarketDataError };
+/** A strike by instrument symbol. */
+export interface StrikeRef {
+  instrumentSymbol: string;
+  strikeCents: number;
+}
+
+/**
+ * `elsewhere`: the strikes production lists on the same event that the venue's ladder lacks, for cover of
+ * positions the simulated venue filled there (`symbolsMissingFromLadder`); empty when the venue is
+ * production, null when production could not be read. Absent counts as empty.
+ */
+export type LadderLookup =
+  | { ok: true; ladder: Ladder; elsewhere?: readonly StrikeRef[] | null }
+  | { ok: false; error: MarketDataError };
 
 interface Entry {
   at: number;
@@ -55,7 +76,10 @@ const MAX_RETRIES = 1;
 
 export class MarketQuotes {
   readonly baseUrl: string;
+  readonly productionBaseUrl: string;
   private readonly client: GeminiClient;
+  /** Production's client when the venue is another exchange; null when the venue is production. */
+  private readonly production: GeminiClient | null;
   private readonly now: () => number;
   private readonly ttlMs: number;
   private readonly errorTtlMs: number;
@@ -73,17 +97,27 @@ export class MarketQuotes {
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.errorTtlMs = options.errorTtlMs ?? DEFAULT_ERROR_TTL_MS;
     this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES);
-    this.client = createGeminiClient({
-      baseUrl: this.baseUrl,
+    this.productionBaseUrl = (options.productionBaseUrl ?? this.baseUrl).replace(/\/+$/, "");
+    const shared = {
       now: this.now,
       maxRetries: MAX_RETRIES,
       timeoutMs: 6_000,
-      onRequest: (path) => {
-        for (const lookup of this.lookups) if (lookup.paths.has(path)) lookup.sent += 1;
-      },
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.sleep ? { sleep: options.sleep } : {}),
-    });
+    };
+    this.client = createMarketDataClient(
+      { baseUrl: this.baseUrl, productionBaseUrl: this.productionBaseUrl },
+      {
+        ...shared,
+        onRequest: (path) => {
+          for (const lookup of this.lookups) if (lookup.paths.has(path)) lookup.sent += 1;
+        },
+      },
+    );
+    this.production =
+      this.productionBaseUrl === this.baseUrl
+        ? null
+        : createProductionClient({ productionBaseUrl: this.productionBaseUrl }, shared);
   }
 
   /**
@@ -131,7 +165,11 @@ export class MarketQuotes {
         ...(eventTicker === null ? { horizon: "weekly" as const } : { eventTicker }),
       })
       .then(
-        (ladder): LadderLookup => ({ ok: true, ladder }),
+        async (ladder): Promise<LadderLookup> => ({
+          ok: true,
+          ladder,
+          elsewhere: await this.elsewhere(ladder),
+        }),
         (error: unknown): LadderLookup => {
           entry.ttl = this.errorTtlMs;
           return { ok: false, error: describeFailure(error) };
@@ -139,6 +177,22 @@ export class MarketQuotes {
       );
     this.remember(key, entry, time);
     return entry.result;
+  }
+
+  /** The strikes production lists on this ladder's event that the ladder lacks, or null when unreadable. */
+  private async elsewhere(ladder: Ladder): Promise<StrikeRef[] | null> {
+    if (this.production === null) return [];
+    const listed = new Set(ladder.rungs.map((rung) => rung.instrumentSymbol));
+    try {
+      const event = await this.production.getEvent(ladder.eventTicker);
+      return ladderRungs(event)
+        .filter((rung) => !listed.has(rung.instrumentSymbol))
+        .map((rung) => ({ instrumentSymbol: rung.instrumentSymbol, strikeCents: rung.strikeCents }));
+    } catch {
+      // Cover then counts what the venue lists, and is shown as unavailable only if a held position needs
+      // a strike from production (`UnresolvedPositionError`): the ladder itself is still good.
+      return null;
+    }
   }
 
   /** How many ladders are cached; for tests. */
@@ -189,19 +243,27 @@ export function describeFailure(error: unknown): MarketDataError {
         return { code: "invalid_response", message: "Gemini answered with data the console could not read." };
       case "invalid_argument":
         return { code: "invalid_argument", message: "That asset or event is not one Gemini lists." };
+      case "spot_unavailable":
+        return {
+          code: "unavailable",
+          message:
+            "Gemini's market data is unavailable: its BTC/USD spot market is not trading normally, so nothing is measured from it. The console tries again on the next refresh.",
+        };
     }
   }
   return UNKNOWN;
 }
 
 /** The parts of a ladder the hedge view draws, highest strike first like the plan's rungs. */
-export function ladderQuotes(ladder: Ladder): LadderQuotes {
+export function ladderQuotes(ladder: Ladder, elsewhere: readonly StrikeRef[] | null = []): LadderQuotes {
   return {
     asset: ladder.asset,
     eventTicker: ladder.eventTicker,
     title: ladder.title,
     expiry: ladder.expiry,
     spotCents: ladder.spot.midCents,
+    spotBasis: ladder.spot.basis ?? "mid",
+    elsewhere: elsewhere === null ? null : [...elsewhere],
     fetchedAt: ladder.fetchedAt,
     rungs: [...ladder.rungs]
       .sort((a, b) => b.strikeCents - a.strikeCents)
@@ -243,7 +305,8 @@ export function getMarketQuotes(): MarketQuotes {
   const holder = globalThis as unknown as Holder;
   let quotes = holder[KEY];
   if (!quotes) {
-    quotes = new MarketQuotes({ baseUrl: consoleMarketData().baseUrl });
+    const source = consoleMarketData();
+    quotes = new MarketQuotes({ baseUrl: source.baseUrl, productionBaseUrl: source.productionBaseUrl });
     holder[KEY] = quotes;
   }
   return quotes;

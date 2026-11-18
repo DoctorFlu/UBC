@@ -22,12 +22,25 @@ Set `MCP_ERA=auto` to negotiate the 2026-07-28 protocol instead of the 2025 `ini
 
 `npm run mcp:e2e` runs the whole agent flow against a real chain in one command, with nothing to configure and no `.env` read.
 For each Policy contract it starts anvil with a fresh deployment and the demo rules, an in-memory console backend (`testing/fake-console.ts`), and the real server as a child process, each on a free port.
-It then drives the server over HTTP with the official MCP SDK client, opening a new session for every call as Grok Bot does, against live public Gemini market data.
+It then drives the server over HTTP with the official MCP SDK client, opening a new session for every call as Grok Bot does, against live public Gemini market data (or the recording, below).
 The run covers setup and pairing, the read tools, `plan_hedge` and `execute_plan`, `simulate_trade`, the three demo cases (a $10 trade approved, a $30 trade blocked with `over max trade size`, a $22 trade waiting for the owner), a retried proposal, the stored decision contexts and each intent's link to its context in the console, `get_intent`, `get_activity` and `request_policy_change`, and the daily digest's read-only calls with the fields they add (issue #97).
 It also checks that no key or token reaches the server's logs.
 Pass `-- --contract production` or `-- --contract reference` to run one contract; the default runs both.
 On both contracts, `simulate_trade` must use `previewTrade` and every proposal must record its context hash onchain: the production contract has both since Policy v2.
 It needs Foundry (`forge` and `anvil`) and network access to Gemini's public API.
+
+Before anything starts it reads Gemini production's BTC ladders and spot.
+When Gemini's side fails (an HTTP 5xx, a timeout, no connection, a rate limit; for example its scheduled maintenance of 18 November 2026), every check runs on the recorded ladder instead, which `@mandate/gemini/recorded` serves on loopback with its dates moved to today.
+The run then prints one stable line, `LIVE GEMINI UNAVAILABLE: ran on the recorded ladder because Gemini production answered HTTP 500 at 05:28:00 UTC`, with the maintenance Gemini's status page reports in progress when it reports one, and ends with `E2E OK (recorded ladder, live Gemini unavailable)`.
+A failure that may be ours (a 4xx, an answer we cannot read) is not treated as Gemini's.
+
+| Exit status | Meaning |
+| --- | --- |
+| 0 | Every check passed on live Gemini. |
+| 3 | Every check passed on the recorded ladder, because live Gemini was unavailable. Run it again live once Gemini answers. |
+| 1 | A check failed, or the run broke, on either. |
+
+`npm run signal:e2e` and `npm run dev:settle-proof` prove live runs, so they never use the recording: while live Gemini is unavailable they run and pay nothing, print `LIVE GEMINI UNAVAILABLE: nothing was run ...`, and exit 3.
 
 The server reads `.env` from the repo root, or the file named by `ENV_FILE`.
 Variables already set in the environment win over the file.

@@ -52,3 +52,9 @@ export const viewports = [
 ] as const;
 
 export const schemes = ["light", "dark"] as const;
+
+/**
+ * Laptop windows with the sidebar open, where a table or a row of figures is tightest: Home and Activity
+ * are also shot at these, so a wrapped order line or an orphaned figure shows in review.
+ */
+export const laptopWidths = [1024, 1084, 1280, 1470] as const;

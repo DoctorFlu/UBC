@@ -3,6 +3,8 @@ export {
   COVER_TOLERANCE_BPS,
   coverOfPlan,
   positionsFromIntents,
+  symbolsMissingFromLadder,
+  UnresolvedPositionError,
   type CoverInput,
   type CoverLadder,
   type IntentPosition,

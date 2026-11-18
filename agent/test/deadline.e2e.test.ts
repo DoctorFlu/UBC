@@ -50,7 +50,7 @@ describe("plan_hedge with a Gemini endpoint that never answers", () => {
       stack = await startStack({
         holdings: [{ asset: "BTC", quantity: "0.04213" }],
         spotCents: 6_414_000,
-        marketsClient: createGeminiMarkets({ baseUrl: gemini.url }),
+        marketsClient: createGeminiMarkets({ baseUrl: gemini.url, productionBaseUrl: gemini.url }),
         env: { MCP_TOOL_DEADLINE_MS: String(DEADLINE_MS) },
         logger,
       });

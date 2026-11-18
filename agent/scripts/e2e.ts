@@ -11,6 +11,13 @@
  * reason, waiting for the owner), the sealed decision contexts and each intent's link to its context
  * in the console, and that nothing secret reaches the server's logs.
  *
+ * Live Gemini first: before anything starts it reads production's BTC ladders and spot. When Gemini's
+ * side fails (5xx, timeout, unreachable, rate limited; for example its scheduled maintenance), every
+ * check runs on the recorded ladder instead, served on loopback (`@mandate/gemini/recorded`), and the run
+ * says so in one stable line, "LIVE GEMINI UNAVAILABLE: ran on the recorded ladder because ...", and
+ * exits 3. Exit codes: 0 all checks passed on live Gemini; 3 all passed on the recording; 1 a check
+ * failed or the run broke, on either.
+ *
  * Every key here is a public anvil test key or a random token made for this run; the token is
  * written to a temporary env file (mode 600) and never printed or passed on a command line.
  * `.env` is not read.
@@ -34,11 +41,13 @@ import {
   startDevchain,
   type PolicyContractKind,
 } from "@mandate/devchain";
+import { createGeminiClient } from "@mandate/gemini";
+import { bannerLine, checkLiveGemini, RECORDED_EXIT_CODE } from "@mandate/gemini/live";
+import { startRecordedGemini } from "@mandate/gemini/recorded";
 import { CONSOLE_AGENT_API_BASE, devchain, policyAbi, verifyContext, type Intent } from "@mandate/shared";
 import { DEFAULT_LIMITS, ENV_KEYS } from "../src/config";
 import { COMMIT_GRACE_MS } from "../src/mcp/deadline";
 import { UNWIND_GRACE_MS } from "../src/mcp/tool";
-import { createGeminiMarkets } from "../src/markets/gemini";
 import { createFakeConsole, type FakeConsole } from "../testing/fake-console";
 import { coverFromPlans } from "../testing/fake-cover";
 
@@ -222,7 +231,12 @@ function timedOut(result: CallResult): boolean {
   return codes.includes("TIMED_OUT") || (result.isError === true && text.startsWith("TIMEOUT"));
 }
 
-async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | undefined): Promise<void> {
+async function runOne(
+  contract: PolicyContractKind,
+  toolDeadlineMs: string | undefined,
+  /** The recorded Gemini on loopback, when live Gemini is unavailable; undefined for live Gemini. */
+  geminiUrl: string | undefined,
+): Promise<void> {
   // Both contracts have previewTrade and the contextHash overload: the production contract since its v2
   // (issue #23), which the probing in PolicyClient finds by itself.
   process.stdout.write(
@@ -243,7 +257,7 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
     return read.filter((intent): intent is Intent => intent !== null);
   };
   // The console measures cover on Gemini's public quotes and the chain's intents (issue #97).
-  const quotes = createGeminiMarkets();
+  const quotes = createGeminiClient(geminiUrl === undefined ? {} : { baseUrl: geminiUrl });
   const fake: FakeConsole = createFakeConsole({
     cover: coverFromPlans({
       ladder: (asset, eventTicker) => quotes.getLadder({ asset, eventTicker }),
@@ -277,6 +291,8 @@ async function runOne(contract: PolicyContractKind, toolDeadlineMs: string | und
     CONSOLE_URL: `http://127.0.0.1:${consolePort}`,
     CONSOLE_SERVICE_TOKEN: consoleToken,
     ...(toolDeadlineMs === undefined ? {} : { MCP_TOOL_DEADLINE_MS: toolDeadlineMs }),
+    // A loopback server may stand in for Gemini's host (`marketDataSource`); no other host is accepted.
+    ...(geminiUrl === undefined ? {} : { GEMINI_API_URL: geminiUrl }),
   });
   process.stdout.write(
     `  chain ${chain.rpcUrl}, Policy ${chain.deployment.address}; console :${consolePort}; MCP ${server.base}/mcp\n`,
@@ -617,11 +633,29 @@ async function main(): Promise<void> {
     process.stderr.write("--contract must be production, reference or both\n");
     process.exit(1);
   }
+  const live = await checkLiveGemini();
+  const recorded = live.available ? null : await startRecordedGemini();
+  const banner = live.available ? null : bannerLine("ran on the recorded ladder", live.reason);
+  if (banner !== null) process.stdout.write(`\n${banner}\n`);
   process.stdout.write("Compiling the Policy contracts...\n");
   buildContracts();
-  for (const contract of contracts) await runOne(contract, values["tool-deadline-ms"]);
-  process.stdout.write(failures === 0 ? "\nE2E OK\n" : `\nE2E FAILED: ${failures} check(s)\n`);
-  process.exit(failures === 0 ? 0 : 1);
+  try {
+    for (const contract of contracts) await runOne(contract, values["tool-deadline-ms"], recorded?.url);
+  } finally {
+    await recorded?.stop();
+  }
+  if (failures > 0) {
+    process.stdout.write(
+      `\nE2E FAILED: ${failures} check(s)${banner === null ? "" : " (on the recorded ladder)"}\n`,
+    );
+    process.exit(1);
+  }
+  if (banner !== null) {
+    process.stdout.write(`\n${banner}\nE2E OK (recorded ladder, live Gemini unavailable)\n`);
+    process.exit(RECORDED_EXIT_CODE);
+  }
+  process.stdout.write("\nE2E OK\n");
+  process.exit(0);
 }
 
 main().catch((error: unknown) => {

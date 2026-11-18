@@ -6,6 +6,7 @@
  */
 import {
   buildLadder,
+  ladderRungs,
   GeminiError,
   type MarketContract,
   type MarketEvent,
@@ -172,6 +173,13 @@ export function fixtureMarkets(): MarketsClient {
         : Promise.resolve(ladder);
     },
     getSpot: (asset) => (asset.toUpperCase() === "BTC" ? Promise.resolve(SPOT) : notUsed(`getSpot ${asset}`)),
+    // One exchange here: production lists what the fixture lists.
+    productionStrikes: (ticker) => {
+      const event = EVENTS.find((e) => e.ticker === ticker);
+      return event === undefined
+        ? Promise.reject(new GeminiError("not_found", `no event ${ticker}`))
+        : Promise.resolve(new Map(ladderRungs(event).map((r) => [r.instrumentSymbol, r.strikeCents])));
+    },
     resolveMarket: (instrumentSymbol) => {
       for (const event of EVENTS) {
         const found = event.contracts.find((c) => c.instrumentSymbol === instrumentSymbol);

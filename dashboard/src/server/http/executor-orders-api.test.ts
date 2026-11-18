@@ -270,6 +270,7 @@ describe("the executor's order journal in the console", () => {
     const fake = new FakeGeminiPrivate({ apiKey: "account-FAKEKEY", apiSecret: "fake-secret" });
     const gemini = geminiVenue({
       publicClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
+      productionClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
       trading: createGeminiPrivateClient({
         environment: "sandbox",
         credentials: { apiKey: "account-FAKEKEY", apiSecret: "fake-secret" },

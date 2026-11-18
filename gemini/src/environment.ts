@@ -9,6 +9,11 @@
  *                        sandbox would propose strikes the venue cannot fill.
  * otherwise              production's public API (live prices); the simulated venue places nothing.
  *
+ * Spot is the exception: on every venue it is production's public BTC/USD price (`productionBaseUrl`).
+ * Every ladder, the sandbox's included, settles on production's index (LS-LRRR-XBTUSD), and the sandbox's
+ * own spot market drifts far from it (about $700 below on 18 November 2026), so "below spot", the floor and
+ * cover are measured from production on every venue, while books and listings come from the venue.
+ *
  * GEMINI_API_URL may stand in for that host only when it names the same host, or a loopback server (the
  * recorded fake the tests use). Any other host would read one exchange and trade on another, so it is
  * refused, naming the settings. No key is read here: market data is public.
@@ -31,8 +36,14 @@ export interface MarketDataSource {
   environment: GeminiEnvironment;
   /** The venue the stack is configured for (EXECUTOR_VENUE). */
   venue: ExecutorVenueKind;
-  /** Where public requests go: the environment's host, or a loopback stand-in in tests. */
+  /** Where public requests for listings and books go: the environment's host, or a loopback stand-in in tests. */
   baseUrl: string;
+  /**
+   * Gemini production's public API, whatever the venue: where spot is read (the index every ladder settles
+   * on is production's), and where fills the simulated venue made are listed and resolved. The loopback
+   * stand-in in tests serves both.
+   */
+  productionBaseUrl: string;
   /** The settings that chose it, for logs and error messages, for example "EXECUTOR_VENUE=gemini, GEMINI_ENV=sandbox". */
   settings: string;
 }
@@ -87,7 +98,14 @@ export function marketDataSource(env: Record<string, string | undefined>): Marke
         "Unset GEMINI_API_URL, or set it to that same host.",
     );
   }
-  return { environment, venue, baseUrl: override || host, settings };
+  const loopback = override !== "" && isLoopbackTestUrl(override);
+  return {
+    environment,
+    venue,
+    baseUrl: override || host,
+    productionBaseUrl: loopback ? override : GEMINI_HOSTS.production,
+    settings,
+  };
 }
 
 /** "Gemini's sandbox" or "Gemini (production)", for sentences. */

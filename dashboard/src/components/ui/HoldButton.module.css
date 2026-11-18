@@ -49,9 +49,11 @@
   --hold-fill: var(--color-surface-hover);
 }
 
+/* Armed: the button changes colour as well as its words, so a first press never looks like nothing. */
 .hold[data-phase="armed"] {
   outline: 2px dashed currentColor;
   outline-offset: -5px;
+  background: var(--hold-fill);
 }
 
 /* Pressing never moves the button: the shrink other buttons do on press is off for this one. */

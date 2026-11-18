@@ -5,52 +5,18 @@
  * recording reads as if it were made today and "the soonest weekly ladder" keeps existing whatever day
  * the suite runs.
  */
-import { readFileSync } from "node:fs";
 import { type Server, createServer } from "node:http";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { type Ladder, createGeminiClient } from "@mandate/gemini";
+import { type ExtraEvent, RECORDED_EVENT, recordedResponse as replay } from "@mandate/gemini/recorded";
 import { type HedgePlan, type PaidSignal, planHedge } from "@mandate/planner";
 
-const FIXTURES = fileURLToPath(new URL("../../../gemini/test/fixtures/", import.meta.url));
+export { RECORDED_EVENT };
 
-/** When the fixtures were recorded (see signals/src/testing.ts). */
-const RECORDED_AT = Date.parse("2026-11-15T20:19:00Z");
-const DAY_MS = 86_400_000;
-
-/** The recorded weekly BTC ladder the e2e plans are made on. */
-export const RECORDED_EVENT = "BTC2611202200";
-
-const ROUTES: Record<string, string> = {
-  [`/v1/prediction-markets/events/${RECORDED_EVENT}`]: `event-${RECORDED_EVENT}.json`,
-  "/v1/pubticker/btcusd": "pubticker-btcusd.json",
-};
-
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-
-function shiftDates(value: unknown, shiftMs: number): unknown {
-  if (shiftMs === 0) return value;
-  if (typeof value === "string" && ISO.test(value))
-    return new Date(Date.parse(value) + shiftMs).toISOString();
-  if (Array.isArray(value)) return value.map((item) => shiftDates(item, shiftMs));
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shiftDates(item, shiftMs)]));
-  }
-  return value;
-}
+const EVENT_ROUTE = "/v1/prediction-markets/events/";
 
 /** A Sports market, for the test that sends it with the Crypto category. */
 export const SPORTS_MARKET = "GEMI-NFL-2611152125-SF-DAL-M-SF";
-
-const EVENT_ROUTE = "/v1/prediction-markets/events/";
-const RECORDED_EXPIRY = "2026-11-20T22:00:00.000Z";
-
-interface ExtraEvent {
-  title: string;
-  category: string;
-  contracts: [ticker: string, label: string][];
-}
 
 /**
  * Markets the e2e chain uses that the recordings lack, listed as Gemini lists them, so the console's
@@ -76,51 +42,9 @@ const EXTRA_EVENTS: Record<string, ExtraEvent> = {
   },
 };
 
-function readFixture(file: string): unknown {
-  return JSON.parse(readFileSync(join(FIXTURES, file), "utf8"));
-}
-
-/** One event as `GET /v1/prediction-markets/events/:ticker` returns it, or null when Gemini lists none. */
-function eventBody(ticker: string): unknown {
-  const recorded = ROUTES[`${EVENT_ROUTE}${ticker}`];
-  const listed = (readFixture("events-crypto.json") as { data: { ticker: string }[] }).data.find(
-    (event) => event.ticker === ticker,
-  );
-  const base = (recorded ? readFixture(recorded) : listed) as Record<string, unknown> | undefined;
-  const extra = EXTRA_EVENTS[ticker];
-  if (!extra) return base ?? null;
-  const contracts = extra.contracts.map(([contract, label]) => ({
-    instrumentSymbol: `GEMI-${ticker}-${contract}`,
-    ticker: contract,
-    label,
-    status: "active",
-    marketState: "open",
-    expiryDate: RECORDED_EXPIRY,
-  }));
-  const event = base ?? {
-    id: ticker,
-    ticker,
-    title: extra.title,
-    category: extra.category,
-    status: "active",
-    expiryDate: RECORDED_EXPIRY,
-    contracts: [],
-  };
-  const existing = Array.isArray(event.contracts) ? (event.contracts as unknown[]) : [];
-  return { ...event, contracts: [...existing, ...contracts] };
-}
-
-/** The recorded body for a path, dates moved as described above, or null for a route it does not know. */
+/** The recorded body for a path, with the markets above, dates moved to today; null for an unknown route. */
 export function recordedResponse(path: string, now = Date.now()): unknown {
-  const route = path.split("?")[0] ?? "";
-  let body: unknown = null;
-  if (path.startsWith("/v1/prediction-markets/events?")) body = readFixture("events-crypto.json");
-  else if (route.startsWith(EVENT_ROUTE)) {
-    body = eventBody(decodeURIComponent(route.slice(EVENT_ROUTE.length)));
-  } else if (ROUTES[route]) body = readFixture(ROUTES[route]);
-  if (body === null) return null;
-  const shiftMs = Math.max(0, Math.floor((now - RECORDED_AT) / DAY_MS)) * DAY_MS;
-  return shiftDates(body, shiftMs);
+  return replay(path, now, { extraEvents: EXTRA_EVENTS });
 }
 
 /** The port the smoke and screenshot suites serve it on (the live suite starts its own). */

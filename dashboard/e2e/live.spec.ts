@@ -346,7 +346,9 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
   const before = await approve.boundingBox();
   await approve.click();
   await expect(approve).toHaveAttribute("data-phase", "armed");
-  await expect(approve.getByText("Confirm approval", { exact: true })).toBeVisible();
+  // "Press again" on screen; the action, too, for assistive technology.
+  await expect(approve.locator("span[data-active]")).toHaveText("Press again to approve");
+  await expect(approve.getByText("Press again", { exact: false }).first()).toBeVisible();
   expect(await approve.boundingBox()).toEqual(before);
   await page.waitForTimeout(6_500);
   await expect(approve).toHaveAttribute("data-phase", "armed");
@@ -357,7 +359,7 @@ test("the owner approves one held intent and rejects another", async ({ page }) 
   // Rejecting is a signed transaction too, so it takes the same two steps.
   const reject = row(page, 2).getByRole("button", { name: /^Reject \$24\.00/ });
   await reject.click();
-  await expect(reject.getByText("Confirm rejection", { exact: true })).toBeVisible();
+  await expect(reject.locator("span[data-active]")).toHaveText("Press again to reject");
   await expect(row(page, 2)).toContainText("Waiting");
   await reject.click();
   await expect(row(page, 2)).toContainText("rejected by user");
@@ -1373,6 +1375,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     client: chain.executor,
     venue: geminiVenue({
       publicClient: createGeminiClient({ baseUrl: gemini.url }),
+      productionClient: createGeminiClient({ baseUrl: gemini.url }),
       trading: createGeminiPrivateClient({
         environment: "sandbox",
         credentials: { apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" },

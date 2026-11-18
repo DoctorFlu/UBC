@@ -4,6 +4,7 @@ import { Check } from "lucide-react";
 
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { ExplorerLink } from "@/components/ui/ExplorerLink";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
@@ -141,7 +142,34 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
                 <dt>Chain</dt>
                 <dd>{snapshot.network.name}</dd>
               </div>
-              <Advanced>
+              <Advanced
+                fallback={
+                  // On a public chain, the contract and its roles open on the explorer; Advanced shows the hashes.
+                  contract && snapshot.network.explorerUrl ? (
+                    <div>
+                      <dt>On the explorer</dt>
+                      <dd className={styles.explorerLinks}>
+                        <ExplorerLink kind="address" value={contract.address}>
+                          Policy contract
+                        </ExplorerLink>
+                        {contract.roles ? (
+                          <>
+                            <ExplorerLink kind="address" value={contract.roles.user}>
+                              Owner
+                            </ExplorerLink>
+                            <ExplorerLink kind="address" value={contract.roles.agent}>
+                              Agent
+                            </ExplorerLink>
+                            <ExplorerLink kind="address" value={contract.roles.executor}>
+                              Executor
+                            </ExplorerLink>
+                          </>
+                        ) : null}
+                      </dd>
+                    </div>
+                  ) : null
+                }
+              >
                 <div>
                   <dt>Chain id</dt>
                   <dd className="num">{snapshot.network.chainId}</dd>

@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { LADDER_KINDS, type Ladder, type LadderRung } from "@mandate/gemini";
+import { LADDER_KINDS, spotSourceText, type Ladder, type LadderRung } from "@mandate/gemini";
 import { formatPrice } from "@mandate/planner";
 import { Category, formatEasternTime, isCategoryAllowed } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, verdictSchema, type Reason } from "../mcp/envelope";
@@ -34,7 +34,11 @@ const LadderViewSchema = z.object({
   kind: z.string().describe("hourly, daily, weekly or month-end"),
   expiry: z.string(),
   expiryText: DateTextSchema,
-  spotCents: z.int().describe("Gemini spot mid price; the ladder settles on settlementIndex"),
+  spotCents: z
+    .int()
+    .describe(
+      "Spot: the mid price of Gemini's live (production) spot market, on every venue, sandbox included; the ladder settles on settlementIndex, production's index",
+    ),
   settlementIndex: z.string().nullable(),
   rungCount: z.int(),
   pricedRungCount: z
@@ -163,7 +167,7 @@ export const getLadder = defineTool({
     const strikes = ladder.rungs.map((r) => r.strikeCents);
     return {
       structured: { ...v, ladder: view },
-      summary: `${ladder.asset} ${ladder.kind} ladder ${ladder.eventTicker} settles ${view.expiryText}; spot ${formatPrice(ladder.spot.midCents)}; ${ladder.rungs.length} strikes from ${formatPrice(Math.min(...strikes))} to ${formatPrice(Math.max(...strikes))}${view.truncated ? `, the ${rungs.length} nearest spot listed` : ""}.${reasons.length > 0 ? ` ${reasons.map((r) => r.message).join(" ")}` : ""}`,
+      summary: `${ladder.asset} ${ladder.kind} ladder ${ladder.eventTicker} settles ${view.expiryText}; spot ${formatPrice(ladder.spot.midCents)} (${spotSourceText(ladder.asset, ladder.spot.basis)}); ${ladder.rungs.length} strikes from ${formatPrice(Math.min(...strikes))} to ${formatPrice(Math.max(...strikes))}${view.truncated ? `, the ${rungs.length} nearest spot listed` : ""}.${reasons.length > 0 ? ` ${reasons.map((r) => r.message).join(" ")}` : ""}`,
     };
   },
 });

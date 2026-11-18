@@ -1,4 +1,4 @@
-import { createGeminiClient, marketDataSource, type GeminiClient } from "@mandate/gemini";
+import { createMarketDataClient, marketDataSource, type GeminiClient } from "@mandate/gemini";
 
 /**
  * The Gemini client the dev scripts use: the stack's market data source (`marketDataSource`), the same
@@ -6,9 +6,5 @@ import { createGeminiClient, marketDataSource, type GeminiClient } from "@mandat
  * script fails quickly when Gemini is down.
  */
 export function devGeminiClient(): GeminiClient {
-  return createGeminiClient({
-    maxRetries: 1,
-    timeoutMs: 8_000,
-    baseUrl: marketDataSource(process.env).baseUrl,
-  });
+  return createMarketDataClient(marketDataSource(process.env), { maxRetries: 1, timeoutMs: 8_000 });
 }

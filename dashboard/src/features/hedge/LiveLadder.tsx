@@ -3,6 +3,8 @@
 import { RefreshCw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
+import { spotSourceText } from "@mandate/gemini";
+
 import { When } from "@/components/ui/When";
 import { useAdvancedColumns } from "@/lib/advanced/Advanced";
 
@@ -204,12 +206,17 @@ function LadderTable({
   );
 }
 
-/** "BTC price on November 20. Spot $65,586, quoted 2 min ago.", or null when there is nothing to quote. */
+/**
+ * "BTC price on November 20. Spot $65,586 (Gemini's live BTC/USD price, from the exchange whose index the
+ * ladder settles on), quoted 2 min ago.", or null when there is nothing to quote. It names the price on
+ * every venue: on the sandbox, the books are the sandbox's but spot is production's.
+ */
 export function ladderCaption(quotes: LadderQuotes | null): ReactNode {
   if (!quotes) return null;
   return (
     <>
-      {quotes.title}. Spot {usd(quotes.spotCents)}, quoted <When inSentence at={quotes.fetchedAt} />.
+      {quotes.title}. Spot {usd(quotes.spotCents)} ({spotSourceText(quotes.asset, quotes.spotBasis)}), quoted{" "}
+      <When inSentence at={quotes.fetchedAt} />.
     </>
   );
 }

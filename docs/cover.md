@@ -23,7 +23,13 @@ Every intent on that ladder's markets that buys NO and is one of:
 | `approved` (the executor has not filled it yet) | waiting to fill | `floor(amountCents x 100 / limitPrice)` hundredths |
 | `needs_approval` (waiting for the owner) | waiting for the owner | `floor(amountCents x 100 / limitPrice)` hundredths |
 
-Rejected and failed intents, sells, YES buys, other ladders, strikes the ladder does not list, and numbers that do not fit are not counted.
+Rejected and failed intents, sells, YES buys, other ladders, and numbers that do not fit are not counted.
+
+A held position on this ladder's event whose symbol the ladder does not list is looked up on Gemini's production exchange, for the same event.
+That is a fill the simulated venue made before the stack traded on the sandbox: it read production, and the sandbox lists fewer strikes.
+A strike belongs to its symbol on every exchange, and so does the index it settles on, so the position counts at production's strike.
+When neither the ladder nor production lists the strike, cover is not measured at all: `plan_hedge` and `execute_plan` refuse with `POSITIONS_UNRESOLVED` (or `MARKET_DATA_UNAVAILABLE` while production cannot be read), and the console shows cover as unavailable.
+A position is never left out quietly, because a plan made without it could buy the same protection twice.
 Orders waiting for the owner count, so a run never buys again what the owner has not decided on yet; if the owner rejects one, its slice is missing again and the next run buys only that slice.
 The contracts are the most the money buys at the limit price in 0.01 increments; for an order the planner sized, that is at least the planned quantity.
 

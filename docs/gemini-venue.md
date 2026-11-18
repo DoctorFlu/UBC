@@ -89,6 +89,9 @@ The executor first waits for the public outcome, as before, and asks Gemini's pr
 Once it is published, it reads the account's settled positions (`POST /v1/prediction-markets/positions/settled`) and settles only when they agree with the public outcome: the same resolution, at least as many contracts as our order filled, and the payout that resolution implies.
 A disagreement is never resolved silently: the position is not settled, the executor logs "NOT SETTLED" with both sides, writes it to the order's journal record (the intent page shows it in Advanced view), and asks again later.
 A fill recorded before the executor traded on Gemini has no journal record and settles on the public outcome as before, marked simulated.
+That outcome is read on Gemini's production exchange, where the simulated venue read the market, never on the sandbox, which may not list the symbol at all.
+The executor reads the journal first, so a fill on Gemini is never taken for a simulated one: when the journal cannot be read, the position waits.
+It shares an "open" or "awaiting" answer for a ladder only between positions filled on the same exchange.
 
 ## The journal
 
@@ -226,8 +229,21 @@ Gemini's self-trade prevention does not stop a match between two accounts.
 
 ## One environment for the whole stack
 
-With `EXECUTOR_VENUE=gemini`, the console, the MCP server and the signal API read the public market data of the environment the orders go to (`GEMINI_ENV`, the sandbox by default), not production's.
-The sandbox lists fewer strikes (for example 8 of production's 21 on the BTC ladder of 20 November 2026), has its own books and its own spot price (about 1 % from production's), so planning on production would propose strikes the executor cannot place.
+With `EXECUTOR_VENUE=gemini`, the console, the MCP server and the signal API read the listings and books of the environment the orders go to (`GEMINI_ENV`, the sandbox by default), not production's.
+The sandbox lists fewer strikes (for example 8 of production's 21 on the BTC ladder of 20 November 2026) and has its own books, so planning on production would propose strikes the executor cannot place.
+
+Spot is the exception: it is production's on every venue.
+Every ladder, the sandbox's too, settles on production's index (`LS-LRRR-XBTUSD`, Lukka's reference rate), and the sandbox's own BTC/USD market sat about $700 below production's on 18 November 2026.
+So "below spot", the floor and cover are measured from Gemini production's BTC/USD price, while the strikes and their prices are the venue's.
+Gemini does not publish the index's current value, so spot is production's exchange price:
+
+- The mid of bid and ask while the spread is at most 0.5 %.
+- The last trade when the spread is wider, if that trade is at most 5 minutes old (during Gemini's maintenance on 18 November 2026 the spread was $64,242.83 to $65,249.98, a mid $425 above the last trade).
+- Nothing otherwise: "Gemini's market data is unavailable", and nothing is planned.
+- Never the sandbox's own ticker, even when production cannot be read.
+
+The owner sees which price it is on the hedge view's ladder line ("Spot $64,350 (Gemini's live BTC/USD price, from the exchange whose index the ladder settles on)", or "the last trade on ..."), and the agent in `get_ladder`'s summary in the same words; "Spot when planned" on a plan is the same price at planning time.
+Every service builds its clients with `createMarketDataClient` (`@mandate/gemini`), which is the one place this rule lives.
 Give every service the same `EXECUTOR_VENUE` and `GEMINI_ENV`; the demo compose file does.
 When they disagree, nothing is traded on the wrong exchange:
 
@@ -246,8 +262,7 @@ Seen on 17 November 2026, and checked again before each sandbox run:
   The 15-minute and 5-minute ladders were quoted; the daily and weekly ladders were empty.
 - On an empty ladder, `get_ladder` and `plan_hedge` say so first, with the reason `NO_PRICES`: nothing can be planned or filled there.
   The answer names the environment (`marketEnvironment`) and how many strikes are priced (`pricedRungCount`).
-- The sandbox's own BTC spot can sit far from the ladder's strikes (about $63,700 against strikes of $64,400 to $65,100 that day), so `plan_hedge` can find nothing to buy on a quoted ladder.
-  A demo then proposes one intent directly.
+- The sandbox's own BTC spot sat far from production's (about $63,700 against strikes of $64,400 to $65,100 that day), which is why spot is now read from production on every venue ([One environment for the whole stack](#one-environment-for-the-whole-stack)).
 - A fill is achievable: with a YES bid at 3c, buying NO at 97c crosses it and fills at once.
   An order far from the market rests, and the executor cancels it at its time limit.
 - Sandbox fills spend test funds only; the account starts with $100,000 of them.

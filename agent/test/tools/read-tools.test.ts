@@ -18,6 +18,7 @@ import {
   fakeLadder,
   harness,
   LADDER_TICKER,
+  ladderEvent,
   ladderSymbol,
   SPORTS_SYMBOL,
   unquotedLadder,
@@ -418,6 +419,110 @@ describe("plan_hedge", () => {
     const { structured } = await planHedge.run({ ...args, quantity: "0.05" }, h.ctx);
     expect(structured).toMatchObject({ status: "ok", plan: { savedToConsole: false } });
     expect((structured["reasons"] as Row[]).map((r) => r["code"])).toContain("CONSOLE_NOT_SAVED");
+  });
+
+  describe("a fill the simulated venue made on a strike only production lists (the sandbox switch)", () => {
+    // $63,750: listed on production's ladder for this event, not on the venue's (the sandbox's).
+    const ELSEWHERE = ladderSymbol(63_750);
+    function withSimulatedFill(h: Harness): void {
+      h.policy.views.set(0, {
+        id: 0,
+        status: "executed",
+        reason: null,
+        market: ELSEWHERE,
+        category: Category.Crypto,
+        outcome: "NO",
+        isBuy: true,
+        amountCents: 1_000,
+        limitPrice: 40,
+        agent: null,
+        contextHash: null,
+        proposedAt: 0,
+        filledCents: 1_000,
+        pnlCents: null,
+        proposedTxHash: `0x${"a".repeat(64)}`,
+        decidedTxHash: `0x${"a".repeat(64)}`,
+        resultTxHash: `0x${"b".repeat(64)}`,
+      });
+    }
+    function productionLadder() {
+      const event = ladderEvent();
+      const template = event.contracts.find((c) => c.instrumentSymbol === ladderSymbol(63_500));
+      if (template === undefined) throw new Error("fixture changed");
+      const extra = {
+        ...template,
+        instrumentSymbol: ELSEWHERE,
+        ticker: "HI63750",
+        strike: { type: "above" as const, value: "63750", valueCents: 6_375_000 },
+      };
+      return { ...event, contracts: [...event.contracts, extra] };
+    }
+
+    it("counts it at production's strike, so the plan buys only the rest", async () => {
+      const h = harness();
+      withSimulatedFill(h);
+      h.markets.productionEvents = [productionLadder()];
+      const { structured } = await planHedge.run(args, h.ctx);
+      expect(structured["status"]).toBe("ok");
+      // $10 at 40c: 25 contracts paying $25 below $63,750, held.
+      expect(structured).toMatchObject({ plan: { cover: { heldPayoutCents: 2_500 } } });
+      expect(h.markets.calls).toContain(`productionStrikes ${LADDER_TICKER}`);
+    });
+
+    it("refuses to plan when nobody lists that strike, rather than plan as if it were not held", async () => {
+      const h = harness();
+      withSimulatedFill(h);
+      h.markets.productionEvents = [ladderEvent()];
+      const { structured } = await planHedge.run(args, h.ctx);
+      expect(structured).toMatchObject({
+        plan: null,
+        reasons: [{ code: "POSITIONS_UNRESOLVED", message: expect.stringContaining(ELSEWHERE) as unknown }],
+      });
+    });
+
+    it("refuses to plan while production cannot be read, and says Gemini's market data is unavailable", async () => {
+      const h = harness();
+      withSimulatedFill(h);
+      h.markets.productionStrikes = () =>
+        Promise.reject(
+          new GeminiError("http", "GET /v1/prediction-markets/events/x returned HTTP 500", { status: 500 }),
+        );
+      const { structured } = await planHedge.run(args, h.ctx);
+      expect(structured).toMatchObject({
+        plan: null,
+        reasons: [
+          {
+            code: "MARKET_DATA_UNAVAILABLE",
+            message: expect.stringContaining("Gemini's market data is unavailable") as unknown,
+          },
+        ],
+      });
+    });
+
+    it("never asks production when the ladder lists every held strike", async () => {
+      const h = harness();
+      await planHedge.run(args, h.ctx);
+      expect(h.markets.calls.some((c) => c.startsWith("productionStrikes"))).toBe(false);
+    });
+  });
+
+  it("says Gemini's market data is unavailable, plainly, while Gemini answers 500", async () => {
+    const h = harness();
+    h.markets.error = new GeminiError("http", "GET /v1/prediction-markets/events returned HTTP 500", {
+      status: 500,
+    });
+    const { structured, summary } = await planHedge.run(args, h.ctx);
+    expect(structured).toMatchObject({
+      plan: null,
+      reasons: [
+        {
+          code: "MARKET_DATA_UNAVAILABLE",
+          message:
+            "Gemini's market data is unavailable: Gemini answered with an error on its side (HTTP 500). Nothing was planned or proposed.",
+        },
+      ],
+    });
+    expect(summary).toContain("Gemini's market data is unavailable");
   });
 
   it("samples the payoff table evenly and keeps both ends", () => {

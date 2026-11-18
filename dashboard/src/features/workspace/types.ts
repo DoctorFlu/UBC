@@ -1,8 +1,12 @@
+import type { Address } from "viem";
+
 import type { MandateView } from "@/lib/accounts/types";
 
 /** One mandate on the workspace Home (#95), from that mandate's own snapshot only. */
 export interface MandateSummary {
   mandate: MandateView;
+  /** The account the contract names as its owner (`user()`); null without a contract or a read of it. */
+  owner: Address | null;
   /** Intents, change requests and a pairing waiting for the owner. */
   waiting: number;
   /** Null while the console cannot read the contract. */

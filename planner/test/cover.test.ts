@@ -9,6 +9,8 @@ import {
   planHedge,
   positionsFromIntents,
   summarizePlan,
+  symbolsMissingFromLadder,
+  UnresolvedPositionError,
   type HedgeInput,
   type HedgePlan,
   type HeldPosition,
@@ -194,7 +196,7 @@ describe("cover against the goal's staircase", () => {
     expect(at(32, "0.0002").state).toBe("met");
   });
 
-  it("ignores sells, YES, other ladders, unknown strikes and numbers that do not fit", () => {
+  it("ignores sells, YES, other ladders and numbers that do not fit", () => {
     const base: RecordedIntent = {
       id: 0,
       market: "GEMI-BTC2611202200-HI64000",
@@ -209,7 +211,8 @@ describe("cover against the goal's staircase", () => {
       { ...base, isBuy: false },
       { ...base, outcome: "YES" },
       { ...base, market: "GEMI-BTC2611272200-HI64000" },
-      { ...base, market: "GEMI-BTC2611202200-HI64250" },
+      // On this ladder but sold, rejected or empty: not counted, so its strike is never needed.
+      { ...base, market: "GEMI-BTC2611202200-HI64250", status: "rejected" },
       { ...base, amountCents: null },
       { ...base, limitPrice: 0 },
       { ...base, status: "failed" },
@@ -220,6 +223,54 @@ describe("cover against the goal's staircase", () => {
     expect(
       positionsFromIntents([base, { ...base, id: 1, limitPrice: 30 }], ladder).map((p) => p.hundredths),
     ).toEqual([2_500, 3_333]);
+  });
+
+  describe("positions the ladder does not list (fills the simulated venue made on production)", () => {
+    const base: RecordedIntent = {
+      id: 0,
+      market: "GEMI-BTC2611202200-HI64000",
+      outcome: "NO",
+      isBuy: true,
+      amountCents: 1_000,
+      limitPrice: 40,
+      status: "executed",
+      filledCents: 1_000,
+    };
+    // Production lists $64,250 on the same event; the venue's ladder (the sandbox's) does not.
+    const ELSEWHERE = "GEMI-BTC2611202200-HI64250";
+    const intents: RecordedIntent[] = [
+      base,
+      { ...base, id: 1, market: ELSEWHERE },
+      { ...base, id: 2, market: "GEMI-BTC2611272200-HI99000" },
+    ];
+
+    it("names the held symbols on this event the ladder lacks, and nothing on other events", () => {
+      expect(symbolsMissingFromLadder(intents, ladder)).toEqual([ELSEWHERE]);
+      expect(symbolsMissingFromLadder([base], ladder)).toEqual([]);
+    });
+
+    it("counts them at the strike production lists, so a plan never buys the same cover twice", () => {
+      const held = positionsFromIntents(intents, ladder, new Map([[ELSEWHERE, 6_425_000]]));
+      expect(held.map((p) => [p.instrumentSymbol, p.strikeCents, p.hundredths])).toEqual([
+        ["GEMI-BTC2611202200-HI64000", 6_400_000, 2_500],
+        [ELSEWHERE, 6_425_000, 2_500],
+      ]);
+    });
+
+    it("refuses, never drops, a held position whose strike nobody lists", () => {
+      expect(() => positionsFromIntents(intents, ladder)).toThrow(UnresolvedPositionError);
+      expect(() => positionsFromIntents(intents, ladder)).toThrow(
+        "GEMI-BTC2611202200-HI64250 is held on this ladder, but neither the venue nor Gemini's production exchange lists the strike now",
+      );
+      // A strike for a symbol of another event is never taken from `elsewhere`.
+      expect(
+        positionsFromIntents(
+          [{ ...base, market: "GEMI-BTC2611272200-HI99000" }],
+          ladder,
+          new Map([["GEMI-BTC2611272200-HI99000", 1]]),
+        ),
+      ).toEqual([]);
+    });
   });
 
   it("says there is nothing to cover when the floor is not below spot", () => {
