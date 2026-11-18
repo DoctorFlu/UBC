@@ -8,7 +8,9 @@
     ".": "./src/index.ts",
     "./private": "./src/private-index.ts",
     "./maker": "./src/maker/index.ts",
-    "./testing": "./testing/fake-private.ts"
+    "./testing": "./testing/fake-private.ts",
+    "./live": "./testing/live-gemini.ts",
+    "./recorded": "./testing/recorded-public.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
