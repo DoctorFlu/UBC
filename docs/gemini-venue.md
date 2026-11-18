@@ -143,6 +143,67 @@ It is read-only: it places nothing, cancels nothing and never accepts terms, and
 It ends with one line: `READY`, `NOT READY` with each reason, `REFUSED` (the key and `GEMINI_ENV` disagree), `NOT CHECKED` (production is never checked) or `UNKNOWN` (the sandbox did not answer).
 Its exit status is 0 when ready, 1 when not, 2 when the sandbox could not be reached.
 
+## The mirror maker
+
+The sandbox lists the same ladders as production, but its books are empty, and on the hourly ladder its own maker prices off the sandbox's BTC price, which was about $700 below the real index the contracts settle on (18 November 2026).
+So the sandbox alone gives no fill at a real price.
+The mirror maker fills that gap from a second sandbox account of its own: it rests orders on the sandbox at the prices Gemini's production exchange shows for the same contracts.
+
+What is real and what is not:
+
+- The prices are production's: the best bids of the same contract, read from production's public books.
+- The orders, the matching and the fills are the sandbox's own engine, between two accounts.
+- The settlement is the sandbox's, on the same index as production (`LS-LRRR-XBTUSD`).
+- The counterparty is ours: the maker, on a second sandbox account. The sizes are production's displayed sizes, capped.
+
+How it quotes, for each rung of a ladder in scope:
+
+- A YES bid at production's best YES bid, which is what a NO buyer takes (a NO buy at 100 minus that bid matches it), and a NO bid at 100 minus production's best YES ask, each sized to what production shows at that price, within the caps.
+- Every order is maker only (`makerOrCancel`): an order that would take liquidity is cancelled by Gemini instead of filling, and the maker leaves that side alone until production's price moves.
+- Nothing is quoted where production does not list the contract or could not be read, where production's book is closed, one-sided, locked or crossed, or more than 45 seconds old, where the sandbox does not have the rung open, within 2 minutes of expiry, or where the sandbox book holds someone else's order.
+  It never invents a price.
+- Daily ladders only by default (`MAKER_KINDS`); weekly and month-end on request; never hourly or shorter, where the sandbox's own maker is.
+
+Every 15 seconds it reads production's books and the sandbox's listing (public), and its account's open orders and positions, then cancels what no longer matches and places what is missing.
+An order stays while its price is right and between half and all of its size is left; otherwise it is replaced, so a quote the executor took is refilled at production's size.
+It places at most 8 orders a cycle and never holds back a cancel, inside the private client's pace of one signed request a second.
+Its caps (`MAKER_MAX_*`, [configuration.md](configuration.md)) bound each quote, all quotes together, and what it may hold.
+
+Safety:
+
+- Sandbox only: the host is fixed in its code, and it refuses to start where `GEMINI_ENV` names anything else or any live-trading setting is set.
+- Its own account: it refuses the executor's key (`GEMINI_API_KEY`) as its own.
+- Every client order id it sends starts with `mk-`, and it cancels only those; the executor's ids start with `m-` and a hex digest, so they never match.
+- It cancels every order of its own when it starts and when it stops; a killed process leaves its orders until the next start, or `--cancel-all`.
+- A placement that got no answer is never sent again: that side is left alone until the account's open orders show what happened.
+- No key or secret is printed.
+
+Running it:
+
+```sh
+npm run gemini:maker:doctor             # read-only: both accounts, open orders, and each rung against production
+npm run gemini:maker                    # run until Ctrl-C, then cancel everything of its own
+npm run gemini:maker -- --cancel-all    # cancel every order of its own, and exit
+```
+
+On the hosted Arc stack it is the `maker` service of `compose.arc.yml`, off unless its profile is named (from `/data/mandate/repo/deploy`):
+
+```sh
+docker compose --env-file /data/mandate/mandate.env run --rm --no-deps maker node --import tsx gemini/scripts/maker-doctor.ts
+docker compose --env-file /data/mandate/mandate.env --profile maker up -d --no-build --no-deps maker
+docker compose --env-file /data/mandate/mandate.env --profile maker logs -f --tail 50 maker
+docker compose --env-file /data/mandate/mandate.env --profile maker stop maker
+docker compose --env-file /data/mandate/mandate.env run --rm --no-deps maker node --import tsx gemini/scripts/maker.ts --cancel-all
+```
+
+`stop` sends SIGTERM and allows 60 seconds, in which the maker cancels its orders.
+Its keys are `GEMINI_MAKER_API_KEY` and `GEMINI_MAKER_API_SECRET`, set with `deploy/set-secret.sh`.
+The second account is made, funded and given its Prediction Markets terms by its owner on <https://exchange.sandbox.gemini.com>, as in [Setting it up](#setting-it-up).
+
+The first match between the two accounts, on 18 November 2026: the maker's YES bid of 1 contract at 52c on `GEMI-BTC2611182200-HI64250` was taken at once by the executor account's NO buy at 48c, and Get Positions showed YES 1 at 0.52 on one account and NO 1 at 0.48 on the other.
+Gemini's self-trade prevention does not stop a match between two accounts.
+`MAKER_INTEGRATION=1 npx vitest run gemini/test/maker.sandbox.live.test.ts` repeats it with the maker's own loop, about $1 of test funds.
+
 ## Setting it up
 
 1. Make a separate account on <https://exchange.sandbox.gemini.com> (it is credited with test funds; the 2FA code there is `9999999`).

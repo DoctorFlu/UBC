@@ -47,6 +47,8 @@ export interface FakeOrder {
   /** Total cost of the fills in ten-thousandths of a dollar (hundredths times cents). */
   costUnits: number;
   status: "open" | "filled" | "cancelled";
+  /** Placed with `makerOrCancel: true`. */
+  makerOnly: boolean;
   createdAt: string;
   updatedAt: string;
   cancelledAt: string | null;
@@ -115,6 +117,16 @@ export class FakeGeminiPrivate {
   balances = [{ type: "exchange", currency: "USD", amount: "100000.00", available: "100000.00" }];
   /** While true, every route answers 503. */
   failing = false;
+  /**
+   * Whether an order would take liquidity at once. A maker-only order that would is cancelled instead
+   * (Gemini REST's `makerOrCancel`); other orders rest as usual, since this fake has no matching engine.
+   */
+  wouldTake: (order: {
+    symbol: string;
+    side: "buy" | "sell";
+    outcome: "yes" | "no";
+    priceCents: number;
+  }) => boolean = () => false;
   private faults: PlacementFault[] = [];
   private settled: SettledEntry[] = [];
   /** Real-sized ids, above 2^53 like the sandbox's (145853902320696849), so rounding one shows up. */
@@ -250,6 +262,8 @@ export class FakeGeminiPrivate {
         return this.list(fields, (order) => order.status === "open");
       case "POST /v1/prediction-markets/orders/history":
         return this.list(fields, (order) => order.status !== "open");
+      case "POST /v1/prediction-markets/positions":
+        return { status: 200, body: this.openPositions() };
       case "POST /v1/prediction-markets/positions/settled":
         return {
           status: 200,
@@ -354,6 +368,7 @@ export class FakeGeminiPrivate {
         },
       };
     }
+    const makerOnly = fields.makerOrCancel === true;
     const order: FakeOrder = {
       orderId: String(this.nextOrderId++),
       clientOrderId: typeof fields.clientOrderId === "string" ? fields.clientOrderId : null,
@@ -365,11 +380,15 @@ export class FakeGeminiPrivate {
       priceCents: price,
       costUnits: 0,
       status: "open",
+      makerOnly,
       createdAt: this.iso(),
       updatedAt: this.iso(),
       cancelledAt: null,
     };
     this.orders.set(order.orderId, order);
+    if (makerOnly && this.wouldTake({ symbol: order.symbol, side, outcome, priceCents: price })) {
+      this.cancel(order);
+    }
     if (fault?.kind === "drop-after") return DROPPED;
     return { status: 201, body: this.orderView(order) };
   }
@@ -393,6 +412,38 @@ export class FakeGeminiPrivate {
       .reverse()
       .map((order) => this.orderView(order));
     return { status: 200, body: { orders, pagination: { limit: 100, offset: 0, count: orders.length } } };
+  }
+
+  /** What the account holds, per contract and outcome, from its filled orders (buys add, sells take away). */
+  private openPositions(): Record<string, unknown> {
+    const held = new Map<string, { symbol: string; outcome: string; quantity: number; costUnits: number }>();
+    for (const order of this.orders.values()) {
+      if (order.filled === 0) continue;
+      const key = `${order.symbol}:${order.outcome}`;
+      const entry = held.get(key) ?? {
+        symbol: order.symbol,
+        outcome: order.outcome,
+        quantity: 0,
+        costUnits: 0,
+      };
+      const sign = order.side === "buy" ? 1 : -1;
+      entry.quantity += sign * order.filled;
+      entry.costUnits += sign * order.costUnits;
+      held.set(key, entry);
+    }
+    const positions = [...held.values()]
+      .filter((entry) => entry.quantity > 0)
+      .map((entry) => ({
+        symbol: entry.symbol,
+        instrumentId: 1,
+        totalQuantity: decimal(entry.quantity),
+        quantityOnHold: "0",
+        avgPrice: (entry.costUnits / entry.quantity / 100).toFixed(4),
+        outcome: entry.outcome,
+        isLive: true,
+        realizedPl: "0",
+      }));
+    return { positions, total: positions.length };
   }
 
   private cancel(order: FakeOrder): void {

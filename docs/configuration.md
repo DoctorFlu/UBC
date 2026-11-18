@@ -251,6 +251,13 @@ The executor (`npm run dev:executor`, and the `executor` service of the hosted d
 | `GEMINI_LIVE_TRADING` | no | `on` to allow `GEMINI_ENV=production`; anything but `on` or empty is refused. The dev and demo executor refuses production even then, and the demo compose file does not pass it. |
 | `GEMINI_API_KEY` | with `gemini` | An account-scoped API key with the Trader role, from a separate account on exchange.sandbox.gemini.com for the sandbox. A secret: never printed or logged. |
 | `GEMINI_API_SECRET` | with `gemini` | The key's secret. Never printed or logged; the doctor shows only whether it is set and its length. |
+| `GEMINI_MAKER_API_KEY` | for the mirror maker | An account-scoped key with the Trader role from a second sandbox account, never the executor's: the maker refuses `GEMINI_API_KEY` as its own. A secret ([gemini-venue.md](gemini-venue.md#the-mirror-maker)). |
+| `GEMINI_MAKER_API_SECRET` | for the mirror maker | That key's secret. Never printed or logged. |
+| `MAKER_KINDS` | no | The ladders the mirror maker quotes, from `daily`, `weekly` and `month-end`, comma-separated. Defaults to `daily`. Never `hourly` or shorter: the sandbox runs a maker of its own there. |
+| `MAKER_INTERVAL_MS` | no | Time between the maker's cycles, at least `5000`. Defaults to `15000`. |
+| `MAKER_MAX_QUOTE_CONTRACTS`, `MAKER_MAX_QUOTE_USD` | no | The largest quote, in contracts and in dollars if it filled. Default `100` and `50`. |
+| `MAKER_MAX_RESTING_USD` | no | What all the maker's quotes together would cost if they filled. Defaults to `1000`. |
+| `MAKER_MAX_RUNG_CONTRACTS`, `MAKER_MAX_INVENTORY_USD` | no | What the maker may hold: contracts on one contract and side (that side stops quoting), and dollars in all (it stops quoting). Default `500` and `2000`. |
 | `EXECUTOR_SETTLE_MS` | no | How often the executor looks for a filled position that is due to be settled, at least `1000`. Defaults to `60000`. The look is local: Gemini and the console are asked only once a position's market has expired, then with waits of 1, 2, 5, 10 and then every 30 minutes while Gemini has not published the outcome. |
 | `EXECUTOR_DISCOVERY_MS` | no | How often the executor asks the console which mandate contracts name it as their executor (`GET /api/executor/v1/contracts`, signed by its key), at least `1000`. Defaults to `15000`. It checks each contract's `executor()` onchain before serving it, and serves the server's own contract whatever the console says. |
 | `SIM_EXECUTOR_DELAY_MS` | no | How long the executor waits after an approval before filling it. Defaults to `1500`. |
