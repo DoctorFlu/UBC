@@ -574,3 +574,18 @@ export const putExecutorVenueRequestSchema = z.strictObject({
   signature: signatureSchema,
 });
 export type PutExecutorVenueRequest = z.infer<typeof putExecutorVenueRequestSchema>;
+
+/**
+ * The console's answer to an accepted announcement: 201 when it stored a new one (`stored`), 200 when the
+ * announcement in force already names this venue and nothing was added. `seq` and `holdsFromBlock` are the
+ * announcement in force after the call; a console from before they were sent leaves them out.
+ */
+export const executorVenueAnswerSchema = z.object({
+  venue: z.enum(SETTLEMENT_VENUES),
+  environment: z.enum(VENUE_ENVIRONMENTS).nullable(),
+  announcedAt: isoDateTime,
+  stored: z.boolean().optional(),
+  seq: z.int().min(0).optional(),
+  holdsFromBlock: z.int().min(0).nullable().optional(),
+});
+export type ExecutorVenueAnswer = z.infer<typeof executorVenueAnswerSchema>;

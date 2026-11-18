@@ -170,7 +170,7 @@ test("on Arc with the simulated venue, the top bar, Activity, the intent, Audit 
         announcedAt: new Date().toISOString(),
       },
     ),
-  ).toBeNull();
+  ).toMatchObject({ accepted: true });
 
   await page.goto(await firstMandatePath(baseURL));
   await expect(badge(page)).toHaveAttribute("data-venue", "simulated");
@@ -254,7 +254,10 @@ test("after the switch to Gemini's sandbox, earlier fills still say simulated an
     environment: "sandbox",
     announcedAt: new Date().toISOString(),
   };
-  expect(await announceVenue({ consoleUrl: baseURL, sign: executorSign }, sandbox)).toBeNull();
+  expect(await announceVenue({ consoleUrl: baseURL, sign: executorSign }, sandbox)).toMatchObject({
+    accepted: true,
+    stored: true,
+  });
 
   // A sandbox fill: the executor journals the order before it is placed, then records the fill onchain.
   const amountCents = 620;
