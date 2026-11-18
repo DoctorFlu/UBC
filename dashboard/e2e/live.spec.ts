@@ -51,6 +51,7 @@ import {
   startFakeGemini,
 } from "./support/fake-gemini";
 import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
+import { startMcpServer } from "./support/mcp";
 import { gotoHydrated } from "./support/navigation";
 
 /**
@@ -1531,6 +1532,122 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
   } finally {
     executor.stop();
     await testInfo.attach("executor-log", { body: logs.join("\n"), contentType: "text/plain" });
+  }
+});
+
+test("an order Gemini fills only in part says so on every view, and get_activity says it in the same words", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  // The real executor on the fake Gemini, its journal in this console, and the real MCP server reading both.
+  const fake = new FakeGeminiPrivate({ apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" });
+  const sign = (hash: `0x${string}`) => devAccount("executor").signMessage({ message: { raw: hash } });
+  const chainId = chain.executor.publicClient.chain.id;
+  const policy = chain.address.toLowerCase() as `0x${string}`;
+  const logs: string[] = [];
+  const waiters: { pattern: RegExp; resolve: () => void }[] = [];
+  const say = (line: string) => {
+    logs.push(`${new Date().toISOString()} ${line}`);
+    for (const waiter of waiters) if (waiter.pattern.test(line)) waiter.resolve();
+  };
+  const untilLogged = (pattern: RegExp) =>
+    logs.some((line) => pattern.test(line))
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => waiters.push({ pattern, resolve }));
+  let orderReachedGemini = () => {};
+  const orderOnFake = new Promise<void>((resolve) => {
+    orderReachedGemini = resolve;
+  });
+  const mcp = await startMcpServer({
+    rpcUrl: chain.anvil.rpcUrl,
+    policy: chain.address,
+    consoleUrl: baseURL,
+    consoleServiceToken: E2E_SERVICE_TOKEN,
+    geminiUrl: gemini.url,
+  });
+  const executor = startExecutor({
+    client: chain.executor,
+    venue: geminiVenue({
+      publicClient: createGeminiClient({ baseUrl: gemini.url }),
+      productionClient: createGeminiClient({ baseUrl: gemini.url }),
+      trading: createGeminiPrivateClient({
+        environment: "sandbox",
+        credentials: { apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" },
+        fetch: async (input, init) => {
+          const answer = await fake.fetch(input, init);
+          if (new URL(input).pathname === "/v1/prediction-markets/order" && answer.status === 201) {
+            orderReachedGemini();
+          }
+          return answer;
+        },
+        limiter: unpacedLimiter(),
+      }),
+      journal: consoleOrderJournal({ consoleUrl: baseURL, sign, deployment: { chainId, policy } }),
+      deployment: { chainId, policy, deployBlockHash: `0x${"ab".repeat(32)}` },
+    }),
+    settlements: consoleSettlementSink({ consoleUrl: baseURL }),
+    fromBlock: 0n,
+    fillDelayMs: 0,
+    fillPollMs: 200,
+    pollingIntervalMs: 200,
+    log: say,
+  });
+  try {
+    // $3.00 at 31c: 9.22 contracts placed (with Gemini's worst-case fee, as in the test above).
+    const { intentId, verdict } = await chain.agent.proposeTrade(noBuy("GEMI-ETH2611202200-HI2800", 300, 31));
+    expect(verdict).toBe("approved");
+    await orderOnFake;
+    const order = [...fake.orders.values()].find((candidate) => candidate.status === "open");
+    if (!order) throw new Error("no open order on the fake");
+    // 4 of the 9.22 contracts fill, then Gemini cancels the rest.
+    fake.fill(order.orderId, 400);
+    fake.cancelOpen();
+    await untilLogged(new RegExp(`intent #${String(intentId)} buy NO .* filled \\(0x`));
+    const id = `#${String(intentId)}`;
+    const sentence =
+      "Partly filled: 4 of 9.22 contracts, $1.24 of $3.00. The rest was cancelled and its budget released.";
+
+    await open(page, `/activity/${String(intentId)}`);
+    const header = page.locator("main header").first();
+    const chip = header.locator("[data-status]");
+    await expect(chip).toHaveText("Partly filled");
+    await expect(chip).toHaveAttribute("data-status", "executed");
+    await expect(chip).toHaveAttribute("title", sentence);
+    await expect(header).toContainText(sentence);
+    await expect(page.getByRole("main").getByTestId("order-summary")).toHaveText(
+      "Buy NO, 4 of 9.22 filled at 31¢",
+    );
+    await expect(page.getByTestId("intent-timeline")).toContainText(
+      "4 of 9.22 contracts, $1.24 of $3.00. The rest was cancelled and its budget released.",
+    );
+    await shoot(page, testInfo, "intent-partly-filled");
+
+    await open(page, "/activity");
+    await expect(row(page, intentId).locator("[data-status]")).toHaveText("Partly filled");
+    await expect(row(page, intentId).getByTestId("order-summary")).toHaveText(
+      "Buy NO, 4 of 9.22 filled at 31¢",
+    );
+    await expect(page.getByText(/fills? recorded, 1 partly filled/)).toBeVisible();
+    await shoot(page, testInfo, "activity-partly-filled");
+
+    await open(page, "/");
+    await expect(row(page, intentId).locator("[data-status]")).toHaveText("Partly filled");
+
+    // What Grok Bot reads: the same sentence, from the journal the console served it.
+    const activity = await mcp.call("get_activity", { limit: 5 });
+    expect(activity.text).toContain(`${id}: ${sentence}`);
+    expect(activity.text).toMatch(/executed \(\$[\d.,]+ filled, 1 partly filled/);
+    const rows = activity.structured["intents"] as Record<string, unknown>[];
+    expect(rows.find((entry) => entry["id"] === intentId)?.["order"]).toMatchObject({
+      state: "partly_filled",
+      contractsHundredths: 922,
+      filledContractsHundredths: 400,
+    });
+  } finally {
+    executor.stop();
+    await mcp.stop();
+    await testInfo.attach("executor-log", { body: logs.join("\n"), contentType: "text/plain" });
+    await testInfo.attach("mcp-log", { body: mcp.logs.join("\n"), contentType: "text/plain" });
   }
 });
 
