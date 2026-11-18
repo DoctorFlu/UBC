@@ -32,7 +32,13 @@ export interface MakerSettings {
   assets: string[];
   intervalMs: number;
   limits: MakerLimits;
-  /** New quotes placed per cycle at most; cancels are never held back. */
+  /**
+   * New quotes placed per cycle at most; cancels are never held back. Room for every quote of two ladders'
+   * worth of rungs moving at once (production moves most of them every cycle), so a cycle that cannot place
+   * them all is rare, and a replacement it cannot place then stays stale for a cycle only within
+   * `STALE_BOUND_CENTS` (maker.ts). What bounds the request rate is the private client's pacing
+   * (`MAKER_REQUESTS_PER_MINUTE`), not this cap.
+   */
   maxPlacementsPerCycle: number;
   /** How often the sandbox's listings are read again. */
   discoveryMs: number;
@@ -48,7 +54,7 @@ export const MAKER_DEFAULTS = {
   maxInventoryUsd: 2_000,
   closeBeforeMs: 2 * 60_000,
   staleAfterMs: 45_000,
-  maxPlacementsPerCycle: 8,
+  maxPlacementsPerCycle: 24,
   discoveryMs: 60_000,
 } as const;
 
@@ -128,3 +134,13 @@ export function makerSettings(env: Record<string, string | undefined>): MakerSet
     discoveryMs: MAKER_DEFAULTS.discoveryMs,
   };
 }
+
+/**
+ * The maker's signed requests per minute, on average, and the burst it may send at once. Gemini allows 600
+ * private requests a minute; the maker uses under a third of that, so its start and stop (cancelling
+ * everything) and a cycle with every quote changing stay far inside it. A typical cycle (two reads, then a
+ * place and a cancel per changed quote, 6 to 11 of 12 changing every 15 s) takes up to 24 requests, about
+ * 8 s at this pace.
+ */
+export const MAKER_REQUESTS_PER_MINUTE = 180;
+export const MAKER_BURST = 3;

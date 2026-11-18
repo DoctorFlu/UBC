@@ -13,8 +13,9 @@ import { loadEnv } from "@mandate/shared";
 import { createGeminiClient } from "../src/client";
 import { GEMINI_HOSTS } from "../src/environment";
 import { MirrorMaker } from "../src/maker/maker";
-import { makerSettings } from "../src/maker/settings";
+import { MAKER_BURST, MAKER_REQUESTS_PER_MINUTE, makerSettings } from "../src/maker/settings";
 import { createGeminiPrivateClient } from "../src/private";
+import { TokenBucket } from "../src/rate-limiter";
 
 const say = (line: string) => {
   console.log(`${new Date().toISOString()} maker: ${line}`);
@@ -26,7 +27,16 @@ const settings = makerSettings(process.env);
 const maker = new MirrorMaker({
   production: createGeminiClient({ baseUrl: GEMINI_HOSTS.production }),
   sandbox: createGeminiClient({ baseUrl: GEMINI_HOSTS.sandbox }),
-  account: createGeminiPrivateClient({ environment: "sandbox", credentials: settings.credentials }),
+  account: createGeminiPrivateClient({
+    environment: "sandbox",
+    credentials: settings.credentials,
+    limiter: new TokenBucket({
+      capacity: MAKER_BURST,
+      refillPerMinute: MAKER_REQUESTS_PER_MINUTE,
+      now: Date.now,
+      sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    }),
+  }),
   settings,
   say,
 });
