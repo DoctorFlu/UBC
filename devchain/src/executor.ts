@@ -39,7 +39,10 @@ import {
   rpcErrorText,
 } from "@mandate/shared";
 import type { SettlementSink } from "./settlement-sink";
-import type { HeldPosition, PositionOutcome, Venue } from "./venue";
+import type { FillState, HeldPosition, PositionOutcome, Venue } from "./venue";
+
+/** A fill the venue says is over. */
+type ClosedFill = Extract<FillState, { state: "closed" }>;
 
 export type RefusalCode =
   | "market_not_a_symbol"
@@ -105,6 +108,20 @@ export async function checkApprovedIntent(
       code: "category_mismatch",
       detail: `Gemini lists ${intent.market} as ${categoryLabel(listed)}, the intent says ${categoryLabel(intent.category)}`,
     };
+  }
+  return { ok: true, outcome, amountCents, limitPrice };
+}
+
+/**
+ * The order terms of an approved intent whose order already reached the venue, read from the intent alone
+ * (no market data: the market may be gone by now). Null when the intent's numbers cannot make an order,
+ * which no placed order has; the intent then takes `checkApprovedIntent` as any other.
+ */
+export function checkPlacedIntent(intent: Intent): Extract<IntentCheck, { ok: true }> | null {
+  const { outcome, amountCents, limitPrice } = intent;
+  if (!isInstrumentSymbol(intent.market) || (outcome !== "YES" && outcome !== "NO")) return null;
+  if (amountCents === null || limitPrice === null || amountCents <= 0 || !isValidLimitPrice(limitPrice)) {
+    return null;
   }
   return { ok: true, outcome, amountCents, limitPrice };
 }
@@ -216,6 +233,10 @@ export function startExecutor(options: ExecutorOptions): Executor {
   const holds = new Map<number, number>();
   /** How many times in a row each intent's market could not be checked, for growing waits. */
   const marketWaits = new Map<number, number>();
+  /** How many times in a row each intent's result could not be recorded, for growing waits. */
+  const recordWaits = new Map<number, number>();
+  /** Fills read from the venue whose result is not onchain yet: a later pass records them as they are. */
+  const fills = new Map<number, ClosedFill>();
   let stopped = false;
   // Read through a function so the compiler does not narrow `stopped` across awaits.
   const isStopped = (): boolean => stopped;
@@ -253,46 +274,64 @@ export function startExecutor(options: ExecutorOptions): Executor {
   async function handle(intentId: number): Promise<void> {
     if (isStopped() || inFlight.has(intentId)) return;
     inFlight.add(intentId);
-    /** Set once an order may have reached the venue: from then on a failure is never retried blindly. */
+    /**
+     * Set once an order may have reached the venue: from then on a failure is retried only through the
+     * venue's `placeOrder`, which finds the order an earlier pass placed and never places a second one.
+     */
     let placing = false;
     try {
       const intent = await reads.run(() => client.getIntent(intentId));
       if (intent?.status !== "approved") {
         marketWaits.delete(intentId);
+        recordWaits.delete(intentId);
+        fills.delete(intentId);
         return; // already recorded, for example after a restart
       }
 
-      let check: IntentCheck;
-      try {
-        check = await checkApprovedIntent(intent, venue);
-      } catch (error) {
-        // Gemini's market data is unavailable (an outage, maintenance): asking every few seconds for hours
-        // helps nobody, so the waits grow, as for a venue hold.
-        const delayMs = growingDelay(marketWaits, intentId);
-        log(
-          `${tag} intent #${intentId}: could not check the market on Gemini (${errorText(error)}); ` +
-            `not placing it, trying again in ${formatWait(delayMs)}`,
-        );
-        retryLater(intentId, delayMs);
-        return;
-      }
-      marketWaits.delete(intentId);
+      // A fill this process already read, or an order the venue's journal says reached it, is recorded
+      // from what the venue did. Its market is never checked again: it may have expired or left the
+      // listing since, or market data may be down, and a check made now must never record a refusal for
+      // an order that was placed, or keep its result waiting.
+      const known = fills.get(intentId);
+      const reached = known !== undefined || ((await venue.reachedVenue?.(intentId)) ?? false);
+      const placedCheck = reached ? checkPlacedIntent(intent) : null;
+      let check: Extract<IntentCheck, { ok: true }>;
+      if (placedCheck !== null) {
+        placing = true;
+        check = placedCheck;
+      } else {
+        let checked: IntentCheck;
+        try {
+          checked = await checkApprovedIntent(intent, venue);
+        } catch (error) {
+          // Gemini's market data is unavailable (an outage, maintenance): asking every few seconds for
+          // hours helps nobody, so the waits grow, as for a venue hold.
+          const delayMs = growingDelay(marketWaits, intentId);
+          log(
+            `${tag} intent #${intentId}: could not check the market on Gemini (${errorText(error)}); ` +
+              `not placing it, trying again in ${formatWait(delayMs)}`,
+          );
+          retryLater(intentId, delayMs);
+          return;
+        }
+        marketWaits.delete(intentId);
 
-      if (!check.ok) {
-        const { txHash } = await client.recordResult({
-          intentId,
-          filled: false,
-          filledCents: 0,
-          pnlCents: 0,
-        });
-        log(
-          `${tag} intent #${intentId} REFUSED (${check.code}): ${check.detail}; recorded as not filled (${txHash})`,
-        );
-        return;
+        if (!checked.ok) {
+          const { txHash } = await client.recordResult({
+            intentId,
+            filled: false,
+            filledCents: 0,
+            pnlCents: 0,
+          });
+          log(
+            `${tag} intent #${intentId} REFUSED (${checked.code}): ${checked.detail}; recorded as not filled (${txHash})`,
+          );
+          return;
+        }
+        check = checked;
+        await wait(fillDelayMs);
+        if (isStopped()) return;
       }
-
-      await wait(fillDelayMs);
-      if (isStopped()) return;
       const order = {
         intentId,
         market: intent.market,
@@ -301,46 +340,53 @@ export function startExecutor(options: ExecutorOptions): Executor {
         amountCents: check.amountCents,
         limitPrice: check.limitPrice,
       };
-      let fill;
-      try {
-        placing = true;
-        const placement = await venue.placeOrder(order);
-        if (placement.status === "refused") {
+      let fill: ClosedFill;
+      if (known !== undefined) {
+        fill = known;
+      } else {
+        try {
+          placing = true;
+          const placement = await venue.placeOrder(order);
+          if (placement.status === "refused") {
+            holds.delete(intentId);
+            const { txHash } = await client.recordResult({
+              intentId,
+              filled: false,
+              filledCents: 0,
+              pnlCents: 0,
+            });
+            log(
+              `${tag} intent #${intentId} REFUSED by the venue: ${placement.detail}; recorded as not filled (${txHash})`,
+            );
+            return;
+          }
+          if (placement.status === "held") {
+            const delayMs = holdDelay(intentId);
+            // Said once while the reason stays the same; the waits grow up to 10 minutes.
+            note(intentId, `held by the venue, not recorded: ${placement.detail}`);
+            retryLater(intentId, delayMs);
+            return;
+          }
           holds.delete(intentId);
-          const { txHash } = await client.recordResult({
-            intentId,
-            filled: false,
-            filledCents: 0,
-            pnlCents: 0,
-          });
+          const { placed } = placement;
+          let read = await venue.readFill(placed);
+          while (read.state === "open") {
+            await wait(fillPollMs);
+            if (isStopped()) return;
+            read = await venue.readFill(placed);
+          }
+          fill = read;
+        } catch (error) {
           log(
-            `${tag} intent #${intentId} REFUSED by the venue: ${placement.detail}; recorded as not filled (${txHash})`,
+            `${tag} intent #${intentId}: the venue did not answer (${errorText(error)}); ` +
+              `trying again in ${Math.round(venueRetryMs / 1000)} s`,
           );
+          retryLater(intentId);
           return;
         }
-        if (placement.status === "held") {
-          const delayMs = holdDelay(intentId);
-          // Said once while the reason stays the same; the waits grow up to 10 minutes.
-          note(intentId, `held by the venue, not recorded: ${placement.detail}`);
-          retryLater(intentId, delayMs);
-          return;
-        }
-        holds.delete(intentId);
-        const { placed } = placement;
-        fill = await venue.readFill(placed);
-        while (fill.state === "open") {
-          await wait(fillPollMs);
-          if (isStopped()) return;
-          fill = await venue.readFill(placed);
-        }
-      } catch (error) {
-        log(
-          `${tag} intent #${intentId}: the venue did not answer (${errorText(error)}); ` +
-            `trying again in ${Math.round(venueRetryMs / 1000)} s`,
-        );
-        retryLater(intentId);
-        return;
       }
+      // Kept until the result is onchain, so a later pass records this fill without asking anyone again.
+      fills.set(intentId, fill);
       const filledCents = Math.min(fill.filledCents, check.amountCents);
       const { txHash } = await client.recordResult({
         intentId,
@@ -348,6 +394,8 @@ export function startExecutor(options: ExecutorOptions): Executor {
         filledCents,
         pnlCents: 0,
       });
+      recordWaits.delete(intentId);
+      fills.delete(intentId);
       log(
         `${tag} intent #${intentId} ${intent.isBuy ? "buy" : "sell"} ${check.outcome} ${intent.market} ` +
           `${formatCents(check.amountCents)} at ${check.limitPrice}c: ${fill.detail}, ` +
@@ -361,7 +409,15 @@ export function startExecutor(options: ExecutorOptions): Executor {
         log(`${tag} intent #${intentId}: ${errorText(error)}; trying again in ${formatWait(delayMs)}`);
         retryLater(intentId, delayMs);
       } else {
-        log(`${tag} intent #${intentId}: ${errorText(error)}`);
+        // The order reached the venue and ended there, but its result is not onchain yet (the RPC refused
+        // the write, or it timed out). The next pass asks the venue again, which finds this order and never
+        // sends a second one, and records what it ended as; until then the approval stays committed.
+        const delayMs = growingDelay(recordWaits, intentId);
+        log(
+          `${tag} intent #${intentId}: the order is at the venue but its result could not be recorded onchain ` +
+            `(${errorText(error)}); no order is sent again, recording it again in ${formatWait(delayMs)}`,
+        );
+        retryLater(intentId, delayMs);
       }
     } finally {
       inFlight.delete(intentId);

@@ -43,6 +43,7 @@ import {
 import { type ExecutorContract, type ExecutorVenue, loadEnv, PolicyClient, WriteLane } from "@mandate/shared";
 import { type ResolvedDeployment, resolvePolicyDeployment } from "@mandate/shared/node";
 import {
+  announceUntilAccepted,
   announceVenue,
   consoleContractDiscovery,
   consoleOrderJournal,
@@ -229,24 +230,21 @@ console.log(
 );
 
 /**
- * Tells the console which venue fills this contract's orders (its Sandbox badge). The console may start
- * after the executor, so this tries again with growing waits until it is stored; it asks nothing of Gemini.
- * A console that reads another Gemini refuses it (environment_mismatch), and the executor stops there.
+ * Tells the console which venue fills this contract's orders (its Sandbox badge), and logs what the console
+ * did with it: every failed attempt with its wait, then the announcement stored or found in force. A
+ * console that reads another Gemini refuses it (environment_mismatch), and the executor stops there.
  */
 function announce(announcement: ExecutorVenue): Promise<void> {
-  return (async () => {
-    for (let attempt = 0; ; attempt += 1) {
-      const problem = await announceVenue({ consoleUrl, sign }, announcement);
-      if (problem === null) return;
-      if (problem.mismatch) fail(`The console refused this executor: ${problem.message}`);
-      if (attempt === 0) {
-        console.warn(
-          `[executor] Could not tell the console the venue of ${announcement.policy} yet (${problem.message}); trying again.`,
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, Math.min(5_000 * 2 ** attempt, 60_000)));
-    }
-  })();
+  return announceUntilAccepted({
+    announce: () => announceVenue({ consoleUrl, sign }, announcement),
+    policy: announcement.policy,
+    log: (line) => {
+      console.log(line);
+    },
+  }).then(
+    () => undefined,
+    (error: unknown) => fail(error instanceof Error ? error.message : String(error)),
+  );
 }
 
 /** Serves one contract, once its own `executor()` is this key: the console's listing is not trusted. */

@@ -1374,8 +1374,12 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
   // An executor on Gemini's production would read another exchange than this console: refused, never shown.
   expect(
     await announceVenue({ consoleUrl: baseURL, sign }, { ...announcement, environment: "production" }),
-  ).toMatchObject({ mismatch: true, message: expect.stringContaining("GEMINI_ENV=production") });
-  expect(await announceVenue({ consoleUrl: baseURL, sign }, announcement)).toBeNull();
+  ).toMatchObject({
+    accepted: false,
+    mismatch: true,
+    message: expect.stringContaining("GEMINI_ENV=production"),
+  });
+  expect(await announceVenue({ consoleUrl: baseURL, sign }, announcement)).toMatchObject({ accepted: true });
   // The test waits on what happens, never on a clock: the order reaching the fake, and the executor's own
   // line for the fill. Its log is attached to the test, so a failure shows what it did and when.
   const logs: string[] = [];
