@@ -11,6 +11,7 @@ import { E2E_SERVICE_TOKEN, ownerHeaders, snapshot } from "./support/console";
 import { type HeadWatch, headReport, watchRebuilds } from "./support/head-report";
 import { watchConsole } from "./support/problems";
 import { type VirtualPasskey, addVirtualPasskey, registerOnPage } from "./support/session";
+import { gotoHydrated, waitForHydration } from "./support/navigation";
 
 /**
  * Workspaces and passkeys as a person meets them (docs/accounts.md), on the smoke suite's console, whose
@@ -55,9 +56,7 @@ async function shotOf(locator: Locator, testInfo: TestInfo, name: string) {
   });
 }
 
-async function hydrated(page: Page) {
-  await page.locator("html[data-page-hydrated]").waitFor({ state: "attached" });
-}
+const hydrated = waitForHydration;
 
 /** Which agent the console says a token belongs to, asked the way the MCP server asks. */
 async function resolveToken(baseURL: string, token: string): Promise<string | null> {
@@ -242,7 +241,7 @@ test.describe("a second workspace", () => {
     baseURL,
   }, testInfo) => {
     const problems = watchConsole(page);
-    await page.goto("/setup");
+    await gotoHydrated(page, "/setup");
     const agents = page.getByRole("region", { name: "Agents" });
     await expect(agents.getByText("No tokens yet. Create one to connect Grok Bot.")).toBeVisible();
     await hydrated(page);
@@ -585,7 +584,7 @@ test.describe("a second workspace", () => {
     expect((await signedOut).status()).toBe(200);
     await page.waitForURL(/\/sign-in$/);
     expect((await page.request.get("/api/console/snapshot")).status()).toBe(401);
-    await page.goto("/setup");
+    await gotoHydrated(page, "/setup");
     await expect(page).toHaveURL(/\/sign-in\?next=%2Fsetup$/);
     await hydrated(page);
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();

@@ -16,6 +16,7 @@ import { firstMandatePath } from "./support/console";
 import { suitePaths } from "./support/chain";
 import { DEMO_RECEIPT, ownerHeaders, reportSignalBudget, snapshot } from "./support/console";
 import { watchConsole } from "./support/problems";
+import { gotoHydrated } from "./support/navigation";
 
 const ADVANCED_COOKIE = "mandate-advanced";
 
@@ -103,7 +104,7 @@ for (const scheme of schemes) {
 
       test("the dev signer shows the connected owner", async ({ page, baseURL }) => {
         const problems = watchConsole(page);
-        await page.goto(await firstMandatePath(baseURL ?? ""));
+        await gotoHydrated(page, await firstMandatePath(baseURL ?? ""));
         if (viewport.name === "phone") {
           await page.getByRole("button", { name: "Open menu" }).click();
         }
@@ -197,7 +198,7 @@ test.describe("seeded demo", () => {
   test("a holdings row shows its error only once edited, and nothing moves when it does", async ({
     page,
   }) => {
-    await page.goto("/hedge");
+    await gotoHydrated(page, "/hedge");
     const save = page.getByRole("button", { name: "Sign and save" });
     await expect(save).toBeVisible();
     await page.getByRole("button", { name: "Add an asset" }).click();
@@ -286,7 +287,7 @@ test.describe("seeded demo", () => {
     const { plan } = stored;
     const usd = (cents: number) => formatUsdCents(cents, { trimWholeCents: true });
 
-    await page.goto("/hedge");
+    await gotoHydrated(page, "/hedge");
     const card = page.getByTestId("agent-plan");
     await expect(card).toHaveAttribute("data-plan-id", plan.planId);
     await expect(card).toContainText(stored.requestText);
@@ -400,7 +401,7 @@ test.describe("seeded demo", () => {
     expect(cited.map((intent) => intent.status)).toEqual(["executed", "approved"]);
 
     // Reached from the hedge page.
-    await page.goto("/hedge");
+    await gotoHydrated(page, "/hedge");
     await page.getByRole("link", { name: "Evidence chain" }).click();
     await expect(page).toHaveURL(new RegExp(`/hedge/plans/${stored.planId}$`));
     await expect(page.getByRole("heading", { level: 1, name: "Evidence chain" })).toBeVisible();
@@ -460,7 +461,7 @@ test.describe("seeded demo", () => {
   test("a plan the console does not store says so", async ({ page }) => {
     const problems = watchConsole(page);
     // Intent 0's reason names plan_e2e, which the agent never posted.
-    await page.goto("/activity/0");
+    await gotoHydrated(page, "/activity/0");
     await page.getByTestId("sealed-reason").getByRole("link", { name: "plan_e2e" }).click();
     await expect(page).toHaveURL(/\/hedge\/plans\/plan_e2e$/);
     await expect(page.getByText("No plan with this id")).toBeVisible();
@@ -519,7 +520,7 @@ test.describe("seeded demo", () => {
     expect(scorecardBlocked.length).toBeGreaterThan(0);
 
     // Each number lists the transactions behind it, and every one is a Policy contract event.
-    await page.goto(`/agent/${AGENT_ADDRESS}`);
+    await gotoHydrated(page, `/agent/${AGENT_ADDRESS}`);
     const approved = page.getByTestId("count-approved");
     await approved.locator("summary").click();
     const listed = await approved
@@ -558,7 +559,7 @@ test.describe("seeded demo", () => {
     const current = await snapshot(baseURL ?? "");
     const events = current.chain?.events ?? [];
     expect(events.length).toBeGreaterThan(0);
-    await page.goto("/audit");
+    await gotoHydrated(page, "/audit");
     const table = () => page.getByRole("region", { name: /Policy contract events/ });
 
     // Everything the console ingested, newest first, except the Paused event setPolicy emits without
@@ -614,7 +615,7 @@ test.describe("seeded demo", () => {
   });
 
   test("the audit counts blocked intents by the contract's reason", async ({ page }) => {
-    await page.goto("/audit");
+    await gotoHydrated(page, "/audit");
     const blocked = page.getByTestId("blocked-by-rule");
     const reasons = ["over max trade size", "category not allowed"];
     // In words by default, and with the contract's own reason code in Advanced view.

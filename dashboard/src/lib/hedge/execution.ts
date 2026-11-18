@@ -3,16 +3,18 @@
  * plan is the agent's sealed reason: a decision context whose hash checks out (`verified`) and that
  * names the plan. An order is matched to such an intent by market and amount, each intent once.
  */
-import type { IntentStatus, IntentView } from "@mandate/shared";
+import { type IntentStatus, type IntentView, countFills } from "@mandate/shared";
 import type { HedgePlan, PlannedOrder } from "@mandate/planner";
 
-import type { ChainView } from "@/lib/live/types";
+import type { ChainView, VenueOrderView } from "@/lib/live/types";
 
 export interface OrderOnChain {
   order: PlannedOrder;
   index: number;
   /** The intent that proposed this order, or null when none cites the plan for it. */
   intent: IntentView | null;
+  /** The order the executor placed on a venue for that intent, from its journal; none on the simulated venue. */
+  venueOrder: VenueOrderView | undefined;
 }
 
 export interface PlanExecution {
@@ -22,6 +24,8 @@ export interface PlanExecution {
   /** Orders with an intent on the chain. */
   proposed: number;
   byStatus: Partial<Record<IntentStatus, number>>;
+  /** Executed intents of which only part filled, by the executor's journal (counted in `byStatus` too). */
+  partlyFilled: number;
   /** Filled cents the executor recorded across the plan's intents. */
   filledCents: number;
 }
@@ -39,8 +43,9 @@ export function intentsCitingPlan(
 
 export function planExecution(
   plan: Pick<HedgePlan, "planId" | "orders">,
-  chain: Pick<ChainView, "intents" | "sealed"> | null,
+  chain: (Pick<ChainView, "intents" | "sealed"> & Partial<Pick<ChainView, "venueOrders">>) | null,
 ): PlanExecution {
+  const venueOrders = chain?.venueOrders ?? {};
   const citing = chain ? intentsCitingPlan(chain, plan.planId) : [];
   const unused = [...citing];
   const orders = plan.orders.map((order, index): OrderOnChain => {
@@ -48,7 +53,7 @@ export function planExecution(
       (intent) => intent.market === order.instrumentSymbol && intent.amountCents === order.amountCents,
     );
     const intent = at >= 0 ? (unused.splice(at, 1)[0] ?? null) : null;
-    return { order, index, intent };
+    return { order, index, intent, venueOrder: intent === null ? undefined : venueOrders[intent.id] };
   });
   const byStatus: Partial<Record<IntentStatus, number>> = {};
   let filledCents = 0;
@@ -61,6 +66,8 @@ export function planExecution(
     extra: unused,
     proposed: orders.filter((entry) => entry.intent !== null).length,
     byStatus,
+    partlyFilled: countFills(citing.map((intent) => ({ intent, order: venueOrders[intent.id] })))
+      .partlyFilled,
     filledCents,
   };
 }
@@ -81,7 +88,9 @@ export function executionSummary(execution: PlanExecution, orderCount: number, e
   const failed = execution.byStatus.failed ?? 0;
   const waiting = execution.byStatus.needs_approval ?? 0;
   const rejected = execution.byStatus.rejected ?? 0;
-  if (executed > 0) parts.push(`${String(executed)} filled`);
+  const partly = execution.partlyFilled;
+  if (executed - partly > 0) parts.push(`${String(executed - partly)} filled`);
+  if (partly > 0) parts.push(`${String(partly)} partly filled`);
   if (failed > 0) parts.push(`${String(failed)} not filled`);
   if (waiting > 0) parts.push(`${String(waiting)} waiting for you`);
   if (rejected > 0) parts.push(`${String(rejected)} rejected`);

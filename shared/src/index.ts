@@ -16,6 +16,7 @@ export * from "./deployment";
 export * from "./env";
 export * from "./evaluate";
 export * from "./events";
+export * from "./fill-words";
 export * from "./fees";
 export * from "./goals";
 export * from "./head";

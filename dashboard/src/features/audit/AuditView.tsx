@@ -1,6 +1,6 @@
 "use client";
 
-import { describeReason } from "@mandate/shared";
+import { INTENT_STATUS_LABELS, describeReason } from "@mandate/shared";
 import { ScrollText } from "lucide-react";
 import { useState } from "react";
 
@@ -108,7 +108,12 @@ const columns: readonly Column<AuditRow>[] = [
     header: "Result",
     cell: (row) =>
       row.status ? (
-        <StatusChip status={row.status} reason={row.reason} />
+        // The log of what the contract emitted keeps its words, "Failed" included.
+        <StatusChip
+          status={row.status}
+          reason={row.reason}
+          label={row.status === "failed" ? INTENT_STATUS_LABELS.failed : undefined}
+        />
       ) : (
         <span className={styles.none}>None</span>
       ),

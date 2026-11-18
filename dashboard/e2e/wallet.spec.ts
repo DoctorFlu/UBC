@@ -18,6 +18,7 @@ import {
   waitForSnapshot,
 } from "./support/console";
 import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
+import { gotoHydrated } from "./support/navigation";
 
 /**
  * The owner's first visit with a real browser wallet, as on Arc testnet: a console built without the dev
@@ -320,7 +321,7 @@ test("a wallet on another network is asked to switch, and to add the console's n
     announce: false,
     legacy: METAMASK.rdns,
   });
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
 
   // This build has no dev signer: nothing connects until the owner asks.
   await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
@@ -393,7 +394,7 @@ test("with two wallets in the browser, the owner picks one, the console remember
     ],
     { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
   );
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   // The first test paused the agent: here the owner resumes it.
   await expect(page.getByTestId("paused-banner")).toBeVisible();
 
@@ -468,7 +469,7 @@ test("from Home, the owner's first screen, the owner connects the wallet without
     legacy: METAMASK.rdns,
   });
   // Where a claim lands.
-  await page.goto("/");
+  await gotoHydrated(page, "/");
   await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
 
   // The wallet-owned mandate says what is missing, with the action, on its own row.
@@ -522,7 +523,7 @@ test("a remembered wallet that never answers: within the deadline the console of
 
   // In a mandate: the top bar offers to connect, the page says which wallet did not answer, and the pause
   // control says why it is off.
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   const connect = page
     .getByRole("banner")
     .getByRole("button", { name: "Connect wallet" })
@@ -588,7 +589,7 @@ test("a wallet the owner picked while another did not answer stays the one conne
     ],
     { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
   );
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   const connect = page
     .getByRole("banner")
     .getByRole("button", { name: "Connect wallet" })
@@ -629,7 +630,7 @@ test("a wallet the owner picked and then disconnected is not put back when anoth
     ],
     { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: PHANTOM.rdns },
   );
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   const connect = page
     .getByRole("banner")
     .getByRole("button", { name: "Connect wallet" })
@@ -685,7 +686,7 @@ test("a wallet that does not answer the request to connect either: the button ca
     announce: true,
     legacy: METAMASK.rdns,
   });
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   const connect = page
     .getByRole("banner")
     .getByRole("button", { name: "Connect wallet" })
@@ -720,7 +721,7 @@ test("after a Connect the owner declined, the remembered wallet's late answer st
     announce: true,
     legacy: METAMASK.rdns,
   });
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   const connect = page
     .getByRole("banner")
     .getByRole("button", { name: "Connect wallet" })
@@ -748,7 +749,7 @@ test("a wallet remembered from before the chooser reconnects under its own name"
     ],
     { rpcUrl: chain.anvil.rpcUrl, announce: true, legacy: METAMASK.rdns },
   );
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   const chip = page.getByTestId("owner-address").filter({ visible: true });
   await expect(chip).toHaveAttribute("data-address", owner);
   await chip.click();

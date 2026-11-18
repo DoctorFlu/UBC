@@ -28,6 +28,7 @@ import {
 import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
 import { type FakeGemini, recordedPlanRequest, startFakeGemini } from "./support/fake-gemini";
 import { type FakeWebhook, startFakeWebhook } from "./support/fake-webhook";
+import { gotoHydrated } from "./support/navigation";
 
 /**
  * Event wake-ups (issue #40) the way production runs them: the real console (`next dev`) reading a real
@@ -145,7 +146,7 @@ async function settled() {
 
 async function open(page: Page, path: string): Promise<void> {
   // `/` is the workspace Home (#95); the owner acts on the first mandate's Overview.
-  await page.goto(path === "/" ? await firstMandatePath(baseURL) : path);
+  await gotoHydrated(page, path === "/" ? await firstMandatePath(baseURL) : path);
   await expect(page.getByTestId("owner-address").filter({ visible: true })).toBeVisible();
 }
 

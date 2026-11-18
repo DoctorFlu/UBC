@@ -138,6 +138,16 @@ Until then it logs each failed attempt with the wait before the next (5 s doubli
 - The Order line, on the intent page, in Activity and on Home, gives the contracts the order was placed for, which [Fees](#fees) can make fewer than the amount buys at the limit (issue #117).
   Advanced view adds what the amount buys at the limit when the two differ: "Buy NO, 10 at 97¢ (10.03 before the fee)".
   Before an order is placed, and on the simulated venue, the line gives what the amount buys at the limit.
+- The contract records one result per intent, so an order that closed with only part of it filled is Executed onchain.
+  The executor's journal says more, and the console reads it in one set of words (`shared/src/fill-words.ts`), which `get_activity`'s summary also uses:
+  - A partial fill: the chip reads "Partly filled", and its sentence "Partly filled: 5 of 12.50 contracts, $1.05 of $2.63. The rest was cancelled and its budget released."
+    The intent's onchain step, the Order line ("Buy NO, 5 of 12.50 filled at 21¢"), Activity's rows and its Filled total, the Overview and the Hedge plan line ("1 partly filled") say the same.
+    The contract releases the unfilled part of the amount when the result is recorded (`Policy.recordResult`).
+  - A fill the journal has and the chain does not yet (the executor records the result after the order closes, and retries when the chain does not answer): "Filled at Gemini sandbox; recording the result onchain", with a step marked as the journal's, never as onchain.
+  - A failed intent reads "Not filled" in the default view; Advanced view, Audit and the agent keep the contract's word, "Failed".
+    Its sentence gives the executor's journalled words when Gemini refused the order, and says when the order rested and was cancelled with nothing filled.
+    The executor journals nothing when it refuses an intent before sending an order (a closed or unlisted market, a price off the grid, too small an order): only its log says why, so the console says it holds no reason.
+  - An intent with no journal row (the simulated venue) reads as its status, apart from that sentence for a failed one.
 
 The agent reads the same journal through the console's agent API (`GET /api/agent/v1/orders`, its own mandate only): `get_intent` and `get_activity` give each intent's `order` (venue, environment, state, contracts placed and filled, fee), and `get_intent` says when fewer contracts were placed than the amount buys at the limit.
 The same response carries each filled intent's source as the console labels it (`fillSources`), so each filled intent also has a `fillSource` (`simulated`, `sandbox`, `live` or `unknown`), and `get_intent` and `get_activity` name it in their summaries whenever a fill was not real money; `get_activity` gives each source's count when its fills differ.

@@ -6,6 +6,7 @@ import { laptopWidths, routePath, routes, schemes } from "./routes";
 import { firstMandatePath } from "./support/console";
 import { watchConsole } from "./support/problems";
 import { ownerCookie } from "./support/session";
+import { gotoHydrated, waitForHydration } from "./support/navigation";
 
 const ADVANCED_COOKIE = "mandate-advanced";
 
@@ -26,7 +27,7 @@ test.describe("Advanced view", () => {
     baseURL,
   }) => {
     const problems = watchConsole(page);
-    await page.goto(await firstMandatePath(baseURL ?? ""));
+    await gotoHydrated(page, await firstMandatePath(baseURL ?? ""));
     await page.getByRole("switch", { name: "Advanced view" }).click();
     await expect(page.getByRole("switch", { name: "Advanced view" })).toBeChecked();
     await expect(page.getByText("Committed", { exact: true })).toBeVisible();
@@ -72,7 +73,7 @@ test.describe("Advanced view", () => {
     baseURL,
   }) => {
     const problems = watchConsole(page);
-    await page.goto(`${await firstMandatePath(baseURL ?? "")}#rule-meters`);
+    await gotoHydrated(page, `${await firstMandatePath(baseURL ?? "")}#rule-meters`);
     const note = page.getByTestId("advanced-note");
     await expect(note).toBeVisible();
     await expect(note).toContainText("part of Advanced view");
@@ -230,7 +231,7 @@ test.describe("hedge disclosure", () => {
     page,
   }) => {
     const problems = watchConsole(page);
-    await page.goto("/hedge");
+    await gotoHydrated(page, "/hedge");
     // What the owner needs first stays open: the plan, what it costs and covers, and its orders.
     await expect(page.getByTestId("agent-plan")).toBeVisible();
     await expect(page.getByTestId("plan-execution")).toBeVisible();
@@ -262,7 +263,7 @@ test.describe("hedge disclosure", () => {
 
   test("is open in Advanced view, and follows the switch", async ({ page, context, baseURL }) => {
     await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
-    await page.goto("/hedge");
+    await gotoHydrated(page, "/hedge");
     const trigger = page.getByRole("button", { name: "Payoff and live ladder" });
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByTestId("live-ladder")).toBeVisible();
@@ -279,7 +280,7 @@ test.describe("layout", () => {
       baseURL,
     }) => {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+      await gotoHydrated(page, await firstMandatePath(baseURL ?? "", "/activity"));
       // Activity opens on Waiting while something is held: every row, rejected ones too, is under All.
       await page.getByRole("tab", { name: /^All/ }).click();
       const table = page.getByRole("tabpanel").getByRole("table");
@@ -310,7 +311,7 @@ test.describe("layout", () => {
       }) => {
         if (advanced) await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
         await page.setViewportSize({ width, height: 900 });
-        await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+        await gotoHydrated(page, await firstMandatePath(baseURL ?? "", "/activity"));
         const panel = page.getByRole("tabpanel");
         for (const tab of ["All", "Waiting", "Approved", "Executed", "Failed", "Rejected"]) {
           await page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
@@ -391,7 +392,7 @@ test.describe("layout", () => {
     page,
     baseURL,
   }) => {
-    await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+    await gotoHydrated(page, await firstMandatePath(baseURL ?? "", "/activity"));
     await page.getByRole("tab", { name: /^All/ }).click();
     const panel = page.getByRole("tabpanel");
     const held = panel.locator("tbody tr", { has: page.getByTestId("decide") }).first();
@@ -409,7 +410,7 @@ test.describe("layout", () => {
     baseURL,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+    await gotoHydrated(page, await firstMandatePath(baseURL ?? "", "/activity"));
     const panel = page.getByRole("tabpanel");
     for (const tab of ["All", "Waiting", "Executed", "Rejected"]) {
       await page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
@@ -449,7 +450,7 @@ test.describe("layout", () => {
 
 test.describe("keyboard", () => {
   test("the Advanced view switch toggles with Space", async ({ page, baseURL }) => {
-    await page.goto(await firstMandatePath(baseURL ?? ""));
+    await gotoHydrated(page, await firstMandatePath(baseURL ?? ""));
     const toggle = page.getByRole("switch", { name: "Advanced view" });
     await toggle.focus();
     await page.keyboard.press("Space");
@@ -459,7 +460,7 @@ test.describe("keyboard", () => {
   });
 
   test("tabs move with the arrow keys and keep the choice in the address", async ({ page }) => {
-    await page.goto("/approvals");
+    await gotoHydrated(page, "/approvals");
     const waiting = page.getByRole("tab", { name: /Waiting/ });
     const decided = page.getByRole("tab", { name: /Decided/ });
     await expect(waiting).toHaveAttribute("aria-selected", "true");
@@ -471,6 +472,7 @@ test.describe("keyboard", () => {
     await expect(page.getByRole("tabpanel")).toBeVisible();
 
     await page.reload();
+    await waitForHydration(page);
     await expect(page.getByRole("tab", { name: /Decided/ })).toHaveAttribute("aria-selected", "true");
     await page.getByRole("tab", { name: /Decided/ }).focus();
     await page.keyboard.press("ArrowRight");
@@ -479,7 +481,7 @@ test.describe("keyboard", () => {
   });
 
   test("a dialog opens from the keyboard, closes with Escape and returns focus", async ({ page }) => {
-    await page.goto("/dev/components");
+    await gotoHydrated(page, "/dev/components");
     const trigger = page.getByRole("button", { name: "Open dialog" });
     await trigger.focus();
     await page.keyboard.press("Enter");
@@ -492,7 +494,7 @@ test.describe("keyboard", () => {
   });
 
   test("a select opens, moves and picks with the keyboard", async ({ page }) => {
-    await page.goto("/audit");
+    await gotoHydrated(page, "/audit");
     const order = page.getByRole("combobox", { name: "Order of events" });
     await expect(order).toContainText("Newest first");
     await order.focus();
@@ -512,7 +514,7 @@ test.describe("keyboard", () => {
       page.locator(`[data-specimen="${label}"]`).getByTestId("request-text");
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto("/dev/components");
+      await gotoHydrated(page, "/dev/components");
       const short = specimen("short");
       const long = specimen("long");
       await expect(long.getByRole("button", { name: "Show more" })).toBeVisible();
@@ -567,7 +569,7 @@ test.describe("keyboard", () => {
   test("a toast is announced in the notifications region and dismisses from the keyboard", async ({
     page,
   }) => {
-    await page.goto("/dev/components");
+    await gotoHydrated(page, "/dev/components");
     await page.getByRole("button", { name: "Success" }).click();
     const region = page.getByRole("region", { name: "Notifications" });
     const item = region.getByText("A success toast");
@@ -618,7 +620,7 @@ for (const scheme of schemes) {
         await held;
         await route.continue().catch(() => {});
       });
-      await page.goto("/hedge");
+      await gotoHydrated(page, "/hedge");
       await expect(page.getByRole("heading", { level: 1, name: "Hedge" })).toBeVisible();
       await page.getByRole("button", { name: "Payoff and live ladder" }).click();
       await expect(page.getByTestId("ladder-loading")).toBeVisible();
