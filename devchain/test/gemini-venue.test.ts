@@ -465,6 +465,42 @@ describe("an attempt whose answer never came", () => {
       detail: expect.stringMatching(/2 orders for 40 contracts at 31c match; check Gemini/) as unknown,
     });
   });
+
+  it("ends a 'placing' attempt Gemini never received as refused once the market is gone, never sending it", async () => {
+    // The process stopped after journalling "placing", before it knew whether the order went out.
+    fake.failNextPlacement({ kind: "drop-before" });
+    await venue().placeOrder(order());
+    const record = journal.records.get(7);
+    if (!record) throw new Error("no journal record");
+    journal.records.set(7, { ...record, state: "placing", detail: null });
+
+    // While the market trades, it waits: an order of this attempt could still be on its way.
+    expect(await restarted().placeOrder(order())).toMatchObject({ status: "held" });
+    // The ladder leaves the listing: no such order on Gemini, and none can arrive and fill now.
+    events = [];
+    const detail =
+      "an earlier attempt got no answer, no order for 40 contracts at 31c on Gemini since the attempt, and " +
+      `Gemini's sandbox does not list ${MARKET}: nothing filled`;
+    expect(await restarted().placeOrder(order())).toEqual({ status: "refused", detail });
+    expect(journal.records.get(7)).toMatchObject({ state: "rejected", detail });
+    expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+    expect(fake.orders.size).toBe(0);
+  });
+
+  it("keeps holding a lost attempt on a gone market while Gemini's answer proves nothing", async () => {
+    fake.echoClientOrderId = false;
+    fake.failNextPlacement({ kind: "drop-before" });
+    await venue({ matchByTerms: false }).placeOrder(order());
+    // Another mandate's order on the same account: it might be this one.
+    clock.now += 1_000;
+    await trading.placeOrder({ symbol: MARKET, side: "buy", outcome: "no", quantity: "40", price: "0.31" });
+    events = [];
+    expect(await restarted({ matchByTerms: false }).placeOrder(order())).toMatchObject({
+      status: "held",
+      detail: expect.stringMatching(/places orders for several mandates/) as unknown,
+    });
+    expect(journal.records.get(7)?.state).toBe("unknown");
+  });
 });
 
 describe("a request Gemini refused before reading it", () => {
