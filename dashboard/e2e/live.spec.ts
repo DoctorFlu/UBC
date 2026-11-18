@@ -645,6 +645,15 @@ test("the hedge view: an honest empty state and preview, then the agent's plan, 
     await expect(page.getByTestId("quotes-error")).toContainText("did not answer", { timeout: 45_000 });
     await expect(card).toBeVisible();
     await expect(page.getByTestId("live-ladder")).toHaveCount(0);
+    // Cover is unknown, not short: Hedge says why, and Home never counts the goal as uncovered.
+    await expect(page.getByTestId("cover-now")).toHaveText(
+      "Cover cannot be measured now: Gemini's market data for this ladder is unavailable.",
+    );
+    // The workspace Home itself (`open` takes "/" to the first mandate's Overview).
+    await page.goto("/");
+    await expect(page.getByRole("region", { name: "Across every mandate" })).toContainText(
+      /Goals covered\s*Unknown\s*Can't measure it right now/,
+    );
   } finally {
     gemini.setFailing(false);
   }
