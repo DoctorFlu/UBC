@@ -14,16 +14,21 @@
   line-height: 1.2;
   white-space: nowrap;
   vertical-align: middle;
+  /* Where the reason does not fit beside the word, it goes under it. */
+  flex-wrap: wrap;
+  row-gap: var(--space-0-5);
 }
 
-/* The contract's reason reads as words by default, and as the exact code in Advanced view. */
+/*
+ * The contract's reason reads as words by default, and as the exact code in Advanced view.
+ * It is why the contract said no, so it is never cut: where the chip is narrower than it, it wraps.
+ */
 .code {
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
+  white-space: normal;
   padding-inline-start: var(--space-1-5, 0.375rem);
   border-inline-start: 1px solid color-mix(in srgb, var(--chip-text) 30%, transparent);
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 :global([data-advanced="on"]) .code {
