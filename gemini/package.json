@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./private": "./src/private-index.ts",
+    "./maker": "./src/maker/index.ts",
     "./testing": "./testing/fake-private.ts"
   },
   "scripts": {
