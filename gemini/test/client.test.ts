@@ -152,7 +152,9 @@ describe("getLadder", () => {
       testClient(recordedApi().fetch).getLadder({ asset: "BTC", expiry: "2026-11-21T22:00:00Z" }),
     );
     expect(error.code).toBe("no_ladder");
-    expect(error.message).toContain("weekly 2026-11-20T22:00:00.000Z (BTC2611202200)");
+    expect(error.message).toContain(
+      "weekly BTC2611202200, settling Fri Nov 20, 2026, 5:00 PM ET (expiry 2026-11-20T22:00:00.000Z)",
+    );
   });
 
   it("requires a way to choose the ladder", async () => {

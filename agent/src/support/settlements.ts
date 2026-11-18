@@ -4,8 +4,13 @@
  * per intent (the fill). These helpers read the console's list, never guess one, and say it plainly.
  */
 import * as z from "zod";
-import { formatEasternTime } from "@mandate/planner";
-import { formatCents, type Settlement, settlementTotals, type StoredSettlement } from "@mandate/shared";
+import {
+  formatCents,
+  formatEasternTime,
+  type Settlement,
+  settlementTotals,
+  type StoredSettlement,
+} from "@mandate/shared";
 import type { ToolContext } from "../context";
 import { describeFailure } from "./failures";
 

@@ -6,12 +6,12 @@ import {
   categoryLabel,
   Category,
   type CategoryId,
+  formatEasternTime,
 } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, verdictSchema } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { untrusted, UntrustedTextSchema } from "../mcp/untrusted";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
-import { formatEasternTime } from "@mandate/planner";
 import { capList, CategoryNameSchema, categoryIdOf, DateTextSchema } from "../support/format";
 
 const MAX_CONTRACTS = 25;

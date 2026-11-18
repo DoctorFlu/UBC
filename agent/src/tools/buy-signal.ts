@@ -1,6 +1,6 @@
-import { formatEasternTime } from "@mandate/planner";
 import {
   ARC_TESTNET,
+  formatEasternTime,
   hedgeSignalQuerySchema,
   PROTECTION_VERDICTS,
   SIGNAL_HORIZONS,

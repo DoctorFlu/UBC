@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatEasternTime } from "./dates";
 import { eventKey } from "./events";
 import { type Settlement, eventTickerAsset, settlementTotals } from "./settlement";
 import type { PolicyEvent } from "./types";
@@ -296,7 +297,7 @@ export function wakeSummary(detail: WakeDetail, count: number): string {
         const fee = only.feeCents === undefined ? "" : `, fees ${usd(only.feeCents)} (estimated)`;
         const net = only.feeCents === undefined ? "net" : "net after fees";
         return (
-          `The ${name} ${only.eventTicker} settled${settledAt(only.settlementValue)}: ` +
+          `The ${name} ${only.eventTicker}, which expired ${formatEasternTime(only.expiresAt)}, settled${settledAt(only.settlementValue)}: ` +
           `${what} cost ${usd(only.costCents)}${fee}, paid ${usd(only.payoutCents)}, ${net} ${signedUsd(only.pnlCents)}. ` +
           "Plan on the next ladder."
         );

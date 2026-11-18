@@ -11,6 +11,7 @@ export * from "./chains";
 export * from "./client";
 export * from "./console-api";
 export * from "./context";
+export * from "./dates";
 export * from "./deployment";
 export * from "./env";
 export * from "./evaluate";

@@ -1,15 +1,10 @@
 import * as z from "zod";
 import { LADDER_KINDS, type Ladder } from "@mandate/gemini";
-import {
-  formatEasternTime,
-  type HedgePlan,
-  type IntentPosition,
-  type PlanCover,
-  type ProtectionGoal,
-} from "@mandate/planner";
+import type { HedgePlan, IntentPosition, PlanCover, ProtectionGoal } from "@mandate/planner";
 import {
   Category,
   evaluateIntent,
+  formatEasternTime,
   holdingQuantitySchema,
   isCategoryAllowed,
   type PolicySnapshot,

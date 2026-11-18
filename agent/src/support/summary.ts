@@ -5,8 +5,13 @@
  * recompute it, and say plainly when the console cannot.
  */
 import * as z from "zod";
-import { formatEasternTime } from "@mandate/planner";
-import { COVER_NOW_STATES, formatCents, type CoverNowView, type SummaryResponse } from "@mandate/shared";
+import {
+  COVER_NOW_STATES,
+  formatCents,
+  formatEasternTime,
+  type CoverNowView,
+  type SummaryResponse,
+} from "@mandate/shared";
 import type { ToolContext } from "../context";
 import { describeFailure } from "./failures";
 import { DateTextSchema } from "./format";

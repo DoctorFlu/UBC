@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatEasternTime } from "../src/index";
+import { formatEasternTime } from "../src/dates";
 
 describe("formatEasternTime", () => {
   it("writes the weekday the owner would say, so an agent copies it instead of working it out", () => {

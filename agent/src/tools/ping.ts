@@ -1,4 +1,4 @@
-import { formatEasternTime } from "@mandate/planner";
+import { formatEasternTime } from "@mandate/shared";
 import * as z from "zod";
 import { defineTool } from "../mcp/tool";
 import { DateTextSchema } from "../support/format";

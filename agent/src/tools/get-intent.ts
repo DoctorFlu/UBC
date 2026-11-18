@@ -1,6 +1,5 @@
 import * as z from "zod";
-import { formatEasternTime } from "@mandate/planner";
-import { verifyContext, type Intent, type IntentView } from "@mandate/shared";
+import { formatEasternTime, verifyContext, type Intent, type IntentView } from "@mandate/shared";
 import { ok, reason, summarizeVerdict, unavailable, verdictSchema, type NextAction } from "../mcp/envelope";
 import { defineTool } from "../mcp/tool";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";

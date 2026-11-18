@@ -19,9 +19,9 @@
  */
 import { parseArgs } from "node:util";
 import { createGeminiClient, LADDER_KINDS, toCents, type LadderKind } from "@mandate/gemini";
+import { formatEasternTime } from "@mandate/shared";
 import {
   formatContracts,
-  formatEasternTime,
   formatPrice,
   formatUsd,
   planHedge,
