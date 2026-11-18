@@ -172,6 +172,17 @@
   }
 }
 
+/*
+ * A table on a laptop (a card narrower than 62rem): Approve over Reject, so the Decision column is one
+ * button wide and stays inside the card instead of scrolling out of it.
+ */
+@container table (width >= 36rem) and (width < 62rem) {
+  .approval:not([data-block]) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 /* Panel schedule: rules as circuits on ruled rows. */
 .schedule {
   display: flex;

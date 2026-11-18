@@ -130,6 +130,22 @@ const baseColumns: readonly Column<IntentView>[] = [
   },
 ];
 
+/**
+ * Columns only some intents can fill: what a position paid at expiry (filled ones) and the decision (held
+ * ones). A tab whose intents can't have them leaves them out, so Waiting keeps its width for Approve and Reject.
+ */
+const COLUMN_STATUSES: Readonly<Record<string, readonly IntentStatus[]>> = {
+  settled: ["executed"],
+  actions: ["needs_approval"],
+};
+
+function columnsFor<Row>(columns: readonly Column<Row>[], statuses: readonly IntentStatus[]) {
+  return columns.filter((column) => {
+    const only = COLUMN_STATUSES[column.key];
+    return only === undefined || statuses.some((status) => only.includes(status));
+  });
+}
+
 interface Filter {
   id: string;
   label: string;
@@ -195,7 +211,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
         <Table
           caption={`${filter.label} intents`}
           captionHidden
-          columns={shown}
+          columns={columnsFor(shown, filter.statuses)}
           rows={rows}
           rowKey={(intent) => intent.id.toString()}
           rowTone={(intent) => (intent.status === "needs_approval" ? "attention" : undefined)}
