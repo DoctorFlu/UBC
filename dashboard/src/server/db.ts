@@ -226,6 +226,28 @@ export const MIGRATIONS: readonly Migration[] = [
   // the console on the demo chain (with an owner key the console seals) or by the owner's wallet on Arc;
   // owner actions the console signs are recorded with the member and passkey that authorised them.
   { withoutForeignKeys: migrateToMandates },
+  // 10: the executor's venue announcements become a history (#23). A fill is labelled by the announcement
+  // in force when its ResultRecorded was mined, never by a later one. Each announcement holds from
+  // `holds_from_block`: one past the chain head the console read when it stored it. The first of a
+  // deployment also covers that contract's earlier fills, so the one announcement a database holds today
+  // (holds_from_block NULL: stored before blocks were recorded) keeps covering the fills it covers now.
+  `
+  CREATE TABLE executor_venue_announcements (
+    deployment_id    TEXT    NOT NULL,
+    seq              INTEGER NOT NULL,
+    hash             TEXT    NOT NULL,
+    document         TEXT    NOT NULL,
+    signature        TEXT    NOT NULL,
+    signer           TEXT    NOT NULL,
+    stored_at        TEXT    NOT NULL,
+    holds_from_block INTEGER,
+    PRIMARY KEY (deployment_id, seq)
+  ) STRICT;
+  INSERT INTO executor_venue_announcements
+    (deployment_id, seq, hash, document, signature, signer, stored_at, holds_from_block)
+    SELECT deployment_id, 0, hash, document, signature, signer, stored_at, NULL FROM executor_venues;
+  DROP TABLE executor_venues;
+  `,
 ];
 
 /**

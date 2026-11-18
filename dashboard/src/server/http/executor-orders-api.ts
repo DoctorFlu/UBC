@@ -6,6 +6,7 @@ import {
   executorContractsMessage,
   hashExecutorRecord,
   isFinalVenueOrderState,
+  executorVenueSchema,
   putExecutorVenueRequestSchema,
   putVenueOrderRequestSchema,
   settlementMessage,
@@ -13,13 +14,12 @@ import {
   VENUE_ORDER_FIXED_FIELDS,
   venueOrderRecordSchema,
   type ExecutorContract,
-  type ExecutorVenue,
   type VenueOrderRecord,
 } from "@mandate/shared";
 import { type Hex, isAddress, isAddressEqual, recoverMessageAddress } from "viem";
 
 import type { Mandate } from "../accounts/store";
-import type { ConsoleService } from "../console-service";
+import type { ConsoleService, MandateChain } from "../console-service";
 import type { VenueOrderRow } from "../store/venue-orders";
 import { apiError, json, readBody } from "./responses";
 
@@ -81,7 +81,7 @@ async function verifySigned(
   hash: Hex,
   signature: Hex,
 ): Promise<
-  | { ok: true; mandate: Mandate; deploymentId: string; signer: `0x${string}` }
+  | { ok: true; mandate: Mandate; chain: MandateChain; deploymentId: string; signer: `0x${string}` }
   | { ok: false; response: Response }
 > {
   const found = isAddress(document.policy)
@@ -116,7 +116,7 @@ async function verifySigned(
       ),
     };
   }
-  return { ok: true, mandate, deploymentId, signer };
+  return { ok: true, mandate, chain, deploymentId, signer };
 }
 
 function storedView(row: VenueOrderRow) {
@@ -271,24 +271,44 @@ export function putExecutorVenue(
     );
     if (mismatch !== null) return apiError(409, "environment_mismatch", mismatch);
     const existing = service.venueOrders.venue(verified.deploymentId);
-    const previous = existing ? (existing.document as Partial<ExecutorVenue>) : null;
-    if (
-      previous?.announcedAt !== undefined &&
-      Date.parse(previous.announcedAt) > Date.parse(document.announcedAt)
-    ) {
+    const previous = existing ? executorVenueSchema.safeParse(existing.document) : null;
+    if (previous?.success && Date.parse(previous.data.announcedAt) > Date.parse(document.announcedAt)) {
       return apiError(409, "stale", "The console holds a newer announcement from the executor.");
     }
-    service.venueOrders.putVenue(verified.deploymentId, {
-      hash,
-      document,
-      signature: signature.toLowerCase() as Hex,
-      signer: verified.signer,
-    });
-    service.venueChanged(verified.mandate);
-    return json(
-      { venue: document.venue, environment: document.environment, announcedAt: document.announcedAt },
-      201,
+    const answer = {
+      venue: document.venue,
+      environment: document.environment,
+      announcedAt: document.announcedAt,
+    };
+    // A restart on the venue already in force adds nothing: the announcement in force keeps its start.
+    if (
+      existing &&
+      previous?.success &&
+      hashExecutorRecord(previous.data).toLowerCase() === existing.hash.toLowerCase() &&
+      previous.data.venue === document.venue &&
+      previous.data.environment === document.environment
+    ) {
+      return json(answer, 200);
+    }
+    // Fills mined up to the head read now were filled under the earlier announcement; this one holds after
+    // it. Read fresh, never from the follower, which may be behind: a late head would claim earlier fills.
+    let head: bigint;
+    try {
+      head = await verified.chain.policy.publicClient.getBlockNumber({ cacheTime: 0 });
+    } catch {
+      return apiError(
+        503,
+        "chain_unavailable",
+        "The console can't read the chain head right now, so it can't say from when this venue holds. Try again.",
+      );
+    }
+    service.venueOrders.announceVenue(
+      verified.deploymentId,
+      { hash, document, signature: signature.toLowerCase() as Hex, signer: verified.signer },
+      Number(head) + 1,
     );
+    service.venueChanged(verified.mandate);
+    return json(answer, 201);
   });
 }
 

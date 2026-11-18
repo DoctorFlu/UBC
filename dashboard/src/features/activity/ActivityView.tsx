@@ -11,7 +11,7 @@ import { Inbox } from "lucide-react";
 
 import { ApprovalActions } from "@/components/domain/ApprovalActions";
 import { IntentLink, IntentVerdict, MarketName, OrderAmount } from "@/components/domain/Intent";
-import { FillSourceTag } from "@/components/domain/FillSourceTag";
+import { FillSharesTag } from "@/components/domain/FillSourceTag";
 import { ChainUnavailable } from "@/components/states/ChainStates";
 import { Card } from "@/components/ui/Card";
 import { HexValue } from "@/components/ui/HexValue";
@@ -27,7 +27,7 @@ import { useAdvancedColumns } from "@/lib/advanced/Advanced";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import { agentName, countByStatus, newestFirst, todayUsage } from "@/lib/live/derive";
 import type { ConsoleSnapshot, VenueOrderView } from "@/lib/live/types";
-import { filledIntentIds, fillsSource } from "@/lib/network";
+import { fillShares, filledIntentIds } from "@/lib/network";
 import { verifiedSettlements } from "@/lib/settlement/settlement";
 
 import styles from "./activity.module.css";
@@ -235,7 +235,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
           hint={
             <span className={styles.statHint}>
               {`${formatCount(executed)} ${executed === 1 ? "fill" : "fills"} recorded`}
-              <FillSourceTag source={fillsSource(chain, snapshot.network, filledIntentIds(chain))} />
+              <FillSharesTag shares={fillShares(chain, snapshot.network, filledIntentIds(chain))} />
             </span>
           }
         />
@@ -251,7 +251,7 @@ export function ActivityView({ preview }: { preview?: ConsoleSnapshot }) {
                   (settled.feesEstimated ? `fees ${formatUsdCents(settled.feeCents)}, ` : "") +
                   `net ${formatUsdCents(settled.pnlCents, { sign: "always" })}` +
                   (settled.feesEstimated ? " (fees estimated)" : "")}
-                <FillSourceTag source={fillsSource(chain, snapshot.network, settlements.keys())} />
+                <FillSharesTag shares={fillShares(chain, snapshot.network, settlements.keys())} />
               </span>
             )
           }

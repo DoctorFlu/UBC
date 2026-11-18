@@ -140,12 +140,26 @@ export interface VenueOrderView {
   updatedAt: string;
 }
 
-/** The venue the executor said it fills orders on when it last started (issue #93). */
+/** The venue the executor said it fills orders on when it started (issue #93). */
 export interface ExecutorVenueView {
   venue: SettlementVenue;
   /** Null for the simulated venue. */
   environment: VenueEnvironment | null;
   announcedAt: string;
+}
+
+/**
+ * One announcement in the deployment's history, and the fills it labels: those whose `ResultRecorded` was
+ * mined from `holdsFromBlock` until the next announcement holds.
+ */
+export interface VenueAnnouncementView {
+  /**
+   * The first block whose fills it labels. Null for the deployment's first announcement, which also covers
+   * every earlier fill of the contract.
+   */
+  holdsFromBlock: number | null;
+  /** What the executor signed, or null when the stored record no longer verifies: its fills are unknown. */
+  announced: ExecutorVenueView | null;
 }
 
 export interface ChainView {
@@ -175,6 +189,8 @@ export interface ChainView {
   venueOrders: Record<number, VenueOrderView>;
   /** The executor's venue, as it last announced it, or null before it has. */
   venue: ExecutorVenueView | null;
+  /** Every announcement of the executor's venue, oldest first: each fill is labelled by the one in force. */
+  venues: VenueAnnouncementView[];
 }
 
 export interface PairingView {

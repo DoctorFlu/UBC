@@ -7,6 +7,7 @@ import * as z from "zod";
 import {
   type AgentOrder,
   type AnnouncedVenue,
+  type FillSource,
   quantityHundredthsFromAmount,
   VENUE_ORDER_STATES,
 } from "@mandate/shared";
@@ -48,6 +49,8 @@ export function orderRow(order: AgentOrder): OrderRow {
 export interface OrdersRead {
   byIntent: Map<number, AgentOrder>;
   venue: AnnouncedVenue | null;
+  /** Each fill's source as the console labels it, by the venue announced when it was mined; null from an older console. */
+  fillSources: Map<number, FillSource> | null;
 }
 
 /**
@@ -63,6 +66,9 @@ export async function readOrders(ctx: ToolContext): Promise<OrdersRead | null> {
       : {
           byIntent: new Map(response.orders.map((order) => [order.intentId, order])),
           venue: response.venue ?? null,
+          fillSources: response.fillSources
+            ? new Map(response.fillSources.map((fill) => [fill.intentId, fill.source]))
+            : null,
         };
   } catch (error) {
     describeFailure(error, ctx);

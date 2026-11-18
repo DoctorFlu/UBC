@@ -293,6 +293,22 @@
   height: 0.75rem;
 }
 
+/* Real money's share of a mixed total: the same outline, in the plain ink of an unqualified figure. */
+.liveShare {
+  border-style: solid;
+  border-color: var(--color-rule-strong);
+  background: transparent;
+  color: var(--color-text);
+}
+
+/* A mixed total's sources, one tag each. */
+.fillShares {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 /*
  * The agent's own words: a label that says whose they are, then the text framed whole as a quote (no side
  * bar), always one plain block, so it can never read as something the console says.

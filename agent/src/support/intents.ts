@@ -139,7 +139,11 @@ export function intentRow(
     order: order === undefined ? null : orderRow(order),
     fillSource:
       filled && orders
-        ? fillSourceOf({ order, settlementVenue: settlement?.venue, announced: orders.venue })
+        ? (orders.fillSources?.get(intent.id) ??
+          // A console from before announcements had a history: only the venue it announced last.
+          (orders.fillSources
+            ? "unknown"
+            : fillSourceOf({ order, settlementVenue: settlement?.venue, announced: orders.venue })))
         : null,
     settlement: settlement === undefined ? null : settlementRow(settlement),
   };

@@ -142,8 +142,13 @@ function tables(db: Database): string[] {
   return rows.map((row) => row.name);
 }
 
+/** Tables a later migration replaced, and the table that holds their rows now. */
+const RENAMED: Record<string, string> = { executor_venues: "executor_venue_announcements" };
+
+/** The rows of `table`, or of the table that replaced it when a later migration did. */
 function count(db: Database, table: string): number {
-  return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  const name = !tables(db).includes(table) && RENAMED[table] ? RENAMED[table] : table;
+  return (db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get() as { n: number }).n;
 }
 
 /**
@@ -494,7 +499,7 @@ describe("migration to accounts (version 7 to 8, then 9)", () => {
       hash: hex("0e"),
       document: { venue: "gemini", environment: "sandbox" },
     });
-    for (const table of ["settlements", "venue_orders", "executor_venues"]) {
+    for (const table of ["settlements", "venue_orders", "executor_venue_announcements"]) {
       const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
         (column) => column.name,
       );
@@ -579,8 +584,9 @@ describe("migration to several mandates (after the hosted version 8)", () => {
     for (const [table, n] of Object.entries(counts)) expect(n, table).toBeGreaterThan(0);
 
     const db = openDatabase(dataDir);
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(9);
-    expect(MIGRATIONS.length).toBe(HOSTED_VERSION + 1);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(
+      MIGRATIONS.length,
+    );
     for (const [table, n] of Object.entries(counts)) expect(count(db, table), table).toBe(n);
     expect(count(db, "owner_actions")).toBe(0);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
@@ -673,5 +679,70 @@ describe("migration to several mandates (after the hosted version 8)", () => {
     expect(count(db, "holdings")).toBe(0);
     expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+  });
+});
+
+describe("migration to the executor's venue history (version 9 to 10)", () => {
+  /** The hosted Arc console's file today: version 9, with the one announcement it holds. */
+  function version9(): string {
+    const dataDir = hostedDatabase();
+    const db = new DatabaseSync(join(dataDir, "console.sqlite"));
+    migrate(db, 9);
+    db.close();
+    return dataDir;
+  }
+
+  it("carries the stored announcement over as the first, which covers the contract's earlier fills", () => {
+    const dataDir = version9();
+    const before = new DatabaseSync(join(dataDir, "console.sqlite"));
+    expect((before.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(9);
+    const stored = before.prepare("SELECT * FROM executor_venues").all();
+    expect(stored).toHaveLength(1);
+    before.close();
+
+    const db = openDatabase(dataDir);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(10);
+    expect(tables(db)).not.toContain("executor_venues");
+    const venues = new VenueOrderStore(db);
+    expect(venues.venues(DEPLOYMENT)).toEqual([
+      {
+        seq: 0,
+        holdsFromBlock: null,
+        hash: hex("0e"),
+        document: { venue: "gemini", environment: "sandbox" },
+        signature: `0x${"ef".repeat(65)}`,
+        signer: OWNER,
+        storedAt: T,
+      },
+    ]);
+    expect(venues.venue(DEPLOYMENT)?.seq).toBe(0);
+    expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+  });
+
+  it("appends later announcements, each holding from its own block, the latest in force", () => {
+    const db = openDatabase(version9());
+    const venues = new VenueOrderStore(db, () => new Date("2026-11-18T09:00:00.000Z"));
+    const record = { hash: hex("1a"), document: { venue: "simulated" }, signature: hex("1b"), signer: OWNER };
+    venues.announceVenue(DEPLOYMENT, record, 1_201);
+    expect(venues.venues(DEPLOYMENT).map((row) => [row.seq, row.holdsFromBlock, row.hash])).toEqual([
+      [0, null, hex("0e")],
+      [1, 1_201, hex("1a")],
+    ]);
+    expect(venues.venue(DEPLOYMENT)).toMatchObject({
+      seq: 1,
+      holdsFromBlock: 1_201,
+      storedAt: "2026-11-18T09:00:00.000Z",
+    });
+    // Another deployment's history starts at its own first announcement.
+    expect(venues.venues("other")).toEqual([]);
+    expect(venues.announceVenue("other", record, 7).seq).toBe(0);
+  });
+
+  it("runs once: opening the upgraded file again changes nothing", () => {
+    const dataDir = version9();
+    openDatabase(dataDir).close();
+    const again = openDatabase(dataDir);
+    expect(count(again, "executor_venue_announcements")).toBe(1);
+    expect((again.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(10);
   });
 });
