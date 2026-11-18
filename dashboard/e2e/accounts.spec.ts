@@ -8,6 +8,7 @@ import { AGENT_ID_HEADER, CONSOLE_AGENT_ROUTES, hashAgentToken } from "@mandate/
 import type { ConsoleSnapshot } from "../src/lib/live/types";
 import { schemes, viewports } from "./routes";
 import { E2E_SERVICE_TOKEN, ownerHeaders, snapshot } from "./support/console";
+import { type HeadWatch, headReport, watchRebuilds } from "./support/head-report";
 import { watchConsole } from "./support/problems";
 import { type VirtualPasskey, addVirtualPasskey, registerOnPage } from "./support/session";
 
@@ -135,6 +136,7 @@ test.describe("a second workspace", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   let page: Page;
+  let head: HeadWatch;
   let recoveryCode = "";
   let token = "";
   let agentId = "";
@@ -159,8 +161,15 @@ test.describe("a second workspace", () => {
       },
     );
     page = await context.newPage();
+    head = watchRebuilds(page);
     passkey = await addVirtualPasskey(page);
   });
+
+  /** Axe finds nothing; if it does, the message also says what the head held and what `next dev` did. */
+  async function expectAccessible() {
+    const violations = await axe(page);
+    expect(violations, violations.length > 0 ? await headReport(page, head) : undefined).toEqual([]);
+  }
 
   test.afterAll(async () => {
     await page.context().close();
@@ -250,7 +259,7 @@ test.describe("a second workspace", () => {
     await expect(dialog).toBeVisible();
     token = (await dialog.getByTestId("new-token").textContent())?.trim() ?? "";
     expect(token).toMatch(/^mdt_[A-Za-z0-9_-]{43}$/);
-    expect(await axe(page)).toEqual([]);
+    await expectAccessible();
     await shotOf(dialog, testInfo, "agents-token-1440-light");
     await dialog.getByRole("button", { name: "Done" }).click();
     await expect(dialog).toBeHidden();
@@ -260,7 +269,7 @@ test.describe("a second workspace", () => {
     await expect(agents.getByRole("cell", { name: "Grok Bot" })).toBeVisible();
     await expect(page.getByText(token)).toHaveCount(0);
     expect(await resolveToken(baseURL ?? "", token)).toBe(agentId);
-    expect(await axe(page)).toEqual([]);
+    await expectAccessible();
     await shotOf(agents, testInfo, "agents-1440-light");
 
     for (const viewport of viewports.filter((v) => v.name === "phone")) {
@@ -553,7 +562,7 @@ test.describe("a second workspace", () => {
     await expect(page.getByTestId("mandate-switcher").filter({ visible: true })).toContainText(
       "Hedge ETH weekly",
     );
-    expect(await axe(page)).toEqual([]);
+    await expectAccessible();
     await shotOf(card, test.info(), "rename-1440-light");
     await page.goto(hedgeSetup.replace(/\/setup$/, "/audit"));
     const actions = page.getByRole("region", { name: "Owner actions" });

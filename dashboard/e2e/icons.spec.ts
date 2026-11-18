@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
 import { AGENT_ADDRESS } from "./routes";
+import { headReport, watchRebuilds } from "./support/head-report";
 
 /**
  * The hosted console asks for a signed-in session on every path but a short public list in
@@ -31,16 +32,17 @@ async function declaredIcons(page: Page): Promise<string[]> {
 
 test("the icons are images, and public on the hosted console", async ({ page }) => {
   expect(PUBLIC_PATHS).toContain("/favicon.ico");
+  const head = watchRebuilds(page);
 
   // A console page (behind the login when hosted), the public scorecard, and a page that is not there.
   for (const path of ["/", `/agent/${AGENT_ADDRESS}`, "/no-such-page"]) {
     await page.goto(path);
     const icons = await declaredIcons(page);
-    expect(icons.map((href) => new URL(href, "http://x").pathname).sort(), path).toEqual([
-      "/apple-icon.png",
-      "/favicon.ico",
-      "/icon.svg",
-    ]);
+    const paths = icons.map((href) => new URL(href, "http://x").pathname).sort();
+    const expected = ["/apple-icon.png", "/favicon.ico", "/icon.svg"];
+    // If they are missing, say what the head held and what `next dev` did (support/head-report.ts).
+    const why = paths.join() === expected.join() ? path : `${path}\n${await headReport(page, head)}`;
+    expect(paths, why).toEqual(expected);
     for (const href of icons) {
       const { pathname } = new URL(href, "http://x");
       expect(isPublic(pathname), `${pathname} is not in @public in deploy/caddy/app-routes.caddy`).toBe(true);
