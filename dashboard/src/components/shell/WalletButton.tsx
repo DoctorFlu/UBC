@@ -18,6 +18,19 @@ import { useWalletState } from "@/lib/wallet/useWalletState";
 
 import styles from "./Shell.module.css";
 
+/** Whether the person said no in their wallet (EIP-1193 code 4001), however the wallet library wrapped it. */
+function declined(error: unknown): boolean {
+  for (
+    let cause = error;
+    typeof cause === "object" && cause !== null;
+    cause = (cause as { cause?: unknown }).cause
+  ) {
+    const { code, name } = cause as { code?: unknown; name?: unknown };
+    if (code === 4001 || name === "UserRejectedRequestError") return true;
+  }
+  return false;
+}
+
 /**
  * The owner's wallet, in each of its states: no wallet installed, not connected, wrong network
  * (one click to switch to, or add, the console's network), and connected.
@@ -112,11 +125,18 @@ export function WalletButton({ block = false }: { block?: boolean }) {
               { chainId: network.chainId },
               {
                 onError: (error) =>
-                  toast({
-                    title: `Could not switch to ${network.name}`,
-                    description: error.message.split("\n")[0],
-                    tone: "danger",
-                  }),
+                  toast(
+                    declined(error)
+                      ? {
+                          title: `Still on another network`,
+                          description: `You declined in your wallet, so nothing changed. Press "Switch to ${network.name}" again when you are ready to sign as the owner.`,
+                        }
+                      : {
+                          title: `Could not switch to ${network.name}`,
+                          description: error.message.split("\n")[0],
+                          tone: "danger",
+                        },
+                  ),
               },
             )
           }
