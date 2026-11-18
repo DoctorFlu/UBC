@@ -51,6 +51,7 @@ import {
   startFakeGemini,
 } from "./support/fake-gemini";
 import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
+import { gotoHydrated } from "./support/navigation";
 
 /**
  * The owner's whole loop against a real chain, as a person would do it: set the first rules, watch
@@ -218,7 +219,7 @@ function row(page: Page, intentId: number) {
  */
 async function open(page: Page, path: string): Promise<void> {
   // `/` is the workspace Home (#95); the owner acts on the first mandate's Overview.
-  await page.goto(path === "/" ? await firstMandatePath(baseURL) : path);
+  await gotoHydrated(page, path === "/" ? await firstMandatePath(baseURL) : path);
   await expect(page.getByTestId("owner-address").filter({ visible: true })).toBeVisible();
 }
 
@@ -832,7 +833,7 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
     requestText: "W".repeat(2_000),
   });
   await agentApi(baseURL, CONSOLE_AGENT_ROUTES.plans, "POST", request);
-  await page.goto(`/hedge/plans/${encodeURIComponent(request.plan.planId)}`);
+  await gotoHydrated(page, `/hedge/plans/${encodeURIComponent(request.plan.planId)}`);
   await expect(page.getByTestId("chain-status")).toHaveAttribute("data-status", "not_executed");
   const evidenceRequest = page.getByTestId("evidence-request").getByTestId("request-text");
   await expect(evidenceRequest).toContainText("W".repeat(100));
@@ -914,7 +915,7 @@ async function overflowsViewport(page: Page): Promise<false | string[]> {
  * phone, so this one is for pages read rather than acted on.
  */
 async function view(page: Page, path: string): Promise<void> {
-  await page.goto(path === "/" ? await firstMandatePath(baseURL) : path);
+  await gotoHydrated(page, path === "/" ? await firstMandatePath(baseURL) : path);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 }
 

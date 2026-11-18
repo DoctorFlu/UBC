@@ -31,6 +31,7 @@ import {
   waitForSnapshot,
 } from "./support/console";
 import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
+import { gotoHydrated } from "./support/navigation";
 
 /**
  * The console as the hosted Arc demo runs it: a Policy contract configured by address (`POLICY_ADDRESS`,
@@ -307,7 +308,7 @@ test("after the switch to Gemini's sandbox, earlier fills still say simulated an
   );
 
   // The top bar states the venue now, and its details say how this deployment gets sandbox liquidity.
-  await page.goto(await firstMandatePath(baseURL));
+  await gotoHydrated(page, await firstMandatePath(baseURL));
   await expect(badge(page)).toHaveAttribute("data-venue", "sandbox");
   await badge(page).click();
   const details = page.getByTestId("venue-details");
