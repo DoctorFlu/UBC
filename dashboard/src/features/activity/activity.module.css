@@ -31,3 +31,63 @@
   align-items: center;
   gap: var(--space-1) var(--space-2);
 }
+
+/* The intent's number with when it was proposed under it, in one column. */
+.intentCell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
+
+.when {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* The verdict, then (Advanced view) the transaction that proposed the intent, in a quieter line. */
+.verdictCell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.verdictLine {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  max-width: 100%;
+}
+
+/* A held intent outside Waiting: one quiet step to where it is decided. */
+.decide {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-link);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.proposal {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* Stacked on a phone, each value aligns to the end, as the table's other cells do. */
+@container (width < 36rem) {
+  .intentCell,
+  .verdictCell {
+    align-items: flex-end;
+  }
+
+  .verdictLine {
+    justify-content: flex-end;
+  }
+}

@@ -73,6 +73,13 @@
   min-width: 0;
 }
 
+/* A table on a laptop card (narrower than 62rem): the reason gives way sooner, so every column fits. */
+@container table (width >= 36rem) and (width < 62rem) {
+  .verdict {
+    max-width: 10rem;
+  }
+}
+
 /* A table stacked on a phone aligns its values to the end: wrap the badge there too. */
 @container (width < 36rem) {
   .verdict {
