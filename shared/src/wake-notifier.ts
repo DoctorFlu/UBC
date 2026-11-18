@@ -415,7 +415,7 @@ export class WakeNotifier {
       sentAt: new Date(sentAt).toISOString(),
       attempt,
       count: delivery.count,
-      summary: wakeSummary(delivery.detail, delivery.count),
+      summary: wakeSummary(delivery.detail, delivery.count, delivery.occurredAt),
       link: this.link(delivery.detail),
       ...delivery.detail,
     };
@@ -432,7 +432,7 @@ export class WakeNotifier {
     return {
       id: delivery.id,
       kind: delivery.kind,
-      summary: wakeSummary(delivery.detail, delivery.count),
+      summary: wakeSummary(delivery.detail, delivery.count, delivery.occurredAt),
       count: delivery.count,
       status: delivery.status,
       result: delivery.result,
@@ -447,6 +447,8 @@ export class WakeNotifier {
     switch (detail.kind) {
       case "price_below_floor":
       case "cover_lost":
+        // The goal's own view on the Hedge page.
+        return `${this.publicUrl}/hedge?asset=${encodeURIComponent(detail.detail.asset)}&goal=${encodeURIComponent(detail.detail.eventTicker)}`;
       case "ladder_settled":
         return `${this.publicUrl}/hedge`;
       case "mandate_changed":

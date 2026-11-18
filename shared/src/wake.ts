@@ -1,3 +1,4 @@
+import { goalLabel } from "./goals";
 import { z } from "zod";
 import { formatEasternTime } from "./dates";
 import { eventKey } from "./events";
@@ -108,6 +109,8 @@ export const wakeDetailSchema = z.discriminatedUnion("kind", [
       asset: z.string(),
       eventTicker: z.string(),
       planId: z.string(),
+      /** When the goal's ladder expires, to name the goal in words. Absent on wake-ups stored before it. */
+      expiresAt: z.string().optional(),
       spotCents: centsSchema,
       floorCents: centsSchema,
     }),
@@ -118,6 +121,8 @@ export const wakeDetailSchema = z.discriminatedUnion("kind", [
       asset: z.string(),
       eventTicker: z.string(),
       planId: z.string(),
+      /** When the goal's ladder expires, to name the goal in words. Absent on wake-ups stored before it. */
+      expiresAt: z.string().optional(),
       spotCents: centsSchema,
       previousSpotCents: centsSchema,
       state: coverStateSchema,
@@ -243,17 +248,22 @@ function more(count: number, shown: number): string {
   return count > shown ? ` (${String(count)} in all)` : "";
 }
 
-/** One sentence naming what happened, written for the Bot to repeat to the owner. */
-export function wakeSummary(detail: WakeDetail, count: number): string {
+/**
+ * One sentence naming what happened, written for the Bot to repeat to the owner. `at` is when it happened,
+ * so a goal ending that day reads "through today".
+ */
+export function wakeSummary(detail: WakeDetail, count: number, at?: number): string {
   switch (detail.kind) {
     case "price_below_floor": {
       const d = detail.detail;
-      return `${d.asset} spot is ${usd(d.spotCents)}, below the ${usd(d.floorCents)} floor of the current goal.`;
+      const goal = d.expiresAt === undefined || at === undefined ? "the current goal" : `the goal ${goalLabel(d.asset, d.expiresAt, at)}`;
+      return `${d.asset} spot is ${usd(d.spotCents)}, below the ${usd(d.floorCents)} floor of ${goal}.`;
     }
     case "cover_lost": {
       const d = detail.detail;
-      const share = d.coverBps === null ? "" : `, ${String(Math.floor(d.coverBps / 100))}% of the goal`;
-      return `${d.asset} spot rose from ${usd(d.previousSpotCents)} to ${usd(d.spotCents)} and the goal is no longer covered${share}.`;
+      const goal = d.expiresAt === undefined || at === undefined ? "the goal" : `the goal ${goalLabel(d.asset, d.expiresAt, at)}`;
+      const share = d.coverBps === null ? "" : `, ${String(Math.floor(d.coverBps / 100))}% of it`;
+      return `${d.asset} spot rose from ${usd(d.previousSpotCents)} to ${usd(d.spotCents)} and ${goal} is no longer covered${share}.`;
     }
     case "intent_rejected": {
       const latest = detail.detail.intents.at(-1);
@@ -513,11 +523,13 @@ export function chainWakes(
 
 // ------------------------------------------------------------------ price
 
-/** The goal a price check measures: the agent's latest stored plan for one asset. */
+/** The goal a price check measures: one goal plan (one per asset and event, `selectGoalPlans`). */
 export interface PriceGoal {
   planId: string;
   asset: string;
   eventTicker: string;
+  /** When the goal's ladder expires. */
+  expiresAt?: string;
   floorCents: number;
   /** Spot when the plan was made; a new goal starts on that side of the floor. */
   planSpotCents: number;
@@ -572,7 +584,12 @@ export function priceWakes(
     spotCents: reading.spotCents,
     coverState: reading.cover?.state ?? memory.coverState,
   };
-  const base = { asset: goal.asset, eventTicker: goal.eventTicker, planId: goal.planId };
+  const base = {
+    asset: goal.asset,
+    eventTicker: goal.eventTicker,
+    planId: goal.planId,
+    ...(goal.expiresAt === undefined ? {} : { expiresAt: goal.expiresAt }),
+  };
 
   if (reading.spotCents < goal.floorCents && memory.side === "above") {
     next.side = "below";

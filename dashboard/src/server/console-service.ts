@@ -365,10 +365,10 @@ export class ConsoleService {
       : wakeOffStatus(this.config, NO_WAKE_TARGET_REASON);
   }
 
-  /** What a price check reads: the wake-up mandate's latest plans and holdings, and its intents. */
+  /** What a price check reads: the wake-up mandate's goal plans and holdings, and its intents. */
   private priceInputs() {
     const mandateId = this.wake.mandateId;
-    const plans = this.offchain.latestPlans(mandateId).flatMap((stored) => {
+    const plans = this.offchain.goalPlans(mandateId).flatMap((stored) => {
       const view = toPlanView(stored);
       return view ? [view] : [];
     });
@@ -495,7 +495,7 @@ export class ConsoleService {
         : null;
     const pairing = this.offchain.latestPairing(mandate.id);
     const holdings = this.offchain.holdings(mandate.id);
-    const plans = this.offchain.latestPlans(mandate.id).flatMap((stored) => {
+    const plans = this.offchain.goalPlans(mandate.id).flatMap((stored) => {
       const view = toPlanView(stored);
       return view ? [view] : [];
     });

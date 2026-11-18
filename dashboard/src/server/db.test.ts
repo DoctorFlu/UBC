@@ -477,7 +477,7 @@ describe("migration to accounts (version 7 to 8, then 9)", () => {
       confirmedBy: OWNER,
     });
     expect(offchain.changeRequests(mandate.id).map((request) => request.id)).toEqual(["pcr_1"]);
-    expect(offchain.latestPlans(mandate.id).map((plan) => plan.planId)).toEqual(["plan_3", "plan_2"]);
+    expect(offchain.goalPlans(mandate.id).map((plan) => plan.planId)).toEqual(["plan_3", "plan_2"]);
     expect(offchain.context(mandate.id, hex("bb"))?.document).toEqual({ n: 1 });
     expect(offchain.intentContextLink(mandate.id, DEPLOYMENT, 0)?.hash).toBe(hex("aa"));
     // Settlements, the venue order journal and the executor's venue belong to the deployment the first
@@ -512,7 +512,7 @@ describe("migration to accounts (version 7 to 8, then 9)", () => {
 
     // Another mandate sees none of it.
     expect(offchain.holdings("mnd_other").holdings).toEqual([]);
-    expect(offchain.latestPlans("mnd_other")).toEqual([]);
+    expect(offchain.goalPlans("mnd_other")).toEqual([]);
     const strangers = new SqliteWakeStore(db, "mnd_other");
     expect(strangers.recent(10)).toEqual([]);
     expect(strangers.countedSince(0)).toBe(0);
@@ -613,7 +613,7 @@ describe("migration to several mandates (after the hosted version 8)", () => {
     const offchain = new OffchainStore(db);
     expect(offchain.holdings(SIGNED_UP.mandate).holdings).toEqual([{ asset: "ETH", quantity: "2" }]);
     expect(offchain.holdings(env.id).holdings).toEqual([{ asset: "BTC", quantity: "0.05" }]);
-    expect(offchain.latestPlans(SIGNED_UP.mandate).map((plan) => plan.planId)).toEqual(["plan_1"]);
+    expect(offchain.goalPlans(SIGNED_UP.mandate).map((plan) => plan.planId)).toEqual(["plan_1"]);
     expect(columnsOf(db, "mandates")).toEqual([
       "id",
       "workspace_id",

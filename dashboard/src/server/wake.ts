@@ -197,6 +197,7 @@ export class ConsoleWake {
         planId: view.planId,
         asset: plan.asset,
         eventTicker: plan.eventTicker,
+        expiresAt: plan.expiry,
         floorCents: plan.floorCents,
         planSpotCents: plan.spotCents,
       };
@@ -242,9 +243,13 @@ export function wakeOffStatus(config: ConsoleConfig, offReason: string): Console
   };
 }
 
-/** The goals a price check measures: the latest plan per asset with a floor, on a ladder not yet expired. */
+/**
+ * The goals a price check measures, and Home and `get_portfolio` count: the goal plans (one per asset and
+ * event, `selectGoalPlans`) with a floor, on a ladder not yet expired, soonest expiry first.
+ */
 export function currentGoals(plans: readonly AgentPlanView[], now: number): AgentPlanView[] {
   return plans
     .filter((view) => view.plan.floorCents !== null && Date.parse(view.plan.expiry) > now)
+    .sort((a, b) => Date.parse(a.plan.expiry) - Date.parse(b.plan.expiry))
     .slice(0, MAX_PRICE_GOALS);
 }

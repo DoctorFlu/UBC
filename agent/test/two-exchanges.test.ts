@@ -216,7 +216,8 @@ describe("get_portfolio for each cause", () => {
     missingPayoutCents: 0,
     belowFloor: null,
   };
-  const head = "Cover now: BTC below $57,991.80 on BTC2611202200 (settles Fri Nov 20, 2026, 5:00 PM ET): ";
+  const head =
+    "Cover now: BTC, through Fri 20 Nov (protect below $57,991.80; ladder BTC2611202200, settles Fri Nov 20, 2026, 5:00 PM ET): ";
 
   it.each([
     [

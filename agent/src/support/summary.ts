@@ -10,6 +10,7 @@ import {
   COVER_REASONS,
   formatCents,
   formatEasternTime,
+  goalLabel,
   type CoverNowView,
   type SummaryResponse,
 } from "@mandate/shared";
@@ -37,6 +38,11 @@ export function consoleLink(summary: SummaryResponse, path: string): string {
 }
 
 export const CoverNowSchema = z.object({
+  goal: z
+    .string()
+    .describe(
+      'The goal in the owner\'s words: "BTC, through today, 22:00 UTC" or "BTC, through Fri 20 Nov". Name goals this way, never by ladder ticker alone',
+    ),
   asset: z.string(),
   eventTicker: z.string().describe("The ladder the goal is on"),
   expiresAt: z.string(),
@@ -81,8 +87,9 @@ export const CoverNowSchema = z.object({
 });
 export type CoverNowRow = z.infer<typeof CoverNowSchema>;
 
-export function coverNowRow(cover: CoverNowView, summary: SummaryResponse): CoverNowRow {
+export function coverNowRow(cover: CoverNowView, summary: SummaryResponse, now: number): CoverNowRow {
   return {
+    goal: goalLabel(cover.asset, cover.expiresAt, now),
     asset: cover.asset,
     eventTicker: cover.eventTicker,
     expiresAt: cover.expiresAt,
@@ -127,9 +134,12 @@ function addNothing(reason: CoverNowRow["reason"]): string {
   }
 }
 
-/** "BTC below $63,000.00 on BTC2611272200 (settles Fri Nov 27, 2026, 5:00 PM ET): covered, the goal is met (...)." */
+/**
+ * "BTC, through Fri 20 Nov (protect below $63,000.00; ladder BTC2611272200, settles Fri Nov 27, 2026, 5:00 PM
+ * ET): covered, the goal is met (...)."
+ */
 export function coverSentence(cover: CoverNowRow): string {
-  const goal = `${cover.asset} below ${cover.floorCents === null ? "its floor" : formatCents(cover.floorCents)} on ${cover.eventTicker} (settles ${cover.expiresText})`;
+  const goal = `${cover.goal} (protect below ${cover.floorCents === null ? "its floor" : formatCents(cover.floorCents)}; ladder ${cover.eventTicker}, settles ${cover.expiresText})`;
   const owner = cover.heldByState?.awaitingOwnerCents ?? 0;
   const pending =
     owner > 0 ? `, ${formatCents(owner)} of it from orders waiting for the owner's approval` : "";

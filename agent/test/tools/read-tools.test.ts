@@ -1123,7 +1123,7 @@ describe("the daily digest's fields (issue #97)", () => {
       expect.objectContaining({ asset: "ETH", state: "unavailable", coverBps: null }),
     ]);
     expect(summary).toContain(
-      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): covered 46% (positions pay $30.00 of $65.00, $20.00 of it from orders waiting for the owner's approval), $35.00 missing.`,
+      `Cover now: BTC, through Fri 20 Nov (protect below $63,000.00; ladder ${LADDER_TICKER}, settles Fri Nov 20, 2026, 5:00 PM ET): covered 46% (positions pay $30.00 of $65.00, $20.00 of it from orders waiting for the owner's approval), $35.00 missing.`,
     );
     expect(summary).toContain(
       `ETH below $3,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): the console cannot measure the cover right now; do not report it as covered or not.`,
@@ -1147,7 +1147,7 @@ describe("the daily digest's fields (issue #97)", () => {
     });
     const metSummary = (await getPortfolio.run({}, met.ctx)).summary;
     expect(metSummary).toContain(
-      `Cover now: BTC below $63,000.00 on ${LADDER_TICKER} (settles Fri Nov 20, 2026, 5:00 PM ET): covered, the goal is met (positions pay $64.70 of $65.00).`,
+      `Cover now: BTC, through Fri 20 Nov (protect below $63,000.00; ladder ${LADDER_TICKER}, settles Fri Nov 20, 2026, 5:00 PM ET): covered, the goal is met (positions pay $64.70 of $65.00).`,
     );
     expect(metSummary).not.toContain("99%");
     expect((await getPortfolio.run({}, harness().ctx)).structured["cover"]).toEqual([]);
