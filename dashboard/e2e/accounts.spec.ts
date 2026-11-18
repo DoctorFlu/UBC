@@ -3,7 +3,7 @@ import { join } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { type Locator, type Page, type TestInfo, expect, test } from "@playwright/test";
 
-import { CONSOLE_AGENT_ROUTES, hashAgentToken } from "@mandate/shared";
+import { AGENT_ID_HEADER, CONSOLE_AGENT_ROUTES, hashAgentToken } from "@mandate/shared";
 
 import type { ConsoleSnapshot } from "../src/lib/live/types";
 import { schemes, viewports } from "./routes";
@@ -347,6 +347,43 @@ test.describe("a second workspace", () => {
     expect(problems).toEqual([]);
   });
 
+  test("a passkey prompt nobody answers closes when its challenge expires, and the page is as it was", async () => {
+    // A second tab of his session whose authenticator never answers, on a clock the test can move: the
+    // prompt waits, as it does for a person who walked away, until its 2-minute challenge runs out.
+    const other = await page.context().newPage();
+    try {
+      await other.clock.install();
+      await addVirtualPasskey(other, { answers: false });
+      const problems = watchConsole(other);
+      await other.goto("/rules");
+      await hydrated(other);
+      await other.getByRole("button", { name: "Review and confirm" }).click();
+      const review = other.getByRole("dialog", { name: "Review the first rules" });
+      const challenge = other.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/console/step-up",
+      );
+      await review.getByRole("button", { name: "Confirm rules with passkey" }).click();
+      expect((await challenge).status()).toBe(201);
+      await expect(review.getByText("Confirm it with your passkey within 2 minutes.")).toBeVisible();
+      // The prompt is open and waits. Two minutes later, by the page's clock, it has closed by itself.
+      const closed = review.getByText(
+        "The passkey prompt got no answer for 2 minutes, so it closed and nothing was changed. Confirm again when you are ready.",
+      );
+      await expect(async () => {
+        await other.clock.fastForward("02:00");
+        await expect(closed).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
+      await expect(review.getByRole("button", { name: "Confirm rules with passkey" })).toBeEnabled();
+      const his = (await (await other.request.get("/api/console/snapshot")).json()) as ConsoleSnapshot;
+      expect(his.chain?.rules ?? null).toBeNull();
+      expect(problems).toEqual([]);
+    } finally {
+      await other.close();
+    }
+  });
+
   test("sets his first rules with one passkey prompt, signed by the console with his mandate's owner key", async () => {
     const testInfo = test.info();
     await page.goto("/rules");
@@ -377,6 +414,57 @@ test.describe("a second workspace", () => {
     await page.goto("/audit");
     const actions = page.getByRole("region", { name: "Owner actions" });
     await expect(actions.getByRole("row").filter({ hasText: "Set the rules" })).toContainText("Passkey");
+  });
+
+  test("Hedge and Setup say his passkey confirms and the console holds the key, and never mention a wallet", async () => {
+    await page.goto("/hedge");
+    await hydrated(page);
+    const hedge = page.locator("main");
+    await expect(hedge.getByText("Saving it takes your passkey's confirmation.")).toBeVisible();
+    expect(await hedge.innerText()).not.toMatch(/wallet/i);
+
+    await page.goto("/setup");
+    await hydrated(page);
+    const setup = page.locator("main");
+    await expect(setup.getByText("Act as the owner with your passkey")).toBeVisible();
+    await expect(
+      setup.getByText(
+        "The console holds this mandate's owner key; your passkey confirms each owner action, such as the rules and approvals.",
+      ),
+    ).toBeVisible();
+    await expect(
+      setup.getByText("Check the agent's name and address, then confirm it with your passkey."),
+    ).toBeVisible();
+    expect(await setup.innerText()).not.toMatch(/wallet/i);
+  });
+
+  test("an agent asking to pair is what the Approvals badge counts, and Approvals lists it", async ({
+    baseURL,
+  }) => {
+    const bobs = (await (await page.request.get("/api/console/agents")).json()) as {
+      agents: { id: string; address: string }[];
+    };
+    const agent = bobs.agents.find((candidate) => candidate.id === agentId);
+    if (!agent) throw new Error("Bob's agent is not listed");
+    // As his MCP server does when Grok Bot calls request_pairing: the service token, naming his agent.
+    const announced = await fetch(new URL(CONSOLE_AGENT_ROUTES.pairing, baseURL), {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${E2E_SERVICE_TOKEN}`,
+        [AGENT_ID_HEADER]: agentId,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ agentAddress: agent.address, agentName: "Grok Bot", serverVersion: "e2e" }),
+    });
+    expect(announced.status).toBe(200);
+
+    await page.goto("/approvals");
+    await hydrated(page);
+    // Nothing else waits for him: no held intent, no change request. The badge and the page agree on one.
+    await expect(page.getByTestId("nav-count-approvals").filter({ visible: true })).toHaveText(/^1/);
+    await expect(page.getByRole("tab", { name: /Waiting/ })).toContainText("1");
+    await expect(page.getByTestId("pairing-task")).toContainText("Grok Bot wants to pair with this console");
+    await expect(page.locator("main")).toContainText("agents asking to pair");
   });
 
   test("creates a second mandate with one passkey prompt, sees its token once, and switches between the two", async ({

@@ -346,7 +346,7 @@ export function ScorecardView({ agent, owner, contract, network, card }: Scoreca
             <Stat size="sm" label="Max trade" value={formatUsdCents(rules.maxTradeCents)} />
             <Stat
               size="sm"
-              label="Owner signs above"
+              label="Owner approves above"
               value={rules.approvalAboveCents === 0 ? "Never" : formatUsdCents(rules.approvalAboveCents)}
             />
             <Stat

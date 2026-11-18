@@ -57,8 +57,8 @@ export function RulesEditor({ rules, version, chain }: RulesEditorProps) {
         title={rules ? "Edit the rules" : "Set the first rules"}
         description={
           rules
-            ? `Version ${version.toString()} is in force. Edit a draft here; nothing changes until you sign it.`
-            : "Until you sign the first rules, the Policy contract rejects every intent. These values are a starting point."
+            ? `Version ${version.toString()} is in force. Edit a draft here; nothing changes until you confirm it.`
+            : "Until you confirm the first rules, the Policy contract rejects every intent. These values are a starting point."
         }
       >
         <form
@@ -155,7 +155,7 @@ export function RulesEditor({ rules, version, chain }: RulesEditorProps) {
         headingLevel={2}
       >
         {changes.length === 0 ? (
-          <p className={styles.noChanges}>No changes yet. Edit a rule to see it here before you sign.</p>
+          <p className={styles.noChanges}>No changes yet. Edit a rule to see it here before you confirm.</p>
         ) : (
           <dl className={styles.changeList}>
             {changes.map((change) => (

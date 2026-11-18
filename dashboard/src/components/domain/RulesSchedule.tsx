@@ -86,7 +86,7 @@ export function RulesSchedule({ rules, committedCents, lossTodayCents, usage }: 
       <li className={styles.circuit}>
         <div className={styles.circuitName}>
           <span className={styles.circuitTitle}>Approval above</span>
-          <span className={styles.circuitHelp}>Larger intents wait for your signature.</span>
+          <span className={styles.circuitHelp}>Larger intents wait for your approval.</span>
         </div>
         <div className={styles.plate}>
           <span className={styles.plateValue}>

@@ -133,6 +133,10 @@ async function startConsole(budgetMs = 225_000): Promise<void> {
       CONSOLE_EVENT_SOURCE: "rpc",
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
+      // Setup asks the MCP server on this machine when no public address is set: never this machine's
+      // own one (8787), so a port nothing listens on.
+      MCP_PUBLIC_URL: "",
+      MCP_PORT: "9",
       GEMINI_API_URL: gemini.url,
       // The Gemini test's executor trades on the sandbox (a fake of it), and the console refuses an
       // executor that reads another Gemini than itself, so this console reads "the sandbox" too: the fake
@@ -242,6 +246,18 @@ test.afterAll(async () => {
   await stopConsole();
   await chain.anvil.stop();
   await gemini.stop();
+});
+
+test("with no public MCP address set, Setup says where the local server should run and how to get one", async ({
+  page,
+}) => {
+  await open(page, "/setup");
+  const card = page.getByTestId("mcp-server");
+  await expect(card).toHaveAttribute("data-kind", "local");
+  await expect(card).toContainText("No MCP server answers on this machine at http://127.0.0.1:9/mcp.");
+  await expect(card).toContainText("npm run dev:mcp");
+  await expect(card).toContainText("npm run dev:tunnel");
+  await expect(page.locator("main")).not.toContainText("MCP_PUBLIC_URL");
 });
 
 test("before the first rules, the console says so", async ({ page }) => {

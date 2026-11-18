@@ -22,6 +22,9 @@ import { NeedsYou } from "./NeedsYou";
 
 export type ApprovalsTab = "waiting" | "decided";
 
+const WAITING_TEXT =
+  "Held intents wait here for your approval, with the agent's requests to change the rules and agents asking to pair.";
+
 function decidedAt({ decidedAt: at }: HeldDecision) {
   return at === null ? "Not recorded" : <When at={at} date />;
 }
@@ -53,16 +56,29 @@ const txColumn: Column<HeldDecision> = {
   nowrap: true,
 };
 
-/** What waits for the owner's signature, and the held intents already decided. */
+/**
+ * Everything that waits for the owner, the same list the navigation badge counts (`needsOwner`): held
+ * intents, the agent's requests to change the rules and an agent asking to pair. Then the held intents
+ * already decided.
+ */
 export function ApprovalsView({ tab, preview }: { tab: ApprovalsTab; preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
   const { advanced } = useAdvanced();
   const [shown, select] = useQueryTab<ApprovalsTab>("show", tab, "waiting");
   const chain = snapshot.chain;
-  if (!chain) return <ChainUnavailable snapshot={snapshot} title="Approvals" />;
-
   const attention = needsOwner(snapshot);
+  if (!chain) {
+    // No contract read yet, but an agent can already ask to pair, and the badge counts it: list it here.
+    if (attention.total === 0) return <ChainUnavailable snapshot={snapshot} title="Approvals" />;
+    return (
+      <div className={styles.view}>
+        <PageHeader title="Approvals" description={WAITING_TEXT} />
+        <NeedsYou snapshot={snapshot} attention={attention} />
+      </div>
+    );
+  }
+
   const decided = decidedAfterHold(chain);
   const threshold = chain.rules?.approvalAboveCents ?? 0;
   const columns = advanced ? [...baseColumns, txColumn] : baseColumns;
@@ -73,8 +89,8 @@ export function ApprovalsView({ tab, preview }: { tab: ApprovalsTab; preview?: C
         title="Approvals"
         description={
           threshold > 0
-            ? `Intents above ${formatUsdCents(threshold)} wait here for your signature.`
-            : "Intents above the approval threshold wait here for your signature."
+            ? `Intents above ${formatUsdCents(threshold)} wait here for your approval, with the agent's requests to change the rules and agents asking to pair.`
+            : WAITING_TEXT
         }
       />
       <Tabs

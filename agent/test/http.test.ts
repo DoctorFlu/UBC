@@ -5,11 +5,40 @@ import { authHeader, initializeRequest, post, TEST_TOKEN, testServer } from "./h
 const listTools = { jsonrpc: "2.0", id: 2, method: "tools/list" };
 
 describe("GET /health", () => {
-  it("answers without auth and exposes only status, name and version", async () => {
+  it("answers without auth and exposes only status, name, version and its public MCP URL", async () => {
     const response = await testServer().fetch(new Request("http://127.0.0.1:8787/health"));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "ok", name: "mandate", version: SERVER_VERSION });
+    expect(await response.json()).toEqual({
+      status: "ok",
+      name: "mandate",
+      version: SERVER_VERSION,
+      publicMcpUrl: null,
+    });
     expect(response.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("learns its public MCP URL from a request that came through an HTTPS tunnel, never from a local one", async () => {
+    const server = testServer();
+    const health = async (headers: Record<string, string>) =>
+      (
+        (await (await server.fetch(new Request("http://127.0.0.1:8787/health", { headers }))).json()) as {
+          publicMcpUrl: string | null;
+        }
+      ).publicMcpUrl;
+    // On this machine, any Host: not a public address.
+    expect(await health({ host: "evil.example" })).toBeNull();
+    // Through cloudflared, as its quick tunnel forwards it.
+    const tunnel = { host: "and-judgment-related-profiles.trycloudflare.com", "x-forwarded-proto": "https" };
+    expect(await health(tunnel)).toBe("https://and-judgment-related-profiles.trycloudflare.com/mcp");
+    // A local request afterwards does not forget it; a Host that is not a name is never taken.
+    expect(await health({})).toBe("https://and-judgment-related-profiles.trycloudflare.com/mcp");
+    expect(await health({ host: "127.0.0.1:8787", "cf-ray": "1" })).toBe(
+      "https://and-judgment-related-profiles.trycloudflare.com/mcp",
+    );
+    // A new tunnel replaces it.
+    expect(await health({ host: "next-tunnel.trycloudflare.com", "cf-ray": "abc" })).toBe(
+      "https://next-tunnel.trycloudflare.com/mcp",
+    );
   });
 });
 

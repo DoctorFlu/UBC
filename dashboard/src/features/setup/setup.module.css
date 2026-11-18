@@ -114,6 +114,16 @@
   overflow-wrap: anywhere;
 }
 
+.mcpServer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mcpServer code:not(.endpoint) {
+  overflow-wrap: anywhere;
+}
+
 .pairing {
   display: flex;
   flex-direction: column;

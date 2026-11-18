@@ -3,14 +3,14 @@
  * enter in Grok Bot's "Add a custom connector" dialog. It never prints the token.
  * Start the server first with `npm run dev:mcp` in another terminal.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { Resolver, type LookupAddress } from "node:dns";
 import { get } from "node:https";
 import type { LookupFunction } from "node:net";
 import { createInterface } from "node:readline";
 import { loadEnvFile, resolveEnvFile } from "../src/env-file";
+import { TUNNEL_ATTEMPTS, TUNNEL_RETRY_MS, tunnelUrlIn } from "./tunnel-url";
 
-const TUNNEL_URL = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
 const HEALTH_ATTEMPTS = 30;
 const HEALTH_INTERVAL_MS = 2000;
 
@@ -111,54 +111,78 @@ async function main(): Promise<void> {
     );
   }
 
-  process.stdout.write(`Starting a Cloudflare quick tunnel to ${local} ...\n`);
-  const child = spawn("cloudflared", ["tunnel", "--no-autoupdate", "--url", local], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
   let stopping = false;
+  let child: ChildProcess | null = null;
   const forward = (signal: NodeJS.Signals) => {
     stopping = true;
+    if (child === null) process.exit(0);
     child.kill(signal);
   };
   process.on("SIGINT", forward);
   process.on("SIGTERM", forward);
   // Never leave a tunnel running if this script dies.
   process.on("exit", () => {
-    if (child.exitCode === null) child.kill("SIGTERM");
-  });
-  child.on("exit", (code, signal) => {
-    process.stdout.write(
-      `cloudflared exited${signal === null ? ` with code ${code ?? 0}` : ` on ${signal}`}.\n`,
-    );
-    process.exit(signal === null ? (code ?? 0) : 0);
+    if (child !== null && child.exitCode === null) child.kill("SIGTERM");
   });
 
-  let announced = false;
-  const onLine = (line: string) => {
-    if (!stopping && / ERR /.test(line)) process.stderr.write(`[cloudflared] ${line}\n`);
-    const match = TUNNEL_URL.exec(line);
-    if (match === null || announced) return;
-    announced = true;
-    const publicUrl = match[0];
-    process.stdout.write(`Tunnel created at ${publicUrl}. Waiting until it is reachable ...\n`);
-    void (async () => {
-      for (let attempt = 0; attempt < HEALTH_ATTEMPTS; attempt += 1) {
-        await sleep(HEALTH_INTERVAL_MS);
-        if (await isPubliclyHealthy(publicUrl)) {
-          printConnectorValues(publicUrl, envFile);
-          process.stdout.write(`Checked ${publicUrl}/health through the tunnel: ok.\n`);
-          return;
-        }
+  // A quick tunnel is asked for from Cloudflare's API, which fails now and then. cloudflared then exits
+  // before printing a tunnel URL: that is worth asking again, a few times, after a short wait.
+  const attempt = (number: number) => {
+    const of = number > 1 ? ` (attempt ${String(number)} of ${String(TUNNEL_ATTEMPTS)})` : "";
+    process.stdout.write(`Starting a Cloudflare quick tunnel to ${local}${of} ...\n`);
+    const current = spawn("cloudflared", ["tunnel", "--no-autoupdate", "--url", local], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child = current;
+    let publicUrl: string | null = null;
+
+    current.on("exit", (code, signal) => {
+      const how = signal === null ? `with code ${String(code ?? 0)}` : `on ${signal}`;
+      if (publicUrl === null && !stopping && number < TUNNEL_ATTEMPTS) {
+        process.stdout.write(
+          `cloudflared exited ${how} before it gave a tunnel URL. Asking again in ${String(TUNNEL_RETRY_MS / 1000)} s ...\n`,
+        );
+        setTimeout(() => {
+          if (!stopping) attempt(number + 1);
+        }, TUNNEL_RETRY_MS);
+        return;
       }
-      printConnectorValues(publicUrl, envFile);
-      process.stderr.write(
-        `Could not reach ${publicUrl}/health through the tunnel yet. Is the MCP server running on port ${port}?\n`,
-      );
-    })();
+      if (publicUrl === null && !stopping) {
+        process.stderr.write(
+          `cloudflared exited ${how} on each of ${String(TUNNEL_ATTEMPTS)} attempts before it gave a tunnel URL. Check the [cloudflared] lines above, then run npm run dev:tunnel again.\n`,
+        );
+        process.exit(1);
+      }
+      process.stdout.write(`cloudflared exited ${how}.\n`);
+      process.exit(signal === null ? (code ?? 0) : 0);
+    });
+
+    const onLine = (line: string) => {
+      if (!stopping && / ERR /.test(line)) process.stderr.write(`[cloudflared] ${line}\n`);
+      const found = tunnelUrlIn(line);
+      if (found === null || publicUrl !== null) return;
+      publicUrl = found;
+      process.stdout.write(`Tunnel created at ${found}. Waiting until it is reachable ...\n`);
+      void (async () => {
+        for (let check = 0; check < HEALTH_ATTEMPTS; check += 1) {
+          await sleep(HEALTH_INTERVAL_MS);
+          if (current.exitCode !== null) return;
+          if (await isPubliclyHealthy(found)) {
+            printConnectorValues(found, envFile);
+            process.stdout.write(`Checked ${found}/health through the tunnel: ok.\n`);
+            return;
+          }
+        }
+        printConnectorValues(found, envFile);
+        process.stderr.write(
+          `Could not reach ${found}/health through the tunnel yet. Is the MCP server running on port ${String(port)}?\n`,
+        );
+      })();
+    };
+    createInterface({ input: current.stdout }).on("line", onLine);
+    createInterface({ input: current.stderr }).on("line", onLine);
   };
-  createInterface({ input: child.stdout }).on("line", onLine);
-  createInterface({ input: child.stderr }).on("line", onLine);
+  attempt(1);
 }
 
 void main();

@@ -55,7 +55,7 @@ export function NoPolicyYet({ children }: { children?: ReactNode }) {
       }
     >
       {children ??
-        "The Policy contract rejects every intent until you sign its first set of rules. Set a budget, a max trade size and the markets the agent may trade."}
+        "The Policy contract rejects every intent until you confirm its first set of rules. Set a budget, a max trade size and the markets the agent may trade."}
     </EmptyState>
   );
 }

@@ -16,7 +16,7 @@ const phaseText: Record<"checking" | "pending" | "syncing", string> = {
 
 /** What the open prompt asks for: the wallet's signature, or the passkey's confirmation of this one action. */
 export function signingText(via: "wallet" | "passkey"): string {
-  return via === "passkey" ? "Confirm it with your passkey." : "Confirm it in your wallet.";
+  return via === "passkey" ? "Confirm it with your passkey within 2 minutes." : "Confirm it in your wallet.";
 }
 
 /**

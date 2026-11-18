@@ -11,6 +11,8 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
 
+import { promptNeedsFocus } from "@/lib/owner/passkey";
+
 /** A failure to show as it is: one plain sentence. */
 export class AuthFailure extends Error {
   override readonly name = "AuthFailure";
@@ -46,6 +48,11 @@ function passkeyFailure(error: unknown): AuthFailure {
     if (error.cause instanceof Error) names.add(error.cause.name);
   } else if (error instanceof Error) {
     names.add(error.name);
+  }
+  if (promptNeedsFocus(error)) {
+    return new AuthFailure(
+      "The passkey prompt needs this tab in front. Click anywhere on this page, then try again.",
+    );
   }
   if (["ERROR_CEREMONY_ABORTED", "NotAllowedError", "AbortError"].some((name) => names.has(name))) {
     return new AuthFailure("The passkey prompt closed before it finished. Try again.");

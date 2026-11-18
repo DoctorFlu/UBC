@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import { ToolError } from "../src/mcp/errors";
 import { defineTool } from "../src/mcp/tool";
+import { planHedge } from "../src/tools/plan-hedge";
 import { ping } from "../src/tools/ping";
 import { tools } from "../src/tools";
 import { SERVER_INSTRUCTIONS } from "../src/instructions";
@@ -111,6 +112,19 @@ describe.each(["legacy", "auto"] as const)("MCP round trip (%s era negotiation)"
 
     const good = await client.callTool({ name: "echo_amount", arguments: { amount: 5 } });
     expect(good.structuredContent).toEqual({ amount: 5 });
+  });
+
+  it("says what to send for a missing argument, from its description", async () => {
+    const client = await connect(testServer({ tools: [ping, planHedge] }), { era });
+    const missing = await client.callTool({
+      name: "plan_hedge",
+      arguments: { asset: "BTC", quantity: "0.05", dropPercent: 3 },
+    });
+    expect(missing.isError).toBe(true);
+    expect(text(missing)).toContain(
+      "requestText is required: the owner's request in their own words; it is sealed into each intent's decision context",
+    );
+    expect(text(missing)).not.toContain("received undefined");
   });
 });
 

@@ -225,7 +225,7 @@ export function ChangeRequests({
       <Card>
         <EmptyState icon={<MessageSquareDiff strokeWidth={1.75} />} title="No change requests">
           When {agentName === "The agent" ? "the agent" : agentName} hits a limit it thinks is wrong, it can
-          ask you to change it. Requests wait here; the rules never change without your signature.
+          ask you to change it. Requests wait here; the rules never change unless you confirm it.
         </EmptyState>
       </Card>
     );

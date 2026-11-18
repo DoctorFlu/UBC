@@ -73,6 +73,10 @@ async function startConsole(): Promise<void> {
       CONSOLE_EVENT_SOURCE: "rpc",
       CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
       CONSOLE_URL: baseURL,
+      // Setup asks the MCP server on this machine when no public address is set: never this machine's
+      // own one (8787), so a port nothing listens on.
+      MCP_PUBLIC_URL: "",
+      MCP_PORT: "9",
       GEMINI_API_URL: gemini.url,
       GROK_WEBHOOK_URL: webhook.url,
       GROK_WEBHOOK_KEY: webhook.key,

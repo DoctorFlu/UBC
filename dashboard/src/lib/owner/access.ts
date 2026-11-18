@@ -3,7 +3,7 @@
 import { type Address, isAddressEqual } from "viem";
 
 import { useSnapshot } from "@/lib/live/LiveConsole";
-import { useMandateScope } from "@/lib/mandate/MandateContext";
+import { type MandateScope, useMandateScope } from "@/lib/mandate/MandateContext";
 import { useWalletState } from "@/lib/wallet/useWalletState";
 
 /**
@@ -22,6 +22,31 @@ export type OwnerAccess =
   | { kind: "wrong-network"; reason: string }
   | { kind: "viewer"; reason: string }
   | { kind: "not-owner"; address: Address; owner: Address; reason: string };
+
+/**
+ * How this mandate's owner acts, for copy that says so: `wallet`, the owner's own wallet signs (or the dev
+ * signer on the demo chain); `passkey`, the console holds this mandate's owner key and the member's passkey
+ * confirms each owner action (#95). A mandate the console is about to deploy is `passkey` already.
+ */
+export type OwnerMode = "wallet" | "passkey";
+
+export function ownerModeOf(scope: MandateScope | null): OwnerMode {
+  if (!scope) return "wallet";
+  const { ownerSigner } = scope.mandate;
+  if (ownerSigner === "console") return "passkey";
+  if (ownerSigner === null && scope.deployer === "server") return "passkey";
+  return "wallet";
+}
+
+export function useOwnerMode(): OwnerMode {
+  return ownerModeOf(useMandateScope());
+}
+
+/** One sentence on how owner actions are made here, true for the mandate's owner mode. */
+export const OWNER_MODE_TEXT: Record<OwnerMode, string> = {
+  wallet: "The owner's wallet signs each owner action.",
+  passkey: "The console holds this mandate's owner key; your passkey confirms each owner action.",
+};
 
 export function useOwnerAccess(): OwnerAccess {
   const wallet = useWalletState();

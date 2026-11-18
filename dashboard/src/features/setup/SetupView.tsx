@@ -4,7 +4,6 @@ import { Check } from "lucide-react";
 
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { CopyButton } from "@/components/ui/CopyButton";
 import { HexValue } from "@/components/ui/HexValue";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/States";
@@ -12,13 +11,14 @@ import { formatCount } from "@/lib/format";
 import { useSnapshot } from "@/lib/live/LiveConsole";
 import type { ConsoleSnapshot } from "@/lib/live/types";
 import { useMandateScope } from "@/lib/mandate/MandateContext";
-import { useOwnerAccess } from "@/lib/owner/access";
+import { useOwnerAccess, useOwnerMode } from "@/lib/owner/access";
 import { setupSteps } from "@/lib/setup";
 import { Advanced } from "@/lib/advanced/Advanced";
 import { When } from "@/components/ui/When";
 
 import { AgentsSection } from "./AgentsSection";
 import { DeployCard } from "./DeployCard";
+import { McpServerCard } from "./McpServerCard";
 import { RenameCard } from "./RenameCard";
 import styles from "./setup.module.css";
 import { WakeUpsCard } from "./WakeUps";
@@ -28,8 +28,9 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
   const live = useSnapshot();
   const snapshot = preview ?? live;
   const access = useOwnerAccess();
+  const mode = useOwnerMode();
   const scope = useMandateScope();
-  const steps = setupSteps(snapshot, access.kind === "owner");
+  const steps = setupSteps(snapshot, access.kind === "owner", mode);
   const done = steps.filter((step) => step.done).length;
   const next = steps.find((step) => !step.done);
   const pairing = snapshot.offchain.pairing;
@@ -74,7 +75,11 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
           {preview ? null : <RenameCard key={scope?.mandate.id} />}
           <Card
             title="Agent pairing"
-            description="The agent's MCP server announces itself here; you confirm it with the owner wallet."
+            description={
+              mode === "passkey"
+                ? "The agent's MCP server announces itself here; you confirm it with your passkey."
+                : "The agent's MCP server announces itself here; you confirm it with the owner wallet."
+            }
             headingLevel={2}
             tone={pairing?.status === "pending" ? "attention" : "default"}
           >
@@ -128,25 +133,7 @@ export function SetupView({ preview }: { preview?: ConsoleSnapshot }) {
             )}
           </Card>
 
-          <Card
-            title="MCP server"
-            description="Add this address to Grok Bot as a connector. It only proposes intents; it cannot move funds."
-            headingLevel={2}
-          >
-            {snapshot.mcpPublicUrl ? (
-              <div className={styles.copyRow}>
-                <code className={styles.endpoint} translate="no">
-                  {snapshot.mcpPublicUrl}
-                </code>
-                <CopyButton value={snapshot.mcpPublicUrl} what="MCP server address" />
-              </div>
-            ) : (
-              <p className={styles.muted}>
-                Not configured. Set <code>MCP_PUBLIC_URL</code> on the console to the public address of the
-                MCP server.
-              </p>
-            )}
-          </Card>
+          <McpServerCard configured={snapshot.mcpPublicUrl} ask={!preview} />
 
           <Card title="Network" headingLevel={2}>
             <dl className={styles.network}>

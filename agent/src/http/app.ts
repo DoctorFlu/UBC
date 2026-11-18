@@ -26,6 +26,20 @@ function jsonRpcError(c: Context, status: ContentfulStatusCode, code: number, me
   return c.json({ jsonrpc: "2.0", error: { code, message }, id: null }, status, headers);
 }
 
+/**
+ * The public origin a request reached this server at, when an HTTPS tunnel or proxy in front of it says so
+ * (cloudflared and Caddy send `X-Forwarded-Proto: https`; Cloudflare also sends `Cf-Ray`): `https://` and
+ * the Host it was asked for. Null for a request made on this machine, or with a Host that is not a name.
+ */
+export function publicOriginOf(request: Request): string | null {
+  const viaProxy = request.headers.get("x-forwarded-proto") === "https" || request.headers.has("cf-ray");
+  if (!viaProxy) return null;
+  const host = (request.headers.get("host") ?? "").toLowerCase();
+  const match = /^((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(?::\d{1,5})?$/.exec(host);
+  if (match === null) return null;
+  return `https://${host}`;
+}
+
 /** How many JSON-RPC `tools/call` requests a body holds (a single message or a batch). */
 function toolCallCount(body: unknown): number {
   const messages: unknown[] = Array.isArray(body) ? body : [body];
@@ -66,7 +80,8 @@ function clientInfoOf(body: unknown): string | undefined {
 
 /**
  * The HTTP surface:
- * - `GET /health`: no auth, status and version only.
+ * - `GET /health`: no auth: status, name, version, and the public MCP URL clients last reached this server
+ *   at through a tunnel or proxy (null until one does), so the console can show the address to give Grok Bot.
  * - `POST /mcp`: Origin check, bearer auth (the console says which agent the token acts for), body
  *   limit, a rate limit on tool calls per token, then the MCP endpoint in that agent's context.
  *   Other methods on `/mcp` get 405 because the server is stateless and never streams.
@@ -84,7 +99,11 @@ export function createHttpApp(
   const limiter = new TokenBucketLimiter(config.limits.rateLimit);
   const failedAuthLimiter = new TokenBucketLimiter(FAILED_AUTH_LIMIT);
 
+  // The last public origin a request came in through: a quick tunnel's changes each time it restarts.
+  let publicOrigin: string | null = null;
+
   http.use("*", async (c, next) => {
+    publicOrigin = publicOriginOf(c.req.raw) ?? publicOrigin;
     const requestId = randomUUID();
     const started = performance.now();
     c.set("requestId", requestId);
@@ -99,7 +118,14 @@ export function createHttpApp(
     });
   });
 
-  http.get("/health", (c) => c.json({ status: "ok", name: SERVER_NAME, version: SERVER_VERSION }));
+  http.get("/health", (c) =>
+    c.json({
+      status: "ok",
+      name: SERVER_NAME,
+      version: SERVER_VERSION,
+      publicMcpUrl: publicOrigin === null ? null : `${publicOrigin}/mcp`,
+    }),
+  );
 
   http.all(
     "/mcp",
