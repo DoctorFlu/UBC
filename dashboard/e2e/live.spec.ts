@@ -1507,12 +1507,19 @@ test("an approval the contract refuses says which rule, in plain words, and the 
   await chain.user.setPaused(true);
 
   await open(page, "/activity");
+  // The owner approves from Waiting, the list of what needs him. Activity opens on it by itself only when
+  // the console already knew of a held intent as the page rendered, so the test opens it by name.
+  const tab = (name: string) => page.getByRole("tab", { name: new RegExp(`^${name}`) });
+  await tab("Waiting").click();
   await expect(row(page, held.intentId)).toContainText("Waiting");
   const approve = row(page, held.intentId).getByRole("button", { name: /^Approve \$22\.00/ });
   await approve.click();
   await approve.click();
   await expect(toast(page)).toContainText("Refused by the contract: Paused");
   await expect(toast(page)).toContainText("The user has paused the agent");
+  // Refused, it leaves Waiting and is listed among the rejected, with the rule in words.
+  await expect(row(page, held.intentId)).toHaveCount(0);
+  await tab("Rejected").click();
   await expect(row(page, held.intentId)).toContainText("agent paused");
   expect(
     (await snapshot(baseURL)).chain?.intents.find((intent) => intent.id === held.intentId),
