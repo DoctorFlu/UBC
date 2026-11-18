@@ -225,11 +225,19 @@ export function startExecutor(options: ExecutorOptions): Executor {
     return Math.min(venueRetryMs * 2 ** count, Math.max(venueRetryMs, 10 * MINUTE_MS));
   }
 
+  /**
+   * At most two intents are read at a time: a restart replays every approval since the deploy block at
+   * once, and a burst of reads is what the public RPC refuses.
+   */
+  const reads = new Limiter(2);
+
   async function handle(intentId: number): Promise<void> {
     if (isStopped() || inFlight.has(intentId)) return;
     inFlight.add(intentId);
+    /** Set once an order may have reached the venue: from then on a failure is never retried blindly. */
+    let placing = false;
     try {
-      const intent = await client.getIntent(intentId);
+      const intent = await reads.run(() => client.getIntent(intentId));
       if (intent?.status !== "approved") return; // already recorded, for example after a restart
 
       let check: IntentCheck;
@@ -269,6 +277,7 @@ export function startExecutor(options: ExecutorOptions): Executor {
       };
       let fill;
       try {
+        placing = true;
         const placement = await venue.placeOrder(order);
         if (placement.status === "refused") {
           holds.delete(intentId);
@@ -319,7 +328,15 @@ export function startExecutor(options: ExecutorOptions): Executor {
           `${formatCents(filledCents)} filled (${txHash})`,
       );
     } catch (error) {
-      log(`${tag} intent #${intentId}: ${errorText(error)}`);
+      if (!placing) {
+        // Nothing reached the venue: a chain read or a refusal's record failed (the RPC rate-limiting us,
+        // a timeout). Ask again later, so an approval is never left behind until the next restart.
+        const delayMs = Math.max(venueRetryMs, options.gate?.remainingMs() ?? 0);
+        log(`${tag} intent #${intentId}: ${errorText(error)}; trying again in ${formatWait(delayMs)}`);
+        retryLater(intentId, delayMs);
+      } else {
+        log(`${tag} intent #${intentId}: ${errorText(error)}`);
+      }
     } finally {
       inFlight.delete(intentId);
     }
@@ -539,6 +556,11 @@ export function startExecutor(options: ExecutorOptions): Executor {
       if (newFills && options.settlements !== undefined) void settleNow();
     },
     onError: (error, retryInMs) => {
+      if (retryInMs === undefined) {
+        // A log this code cannot read: skipped, and the poll went on.
+        log(`${tag} skipped an unreadable log: ${errorText(error)}`);
+        return;
+      }
       failing += 1;
       // The first failure of a run and every tenth after it: a rate-limited minute is one line, not sixty.
       if (failing === 1 || failing % 10 === 0) {
@@ -565,6 +587,27 @@ export function startExecutor(options: ExecutorOptions): Executor {
     },
     settleNow,
   };
+}
+
+/** Runs at most `size` tasks at a time, the rest in the order they came. */
+class Limiter {
+  #running = 0;
+  readonly #waiting: (() => void)[] = [];
+
+  constructor(private readonly size: number) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.#running >= this.size) {
+      await new Promise<void>((resolve) => this.#waiting.push(resolve));
+    }
+    this.#running += 1;
+    try {
+      return await task();
+    } finally {
+      this.#running -= 1;
+      this.#waiting.shift()?.();
+    }
+  }
 }
 
 /** One line, without the RPC's URL (a provider's holds its key) or the request body viem adds. */

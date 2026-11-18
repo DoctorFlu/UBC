@@ -180,7 +180,10 @@ function classify(error: unknown): Failure | null {
   if (limit !== null) {
     const wait = limit.retryAfterMs === null ? "a minute" : formatWait(limit.retryAfterMs);
     return {
-      reason: reason("CHAIN_UNAVAILABLE", `The Arc RPC endpoint is rate-limiting this server; it asks us to wait ${wait}.`),
+      reason: reason(
+        "CHAIN_UNAVAILABLE",
+        `The Arc RPC endpoint is rate-limiting this server; it asks us to wait ${wait}.`,
+      ),
       nextAction: {
         actor: "agent",
         hint: "Try once more in a minute. If it is refused again, tell the owner the chain RPC is rate-limiting the server.",

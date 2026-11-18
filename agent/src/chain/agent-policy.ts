@@ -19,6 +19,7 @@ import {
   arcTestnet,
   chainExplorerTxUrl,
   devchain,
+  ARC_RECEIPT_FIRST_POLL_MS,
   PolicyClient,
   politeHttp,
   signerAccount,
@@ -69,6 +70,8 @@ export class ChainAgentPolicy implements AgentPolicy {
     deployBlock?: bigint;
     /** Skip probing for these contract extensions (tests). */
     capabilities?: Partial<Capabilities>;
+    /** Delay before the first receipt check: `ARC_RECEIPT_FIRST_POLL_MS` on Arc, the default locally. */
+    receiptFirstPollMs?: number;
   }) {
     this.policyAddress = options.policyAddress;
     this.agentAddress = options.walletClient?.account.address;
@@ -80,6 +83,7 @@ export class ChainAgentPolicy implements AgentPolicy {
       ...(options.walletClient === undefined ? {} : { walletClient: options.walletClient }),
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
       receiptTimeoutMs: RECEIPT_TIMEOUT_MS,
+      ...(options.receiptFirstPollMs === undefined ? {} : { receiptFirstPollMs: options.receiptFirstPollMs }),
     });
     this.#events = new EventIndex(this.#client, options.deployBlock);
   }
@@ -203,5 +207,6 @@ export function createAgentPolicy(config: Config, signer?: AgentSigner): AgentPo
     publicClient,
     ...(walletClient === undefined ? {} : { walletClient }),
     ...(config.policyDeployBlock === undefined ? {} : { deployBlock: config.policyDeployBlock }),
+    ...(local ? {} : { receiptFirstPollMs: ARC_RECEIPT_FIRST_POLL_MS }),
   });
 }

@@ -91,8 +91,9 @@ export interface FollowerHooks {
 }
 
 /**
- * Roles change only by an event (`UserChanged`, `AgentChanged`, `ExecutorChanged`), which reads them again
- * at once; this slow read is only a safety net for a contract that would not emit them.
+ * How old the roles shown in the views may get. A role changes only by an event (`UserChanged`,
+ * `AgentChanged`, `ExecutorChanged`), which the views take at once and which reads them again on the next
+ * poll, so this slow read is only a safety net. Every trust decision reads them fresh (`trustedRoles`).
  */
 const ROLES_REFRESH_MS = 300_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -103,8 +104,6 @@ const MAX_BACKOFF_MS = 30_000;
 const RPC_GATE_WAIT_MS = 15_000;
 /** The poll interval on Arc testnet when `CONSOLE_POLL_INTERVAL_MS` is unset; see `pollIntervalMs`. */
 export const ARC_POLL_INTERVAL_MS = 3_000;
-/** Events that change a role: the roles are read again on the next poll. */
-const ROLE_EVENTS = new Set<PolicyEvent["type"]>(["UserChanged", "AgentChanged", "ExecutorChanged"]);
 /** With the Stream as the primary source, the RPC only checks for gaps this often. */
 const STREAM_SAFETY_POLL_MS = 15_000;
 /** Longest a browser waits for a feed update that is not news (the synced block moving on). */
@@ -220,7 +219,9 @@ export class ContractFollower {
           );
           this.setFeed({ health: "lagging", detail: rateLimitedDetail(delay) });
           if (failures === 1 || failures % 10 === 0) {
-            this.log.warn(`chain read refused: the RPC is rate-limiting us; retrying in ${formatWait(delay)}`);
+            this.log.warn(
+              `chain read refused: the RPC is rate-limiting us; retrying in ${formatWait(delay)}`,
+            );
           }
           await sleep(delay, signal);
           continue;
@@ -329,8 +330,9 @@ export class ContractFollower {
         return; // dev:chain restarted or stopped: resolve the deployment again
       }
       // One head read per interval for every follower of this endpoint in the process.
-      const block = await sharedHead(`${String(session.deployment.chain.id)}:${session.deployment.rpcUrl}`, () =>
-        session.client.getBlock({ blockTag: "latest" }),
+      const block = await sharedHead(
+        `${String(session.deployment.chain.id)}:${session.deployment.rpcUrl}`,
+        () => session.client.getBlock({ blockTag: "latest" }),
       ).latest(interval);
       const latest = block.number;
       let cursor = this.events.cursor(session.id) ?? session.deployBlock;
@@ -380,7 +382,9 @@ export class ContractFollower {
   /** Says once that the chain answers again after failed reads, and starts the backoff over. */
   private recovered(): void {
     if (this.failures === 0) return;
-    this.log.info(`chain reads work again after ${String(this.failures)} failed ${this.failures === 1 ? "attempt" : "attempts"}`);
+    this.log.info(
+      `chain reads work again after ${String(this.failures)} failed ${this.failures === 1 ? "attempt" : "attempts"}`,
+    );
     this.failures = 0;
   }
 
@@ -418,7 +422,6 @@ export class ContractFollower {
    */
   private apply(added: readonly PolicyEvent[], history = false): void {
     if (added.length === 0) return;
-    if (added.some((event) => ROLE_EVENTS.has(event.type))) this.rolesReadAt = 0;
     this.state = applyEvents(this.state, added);
     this.followRoleEvents(added, history);
     const session = this.session;

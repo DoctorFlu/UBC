@@ -49,6 +49,7 @@ import {
   devGeminiClient,
   executorHead,
   executorPolicyClient,
+  executorReceiptPolling,
   executorTarget,
   geminiVenue,
   simulatedVenue,
@@ -251,6 +252,7 @@ async function serve(contract: ExecutorContract): Promise<Executor | { refused: 
     publicClient: client.publicClient,
     walletClient: signer,
     lane,
+    ...executorReceiptPolling(target),
   });
   const named = (await policyClient.getRoles()).executor;
   if (named.toLowerCase() !== executorAddress.toLowerCase()) {

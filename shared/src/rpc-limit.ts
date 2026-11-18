@@ -2,7 +2,6 @@ import {
   type EIP1193RequestFn,
   type HttpTransport,
   type HttpTransportConfig,
-  type Transport,
   BaseError,
   HttpRequestError,
   TimeoutError,

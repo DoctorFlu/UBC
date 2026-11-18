@@ -13,6 +13,7 @@
  * Never prints a key.
  */
 import {
+  ARC_RECEIPT_FIRST_POLL_MS,
   PolicyClient,
   type ChainHead,
   type HeadCache,
@@ -141,7 +142,15 @@ export function executorPolicyClient(target: ExecutorTarget, lane?: WriteLane): 
     publicClient: createPublicClient({ chain, transport, pollingInterval: target.local ? 100 : 1_000 }),
     walletClient: createWalletClient({ chain, transport, account: target.account }),
     ...(lane === undefined ? {} : { lane }),
+    ...executorReceiptPolling(target),
   });
+}
+
+/** How the executor's writes wait for their receipts: from half a second on Arc, at once on anvil. */
+export function executorReceiptPolling(target: Pick<ExecutorTarget, "local">): {
+  receiptFirstPollMs?: number;
+} {
+  return target.local ? {} : { receiptFirstPollMs: ARC_RECEIPT_FIRST_POLL_MS };
 }
 
 /** Most one chain request of the executor waits for the RPC's rate-limit gate to open. */
@@ -155,10 +164,13 @@ export function executorHead(
   target: ExecutorTarget,
   client: PolicyClient,
 ): { head: (maxAgeMs: number) => Promise<bigint>; gate: ReturnType<typeof rpcGate> } {
-  const cache: HeadCache = sharedHead(`${String(target.chain.id)}:${target.rpcUrl}`, async (): Promise<ChainHead> => {
-    const block = await client.publicClient.getBlock({ blockTag: "latest" });
-    return { number: block.number, timestamp: block.timestamp };
-  });
+  const cache: HeadCache = sharedHead(
+    `${String(target.chain.id)}:${target.rpcUrl}`,
+    async (): Promise<ChainHead> => {
+      const block = await client.publicClient.getBlock({ blockTag: "latest" });
+      return { number: block.number, timestamp: block.timestamp };
+    },
+  );
   return {
     head: async (maxAgeMs) => (await cache.latest(maxAgeMs)).number,
     gate: rpcGate(target.rpcUrl),
