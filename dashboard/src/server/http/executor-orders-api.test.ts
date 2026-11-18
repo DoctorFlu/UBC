@@ -29,6 +29,7 @@ import {
   type VenueOrderRecord,
   clientOrderIdFor,
   consoleErrorSchema,
+  executorVenueAnswerSchema,
   hashExecutorRecord,
 } from "@mandate/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -360,7 +361,11 @@ describe("the executor's order journal in the console", () => {
     expect(envSnapshot(service).chain?.venue).toBeNull();
     await expectError(await announce(base, agentSign), 403, "not_executor");
     await expectError(await announce({ ...base, environment: null }), 422, "invalid_body");
-    expect((await announce(base)).status).toBe(201);
+    const first = await announce(base);
+    expect(first.status).toBe(201);
+    // The answer says what the console did, for the executor's log.
+    const stored = executorVenueAnswerSchema.parse(await first.json());
+    expect(stored).toMatchObject({ venue: "gemini", environment: "sandbox", stored: true, seq: 0 });
     expect(envSnapshot(service).chain?.venue).toEqual({
       venue: "gemini",
       environment: "sandbox",
@@ -372,7 +377,13 @@ describe("the executor's order journal in the console", () => {
     const deploymentId = service.deploymentIdFor(envMandate(service)) ?? "";
     const history = () => service.venueOrders.venues(deploymentId);
     expect(history()).toHaveLength(1);
-    expect((await announce({ ...base, announcedAt: "2026-11-17T08:05:00.000Z" })).status).toBe(200);
+    const again = await announce({ ...base, announcedAt: "2026-11-17T08:05:00.000Z" });
+    expect(again.status).toBe(200);
+    expect(executorVenueAnswerSchema.parse(await again.json())).toEqual({
+      ...stored,
+      announcedAt: "2026-11-17T08:05:00.000Z",
+      stored: false,
+    });
     expect(history()).toHaveLength(1);
     expect(envSnapshot(service).chain?.venues).toEqual([
       {
@@ -407,6 +418,11 @@ describe("the executor's order journal in the console", () => {
       {},
     );
     expect(response.status).toBe(201);
+    expect(executorVenueAnswerSchema.parse(await response.json())).toMatchObject({
+      stored: true,
+      seq: before.length,
+      holdsFromBlock: head + 1,
+    });
     const after = service.venueOrders.venues(deploymentId);
     expect(after.slice(0, before.length)).toEqual(before);
     expect(after.at(-1)).toMatchObject({ seq: before.length, holdsFromBlock: head + 1 });

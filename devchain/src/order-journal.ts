@@ -7,6 +7,7 @@
 import {
   CONSOLE_EXECUTOR_ROUTES,
   consoleErrorSchema,
+  executorVenueAnswerSchema,
   hashExecutorRecord,
   putExecutorVenueRequestSchema,
   putVenueOrderRequestSchema,
@@ -152,13 +153,14 @@ export function consoleOrderJournal(options: ConsoleJournalOptions): OrderJourna
 }
 
 /**
- * Tells the console which venue fills orders. Returns null when it was stored, or why not (the console
- * is down or not following the contract yet): the caller tries again later.
+ * Tells the console which venue fills orders. Returns what the console did with it (stored a new
+ * announcement, or found this venue already in force), or why it did not take it (the console is down or
+ * not following the contract yet, or reads another Gemini): the caller tries again later or stops.
  */
 export async function announceVenue(
   options: Pick<ConsoleJournalOptions, "consoleUrl" | "sign" | "fetch" | "timeoutMs">,
   document: ExecutorVenue,
-): Promise<VenueAnnouncementProblem | null> {
+): Promise<VenueAnnouncementOutcome> {
   const base = options.consoleUrl.replace(/\/+$/, "");
   const send = options.fetch ?? ((input: string, init: RequestInit) => fetch(input, init));
   const signature = await options.sign(hashExecutorRecord(document));
@@ -173,25 +175,103 @@ export async function announceVenue(
     });
   } catch (error) {
     return {
+      accepted: false,
       mismatch: false,
       message: `the console at ${base} did not answer (${error instanceof Error ? error.message : String(error)})`,
     };
   }
-  if (response.ok) return null;
+  if (response.ok) {
+    // A console from before the answer carried them leaves out `stored`, `seq` and `holdsFromBlock`.
+    const answer = executorVenueAnswerSchema.safeParse(await response.json().catch(() => undefined));
+    const data = answer.success ? answer.data : null;
+    return {
+      accepted: true,
+      stored: data?.stored ?? response.status === 201,
+      seq: data?.seq ?? null,
+      holdsFromBlock: data?.holdsFromBlock ?? null,
+    };
+  }
   const answer = await consoleAnswer(response);
   return answer.code === "environment_mismatch"
-    ? { mismatch: true, message: answer.text.replace(/^environment_mismatch: /, "") }
-    : { mismatch: false, message: `the console answered ${answer.text}` };
+    ? { accepted: false, mismatch: true, message: answer.text.replace(/^environment_mismatch: /, "") }
+    : { accepted: false, mismatch: false, message: `the console answered ${answer.text}` };
+}
+
+/** What the console did with the executor's venue announcement. */
+export type VenueAnnouncementOutcome = VenueAnnouncementAccepted | VenueAnnouncementProblem;
+
+export interface VenueAnnouncementAccepted {
+  accepted: true;
+  /** True when the console stored a new announcement; false when this venue was already in force. */
+  stored: boolean;
+  /** The announcement in force now, 0 for the first; null from a console that does not say. */
+  seq: number | null;
+  /** The first block it holds from; null for one stored before blocks were recorded, or not said. */
+  holdsFromBlock: number | null;
 }
 
 /** Why the console has not taken the executor's venue announcement. */
 export interface VenueAnnouncementProblem {
+  accepted: false;
   /**
    * True when the console reads another Gemini than the executor (409 `environment_mismatch`): settings
    * to fix, never resolved by trying again, so the executor stops. Otherwise the console is not up yet.
    */
   mismatch: boolean;
   message: string;
+}
+
+/** The line the executor logs once the console took its announcement. */
+export function announcementAcceptedLine(policy: string, outcome: VenueAnnouncementAccepted): string {
+  const which = outcome.seq === null ? "the announcement" : `announcement #${String(outcome.seq)}`;
+  const from =
+    outcome.holdsFromBlock === null
+      ? outcome.seq === null
+        ? ""
+        : ", holding from the contract's first block"
+      : `, holding from block ${String(outcome.holdsFromBlock)}`;
+  return outcome.stored
+    ? `[executor] The console stored the venue of ${policy} as ${which}${from}.`
+    : `[executor] The console already has this venue in force for ${policy} (${which}${from}): nothing added.`;
+}
+
+export interface AnnounceUntilAcceptedOptions {
+  /** One attempt: `announceVenue` with the executor's console and key. */
+  announce: () => Promise<VenueAnnouncementOutcome>;
+  policy: string;
+  log: (line: string) => void;
+  sleep?: (ms: number) => Promise<void>;
+  /** The first wait; each next one doubles, up to `maxWaitMs`. */
+  firstWaitMs?: number;
+  maxWaitMs?: number;
+}
+
+/**
+ * Announces until the console takes it, logging every failed attempt with the wait before the next, and
+ * once what the console did. The console may start after the executor, so it tries again with growing
+ * waits; it asks nothing of Gemini. Resolves with the accepted outcome; rejects with the console's words
+ * when the console reads another Gemini (`environment_mismatch`), which no retry resolves.
+ */
+export async function announceUntilAccepted(
+  options: AnnounceUntilAcceptedOptions,
+): Promise<VenueAnnouncementAccepted> {
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const firstWaitMs = options.firstWaitMs ?? 5_000;
+  const maxWaitMs = options.maxWaitMs ?? 60_000;
+  for (let attempt = 1; ; attempt += 1) {
+    const outcome = await options.announce();
+    if (outcome.accepted) {
+      options.log(announcementAcceptedLine(options.policy, outcome));
+      return outcome;
+    }
+    if (outcome.mismatch) throw new Error(`The console refused this executor: ${outcome.message}`);
+    const waitMs = Math.min(firstWaitMs * 2 ** (attempt - 1), maxWaitMs);
+    options.log(
+      `[executor] Could not tell the console the venue of ${options.policy} yet (${outcome.message}); ` +
+        `attempt ${String(attempt)}, trying again in ${String(Math.round(waitMs / 1_000))} s.`,
+    );
+    await sleep(waitMs);
+  }
 }
 
 /** A journal in memory, for tests: it keeps the same rules as the console's on revisions. */

@@ -14,6 +14,7 @@ import {
   VENUE_ORDER_FIXED_FIELDS,
   venueOrderRecordSchema,
   type ExecutorContract,
+  type ExecutorVenueAnswer,
   type VenueOrderRecord,
 } from "@mandate/shared";
 import { type Hex, isAddress, isAddressEqual, recoverMessageAddress } from "viem";
@@ -275,11 +276,17 @@ export function putExecutorVenue(
     if (previous?.success && Date.parse(previous.data.announcedAt) > Date.parse(document.announcedAt)) {
       return apiError(409, "stale", "The console holds a newer announcement from the executor.");
     }
-    const answer = {
+    const answer = (
+      row: { seq: number; holdsFromBlock: number | null },
+      stored: boolean,
+    ): ExecutorVenueAnswer => ({
       venue: document.venue,
       environment: document.environment,
       announcedAt: document.announcedAt,
-    };
+      stored,
+      seq: row.seq,
+      holdsFromBlock: row.holdsFromBlock,
+    });
     // A restart on the venue already in force adds nothing: the announcement in force keeps its start.
     if (
       existing &&
@@ -288,7 +295,7 @@ export function putExecutorVenue(
       previous.data.venue === document.venue &&
       previous.data.environment === document.environment
     ) {
-      return json(answer, 200);
+      return json(answer(existing, false), 200);
     }
     // Fills mined up to the head read now were filled under the earlier announcement; this one holds after
     // it. Read fresh, never from the follower, which may be behind: a late head would claim earlier fills.
@@ -302,13 +309,13 @@ export function putExecutorVenue(
         "The console can't read the chain head right now, so it can't say from when this venue holds. Try again.",
       );
     }
-    service.venueOrders.announceVenue(
+    const row = service.venueOrders.announceVenue(
       verified.deploymentId,
       { hash, document, signature: signature.toLowerCase() as Hex, signer: verified.signer },
       Number(head) + 1,
     );
     service.venueChanged(verified.mandate);
-    return json(answer, 201);
+    return json(answer(row, true), 201);
   });
 }
 
