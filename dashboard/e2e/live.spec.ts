@@ -1373,6 +1373,7 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     client: chain.executor,
     venue: geminiVenue({
       publicClient: createGeminiClient({ baseUrl: gemini.url }),
+      productionClient: createGeminiClient({ baseUrl: gemini.url }),
       trading: createGeminiPrivateClient({
         environment: "sandbox",
         credentials: { apiKey: "account-E2EFAKEKEY", apiSecret: "e2e-fake-secret" },

@@ -28,7 +28,8 @@
  * environment leaves unset, as `npm run gemini:doctor` reads them; the containers have no such file.
  */
 import {
-  createGeminiClient,
+  createMarketDataClient,
+  createProductionClient,
   marketDataSource,
   type GeminiClient,
   type MarketDataSource,
@@ -127,6 +128,7 @@ let describeVenue: string;
 if (settings.venue === "gemini") {
   let trading: GeminiPrivateClient;
   let publicClient: GeminiClient;
+  let productionClient: GeminiClient;
   try {
     const gemini = geminiTradingSettings(process.env);
     if (gemini.environment === "production") {
@@ -144,8 +146,10 @@ if (settings.venue === "gemini") {
     trading = createGeminiPrivateClient({ environment: gemini.environment, credentials: gemini.credentials });
     // The sandbox lists other strikes than production, so the checks and outcomes read the environment
     // the orders go to: the stack's market data source, which follows GEMINI_ENV here and refuses a
-    // GEMINI_API_URL naming another host (a loopback fake in tests is allowed).
-    publicClient = createGeminiClient({ maxRetries: 1, timeoutMs: 8_000, baseUrl: marketData.baseUrl });
+    // GEMINI_API_URL naming another host (a loopback fake in tests is allowed). Fills the simulated venue
+    // made before are listed and resolved on production, where it read them.
+    publicClient = createMarketDataClient(marketData, { maxRetries: 1, timeoutMs: 8_000 });
+    productionClient = createProductionClient(marketData, { maxRetries: 1, timeoutMs: 8_000 });
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -176,6 +180,7 @@ if (settings.venue === "gemini") {
     return {
       venue: geminiVenue({
         publicClient,
+        productionClient,
         trading,
         journal: consoleOrderJournal({ consoleUrl, sign, deployment: { chainId, policy: venueAt.policy } }),
         deployment: venueAt,

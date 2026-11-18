@@ -513,6 +513,36 @@ describe("settling filled positions at expiry (issue #92)", () => {
     expect(sink.calls).toBe(3);
   });
 
+  it("never lets one exchange's answer about a ladder stand for a position the other exchange filled", async () => {
+    // The Gemini venue after the switch: its own fills on the sandbox, earlier simulated fills on production.
+    const venue = fakeVenue();
+    const sources = new Map<number, string>();
+    const outcomes = { sandbox: 0, simulated: 0 };
+    venue.outcomeSource = (position) => Promise.resolve(sources.get(position.intentId) ?? "unknown");
+    venue.positionOutcome = (position) => {
+      venue.outcomeCalls += 1;
+      if (clock.now < DUE) return Promise.resolve({ status: "open", expiresAt: "2026-11-20T22:00:00.000Z" });
+      const source = sources.get(position.intentId) === "sandbox" ? "sandbox" : "simulated";
+      outcomes[source] += 1;
+      // Production has published the outcome; the sandbox has not yet.
+      return Promise.resolve(
+        source === "sandbox" ? { status: "awaiting", expiresAt: "2026-11-20T22:00:00.000Z" } : RESOLVED_NO,
+      );
+    };
+    const sink = fakeSink();
+    const executor = start(venue, sink);
+    const sandboxFill = await filledPosition(executor, venue);
+    const simulatedFill = await filledPosition(executor, venue);
+    sources.set(sandboxFill, "sandbox");
+    sources.set(simulatedFill, "simulated");
+
+    clock.now = DUE;
+    await executor.settleNow();
+    // The sandbox's "awaiting" (asked first) did not stop the simulated fill from settling on production.
+    expect(outcomes).toEqual({ sandbox: 1, simulated: 1 });
+    expect([...sink.stored.keys()]).toEqual([simulatedFill]);
+  });
+
   it("never settles a position whose venue reports a disagreement, and says so once", async () => {
     const venue = fakeVenue();
     const sink = fakeSink();
@@ -584,6 +614,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
       client: chain.executor,
       venue: geminiVenue({
         publicClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
+        productionClient: { getEvent: () => Promise.resolve(OPEN_EVENT) },
         trading: createGeminiPrivateClient({
           environment: "sandbox",
           credentials: { apiKey: "account-FAKEKEY", apiSecret: "fake-secret" },

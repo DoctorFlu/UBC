@@ -66,6 +66,12 @@ import {
 export interface GeminiVenueOptions {
   /** Gemini's public market data for the same environment as `trading` (the sandbox lists other strikes). */
   publicClient: Pick<GeminiClient, "getEvent">;
+  /**
+   * Gemini production's public market data. A position this venue has no order for was filled by the
+   * simulated venue before the executor traded on Gemini, which lists and resolves its markets on
+   * production: it is settled there, never on `publicClient`, where the sandbox may not list it.
+   */
+  productionClient: Pick<GeminiClient, "getEvent">;
   /** The signed client; its environment is the venue's. */
   trading: GeminiPrivateClient;
   journal: OrderJournal;
@@ -160,7 +166,7 @@ export function journalFeeCents(record: VenueOrderRecord): number | undefined {
 type Lookup = { found: PrivateOrder } | { found: null; detail: string };
 
 export function geminiVenue(options: GeminiVenueOptions): Venue {
-  const { publicClient, trading, journal, deployment } = options;
+  const { publicClient, productionClient, trading, journal, deployment } = options;
   const now = options.now ?? Date.now;
   const orderTtlMs = options.orderTtlMs ?? DEFAULT_ORDER_TTL_MS;
   const policy = deployment.policy.toLowerCase() as `0x${string}`;
@@ -177,6 +183,7 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
   /** When to cancel what is left of each open order, and whether that was asked already. */
   const deadlines = new Map<number, { at: number; cancelAsked: boolean }>();
   const publicOutcomes = simulatedVenue(publicClient, { now });
+  const productionOutcomes = simulatedVenue(productionClient, { now });
 
   const iso = () => new Date(now()).toISOString();
 
@@ -550,14 +557,22 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
       return { state: "closed", filledCents: next.filledCents, detail: next.detail ?? next.state };
     },
 
+    async outcomeSource(position: HeldPosition): Promise<string> {
+      return (await current(position.intentId)) === null ? "simulated" : trading.environment;
+    },
+
     async positionOutcome(position: HeldPosition): Promise<PositionOutcome> {
-      const outcome = await publicOutcomes.positionOutcome(position);
-      if (outcome.status !== "resolved") return outcome;
+      // The journal first: it says which exchange filled the position. It throws when it cannot be read,
+      // so a fill on Gemini is never taken for a simulated one.
       const record = await current(position.intentId);
       if (record === null) {
-        // Filled before this executor traded on Gemini (the simulated venue): settled on the public outcome.
-        return { ...outcome, venue: "simulated" };
+        // Filled before this executor traded on Gemini (the simulated venue), which read production: listed
+        // and resolved there, whatever this venue's own exchange lists.
+        const outcome = await productionOutcomes.positionOutcome(position);
+        return outcome.status === "resolved" ? { ...outcome, venue: "simulated" } : outcome;
       }
+      const outcome = await publicOutcomes.positionOutcome(position);
+      if (outcome.status !== "resolved") return outcome;
       const side = position.outcome === "YES" ? "yes" : "no";
       const settled = (await trading.settledPositions()).filter(
         (entry) => entry.instrumentSymbol === position.market && entry.outcome.toLowerCase() === side,

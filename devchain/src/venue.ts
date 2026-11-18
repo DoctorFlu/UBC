@@ -114,6 +114,13 @@ export interface Venue {
   readFill(placed: PlacedOrder): Promise<FillState>;
   /** What became of a filled position's market. Throws when the venue cannot be reached. */
   positionOutcome(position: HeldPosition): Promise<PositionOutcome>;
+  /**
+   * The exchange `positionOutcome` reads for this position, when a venue reads more than one: the Gemini
+   * venue resolves its own fills on its environment and earlier simulated fills on production. The
+   * executor shares an open or awaiting answer only between positions with the same source and ladder.
+   * Absent: one source for every position.
+   */
+  outcomeSource?(position: HeldPosition): Promise<string>;
 }
 
 /** Options for the simulated venue. */

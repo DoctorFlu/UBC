@@ -422,7 +422,10 @@ export function startExecutor(options: ExecutorOptions): Executor {
       }
       return;
     }
-    const ladder = ladderOf(held.market);
+    // Keyed by the exchange too: a sandbox fill and an earlier simulated fill on the same ladder are
+    // answered by different exchanges, and one's answer must never stand for the other's.
+    const source = venue.outcomeSource === undefined ? venue.kind : await venue.outcomeSource(held);
+    const ladder = `${source}:${ladderOf(held.market)}`;
     const outcome = ladders.get(ladder) ?? (await venue.positionOutcome(held));
     switch (outcome.status) {
       case "open":
