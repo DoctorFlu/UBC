@@ -16,6 +16,7 @@ import {
   putSignalBudgetRequestSchema,
   putSignalPaymentRequestSchema,
   selectGoalPlans,
+  ZERO_HASH,
 } from "@mandate/shared";
 import type { Address, Hex } from "viem";
 import { getAddress } from "viem";
@@ -244,10 +245,12 @@ export class OffchainStore {
 
   /**
    * The mandate's goal plans, newest first: one per (asset, event), by the rule in `selectGoalPlans`. The
-   * newest plan of each asset, and every plan with an order proposed to the contract (an intent linked to
-   * a decision context naming the plan, on any of the mandate's contracts), are candidates.
+   * newest plan of each asset, and every plan with an order proposed to the contract, are candidates. An
+   * order counts when its intent is linked to a decision context naming the plan, on any of the mandate's
+   * contracts, or when its `IntentProposed` event carried such a context's hash (`onchainHashes`), as a
+   * contract that records the hash does.
    */
-  goalPlans(mandateId: string): StoredPlan[] {
+  goalPlans(mandateId: string, onchainHashes: Iterable<string | null> = []): StoredPlan[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM hedge_plans WHERE mandate_id = ?
@@ -262,6 +265,12 @@ export class OffchainStore {
          WHERE l.mandate_id = ?`,
       )
       .all(mandateId) as unknown as { plan_id: unknown }[];
+    const hashes = [...onchainHashes].filter(
+      (hash): hash is string => hash !== null && hash.toLowerCase() !== ZERO_HASH,
+    );
+    const sealed = [...this.contexts(mandateId, hashes).values()].map((context) => ({
+      plan_id: (context.document as { planId?: unknown }).planId,
+    }));
     return selectGoalPlans(
       rows.map(planFromRow),
       (plan) => ({
@@ -269,7 +278,9 @@ export class OffchainStore {
         asset: plan.asset,
         eventTicker: typeof plan.plan["eventTicker"] === "string" ? plan.plan["eventTicker"] : "",
       }),
-      new Set(proposed.flatMap((row) => (typeof row.plan_id === "string" ? [row.plan_id] : []))),
+      new Set(
+        [...proposed, ...sealed].flatMap((row) => (typeof row.plan_id === "string" ? [row.plan_id] : [])),
+      ),
     );
   }
 

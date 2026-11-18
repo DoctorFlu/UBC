@@ -20,7 +20,8 @@ Each stored plan names its goal: its asset, its ladder and its floor.
 Which stored plans are goals (`selectGoalPlans` in `shared/src/goals.ts`):
 
 - For each asset, its newest plan, and every plan with at least one order proposed to the contract, are candidates.
-  An order is proposed when an intent is linked to a decision context that names the plan; an intent the contract rejected still counts.
+  An order is proposed when an intent's decision context names the plan: the context hash its `IntentProposed` event carried, on a contract that records it, or the agent's offchain link otherwise.
+  An intent the contract rejected still counts.
 - Of the candidates, the newest per ladder is that ladder's goal.
 
 So the newest plan for an asset supersedes the asset's older plans that never reached the contract, and a plan that did stays a goal until its ladder expires.

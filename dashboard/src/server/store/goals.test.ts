@@ -20,8 +20,19 @@ function setup() {
   let at = Date.parse("2026-11-18T08:00:00Z");
   const store = new OffchainStore(db, () => new Date(at));
   let intents = 0;
+  const onchain: string[] = [];
   return {
-    goals: () => store.goalPlans(mandate.id).map((plan) => plan.planId),
+    goals: () => store.goalPlans(mandate.id, onchain).map((plan) => plan.planId),
+    /**
+     * An order of the plan proposed to a contract that records the context hash in `IntentProposed`: the
+     * context is stored, and only the chain names its hash; no offchain link is made.
+     */
+    proposeSealedOnchain(planId: string) {
+      const id = intents++;
+      const hash = `0x${id.toString(16).padStart(64, "e")}` as const;
+      store.putContext(mandate.id, hash, { version: 1, planId, rungIndex: 0 });
+      onchain.push(hash);
+    },
     /** Stores a plan a minute after the last one. */
     plan(planId: string, eventTicker: string, asset = "BTC") {
       at += 60_000;
@@ -50,6 +61,14 @@ describe("goal plans", () => {
     t.propose("weekly");
     t.plan("daily", DAILY);
     expect(t.goals()).toEqual(["daily", "weekly"]);
+  });
+
+  it("counts an order whose context hash only the chain records as proposed", () => {
+    const t = setup();
+    t.plan("weekly", WEEKLY);
+    t.proposeSealedOnchain("weekly");
+    t.plan("monthly", MONTHLY);
+    expect(t.goals()).toEqual(["monthly", "weekly"]);
   });
 
   it("drops a daily never proposed once a third ladder is planned", () => {
