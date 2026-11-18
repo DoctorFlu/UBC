@@ -12,7 +12,8 @@
     "executor": "tsx scripts/executor.ts",
     "propose": "tsx scripts/propose.ts",
     "typecheck": "tsc --noEmit",
-    "ensure-deployment": "tsx scripts/ensure-deployment.ts"
+    "ensure-deployment": "tsx scripts/ensure-deployment.ts",
+    "arc:deploy": "tsx scripts/arc-deploy.ts"
   },
   "dependencies": {
     "@mandate/gemini": "*",

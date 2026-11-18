@@ -855,7 +855,11 @@ Then, in this order, until the doctor says `READY`:
 
 1. **Faucet** (the owner has approved it; a person does it in a browser): open https://faucet.circle.com, choose **Arc Testnet** and USDC, paste the agent address and request; repeat for the executor address.
    Arc pays gas in USDC: one faucet drip covers hundreds of proposals and `recordResult` calls (the doctor prints how many).
-2. **Roles**: the owner calls `setAgent(<agent address>)` and `setExecutor(<executor address>)` on the contract from their wallet, exactly as the doctor prints them.
+2. **Roles**, in one of two ways ([configuration.md](configuration.md#our-own-instance-or-the-teams)):
+   - **The team's instance, roles set by its owner**: the contract's user calls `setAgent(<agent address>)` and `setExecutor(<executor address>)` from their wallet, exactly as the doctor prints them.
+   - **Our own instance**: `npm run arc:deploy -- --owner 0x<owner> --dry-run` first (a throwaway fork, nothing sent), then the same without `--dry-run`, once.
+     It deploys the same contract from the executor's key with the demo rules and hands the user role to the owner; put the two lines it prints (`POLICY_ADDRESS`, `POLICY_DEPLOY_BLOCK`) in the laptop's `.env` and use them in step 4 instead of the team's.
+     If it stops part way, run it again with the `--resume 0x<address>` it printed.
 3. `npm run arc:doctor -- --owner 0x<owner>` again: it must end `READY`.
 
 Run the doctor again after any later `setUser`, `setAgent` or `setExecutor`: the roles can change at any time.
@@ -882,7 +886,7 @@ After the switch, the laptop must not run its own stack against Arc with the sam
 In `/data/mandate/mandate.env`, with an editor (none of these is a secret):
 
 - `COMPOSE_FILE=compose.yml:compose.arc.yml:compose.gateway.yml` (add `:compose.site.yml` if the landing page is served);
-- `POLICY_ADDRESS=0x571D8ea7C86c80a230C10818743f8861084F82f3` and `POLICY_DEPLOY_BLOCK=72740419`;
+- `POLICY_ADDRESS=0x571D8ea7C86c80a230C10818743f8861084F82f3` and `POLICY_DEPLOY_BLOCK=72740419`, or the two lines `arc:deploy` printed for our own instance;
 - `ARC_RPC_URL=` (empty: Arc's public RPC) and `CONSOLE_EVENT_SOURCE=rpc`.
 
 The Arc console image can be built ahead, while the demo stack serves, so that the switch below finds it in the build cache.

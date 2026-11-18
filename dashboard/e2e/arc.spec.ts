@@ -32,8 +32,8 @@ import { claimOwnerOnce, forgetOwner, signInAsOwner } from "./support/session";
  * announces one, the console says the fill source is unknown.
  */
 
-const PORT = Number(process.env.E2E_ARC_PORT ?? 3104);
-const CHAIN_PORT = Number(process.env.E2E_ARC_CHAIN_PORT ?? 8648);
+const PORT = Number(process.env.E2E_ARC_PORT ?? 3105);
+const CHAIN_PORT = Number(process.env.E2E_ARC_CHAIN_PORT ?? 8649);
 const baseURL = `http://localhost:${PORT.toString()}`;
 
 test.describe.configure({ mode: "serial" });

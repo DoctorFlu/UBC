@@ -54,7 +54,7 @@ export default defineConfig({
     { name: "screenshots", testMatch: /screenshots\.spec\.ts/, use: { storageState: owner } },
     { name: "prod", testMatch: /prod\.spec\.ts/, use: { storageState: owner } },
     // One worker: each spec starts its own `next dev` on this folder's `.next`, so they run one after the other.
-    { name: "live", testMatch: /(live|wake|arc)\.spec\.ts/, timeout: 240_000, workers: 1 },
+    { name: "live", testMatch: /(live|wake|wallet|arc)\.spec\.ts/, timeout: 240_000, workers: 1 },
   ],
   webServer: live
     ? []
