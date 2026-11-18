@@ -7,7 +7,7 @@
  * - `geminiVenue` (gemini-venue.ts, issue #93) places a limit order on Gemini, follows it until it is
  *   done, and reads the outcome from the account's settled positions, checked against the public one.
  */
-import { findInstrument, type GeminiClient } from "@mandate/gemini";
+import { findInstrument, type FoundInstrument, type GeminiClient } from "@mandate/gemini";
 import {
   categoryFromGemini,
   contractsBought,
@@ -123,6 +123,20 @@ export interface Venue {
   outcomeSource?(position: HeldPosition): Promise<string>;
 }
 
+/**
+ * Why no order can be placed on `market` now, in the words both venues give the owner, or null while it
+ * trades: it is not listed, or its market state is anything but open (Gemini closes a contract when it
+ * stops trading, before it settles). `where` names the exchange.
+ */
+export function notTrading(found: FoundInstrument | null, market: string, where: string): string | null {
+  if (found === null) return `${where} does not list ${market}`;
+  const state = found.contract.marketState;
+  if (state !== "open") {
+    return `${market} no longer trades on ${where} (its market is ${state ?? "in no stated state"})`;
+  }
+  return null;
+}
+
 /** Options for the simulated venue. */
 export interface SimulatedVenueOptions {
   /** Clock in milliseconds, for telling an open market from one waiting for its outcome. */
@@ -145,11 +159,15 @@ export function simulatedVenue(
       const found = await findInstrument((ticker) => client.getEvent(ticker), instrumentSymbol);
       return found === null ? null : categoryFromGemini(found.event.category ?? "");
     },
-    placeOrder(order) {
-      return Promise.resolve({
-        status: "placed",
-        placed: { order, venueOrderId: `simulated-${String(order.intentId)}` },
-      });
+    async placeOrder(order) {
+      // It fills nothing the real exchange could not: a contract that no longer trades fills nothing.
+      const closed = notTrading(
+        await findInstrument((ticker) => client.getEvent(ticker), order.market),
+        order.market,
+        "Gemini",
+      );
+      if (closed !== null) return { status: "refused", detail: closed };
+      return { status: "placed", placed: { order, venueOrderId: `simulated-${String(order.intentId)}` } };
     },
     readFill(placed) {
       return Promise.resolve({

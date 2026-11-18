@@ -560,7 +560,16 @@ describe("following an order", () => {
 describe("settling a position", () => {
   async function filledOn(market: string, outcome: "YES" | "NO" = "NO") {
     const gemini = venue();
-    const placed = placedOf(await gemini.placeOrder(order({ market, outcome })));
+    // Placed while its ladder still traded: the recorded ladders have closed since.
+    const now = events;
+    events = now.map((event) => ({
+      ...event,
+      contracts: event.contracts.map((contract) => ({ ...contract, marketState: "open" })),
+    }));
+    const placement = await gemini.placeOrder(order({ market, outcome })).finally(() => {
+      events = now;
+    });
+    const placed = placedOf(placement);
     fake.fill(placed.venueOrderId);
     await gemini.readFill(placed);
     return gemini;

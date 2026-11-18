@@ -53,6 +53,7 @@ import {
 } from "@mandate/shared";
 import type { OrderJournal } from "./order-journal";
 import {
+  notTrading,
   simulatedVenue,
   type FillState,
   type HeldPosition,
@@ -342,7 +343,8 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
   /** Builds and sends a new attempt. */
   async function attempt(order: VenueOrder, previous: VenueOrderRecord | null): Promise<Placement> {
     const found = await findInstrument((ticker) => publicClient.getEvent(ticker), order.market);
-    if (found === null) return { status: "refused", detail: `${where} does not list ${order.market}` };
+    const closed = notTrading(found, order.market, where);
+    if (closed !== null || found === null) return { status: "refused", detail: closed ?? "" };
     const { contract } = found;
     const quantityStep = step(contract.quantityIncrement, 1);
     const minimum = step(contract.quantityMinimum, 1);
