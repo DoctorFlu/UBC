@@ -1415,6 +1415,21 @@ test("on Gemini's sandbox: a Sandbox badge, one order placed, and its id and sta
     await page.keyboard.press("Escape");
     await expect(details).toHaveCount(0);
     await expect(badge).toBeFocused();
+    // The wide strip's badge and the phone strip's are two buttons; each opens its own details.
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await badge.click();
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page
+          .getByRole("dialog")
+          .screenshot({ path: testInfo.outputPath(`venue-details-${width.toString()}-${scheme}.png`) });
+      }
+      await page.keyboard.press("Escape");
+      await expect(details).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ colorScheme: "light" });
     await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toBeVisible();
     await shoot(page, testInfo, "topbar-sandbox", page.locator("header").first());
     // On a phone the strip still fits: menu, name, lamp, Sandbox, Dev and the isolator, no sideways scroll.
