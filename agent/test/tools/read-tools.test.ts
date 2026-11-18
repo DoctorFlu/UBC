@@ -1324,3 +1324,76 @@ describe("the order placed on Gemini, in get_intent and get_activity (issue #117
     expect(((await getIntent.run({ intentId: id }, h.ctx)).structured["intent"] as Row)["order"]).toBeNull();
   });
 });
+
+describe("a partial fill in get_activity, in the console's words", () => {
+  /** A buy of NO for $2.63 at 21c: 12.50 contracts placed. */
+  function propose(h: Harness, status: "executed" | "approved", filledCents: number | null): number {
+    const id = h.policy.intents.length;
+    h.policy.intents.push({
+      id,
+      market: ladderSymbol(63_000),
+      category: Category.Crypto,
+      outcome: "NO",
+      isBuy: true,
+      amountCents: 263,
+      limitPrice: 21,
+      status,
+      proposedAt: Math.floor(Date.now() / 1000),
+      filledCents,
+      pnlCents: status === "executed" ? 0 : null,
+    });
+    return id;
+  }
+  const order = (
+    id: number,
+    state: "filled" | "partly_filled",
+    filledHundredths: number,
+    filledCents: number,
+  ) => ({
+    intentId: id,
+    venue: "gemini" as const,
+    environment: "sandbox" as const,
+    state,
+    quantityHundredths: 1_250,
+    filledHundredths,
+    filledCents,
+    feeCents: 2,
+  });
+
+  it("says what filled of what was placed, and a fill not recorded onchain yet", async () => {
+    const h = harness();
+    const partial = propose(h, "executed", 105);
+    h.console.state.orders.set(partial, order(partial, "partly_filled", 500, 105));
+    const recording = propose(h, "approved", null);
+    h.console.state.orders.set(recording, order(recording, "filled", 1_250, 263));
+    const { structured, summary } = await getActivity.run({}, h.ctx);
+    expect(summary).toContain(
+      `#${partial}: Partly filled: 5 of 12.50 contracts, $1.05 of $2.63. The rest was cancelled and its budget released.`,
+    );
+    expect(summary).toContain(`#${recording}: Filled at Gemini sandbox; recording the result onchain.`);
+    expect(summary).toMatch(/1 executed \(\$1\.05 filled, 1 partly filled/);
+    expect(summary).toMatch(
+      /Last 24 hours: 2 intents proposed: 1 executed \(\$1\.05 filled, 1 partly filled\)/,
+    );
+    // The rows say it by what they already carry; nothing in them changed.
+    const rows = structured["intents"] as Row[];
+    expect(rows.find((row) => row["id"] === partial)?.["order"]).toEqual({
+      venue: "gemini",
+      environment: "sandbox",
+      state: "partly_filled",
+      contractsHundredths: 1_250,
+      filledContractsHundredths: 500,
+      feeCents: 2,
+    });
+  });
+
+  it("reads exactly as before without a journal row", async () => {
+    const h = harness();
+    propose(h, "executed", 263);
+    const { summary } = await getActivity.run({}, h.ctx);
+    expect(summary).not.toContain("partly");
+    expect(summary).not.toContain("Partly");
+    expect(summary).not.toContain("recording the result");
+    expect(summary).toMatch(/1 executed \(\$2\.63 filled[;)]/);
+  });
+});

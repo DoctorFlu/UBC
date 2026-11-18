@@ -2,7 +2,10 @@ import * as z from "zod";
 import { formatUnits } from "viem";
 import {
   ARC_TESTNET,
+  countFills,
+  fillOutcome,
   type FillSource,
+  fillWords,
   formatCents,
   type Intent,
   type IntentView,
@@ -17,7 +20,7 @@ import type { AgentPolicy } from "../services";
 import { describeFailure, notConfigured, unavailableFor } from "../support/failures";
 import { intentFlags, intentRow, IntentRowSchema, shownMarket, type IntentRow } from "../support/intents";
 import { proposedChangesText, reasonCode } from "../support/rules";
-import { readOrders } from "../support/orders";
+import { type OrdersRead, readOrders } from "../support/orders";
 import {
   LadderSettlementSchema,
   ladderSentence,
@@ -214,9 +217,33 @@ function summedDay(
   };
 }
 
-function dayText(day: z.infer<typeof DaySchema>, hasConsole: boolean): string {
+/**
+ * What the executor's journal adds to the contract's status, in the console's words (`@mandate/shared`
+ * fill-words): an order that filled only in part, a fill not recorded onchain yet, why an order did not fill.
+ */
+function journalText(intents: readonly Intent[], orders: OrdersRead | null): string {
+  if (orders === null) return "";
+  const told = intents.flatMap((intent) => {
+    const words = fillWords(fillOutcome(intent, orders.byIntent.get(intent.id)));
+    return words === null ? [] : [`#${intent.id}: ${words.sentence}`];
+  });
+  return told.length === 0 ? "" : ` ${told.join(" ")}`;
+}
+
+/** ", 1 partly filled" when the journal says some of the executed intents filled only in part. */
+function partlyText(intents: readonly Intent[], orders: OrdersRead | null): string {
+  if (orders === null) return "";
+  const { partlyFilled } = countFills(
+    intents.map((intent) => ({ intent, order: orders.byIntent.get(intent.id) })),
+  );
+  return partlyFilled === 0 ? "" : `, ${partlyFilled} partly filled`;
+}
+
+function dayText(day: z.infer<typeof DaySchema>, hasConsole: boolean, partly = ""): string {
   const parts = [
-    ...(day.executed > 0 ? [`${day.executed} executed (${formatCents(day.filledCents)} filled)`] : []),
+    ...(day.executed > 0
+      ? [`${day.executed} executed (${formatCents(day.filledCents)} filled${partly})`]
+      : []),
     ...(day.approved > 0
       ? [`${day.approved} approved and waiting for the executor (${formatCents(day.awaitingFillCents)})`]
       : []),
@@ -464,7 +491,7 @@ export const getActivity = defineTool({
     const latest =
       total === 0
         ? "No intents have been proposed on this contract yet."
-        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled${fillsText(rows)}), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waitingIds.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}${settledText}${flaggedText}`;
+        : `Latest ${rows.length} of ${total} intents: ${count("approved")} approved and waiting for the executor, ${count("executed")} executed (${formatCents(filled)} filled${partlyText(intents, orders)}${fillsText(rows)}), ${count("failed")} failed, ${count("needs_approval")} waiting for approval, ${rejectedRows.length} rejected${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}.${olderIntents(waitingIds.filter((id) => !rows.some((r) => r.id === id)).length, olderRejected)}${journalText(intents, orders)}${settledText}${flaggedText}`;
     return {
       structured: {
         ...v,
@@ -475,7 +502,7 @@ export const getActivity = defineTool({
         last24h,
         waitingForOwner,
       },
-      summary: `${latest} ${dayText(last24h, ctx.console !== undefined)}${waitingText(waitingForOwner, ctx.console !== undefined)}`,
+      summary: `${latest} ${dayText(last24h, ctx.console !== undefined, partlyText(inWindow, orders))}${waitingText(waitingForOwner, ctx.console !== undefined)}`,
     };
   },
 });
