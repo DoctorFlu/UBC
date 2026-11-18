@@ -185,13 +185,22 @@ How it quotes, for each rung of a ladder in scope:
 
 - A YES bid at production's best YES bid, which is what a NO buyer takes (a NO buy at 100 minus that bid matches it), and a NO bid at 100 minus production's best YES ask, each sized to what production shows at that price, within the caps.
 - Every order is maker only (`makerOrCancel`): an order that would take liquidity is cancelled by Gemini instead of filling, and the maker leaves that side alone until production's price moves.
-- Nothing is quoted where production does not list the contract or could not be read, where production's book is closed, one-sided, locked or crossed, or more than 45 seconds old, where the sandbox does not have the rung open, within 2 minutes of expiry, or where the sandbox book holds someone else's order.
+- Nothing is quoted where production does not list the contract or could not be read, where production's book is closed, one-sided, locked or crossed, or more than 45 seconds old, where the sandbox does not have the rung open, or within 2 minutes of expiry.
   It never invents a price.
+- Someone else's order on the sandbox book (the executor's NO bid that did not fill at once, say) is met as production would meet it, whoever placed it.
+  The maker withdraws only its own quote on that side, and never competes with that order; its quote on the other side stays at production's price and size.
+  When production's price there reaches that order, the quote is sent as a plain limit order instead of maker only, and fills against it once, at that order's price.
+  Every cap still applies, so the inventory caps stop it filling such orders again and again.
+  The sandbox's listing shows only the best price on each side, so an order at the maker's own price, or behind it, is taken for the maker's own: the maker keeps its quote there, ahead of that order, as production's resting quote would be.
 - Daily ladders only by default (`MAKER_KINDS`); weekly and month-end on request; never hourly or shorter, where the sandbox's own maker is.
 
-Every 15 seconds it reads production's books and the sandbox's listing (public), and its account's open orders and positions, then cancels what no longer matches and places what is missing.
-An order stays while its price is right and between half and all of its size is left; otherwise it is replaced, so a quote the executor took is refilled at production's size.
-It places at most 8 orders a cycle and never holds back a cancel, inside the private client's pace of one signed request a second.
+Every 15 seconds it reads production's books and the sandbox's listing (public), and its account's open orders and positions, then changes only what differs.
+An order stays untouched while its price is right and between half and all of its size is left; otherwise it is replaced, so a quote the executor took is refilled at production's size.
+A replacement places the new order first and cancels the old one after, so a side is never empty while it moves; where the new YES bid would meet the maker's own NO bid on the same rung (or the reverse), that other side is replaced first.
+The YES bids (the NO offers a hedge buys) on rungs below spot go first, nearest spot first, then those above spot, then the NO bids.
+It places at most 24 orders a cycle and never holds back a cancel.
+When a cycle runs out of placements, an order being replaced stays one more cycle only within a cent of production's price and no larger than production's size; anything further off is cancelled.
+Its signed requests are paced at 180 a minute on average, in bursts of at most 3, under a third of the 600 a minute Gemini allows; a typical cycle (6 to 11 of 12 quotes changing) takes up to 24 of them, about 8 seconds.
 Its caps (`MAKER_MAX_*`, [configuration.md](configuration.md)) bound each quote, all quotes together, and what it may hold.
 
 Safety:
