@@ -13,6 +13,7 @@ import { useOwnerAccess, useOwnerMode } from "@/lib/owner/access";
 import { setupSteps } from "@/lib/setup";
 
 import styles from "./GetStarted.module.css";
+import { WalletButton } from "./WalletButton";
 
 const DISMISSED_KEY = "mandate-get-started-hidden";
 const listeners = new Set<() => void>();
@@ -90,6 +91,17 @@ export function GetStarted() {
             <MeterIndicator className={styles.fill} />
           </MeterTrack>
         </Meter>
+        {next?.id === "connect-wallet" ? (
+          // The step the owner can't do anywhere else on this screen: say it, with the control that does it.
+          <div className={styles.now} data-testid="get-started-now">
+            <p className={styles.nowTitle}>Next: {next.title}</p>
+            {access.kind === "not-owner" ? (
+              <p className={styles.nowText}>{access.reason}</p>
+            ) : (
+              <WalletButton block />
+            )}
+          </div>
+        ) : null}
         <CollapsiblePanel className={styles.panel}>
           <ol className={styles.steps}>
             {steps.map((step) => (

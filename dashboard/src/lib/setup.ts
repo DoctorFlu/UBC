@@ -30,8 +30,8 @@ export function setupSteps(snapshot: ConsoleSnapshot, ownerConnected: boolean, m
         }
       : {
           id: "connect-wallet",
-          title: "Connect the owner wallet",
-          hint: "The wallet the contract names as its owner: it signs the rules, approvals and pauses.",
+          title: "Connect your wallet",
+          hint: "The wallet that holds the account the contract names as its owner: it signs the rules, approvals and pauses.",
           done: ownerConnected,
         },
     {

@@ -5,6 +5,7 @@ import { WorkspaceShell } from "@/components/shell/WorkspaceShell";
 import { AdvancedProvider } from "@/lib/advanced/Advanced";
 import { ADVANCED_COOKIE } from "@/lib/advanced/cookie";
 import { NetworkProvider } from "@/lib/live/LiveConsole";
+import { WalletProvider } from "@/lib/wallet/WalletProvider";
 import { getConsoleService } from "@/server/console";
 import { accountView, workspaceMandates, workspaceScope } from "@/server/page-access";
 
@@ -24,5 +25,14 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
       </WorkspaceShell>
     </AdvancedProvider>
   );
-  return network ? <NetworkProvider network={network}>{shell}</NetworkProvider> : shell;
+  // The wallet too, so Home can connect the owner's wallet: it is the owner's first screen after the claim.
+  return network ? (
+    <NetworkProvider network={network}>
+      <WalletProvider key={`${network.chainId.toString()}:${network.rpcUrl}`} network={network}>
+        {shell}
+      </WalletProvider>
+    </NetworkProvider>
+  ) : (
+    shell
+  );
 }

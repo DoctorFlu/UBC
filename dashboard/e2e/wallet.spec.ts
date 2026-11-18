@@ -275,13 +275,18 @@ test("a wallet on another network is asked to switch, and to add the console's n
 
   // This build has no dev signer: nothing connects until the owner asks.
   await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
-  await page.getByRole("button", { name: "Connect wallet" }).filter({ visible: true }).click();
+  // The setup checklist names connecting the wallet as the step to do now, with the button that does it.
+  const now = page.getByTestId("get-started-now").filter({ visible: true });
+  await expect(now).toContainText("Next: Connect your wallet");
+  await now.getByRole("button", { name: "Connect wallet" }).click();
 
   // Connected on the wrong network: one clear step, and no owner control can send anything meanwhile.
   const switchButton = page
+    .getByRole("banner")
     .getByRole("button", { name: "Switch to Local dev chain" })
     .filter({ visible: true });
   await expect(switchButton).toBeVisible();
+  await expect(now.getByRole("button", { name: "Switch to Local dev chain" })).toBeVisible();
   const pause = page.getByRole("button", { name: /Pause agent/ }).filter({ visible: true });
   await expect(pause).toBeDisabled();
   await expect(
@@ -344,7 +349,10 @@ test("with two wallets in the browser, the owner picks one, the console remember
   await expect(page.getByTestId("paused-banner")).toBeVisible();
 
   // Both wallets answered, so the console asks which, with each one's own name and icon.
-  const connect = page.getByRole("button", { name: "Connect wallet" }).filter({ visible: true });
+  const connect = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Connect wallet" })
+    .filter({ visible: true });
   await connect.click();
   const chooser = page.getByRole("dialog", { name: "Choose a wallet" });
   await expect(chooser).toBeVisible();
@@ -399,4 +407,38 @@ test("with two wallets in the browser, the owner picks one, the console remember
     methods(await walletCalls(page, METAMASK.rdns)).filter((method) => method === "eth_sendTransaction"),
   ).toHaveLength(1);
   expect(methods(await walletCalls(page, PHANTOM.rdns))).not.toContain("eth_sendTransaction");
+});
+
+test("from Home, the owner's first screen, the owner connects the wallet without looking for where", async ({
+  page,
+}) => {
+  const owner = devAccount("user").address;
+  await installWallets(page, [{ ...METAMASK, account: owner, startChainId: WALLET_START_CHAIN }], {
+    rpcUrl: chain.anvil.rpcUrl,
+    announce: true,
+    legacy: METAMASK.rdns,
+  });
+  // Where a claim lands.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+
+  // The wallet-owned mandate says what is missing, with the action, on its own row.
+  const row = page.getByTestId("mandate-row").first();
+  const line = row.getByTestId("mandate-owner-line");
+  await expect(line).toContainText("Connect the owner wallet to approve and change rules");
+  await line.getByRole("button", { name: "Connect wallet" }).click();
+
+  // On another network: Home asks to switch, as a mandate's top bar does.
+  await expect(line).toContainText("Switch the wallet to Local dev chain to approve and change rules");
+  await page.getByRole("button", { name: "Switch to Local dev chain" }).click();
+  const chip = page.getByTestId("owner-address").filter({ visible: true });
+  await expect(chip).toHaveAttribute("data-address", owner);
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(line).toContainText("is the owner and signs");
+
+  // The mandate's pages find the wallet connected, with nothing left to connect.
+  await row.getByRole("link", { name: /^Open / }).click();
+  await expect(chip).toHaveAttribute("data-owner", "true");
+  await expect(page.getByTestId("get-started-now")).toHaveCount(0);
+  await expect(page.getByTestId("wallet-notice")).toHaveCount(0);
 });
