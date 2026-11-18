@@ -33,7 +33,10 @@ import {
   settlementMessage,
   type Intent,
   type PolicyClient,
+  type RpcGate,
   type Settlement,
+  formatWait,
+  rpcErrorText,
 } from "@mandate/shared";
 import type { SettlementSink } from "./settlement-sink";
 import type { HeldPosition, PositionOutcome, Venue } from "./venue";
@@ -138,6 +141,10 @@ export interface ExecutorOptions {
    */
   openRecheckMs?: number;
   pollingIntervalMs?: number;
+  /** The latest block number from a head poll shared by every contract served (`executorHead`). */
+  head?: (maxAgeMs: number) => Promise<bigint>;
+  /** The rate-limit gate of the client's endpoint, waited for after a refusal. */
+  gate?: RpcGate;
   /** Clock in milliseconds, for settlement schedules. */
   now?: () => number;
   log?: (line: string) => void;
@@ -218,11 +225,19 @@ export function startExecutor(options: ExecutorOptions): Executor {
     return Math.min(venueRetryMs * 2 ** count, Math.max(venueRetryMs, 10 * MINUTE_MS));
   }
 
+  /**
+   * At most two intents are read at a time: a restart replays every approval since the deploy block at
+   * once, and a burst of reads is what the public RPC refuses.
+   */
+  const reads = new Limiter(2);
+
   async function handle(intentId: number): Promise<void> {
     if (isStopped() || inFlight.has(intentId)) return;
     inFlight.add(intentId);
+    /** Set once an order may have reached the venue: from then on a failure is never retried blindly. */
+    let placing = false;
     try {
-      const intent = await client.getIntent(intentId);
+      const intent = await reads.run(() => client.getIntent(intentId));
       if (intent?.status !== "approved") return; // already recorded, for example after a restart
 
       let check: IntentCheck;
@@ -262,6 +277,7 @@ export function startExecutor(options: ExecutorOptions): Executor {
       };
       let fill;
       try {
+        placing = true;
         const placement = await venue.placeOrder(order);
         if (placement.status === "refused") {
           holds.delete(intentId);
@@ -312,7 +328,15 @@ export function startExecutor(options: ExecutorOptions): Executor {
           `${formatCents(filledCents)} filled (${txHash})`,
       );
     } catch (error) {
-      log(`${tag} intent #${intentId}: ${errorText(error)}`);
+      if (!placing) {
+        // Nothing reached the venue: a chain read or a refusal's record failed (the RPC rate-limiting us,
+        // a timeout). Ask again later, so an approval is never left behind until the next restart.
+        const delayMs = Math.max(venueRetryMs, options.gate?.remainingMs() ?? 0);
+        log(`${tag} intent #${intentId}: ${errorText(error)}; trying again in ${formatWait(delayMs)}`);
+        retryLater(intentId, delayMs);
+      } else {
+        log(`${tag} intent #${intentId}: ${errorText(error)}`);
+      }
     } finally {
       inFlight.delete(intentId);
     }
@@ -510,9 +534,13 @@ export function startExecutor(options: ExecutorOptions): Executor {
     return next;
   }
 
+  let failing = 0;
   const stopWatching = client.watchEvents({
     ...(options.fromBlock === undefined ? {} : { fromBlock: options.fromBlock }),
     ...(options.pollingIntervalMs === undefined ? {} : { pollingIntervalMs: options.pollingIntervalMs }),
+    ...(options.head === undefined ? {} : { head: options.head }),
+    ...(options.gate === undefined ? {} : { gate: options.gate }),
+    onPolled: recovered,
     onEvents: (events) => {
       let newFills = false;
       for (const event of events) {
@@ -527,10 +555,25 @@ export function startExecutor(options: ExecutorOptions): Executor {
       // A new fill is looked at right away, which also learns when its market expires.
       if (newFills && options.settlements !== undefined) void settleNow();
     },
-    onError: (error) => {
-      log(`${tag} polling failed: ${errorText(error)}`);
+    onError: (error, retryInMs) => {
+      if (retryInMs === undefined) {
+        // A log this code cannot read: skipped, and the poll went on.
+        log(`${tag} skipped an unreadable log: ${errorText(error)}`);
+        return;
+      }
+      failing += 1;
+      // The first failure of a run and every tenth after it: a rate-limited minute is one line, not sixty.
+      if (failing === 1 || failing % 10 === 0) {
+        log(`${tag} polling failed: ${errorText(error)}; retrying in ${formatWait(retryInMs)}`);
+      }
     },
   });
+  /** Says once that polling works again after failures. */
+  function recovered(): void {
+    if (failing === 0) return;
+    log(`${tag} polling works again after ${String(failing)} failed ${failing === 1 ? "poll" : "polls"}`);
+    failing = 0;
+  }
   const settleTimer =
     options.settlements === undefined ? null : setInterval(() => void settleNow(), settleIntervalMs);
 
@@ -546,7 +589,29 @@ export function startExecutor(options: ExecutorOptions): Executor {
   };
 }
 
+/** Runs at most `size` tasks at a time, the rest in the order they came. */
+class Limiter {
+  #running = 0;
+  readonly #waiting: (() => void)[] = [];
+
+  constructor(private readonly size: number) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.#running >= this.size) {
+      await new Promise<void>((resolve) => this.#waiting.push(resolve));
+    }
+    this.#running += 1;
+    try {
+      return await task();
+    } finally {
+      this.#running -= 1;
+      this.#waiting.shift()?.();
+    }
+  }
+}
+
+/** One line, without the RPC's URL (a provider's holds its key) or the request body viem adds. */
 function errorText(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
+  const text = rpcErrorText(error);
   return text.length > 300 ? `${text.slice(0, 300)}...` : text;
 }
