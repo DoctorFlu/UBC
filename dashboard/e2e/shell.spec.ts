@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { FORMAT_REASON_CODES, REASON_CODES } from "@mandate/shared";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { laptopWidths, routePath, routes, schemes } from "./routes";
 import { firstMandatePath } from "./support/console";
@@ -301,33 +302,69 @@ test.describe("layout", () => {
       expect(overflow).toBeLessThanOrEqual(0);
     });
 
-    test(`at ${width.toString()} px, Waiting fits its card: Approve and Reject are both in view`, async ({
-      page,
-      baseURL,
-    }) => {
-      await page.setViewportSize({ width, height: 900 });
-      await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
-      await page.getByRole("tab", { name: /^Waiting/ }).click();
-      const panel = page.getByRole("tabpanel");
-      // A held intent never has a payout yet: Waiting leaves the At expiry column out.
-      await expect(panel.getByRole("columnheader", { name: "Decision" })).toBeVisible();
-      await expect(panel.getByRole("columnheader", { name: "At expiry" })).toHaveCount(0);
-      const wrap = panel.getByRole("region").filter({ has: page.getByRole("table") });
-      const fit = await wrap.evaluate((element) => element.scrollWidth - element.clientWidth);
-      expect(fit).toBeLessThanOrEqual(0);
-      const card = await wrap.boundingBox();
-      if (!card) throw new Error("no table");
-      for (const name of [/^Approve /, /^Reject /]) {
-        const button = await panel.getByRole("button", { name }).first().boundingBox();
-        if (!button) throw new Error(`no ${name.source} button`);
-        expect(button.x).toBeGreaterThanOrEqual(card.x);
-        expect(button.x + button.width).toBeLessThanOrEqual(card.x + card.width);
-      }
-      // Executed lists filled positions: it has their payouts and no decision to make.
-      await page.getByRole("tab", { name: /^Executed/ }).click();
-      await expect(panel.getByRole("columnheader", { name: "At expiry" })).toBeVisible();
-      await expect(panel.getByRole("columnheader", { name: "Decision" })).toHaveCount(0);
-    });
+    for (const advanced of [false, true]) {
+      test(`at ${width.toString()} px, every Activity tab fits its card${advanced ? " in Advanced view" : ""}`, async ({
+        page,
+        context,
+        baseURL,
+      }) => {
+        if (advanced) await context.addCookies([{ name: ADVANCED_COOKIE, value: "on", url: baseURL ?? "" }]);
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+        const panel = page.getByRole("tabpanel");
+        for (const tab of ["All", "Waiting", "Approved", "Executed", "Failed", "Rejected"]) {
+          await page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
+          // The table is a named region, with rows, and never wider than its card.
+          const wrap = panel.getByRole("region", { name: `${tab} intents` });
+          await expect(wrap.locator("tbody tr").first()).toBeVisible();
+          const fit = await wrap.evaluate((element) => element.scrollWidth - element.clientWidth);
+          expect(fit, `${tab}: the table is ${fit.toString()} px wider than its card`).toBeLessThanOrEqual(0);
+          // In Advanced view the proposal's transaction is under each verdict, not in a column of its own.
+          await expect(panel.getByRole("columnheader", { name: "Proposal" })).toHaveCount(0);
+          if (advanced) await expect(wrap.getByText(/^0x[0-9a-f]{4}/i).first()).toBeVisible();
+          // Only Waiting decides; the tabs with filled intents show what they paid at expiry.
+          await expect(panel.getByRole("columnheader", { name: "Decision" })).toHaveCount(
+            tab === "Waiting" ? 1 : 0,
+          );
+          await expect(panel.getByRole("columnheader", { name: "At expiry" })).toHaveCount(
+            tab === "All" || tab === "Executed" ? 1 : 0,
+          );
+          // Why the contract said no is never cut short.
+          await expectReasonsWhole(wrap, tab);
+        }
+        // Every reason the contract can give, the longest included, is whole on a laptop card, and the
+        // table still fits. The seeded intents have three of them; the rest are written into their chips.
+        if (width <= 1084) {
+          await page.getByRole("tab", { name: /^Rejected/ }).click();
+          const wrap = panel.getByRole("region", { name: "Rejected intents" });
+          for (const reason of [...REASON_CODES, ...FORMAT_REASON_CODES]) {
+            await wrap.locator("[data-reason]").evaluateAll((elements, text) => {
+              for (const element of elements) {
+                const words = [...element.childNodes].findLast((node) => node.nodeType === Node.TEXT_NODE);
+                if (words) words.textContent = text;
+              }
+            }, reason);
+            await expect(wrap.locator("[data-reason]").first()).toContainText(reason);
+            await expectReasonsWhole(wrap, reason);
+            const fit = await wrap.evaluate((element) => element.scrollWidth - element.clientWidth);
+            expect(
+              fit,
+              `"${reason}": the table is ${fit.toString()} px wider than its card`,
+            ).toBeLessThanOrEqual(0);
+          }
+        }
+        // Waiting's Approve and Reject are both inside the card.
+        await page.getByRole("tab", { name: /^Waiting/ }).click();
+        const card = await panel.getByRole("region", { name: "Waiting intents" }).boundingBox();
+        if (!card) throw new Error("no table");
+        for (const name of [/^Approve /, /^Reject /]) {
+          const button = await panel.getByRole("button", { name }).first().boundingBox();
+          if (!button) throw new Error(`no ${name.source} button`);
+          expect(button.x).toBeGreaterThanOrEqual(card.x);
+          expect(button.x + button.width).toBeLessThanOrEqual(card.x + card.width);
+        }
+      });
+    }
 
     test(`at ${width.toString()} px, Home's figures sit in one row or one column, never two and one`, async ({
       page,
@@ -349,6 +386,40 @@ test.describe("layout", () => {
       }
     });
   }
+
+  test("a held intent in All has one step to its decision: Decide opens Waiting with focus on its Approve", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+    await page.getByRole("tab", { name: /^All/ }).click();
+    const panel = page.getByRole("tabpanel");
+    const held = panel.locator("tbody tr", { has: page.getByTestId("decide") }).first();
+    const name = await held.getByRole("link", { name: /^Intent #\d+$/ }).textContent();
+    const id = /\d+/.exec(name ?? "")?.[0] ?? "";
+    await held.getByRole("button", { name: `Decide on intent #${id} in Waiting` }).click();
+    await expect(page.getByRole("tab", { name: /^Waiting/ })).toHaveAttribute("aria-selected", "true");
+    await expect(
+      panel.locator(`#waiting-intent-${id}`).getByRole("button", { name: /^Approve / }),
+    ).toBeFocused();
+  });
+
+  test("on a phone, Activity's tables stack each intent as a record that fits the screen", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(await firstMandatePath(baseURL ?? "", "/activity"));
+    const panel = page.getByRole("tabpanel");
+    for (const tab of ["All", "Waiting", "Executed", "Rejected"]) {
+      await page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
+      const wrap = panel.getByRole("region", { name: `${tab} intents` });
+      await expect(wrap.locator("tbody tr").first()).toBeVisible();
+      await expect(wrap.locator("thead")).toBeHidden();
+      const fit = await wrap.evaluate((element) => element.scrollWidth - element.clientWidth);
+      expect(fit, tab).toBeLessThanOrEqual(0);
+    }
+  });
 
   for (const width of [1440, 1024, 768, 390]) {
     test(`a held approval card on Overview is as tall as its content at ${width.toString()} px`, async ({
@@ -563,4 +634,31 @@ for (const scheme of schemes) {
       expect(violations).toEqual([]);
     });
   });
+}
+
+/**
+ * Each of the contract's reasons in a table is shown whole: nothing hides any of it (no ellipsis, no
+ * clipping), and it stays inside its own cell, so it never runs under the next column.
+ */
+async function expectReasonsWhole(wrap: Locator, what: string) {
+  const reasons = await wrap.locator("[data-reason]").evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      const cell = element.closest("td")?.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        text: element.textContent,
+        clipped: element.scrollWidth - element.clientWidth,
+        hides:
+          style.textOverflow === "ellipsis" || style.overflowX !== "visible" || style.overflowY !== "visible",
+        outside: cell ? Math.max(cell.left - box.left, box.right - cell.right) : 0,
+      };
+    }),
+  );
+  for (const reason of reasons) {
+    const detail = `${what}: ${JSON.stringify(reason)}`;
+    expect(reason.clipped, detail).toBeLessThanOrEqual(0);
+    expect(reason.hides, detail).toBe(false);
+    expect(reason.outside, detail).toBeLessThanOrEqual(0);
+  }
 }

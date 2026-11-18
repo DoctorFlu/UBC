@@ -44,7 +44,7 @@ export function StatusChip({ status, reason, label, className }: StatusChipProps
       <span className={styles.lamp} aria-hidden />
       <span>{label ?? statusLabels[status]}</span>
       {reason ? (
-        <span className={styles.code}>
+        <span className={styles.code} data-reason>
           <span className="visually-hidden">, reason </span>
           {reason}
         </span>
