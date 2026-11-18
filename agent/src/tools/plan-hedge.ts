@@ -1,6 +1,14 @@
 import * as z from "zod";
 import { type GeminiEnvironment, isGeminiError, LADDER_KINDS, type Ladder } from "@mandate/gemini";
-import type { HedgePlan, IntentPosition, PlanCover, ProtectionGoal } from "@mandate/planner";
+import {
+  formatPrice,
+  formatUsd,
+  type DepthOption,
+  type HedgePlan,
+  type IntentPosition,
+  type PlanCover,
+  type ProtectionGoal,
+} from "@mandate/planner";
 import {
   Category,
   evaluateIntent,
@@ -99,6 +107,69 @@ function coverView(cover: PlanCover): z.infer<typeof CoverSchema> {
   };
 }
 
+const DepthOptionSchema = z.object({
+  slippageCents: z.int(),
+  coverPercent: z.int().nullable().describe("The cover this plan would give, rounded down"),
+  totalAmountCents: z.int().describe("What its orders would commit"),
+  expectedFillCents: z.int().describe("What they would cost if they fill at the prices the book showed"),
+  orders: z.int(),
+  ordersNeedingApproval: z.int().describe("Orders that would wait for the owner, as things stand"),
+  shortStrikesCents: z.array(z.int()).describe("Strikes still short of the goal"),
+  coversGoal: z.boolean(),
+});
+
+/** How many of an option's orders the mandate would hold for the owner, counting the buys before each. */
+function heldForOwner(amountsCents: readonly number[], snapshot: PolicySnapshot): number {
+  let committedCents = snapshot.committedCents;
+  let held = 0;
+  for (const amountCents of amountsCents) {
+    const evaluation = evaluateIntent(
+      snapshot.rules,
+      { committedCents, lossTodayCents: snapshot.lossTodayCents },
+      { category: Category.Crypto, isBuy: true, amountCents },
+    );
+    if (evaluation.verdict === "approved") committedCents += amountCents;
+    if (evaluation.verdict === "needs_approval") held += 1;
+  }
+  return held;
+}
+
+function depthOptionView(option: DepthOption, snapshot: PolicySnapshot): z.infer<typeof DepthOptionSchema> {
+  return {
+    slippageCents: option.slippageCents,
+    coverPercent: option.coverBps === null ? null : Math.floor(option.coverBps / 100),
+    totalAmountCents: option.totalAmountCents,
+    expectedFillCents: option.expectedFillCents,
+    orders: option.orderCount,
+    ordersNeedingApproval: heldForOwner(option.orderAmountsCents, snapshot),
+    shortStrikesCents: option.shortStrikesCents,
+    coversGoal: option.coversGoal,
+  };
+}
+
+/**
+ * Orders that wait for the owner only because slippage took a deeper level: above the mandate's approval
+ * line at the limit the plan pays, at or below it at the rung's best price. One sentence per order.
+ */
+export function heldBySlippage(
+  plan: HedgePlan,
+  snapshot: PolicySnapshot,
+  expected: readonly { expected: string }[],
+): string[] {
+  const line = snapshot.rules.approvalAboveCents;
+  if (line === 0) return [];
+  return plan.orders.flatMap((order, index) => {
+    const best = plan.rungs.find((r) => r.instrumentSymbol === order.instrumentSymbol)?.bestPriceCents;
+    if (expected[index]?.expected !== "needs_approval" || best == null || order.limitPriceCents <= best)
+      return [];
+    const atBest = Math.ceil((order.quantityHundredths * best) / 100);
+    if (atBest > line) return [];
+    return [
+      `At ${formatPrice(order.strikeCents)}, paying up to ${order.limitPriceCents.toString()}c (best price ${best.toString()}c) makes order ${index.toString()} ${formatUsd(order.amountCents)}, ${formatUsd(order.amountCents - line)} above the ${formatUsd(line)} approval line, so it waits for the owner; at the best price it would be ${formatUsd(atBest)}.`,
+    ];
+  });
+}
+
 const PlanViewSchema = z.object({
   planId: z.string().describe("Pass to execute_plan"),
   status: z.enum(["ok", "partial", "empty"]),
@@ -121,7 +192,21 @@ const PlanViewSchema = z.object({
     lossAtFloorCents: z.int().nullable(),
     payoutBelowFloorCents: z.int(),
     coverageAtFloorBps: z.int().nullable().describe("10000 = the loss at the floor is fully covered"),
+    expectedFillCents: z
+      .int()
+      .describe(
+        "What the orders cost if they fill at the prices the book showed; costCents is what they commit",
+      ),
   }),
+  depthOptions: z
+    .array(DepthOptionSchema)
+    .describe(
+      "When the book is too thin at this slippage: the same plan at each higher slippage up to 10 cents, only where it buys more. Empty otherwise",
+    ),
+  coversAtSlippageCents: z
+    .int()
+    .nullable()
+    .describe("The smallest slippage in depthOptions that covers the goal within the cost cap, or null"),
   orders: z.array(PlannedOrderSchema),
   ordersTruncated: z.boolean(),
   payoff: z.array(
@@ -186,7 +271,7 @@ export const planHedge = defineTool({
   name: "plan_hedge",
   title: "Plan a hedge",
   description:
-    "Plans protection for a crypto holding: a staircase of NO contracts on a Gemini strike ladder that pays out as the price falls from a ceiling (default: spot) to a floor, sized to the holding and kept within the mandate's max trade size, remaining budget and the owner's cost cap. It counts the protection already held on that ladder (filled, waiting to fill, waiting for the owner) and plans only what is missing: cover.state 'met' means nothing is needed and there are no orders. Returns the cover, the orders, cost, payoff table, what the mandate would say to each order, and a planId for execute_plan. Nothing is traded. Give exactly one of floorCents or dropPercent.",
+    "Plans protection for a crypto holding: a staircase of NO contracts on a Gemini strike ladder that pays out as the price falls from a ceiling (default: spot) to a floor, sized to the holding and kept within the mandate's max trade size, remaining budget and the owner's cost cap. It counts the protection already held on that ladder (filled, waiting to fill, waiting for the owner) and plans only what is missing: cover.state 'met' means nothing is needed and there are no orders. Returns the cover, the orders, cost, payoff table, what the mandate would say to each order, and a planId for execute_plan. Nothing is traded. Give exactly one of floorCents or dropPercent. slippageCents buys depth: a rung may take the book's price levels up to that many cents above its best NO price, cheapest first, and only what the goal needs; each order's limit is the deepest level it uses (the best price when the top level is enough), so slippage is not a cushion against the price moving before the order is placed. When the book is too thin, depthOptions says what each higher slippage would buy and commit.",
   inputSchema: z.object({
     asset: assetArg,
     quantity: holdingQuantitySchema
@@ -386,6 +471,10 @@ export const planHedge = defineTool({
     }));
 
     const holds = expected.filter((e) => e.expected === "needs_approval").length;
+    const slippageHolds = heldBySlippage(plan, snapshot, expected).map((message) => ({
+      code: "slippage_needs_approval",
+      message,
+    }));
     const firstRejected = expected.findIndex((e) => e.expected === "rejected");
     const reasons: Reason[] = [];
     if (holds > 0) {
@@ -474,11 +563,18 @@ export const planHedge = defineTool({
             lossAtFloorCents: plan.totals.lossAtFloorCents,
             payoutBelowFloorCents: plan.totals.payoutBelowFloorCents,
             coverageAtFloorBps: plan.totals.coverageAtFloorBps,
+            expectedFillCents: plan.totals.expectedFillCents ?? plan.totals.costCents,
           },
+          depthOptions: (plan.depthOptions ?? []).map((option) => depthOptionView(option, snapshot)),
+          coversAtSlippageCents: plan.coversAtSlippageCents ?? null,
           orders,
           ordersTruncated: truncated,
           payoff: samplePayoff(plan.payoff, MAX_PAYOFF_POINTS),
-          warnings: plan.warnings.slice(0, MAX_WARNINGS).map((w) => ({ code: w.code, message: w.message })),
+          // An order slippage alone sends to the owner is said first.
+          warnings: [
+            ...slippageHolds,
+            ...plan.warnings.map((w) => ({ code: w.code, message: w.message })),
+          ].slice(0, MAX_WARNINGS),
           signal:
             plan.signal === undefined
               ? null

@@ -46,6 +46,9 @@ You cannot change, bypass or pause those rules, and you should never try.
    - the price range that is covered and what is not covered,
    - any order that will wait for the owner's approval, and why,
    - any warning the planner returned, in plain words.
+   - when the book is too thin (`thin_depth`): what the plan covers at the best price, and what paying a few cents more would cover and cost (`depthOptions`).
+     Plan again with the smallest slippage that covers the goal within the owner's cap (`coversAtSlippageCents`), or the one with the most cover if none does, and say which you chose and what it commits and expects to pay.
+     If that slippage makes an order wait for the owner (`slippage_needs_approval`), ask the owner first.
 6. Wait for a clear yes from the owner.
    On a scheduled run where the owner already approved this exact goal, proceed without asking.
 7. Call `execute_plan` with the plan id.

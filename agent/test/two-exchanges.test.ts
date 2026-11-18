@@ -356,3 +356,70 @@ describe("get_portfolio for each cause", () => {
     });
   });
 });
+
+describe("plan_hedge buying depth with slippage, on the daily's 12:39 book", () => {
+  const plan = async (holding: string, slippageCents: number, maxCostCents = 5_000) => {
+    const h = onSandbox({ holding, exchanges: { daily1239: "uncapped", spotUsd: 64_500 } });
+    h.policy.rules = { ...h.policy.rules, budgetCents: 100_000 };
+    const { structured, summary } = await planHedge.run(
+      {
+        asset: "BTC",
+        horizon: "daily",
+        floorCents: 6_300_000,
+        maxCostCents,
+        slippageCents,
+        requestText: `Protect my ${holding} BTC down to $63,000 today.`,
+      },
+      h.ctx,
+    );
+    return { view: structured["plan"] as Row, summary };
+  };
+
+  it("at the best price says what each slippage would buy, and that 1 cent covers the goal", async () => {
+    const { view } = await plan("0.05", 0);
+    expect(view["coversAtSlippageCents"]).toBe(1);
+    expect(view["depthOptions"]).toEqual([
+      {
+        slippageCents: 1,
+        coverPercent: 100,
+        totalAmountCents: 2_852,
+        expectedFillCents: 2_842,
+        orders: 6,
+        ordersNeedingApproval: 0,
+        shortStrikesCents: [],
+        coversGoal: true,
+      },
+    ]);
+    expect((view["warnings"] as Row[]).find((w) => w["code"] === "thin_depth")?.["message"]).toContain(
+      "At the best price this plan covers 80%. Paying up to 1 cent above the best price covers 100%, for $28.52 committed (about $28.42 expected).",
+    );
+  });
+
+  it("at 1 cent takes the next level only where it needs it", async () => {
+    const { view } = await plan("0.05", 1);
+    const orders = (view["orders"] as Row[]).map((o) => [o["strikeCents"], o["quantity"], o["limitPrice"]]);
+    expect(orders).toEqual([
+      [6_425_000, "12.50", 56],
+      [6_400_000, "12.50", 47],
+      [6_375_000, "12.50", 41],
+      [6_350_000, "12.50", 35],
+      [6_325_000, "12.50", 27],
+      [6_300_000, "12.50", 22],
+    ]);
+    expect(view["totals"]).toMatchObject({ costCents: 2_852, expectedFillCents: 2_842 });
+    expect(view["depthOptions"]).toEqual([]);
+  });
+
+  it("says which order waits for the owner only because slippage took a deeper level", async () => {
+    // 0.34 BTC is 85 contracts a rung. At 3 cents, $63,000 takes 5 at 21c, 25 at 22c and 55 at 24c: $20.40
+    // at the 24c limit, above the $20 approval line; at 21c it would be $17.85.
+    const { view } = await plan("0.34", 3, 50_000);
+    const held = (view["warnings"] as Row[]).filter((w) => w["code"] === "slippage_needs_approval");
+    expect(held.map((w) => w["message"])).toEqual([
+      expect.stringContaining("At $63,000, paying up to 24c (best price 21c) makes order 9") as unknown,
+    ]);
+    expect(held[0]?.["message"]).toContain(
+      "$20.40, $0.40 above the $20.00 approval line, so it waits for the owner; at the best price it would be $17.85.",
+    );
+  });
+});

@@ -36,6 +36,9 @@ On each run:
    Never decide this yourself from `get_activity`, `get_portfolio` or `get_ladder`.
 5. Otherwise call `buy_signal` for the plan's ladder (its `eventTicker`), then `plan_hedge` again with the same goal and the signal's `receiptId` as `signalReceiptId`, then `execute_plan` with that plan.
    Its orders are only the missing part.
+   If the plan has the warning `thin_depth`, the book is too thin at the best price: plan again with `slippageCents` set to `coversAtSlippageCents`, or, when that is null, to the `depthOptions` entry with the most cover.
+   Never take a slippage whose `totalAmountCents` is above my spending cap.
+   Report the slippage you chose, what the plan commits (`costCents`) and expects to pay (`expectedFillCents`), and what it covered at the best price, and name any order that waits for my approval because of it (`slippage_needs_approval`).
    If `buy_signal` is rejected or unavailable, execute the plan from step 4 and say so.
    If `execute_plan` answers `COVER_CHANGED`, call `plan_hedge` once more and follow its answer; never execute an older plan to top up.
 6. If the mandate rejects an order, do not work around it. Tell me which rule stopped it. If the same rule has stopped the goal on two runs in a row, call `request_policy_change` once with the reason.

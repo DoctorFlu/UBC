@@ -222,7 +222,7 @@ describe("evidenceChain", () => {
     const read = (file: string) =>
       JSON.parse(readFileSync(fileURLToPath(new URL(file, fixtures)), "utf8")) as unknown;
     const plans = read("plans.json") as Record<string, HedgePlan>;
-    const sealed = read("decision-context.json") as { hash: string; document: DecisionContext };
+    const sealed = read("decision-context.json") as { hash: `0x${string}`; document: DecisionContext };
     const stored = readHedgePlan(plans["production 12:39, 0.05 BTC"]);
     expect(stored).not.toBeNull();
     if (stored === null) return;
@@ -233,7 +233,13 @@ describe("evidenceChain", () => {
     if (first === undefined) throw new Error("the stored plan has no order");
     const old = { planId: stored.planId, plan: stored, ...made };
     const chain = chainOf([{ market: first.instrumentSymbol, amountCents: first.amountCents }], {
-      0: { ...verified(stored.planId, []), hash: sealed.hash, document: sealed.document },
+      0: {
+        status: "verified",
+        source: "onchain",
+        hash: sealed.hash,
+        document: sealed.document,
+        storedAt: "2026-11-18T12:40:01.000Z",
+      },
     });
     const evidence = evidenceChain(old, chain, []);
     expect(evidence.intents.map((intent) => [intent.seal, intent.orderIndex])).toEqual([["verified", 0]]);
