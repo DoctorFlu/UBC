@@ -40,7 +40,7 @@ const PROOFS = [
   },
   {
     title: "Attacked with the agent's own key",
-    body: "On 16 Nov 2026 we ran 42 attacks on a test chain, through the MCP server and straight at the contract: 35 were stopped, 7 went through but stayed inside the mandate's limits, and none broke it.",
+    body: "We ran 47 scripted attacks on a test chain, through the MCP server and straight at the contract: 42 were stopped, 5 went through but stayed inside the mandate's limits, and none broke it.",
   },
   {
     title: "A public scorecard",
