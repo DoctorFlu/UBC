@@ -46,6 +46,10 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 3. It writes "placing" to the journal, then sends one limit order, good till cancelled.
 4. It follows the order (`POST /v1/prediction-markets/orders/active`, then `orders/history`) and records each change in the journal.
 5. When the order fills, or when its time is up (`EXECUTOR_ORDER_TTL_MS`, 10 minutes by default, and never later than a minute before the market stops trading), it cancels what is left and records the fill onchain with `recordResult`.
+   An order is closed only when Gemini says it no longer works: its status is `filled` or `cancelled`, or Gemini answered the cancel and no longer lists it among the active orders.
+   Any other status is open, however much has filled; after the cancel, the executor reads the order again and records the quantity Gemini reports then, since a fill can land between its last read and the cancel.
+   On 18 November 2026 the sandbox reported intent #12's order, 5 of 11.81 contracts filled and still working, in a status the executor took for closed, so it recorded 5 of 11.81 at $1.05 with "the rest cancelled".
+   Gemini filled the other 6.81 contracts 34 seconds later, 11.81 at an average of 21.57c, and paid $11.81 at expiry against the $5.00 recorded; #12's onchain record stays as it was.
 6. When that write fails (the RPC refuses it or times out), it tries again with waits of 15 s doubling to 10 minutes, and logs each failure with its wait.
    Each try asks the venue for the order again, which finds the journaled one and never sends a second; until a try lands, the intent stays Approved and its amount committed.
    An order the journal says reached Gemini is recorded from the journal and Gemini on every later pass, a restart included, and never checked against market data again: the market may have closed or left the listing since, and a check now must never record a refusal for an order that filled.
@@ -334,6 +338,8 @@ From Gemini's documentation only, not yet checked with a key:
 - The roles: the quickstart says orders need the Trader role; the API reference names NewOrder, CancelOrder and OrderStatus permissions per endpoint. The owner's key has Trader and Fund Manager.
 - The terms: the API reference and quickstart describe `POST /v1/prediction-markets/terms/accept`, while an older getting-started page says to accept them in the web interface first. We never call the accept endpoint either way.
 - Order states other than open and cancelled: one page lists open, filled and cancelled, another adds closed.
+  On 18 November 2026 the sandbox reported a live, partly filled order in a status the executor did not expect (intent #12, step 5 of [What the executor does](#what-the-executor-does-with-an-approved-intent)); its exact text was not kept.
+  The executor now treats any status other than `filled` and `cancelled` as open until a cancel Gemini answered shows otherwise.
 - Whether the fee is rounded per order or per fill (see [Fees](#fees)).
 
 The opt-in sandbox test (`gemini/test/sandbox.live.test.ts`) checks these facts with a real sandbox key: it runs only with `GEMINI_SANDBOX_TEST=1` and sandbox keys in the environment, places one order of 1 contract at 1 cent, far from the market, prints Gemini's raw answers, and cancels it.
