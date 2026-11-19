@@ -628,7 +628,8 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
           const answered = await trading.cancelOrder(orderId).then(
             () => true,
             // Refused for the order's own reason (no longer working, or not found): Gemini answered.
-            (error: unknown) => isGeminiPrivateError(error) && !error.outcomeUnknown && error.kind === "rejected",
+            (error: unknown) =>
+              isGeminiPrivateError(error) && !error.outcomeUnknown && error.kind === "rejected",
           );
           if (!answered) {
             // No answer, or a refusal that is not the order's own (rate limit, auth, server error): the
