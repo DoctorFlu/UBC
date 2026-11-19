@@ -165,6 +165,7 @@ export class FakeGeminiPrivate {
    */
   beforeRequest: (route: string) => void = () => {};
   private faults: PlacementFault[] = [];
+  private cancelRefusals: FakeAnswer[] = [];
   private settled: SettledEntry[] = [];
   /** Real-sized ids, above 2^53 like the sandbox's (145853902320696849), so rounding one shows up. */
   private nextOrderId = 145_853_902_320_696_849n;
@@ -178,6 +179,14 @@ export class FakeGeminiPrivate {
   /** The next placement fails this way (queued: one fault per placement). */
   failNextPlacement(fault: PlacementFault): void {
     this.faults.push(fault);
+  }
+
+  /**
+   * The next cancel is answered this way and changes nothing (queued: one answer per cancel), for a refusal
+   * that is not the order's own: `{ status: 429, ... }`, say.
+   */
+  refuseNextCancel(answer: FakeAnswer): void {
+    this.cancelRefusals.push(answer);
   }
 
   /** Requests to a path, for example "/v1/prediction-markets/order". */
@@ -295,7 +304,7 @@ export class FakeGeminiPrivate {
       case "POST /v1/prediction-markets/order":
         return this.observed(route, this.place(fields));
       case "POST /v1/prediction-markets/order/cancel":
-        return this.observed(route, this.cancelRoute(fields));
+        return this.observed(route, this.cancelRefusals.shift() ?? this.cancelRoute(fields));
       case "POST /v1/prediction-markets/orders/active":
         return this.list(fields, (order) => order.status === "open");
       case "POST /v1/prediction-markets/orders/history":

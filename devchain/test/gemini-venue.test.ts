@@ -582,6 +582,30 @@ describe("following an order", () => {
     expect(journal.records.get(7)?.state).toBe("partly_filled");
   });
 
+  it("asks again on the next poll when Gemini refuses the cancel for a reason that is not the order's", async () => {
+    const gemini = venue({ orderTtlMs: 60_000 });
+    const placed = placedOf(await gemini.placeOrder(order()));
+    fake.fill(placed.venueOrderId, 1_550);
+    clock.now += 61_000;
+    fake.refuseNextCancel({ status: 429, body: { result: "error", reason: "RateLimit" } });
+
+    // The cancel is refused and the order still works: nothing is recorded closed.
+    expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 481 });
+    expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(1);
+    expect(fake.order(placed.venueOrderId).status).toBe("open");
+    expect(journal.records.get(7)?.state).toBe("open");
+
+    // The next poll asks again, Gemini cancels, and the part that filled is recorded.
+    expect(await gemini.readFill(placed)).toEqual({
+      state: "closed",
+      filledCents: 481,
+      detail: "15.50 of 40 contracts filled on Gemini's sandbox, the rest cancelled",
+    });
+    expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(2);
+    expect(fake.order(placed.venueOrderId).status).toBe("cancelled");
+    expect(journal.records.get(7)?.state).toBe("partly_filled");
+  });
+
   describe("an order Gemini reports partly filled in a status of its own while it still works (#12)", () => {
     // On 18 Nov 2026 the sandbox reported intent #12's order, 5 of 11.81 filled and still working, in a
     // status other than "open". The venue took it for closed and recorded "the rest cancelled"; the rest

@@ -48,6 +48,7 @@ The simulated venue stays the default; nothing is placed anywhere until `EXECUTO
 5. When the order fills, or when its time is up (`EXECUTOR_ORDER_TTL_MS`, 10 minutes by default, and never later than a minute before the market stops trading), it cancels what is left and records the fill onchain with `recordResult`.
    An order is closed only when Gemini says it no longer works: its status is `filled` or `cancelled`, or Gemini answered the cancel and no longer lists it among the active orders.
    Any other status is open, however much has filled; after the cancel, the executor reads the order again and records the quantity Gemini reports then, since a fill can land between its last read and the cancel.
+   A cancel that gets no answer, or is refused for a reason that is not the order's own (a rate limit, the key, a server error), leaves the order working, so the executor asks again on its next poll.
    On 18 November 2026 the sandbox reported intent #12's order, 5 of 11.81 contracts filled and still working, in a status the executor took for closed, so it recorded 5 of 11.81 at $1.05 with "the rest cancelled".
    Gemini filled the other 6.81 contracts 34 seconds later, 11.81 at an average of 21.57c, and paid $11.81 at expiry against the $5.00 recorded; #12's onchain record stays as it was.
 6. When that write fails (the RPC refuses it or times out), it tries again with waits of 15 s doubling to 10 minutes, and logs each failure with its wait.

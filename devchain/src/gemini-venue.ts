@@ -627,16 +627,14 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
           deadline.cancelAsked = true;
           const answered = await trading.cancelOrder(orderId).then(
             () => true,
-            (error: unknown) => {
-              if (!isGeminiPrivateError(error) || error.outcomeUnknown) {
-                deadline.cancelAsked = false;
-                return false;
-              }
-              // Refused for the order's own reason (no longer working, or not found): Gemini answered.
-              return error.kind === "rejected";
-            },
+            // Refused for the order's own reason (no longer working, or not found): Gemini answered.
+            (error: unknown) => isGeminiPrivateError(error) && !error.outcomeUnknown && error.kind === "rejected",
           );
-          if (answered) {
+          if (!answered) {
+            // No answer, or a refusal that is not the order's own (rate limit, auth, server error): the
+            // order still works, and nothing else closes it. Ask again on the next poll.
+            deadline.cancelAsked = false;
+          } else {
             deadline.cancelAnswered = true;
             // A fill can land between the read above and the cancel: record what Gemini reports now.
             const after = await read();
