@@ -26,6 +26,8 @@ export interface MakerDoctorOptions {
   sandbox: MarketReader;
   /** Builds a signed sandbox client; tests pass one on a fake. */
   sandboxClient?: (credentials: GeminiCredentials) => GeminiPrivateClient;
+  /** The clock the maker's view reads (expiry and staleness), in milliseconds. Default: the real clock. */
+  now?: () => number;
 }
 
 function describeKey(key: string): string {
@@ -138,6 +140,7 @@ export async function makerDoctor(options: MakerDoctorOptions): Promise<MakerDoc
     account: maker,
     settings,
     say,
+    ...(options.now === undefined ? {} : { now: options.now }),
   }).view();
   if (view.holdings === null) {
     problems.push("the maker account's positions could not be read, so it would quote nothing");
