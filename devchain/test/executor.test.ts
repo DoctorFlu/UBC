@@ -636,6 +636,12 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
   let lines: string[];
   /** What Gemini lists for the order's event: a test takes the market away, or the market data. */
   let listing: () => Promise<typeof OPEN_EVENT>;
+  /**
+   * The clock Gemini and the venue share. It runs from 20 Nov 12:00 UTC, ten hours before the fixture
+   * ladder stops trading, whatever today's date: on the real clock past its expiry the venue would cancel
+   * every order the moment it was placed.
+   */
+  let now: () => number;
   const executors: Executor[] = [];
 
   beforeAll(async () => {
@@ -649,7 +655,9 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
     for (const executor of executors.splice(0)) executor.stop();
     chain = await deployTestPolicy(anvil, "production");
     await chain.user.setPolicy(DEMO_POLICY);
-    fake = new FakeGeminiPrivate({ apiKey: "account-FAKEKEY", apiSecret: "fake-secret" });
+    const shift = Date.parse("2026-11-20T12:00:00.000Z") - Date.now();
+    now = () => Date.now() + shift;
+    fake = new FakeGeminiPrivate({ apiKey: "account-FAKEKEY", apiSecret: "fake-secret", now });
     journal = memoryOrderJournal();
     lines = [];
     listing = () => Promise.resolve(OPEN_EVENT);
@@ -666,6 +674,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
           credentials: { apiKey: "account-FAKEKEY", apiSecret: "fake-secret" },
           fetch: fake.fetch,
           limiter: unpacedLimiter(),
+          now,
         }),
         journal,
         deployment: {
@@ -673,6 +682,7 @@ describe("the executor on Gemini's sandbox (issue #93), against a fake of its pr
           policy: chain.address.toLowerCase() as `0x${string}`,
           deployBlockHash: `0x${"ab".repeat(32)}`,
         },
+        now,
       }),
       settlements: fakeSink(),
       fromBlock: chain.deployBlock,

@@ -832,8 +832,14 @@ describe("makerSettings", () => {
 
 describe("makerDoctor", () => {
   async function doctor(setUpAccount: (fake: FakeGeminiPrivate) => void = () => {}) {
-    const maker = new FakeGeminiPrivate({ apiKey: MAKER_KEY, apiSecret: MAKER_SECRET });
-    const executor = new FakeGeminiPrivate({ apiKey: EXECUTOR_KEY, apiSecret: "ExecutorSecretNeverPrinted" });
+    // The fixture ladder expires 18 Nov 22:00 UTC: the doctor reads the test's clock, never today's date.
+    const now = () => NOW;
+    const maker = new FakeGeminiPrivate({ apiKey: MAKER_KEY, apiSecret: MAKER_SECRET, now });
+    const executor = new FakeGeminiPrivate({
+      apiKey: EXECUTOR_KEY,
+      apiSecret: "ExecutorSecretNeverPrinted",
+      now,
+    });
     setUpAccount(maker);
     const production = new Production();
     production.set(64_000, [60, 2_500], [62, 4_000]);
@@ -854,7 +860,9 @@ describe("makerDoctor", () => {
           credentials,
           limiter: unpacedLimiter(),
           fetch: credentials.apiKey === MAKER_KEY ? maker.fetch : executor.fetch,
+          now,
         }),
+      now,
     });
     const output = lines.join("\n");
     for (const secret of [MAKER_KEY, MAKER_SECRET, EXECUTOR_KEY, "ExecutorSecretNeverPrinted"]) {
