@@ -130,6 +130,12 @@ export class FakeGeminiPrivate {
   /** While true, every route answers 503. */
   failing = false;
   /**
+   * The status an open order that has partly filled reports, when not "open". Gemini's spec lists only
+   * "open", "filled" and "cancelled", yet on 18 Nov 2026 the sandbox reported an order that was 5 of 11.81
+   * filled and still working in a status the venue took for closed (#12). Null: such an order reports "open".
+   */
+  partialStatus: string | null = null;
+  /**
    * Whether an order would take liquidity at once. A maker-only order that would is cancelled instead
    * (Gemini REST's `makerOrCancel`); other orders rest as usual, since this fake has no matching engine.
    */
@@ -153,7 +159,13 @@ export class FakeGeminiPrivate {
   readonly selfCrosses: { placed: FakeOrder; met: FakeOrder }[] = [];
   /** Called after every request this fake answers, so a test can look at the book between requests. */
   afterRequest: (route: string) => void = () => {};
+  /**
+   * Called with every authenticated request's route ("POST /v1/prediction-markets/order/cancel") before it
+   * is answered, so a test can make the market move first: a fill landing just before a cancel, say.
+   */
+  beforeRequest: (route: string) => void = () => {};
   private faults: PlacementFault[] = [];
+  private cancelRefusals: FakeAnswer[] = [];
   private settled: SettledEntry[] = [];
   /** Real-sized ids, above 2^53 like the sandbox's (145853902320696849), so rounding one shows up. */
   private nextOrderId = 145_853_902_320_696_849n;
@@ -167,6 +179,14 @@ export class FakeGeminiPrivate {
   /** The next placement fails this way (queued: one fault per placement). */
   failNextPlacement(fault: PlacementFault): void {
     this.faults.push(fault);
+  }
+
+  /**
+   * The next cancel is answered this way and changes nothing (queued: one answer per cancel), for a refusal
+   * that is not the order's own: `{ status: 429, ... }`, say.
+   */
+  refuseNextCancel(answer: FakeAnswer): void {
+    this.cancelRefusals.push(answer);
   }
 
   /** Requests to a path, for example "/v1/prediction-markets/order". */
@@ -266,6 +286,7 @@ export class FakeGeminiPrivate {
     const { fields } = auth;
     this.requests.push({ method: request.method, path: request.path, fields });
     const route = `${request.method} ${request.path}`;
+    this.beforeRequest(route);
     switch (route) {
       case "POST /v1/roles":
         return { status: 200, body: this.roles };
@@ -283,7 +304,7 @@ export class FakeGeminiPrivate {
       case "POST /v1/prediction-markets/order":
         return this.observed(route, this.place(fields));
       case "POST /v1/prediction-markets/order/cancel":
-        return this.observed(route, this.cancelRoute(fields));
+        return this.observed(route, this.cancelRefusals.shift() ?? this.cancelRoute(fields));
       case "POST /v1/prediction-markets/orders/active":
         return this.list(fields, (order) => order.status === "open");
       case "POST /v1/prediction-markets/orders/history":
@@ -514,7 +535,10 @@ export class FakeGeminiPrivate {
       hashOrderId: null,
       clientOrderId: this.echoClientOrderId ? order.clientOrderId : null,
       globalOrderId: null,
-      status: order.status,
+      status:
+        order.status === "open" && order.filled > 0 && this.partialStatus !== null
+          ? this.partialStatus
+          : order.status,
       symbol: order.symbol,
       side: order.side,
       outcome: order.outcome,

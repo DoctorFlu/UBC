@@ -37,6 +37,7 @@ const SETTLED = recorded("event-BTC2611132200-settled.json");
 const MARKET = "GEMI-BTC2611202200-HI65000";
 const SETTLED_NO = "GEMI-BTC2611132200-HI68500";
 const ORDER_ROUTE = "/v1/prediction-markets/order";
+const CANCEL_ROUTE = "/v1/prediction-markets/order/cancel";
 
 let clock: { now: number };
 let fake: FakeGeminiPrivate;
@@ -567,12 +568,12 @@ describe("following an order", () => {
     fake.fill(placed.venueOrderId, 1_550);
     clock.now += 30_000;
     expect((await gemini.readFill(placed)).state).toBe("open");
-    expect(fake.callsTo("/v1/prediction-markets/order/cancel")).toHaveLength(0);
+    expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(0);
 
     clock.now += 31_000;
-    expect((await gemini.readFill(placed)).state).toBe("open");
-    expect(fake.callsTo("/v1/prediction-markets/order/cancel")).toHaveLength(1);
+    // The cancel, then a read of what Gemini holds after it, in the same poll.
     const closed: FillState = await gemini.readFill(placed);
+    expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(1);
     expect(closed).toEqual({
       state: "closed",
       filledCents: 481,
@@ -581,13 +582,139 @@ describe("following an order", () => {
     expect(journal.records.get(7)?.state).toBe("partly_filled");
   });
 
+  it("asks again on the next poll when Gemini refuses the cancel for a reason that is not the order's", async () => {
+    const gemini = venue({ orderTtlMs: 60_000 });
+    const placed = placedOf(await gemini.placeOrder(order()));
+    fake.fill(placed.venueOrderId, 1_550);
+    clock.now += 61_000;
+    fake.refuseNextCancel({ status: 429, body: { result: "error", reason: "RateLimit" } });
+
+    // The cancel is refused and the order still works: nothing is recorded closed.
+    expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 481 });
+    expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(1);
+    expect(fake.order(placed.venueOrderId).status).toBe("open");
+    expect(journal.records.get(7)?.state).toBe("open");
+
+    // The next poll asks again, Gemini cancels, and the part that filled is recorded.
+    expect(await gemini.readFill(placed)).toEqual({
+      state: "closed",
+      filledCents: 481,
+      detail: "15.50 of 40 contracts filled on Gemini's sandbox, the rest cancelled",
+    });
+    expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(2);
+    expect(fake.order(placed.venueOrderId).status).toBe("cancelled");
+    expect(journal.records.get(7)?.state).toBe("partly_filled");
+  });
+
+  describe("an order Gemini reports partly filled in a status of its own while it still works (#12)", () => {
+    // On 18 Nov 2026 the sandbox reported intent #12's order, 5 of 11.81 filled and still working, in a
+    // status other than "open". The venue took it for closed and recorded "the rest cancelled"; the rest
+    // filled 34 seconds later.
+    beforeEach(() => {
+      fake.partialStatus = "partially_filled";
+    });
+
+    const cancelWording = () => journal.history.filter((record) => /cancel/i.test(record.detail ?? ""));
+
+    it("keeps following it until Gemini says it filled, and records one result: all of it filled", async () => {
+      const gemini = venue();
+      const placed = placedOf(await gemini.placeOrder(order()));
+      fake.fill(placed.venueOrderId, 500);
+      expect(fake.order(placed.venueOrderId).status).toBe("open");
+
+      expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 155 });
+      expect(journal.records.get(7)).toMatchObject({
+        state: "open",
+        filledHundredths: 500,
+        detail: "5 of 40 contracts filled so far",
+      });
+
+      fake.fill(placed.venueOrderId);
+      expect(await gemini.readFill(placed)).toEqual({
+        state: "closed",
+        filledCents: 1_240,
+        detail: "filled on Gemini's sandbox",
+      });
+      expect(journal.records.get(7)).toMatchObject({ state: "filled", filledHundredths: 4_000 });
+      expect(journal.history.map((record) => record.state)).not.toContain("partly_filled");
+      expect(cancelWording()).toEqual([]);
+      expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(0);
+    });
+
+    it("records it open when the placement's own answer is partly filled", async () => {
+      // Another account's YES bid at 69c meets 5 contracts of the NO bid at 31c as it is placed.
+      fake.foreign.push({ symbol: MARKET, outcome: "yes", priceCents: 69, hundredths: 500 });
+      const gemini = venue();
+      const placed = placedOf(await gemini.placeOrder(order()));
+      expect(journal.records.get(7)).toMatchObject({ state: "open", filledHundredths: 500 });
+      expect(await gemini.readFill(placed)).toEqual({ state: "open", filledCents: 155 });
+      expect(cancelWording()).toEqual([]);
+    });
+
+    it("at its deadline cancels the rest, reads it again, and records what filled up to the cancel", async () => {
+      const gemini = venue({ orderTtlMs: 60_000 });
+      const placed = placedOf(await gemini.placeOrder(order()));
+      fake.fill(placed.venueOrderId, 500);
+      expect((await gemini.readFill(placed)).state).toBe("open");
+
+      // Two more contracts fill after the venue's read and before its cancel reaches Gemini.
+      fake.beforeRequest = (route) => {
+        if (route === `POST ${CANCEL_ROUTE}`) {
+          fake.beforeRequest = () => {};
+          fake.fill(placed.venueOrderId, 200);
+        }
+      };
+      clock.now += 61_000;
+      expect(await gemini.readFill(placed)).toEqual({
+        state: "closed",
+        filledCents: 217,
+        detail: "7 of 40 contracts filled on Gemini's sandbox, the rest cancelled",
+      });
+      expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(1);
+      expect(journal.records.get(7)).toMatchObject({ state: "partly_filled", filledHundredths: 700 });
+      // Nothing said "cancelled" before Gemini acknowledged the cancel.
+      expect(cancelWording()).toHaveLength(1);
+    });
+
+    it("after a restart, closes it as filled when Gemini filled the rest while no executor was running", async () => {
+      const gemini = venue();
+      const placed = placedOf(await gemini.placeOrder(order()));
+      fake.fill(placed.venueOrderId, 500);
+      expect((await gemini.readFill(placed)).state).toBe("open");
+
+      fake.fill(placed.venueOrderId);
+      const again = restarted();
+      expect(await again.readFill(placed)).toEqual({
+        state: "closed",
+        filledCents: 1_240,
+        detail: "filled on Gemini's sandbox",
+      });
+      expect(journal.records.get(7)).toMatchObject({ state: "filled", filledHundredths: 4_000 });
+      expect(cancelWording()).toEqual([]);
+    });
+
+    it("after a restart, finds a lost attempt partly filled and still working, and follows it as open", async () => {
+      fake.foreign.push({ symbol: MARKET, outcome: "yes", priceCents: 69, hundredths: 500 });
+      fake.failNextPlacement({ kind: "drop-after" });
+      const first = venue();
+      expect((await first.placeOrder(order())).status).toBe("held");
+
+      const again = restarted();
+      const placed = placedOf(await again.placeOrder(order()));
+      expect(fake.callsTo(ORDER_ROUTE)).toHaveLength(1);
+      expect(journal.records.get(7)).toMatchObject({ state: "open", filledHundredths: 500 });
+      expect(await again.readFill(placed)).toEqual({ state: "open", filledCents: 155 });
+      expect(cancelWording()).toEqual([]);
+    });
+  });
+
   it("cancels a minute before the market stops trading, even before the order's time is up", async () => {
     clock.now = Date.parse("2026-11-20T21:58:00Z");
     const gemini = venue();
     const placed = placedOf(await gemini.placeOrder(order()));
     clock.now = Date.parse("2026-11-20T21:59:00Z");
     await gemini.readFill(placed);
-    expect(fake.callsTo("/v1/prediction-markets/order/cancel")).toHaveLength(1);
+    expect(fake.callsTo(CANCEL_ROUTE)).toHaveLength(1);
     expect(await gemini.readFill(placed)).toMatchObject({ state: "closed", filledCents: 0 });
     expect(journal.records.get(7)?.state).toBe("cancelled");
   });

@@ -187,8 +187,11 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
    * write landed after all, the journal shows an attempt this process knows never reached Gemini.
    */
   const neverSent = new Map<number, number>();
-  /** When to cancel what is left of each open order, and whether that was asked already. */
-  const deadlines = new Map<number, { at: number; cancelAsked: boolean }>();
+  /**
+   * When to cancel what is left of each open order, whether that was asked already, and whether Gemini
+   * answered the cancel (it cancelled the order, or refused because the order was no longer working).
+   */
+  const deadlines = new Map<number, { at: number; cancelAsked: boolean; cancelAnswered: boolean }>();
   const publicOutcomes = simulatedVenue(publicClient, { now });
   const productionOutcomes = simulatedVenue(productionClient, { now });
 
@@ -229,11 +232,30 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
     return stored;
   }
 
-  function stateOf(order: PrivateOrder, filledHundredths: number): VenueOrderState {
+  /**
+   * The order's state from Gemini's answer. An order is closed only when Gemini says it no longer works:
+   * its status is "filled" or "cancelled" (the only closed statuses Gemini's spec lists), or, after Gemini
+   * answered our cancel, it is no longer among the account's active orders. Every other status is open,
+   * however much has filled: on 18 Nov 2026 the sandbox reported a live order 5 of 11.81 filled in a status
+   * this once took for closed, and the rest filled 34 seconds later (#12). An open order is cancelled at its
+   * deadline and read again, so an unknown status ends as Gemini reports the order after the cancel.
+   */
+  function stateOf(
+    order: PrivateOrder,
+    filledHundredths: number,
+    quantityHundredths: number,
+    goneAfterCancel: boolean,
+  ): VenueOrderState {
     const status = order.status.toLowerCase();
-    if (status === "open") return "open";
+    const closed = (): VenueOrderState =>
+      filledHundredths >= quantityHundredths
+        ? "filled"
+        : filledHundredths > 0
+          ? "partly_filled"
+          : "cancelled";
     if (status === "filled") return "filled";
-    return filledHundredths > 0 ? "partly_filled" : "cancelled";
+    if (status === "cancelled" || goneAfterCancel) return closed();
+    return "open";
   }
 
   function closedDetail(state: VenueOrderState, record: VenueOrderRecord): string {
@@ -247,13 +269,20 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
     }
   }
 
-  /** The record as Gemini's answer describes the order now. */
-  function withOrder(record: VenueOrderRecord, order: PrivateOrder): Partial<VenueOrderRecord> {
+  /**
+   * The record as Gemini's answer describes the order now. `goneAfterCancel`: Gemini answered our cancel
+   * and no longer lists the order among the active ones (see `stateOf`).
+   */
+  function withOrder(
+    record: VenueOrderRecord,
+    order: PrivateOrder,
+    goneAfterCancel = false,
+  ): Partial<VenueOrderRecord> {
     const filledHundredths = Math.min(
       toHundredths(order.filledQuantity ?? "0") ?? 0,
       record.quantityHundredths,
     );
-    const state = stateOf(order, filledHundredths);
+    const state = stateOf(order, filledHundredths, record.quantityHundredths, goneAfterCancel);
     const average = averageTenThousandths(order.avgExecutionPrice, record.limitPrice);
     const change: Partial<VenueOrderRecord> = {
       venueOrderId: order.orderId,
@@ -345,7 +374,7 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
     const ttl = Date.parse(record.placedAt) + orderTtlMs;
     const expiry = found?.expiry ? Date.parse(found.expiry) - CLOSE_MARGIN_MS : Number.POSITIVE_INFINITY;
     const at = Math.min(ttl, expiry);
-    deadlines.set(record.intentId, { at, cancelAsked: false });
+    deadlines.set(record.intentId, { at, cancelAsked: false, cancelAnswered: false });
     return at;
   }
 
@@ -563,31 +592,58 @@ export function geminiVenue(options: GeminiVenueOptions): Venue {
         return { state: "closed", filledCents: record.filledCents, detail: record.detail ?? record.state };
       }
       const orderId = record.venueOrderId;
-      let order = (await trading.activeOrders(record.market)).find(
-        (candidate) => candidate.orderId === orderId,
-      );
-      order ??= (await trading.orderHistory(record.market)).find(
-        (candidate) => candidate.orderId === orderId,
-      );
-      if (order === undefined) {
+      const market = record.market;
+      /** The order as Gemini holds it now, and whether it is among the active orders. */
+      async function read(): Promise<{ order: PrivateOrder; active: boolean } | undefined> {
+        const active = (await trading.activeOrders(market)).find(
+          (candidate) => candidate.orderId === orderId,
+        );
+        if (active) return { order: active, active: true };
+        const past = (await trading.orderHistory(market)).find((candidate) => candidate.orderId === orderId);
+        return past ? { order: past, active: false } : undefined;
+      }
+      /** Records what Gemini reports, when it changed anything. */
+      async function follow(
+        from: VenueOrderRecord,
+        seen: { order: PrivateOrder; active: boolean },
+      ): Promise<VenueOrderRecord> {
+        const goneAfterCancel = !seen.active && deadlines.get(intentId)?.cancelAnswered === true;
+        const change = withOrder(from, seen.order, goneAfterCancel);
+        return change.state !== from.state || change.filledHundredths !== from.filledHundredths
+          ? await update(from, change)
+          : from;
+      }
+
+      const seen = await read();
+      if (seen === undefined) {
         // Gemini lists a new order a moment after accepting it; ask again on the next poll.
         return { state: "open", filledCents: record.filledCents };
       }
-      const change = withOrder(record, order);
-      const next =
-        change.state !== record.state || change.filledHundredths !== record.filledHundredths
-          ? await update(record, change)
-          : record;
+      let next = await follow(record, seen);
       if (!isFinalVenueOrderState(next.state)) {
         const at = await deadlineOf(next);
         const deadline = deadlines.get(intentId);
         if (now() >= at && deadline && !deadline.cancelAsked) {
           deadline.cancelAsked = true;
-          await trading.cancelOrder(orderId).catch((error: unknown) => {
-            // Already closed (422) or not found: the next read shows what it became.
-            if (!isGeminiPrivateError(error) || error.outcomeUnknown) deadline.cancelAsked = false;
-          });
+          const answered = await trading.cancelOrder(orderId).then(
+            () => true,
+            // Refused for the order's own reason (no longer working, or not found): Gemini answered.
+            (error: unknown) =>
+              isGeminiPrivateError(error) && !error.outcomeUnknown && error.kind === "rejected",
+          );
+          if (!answered) {
+            // No answer, or a refusal that is not the order's own (rate limit, auth, server error): the
+            // order still works, and nothing else closes it. Ask again on the next poll.
+            deadline.cancelAsked = false;
+          } else {
+            deadline.cancelAnswered = true;
+            // A fill can land between the read above and the cancel: record what Gemini reports now.
+            const after = await read();
+            if (after !== undefined) next = await follow(next, after);
+          }
         }
+      }
+      if (!isFinalVenueOrderState(next.state)) {
         return { state: "open", filledCents: next.filledCents };
       }
       deadlines.delete(intentId);
