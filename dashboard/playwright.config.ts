@@ -101,7 +101,7 @@ export default defineConfig({
             POLICY_DEPLOYMENT_FILE: paths.deploymentFile,
             CONSOLE_DATA_DIR: paths.dataDir,
             CONSOLE_SERVICE_TOKEN: E2E_SERVICE_TOKEN,
-            // The production build runs as production: it needs a master key, and sign-up needs an invite.
+            // The production build runs as production: it needs a master key. Sign-up is open, as hosted.
             CONSOLE_MASTER_KEY: E2E_MASTER_KEY,
             CONSOLE_URL: baseURL,
             MCP_PUBLIC_URL: "https://mcp.example.test/mcp",

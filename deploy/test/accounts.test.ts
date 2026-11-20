@@ -105,6 +105,7 @@ describe("compose", () => {
     expect(console).toMatch(/CONSOLE_MODE: production/);
     expect(console).toMatch(/CONSOLE_MASTER_KEY: \$\{CONSOLE_MASTER_KEY:\?/);
     expect(console).toMatch(/CONSOLE_TRUST_PROXY: "true"/);
+    expect(console).toMatch(/CONSOLE_SIGNUP: \$\{CONSOLE_SIGNUP:-\}/);
     expect(console).toMatch(/CONSOLE_URL: \$\{MANDATE_PUBLIC_URL:-https:\/\/\$\{MANDATE_HOST\}\}/);
   });
 
