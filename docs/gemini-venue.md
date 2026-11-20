@@ -129,7 +129,7 @@ Until then it logs each failed attempt with the wait before the next (5 s doubli
   The chain decides nothing here: the hosted Arc demo is a real chain whose fills are simulated, and it says so.
   Only a local devchain whose executor announced nothing reads as simulated, since its in-process simulator never announces.
   On a phone the badge is the icon alone, so the strip still fits.
-- Each fill is labelled the same way wherever it is shown with its amount or result: the intent page and its timeline, Activity's Filled and Paid at expiry totals, the evidence page, and the public scorecard's Filled count and settled result.
+- Each fill is labelled the same way wherever it is shown with its amount or result: the intent page and its timeline, Activity's Filled and Paid at expiry totals, the evidence page, and the public dashboard's Filled count and settled result.
   A fill's own evidence comes first: the order the executor journaled for it (Sandbox or Live), then the venue its settlement names, then the venue announced when the fill was mined, never a later one.
   A Gemini executor journals every order, so a fill it has no order for is "Fill source unknown".
 - When the console stores an announcement of a new venue, it reads the chain head and the announcement holds from the next block: fills mined up to that head keep the announcement before it.
@@ -138,7 +138,7 @@ Until then it logs each failed attempt with the wait before the next (5 s doubli
   It is not a guess about the past: an announcement only labels a fill that has no journaled order, so the most it can say of one is "simulated" or "unknown", and no earlier fill on Gemini (which always has an order) can be called simulated by it.
   When the console cannot read the head, it answers 503 and the executor tries again.
 - A total of fills from one source carries that source's tag, as a single fill does.
-  A total of mixed fills says each source's count instead ("1 simulated", "1 on the sandbox"), never one tag for all: Activity's Filled and Paid at expiry, the Hedge page's settled totals, and the public scorecard's Filled count and settled result.
+  A total of mixed fills says each source's count instead ("1 simulated", "1 on the sandbox"), never one tag for all: Activity's Filled and Paid at expiry, the Hedge page's settled totals, and the public dashboard's Filled count and settled result.
 - The intent page, in Advanced view: the Gemini order id, its state, how much filled, the executor's note, and our client order id.
 - The Order line, on the intent page, in Activity and on Home, gives the contracts the order was placed for, which [Fees](#fees) can make fewer than the amount buys at the limit (issue #117).
   Advanced view adds what the amount buys at the limit when the two differ: "Buy NO, 10 at 97¢ (10.03 before the fee)".

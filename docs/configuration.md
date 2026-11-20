@@ -286,8 +286,8 @@ Its settings are public and read at build time only, so changing one means build
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `NEXT_PUBLIC_APP_URL` | no | The console's public address. "Launch app" links to it, and the scorecard link is built from it. Defaults to `http://localhost:3000`. |
-| `NEXT_PUBLIC_SCORECARD_AGENT` | no | The agent address whose public scorecard (`<app>/agent/<address>`) the page links to. Defaults to `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`, the devchain agent (anvil account 1), which the local stack and the hosted demo chain use. |
+| `NEXT_PUBLIC_APP_URL` | no | The console's public address. "Launch app" links to it, and the public dashboard link is built from it. Defaults to `http://localhost:3000`. |
+| `NEXT_PUBLIC_DASHBOARD_AGENT` | no | The agent address whose public dashboard (`<app>/agent/<address>`) the page links to. Defaults to `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`, the devchain agent (anvil account 1), which the local stack and the hosted demo chain use. |
 | `NEXT_PUBLIC_REPO_URL` | no | The repository's address, linked from the footer as "Source on GitHub". Empty (the default) hides the link, so linking the source is a deliberate choice. |
 | `NEXT_PUBLIC_SITE_URL` | yes, when hosted | The landing page's own public address, such as `https://mandate.example`. Link previews (Open Graph and Twitter cards) need absolute URLs, so the preview image and the page address are built from it. Defaults to `http://localhost:3001`, the local stack's site, which is wrong anywhere else; `deploy/build-site.sh` therefore refuses to build without it (or a named `MANDATE_SITE_ADDRESS`). |
 

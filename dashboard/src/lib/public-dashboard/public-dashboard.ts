@@ -1,5 +1,5 @@
 /**
- * The public scorecard of the contract's agent (issue #38): every number read from the Policy
+ * The public dashboard of the contract's agent (issue #38): every number read from the Policy
  * contract's events, each with the transactions behind it so anyone can check it onchain.
  *
  * It is built from the chain, plus one offchain record: what filled positions paid when their markets
@@ -69,7 +69,7 @@ export interface RecentIntent {
   txHash: Hex;
 }
 
-export interface PublicScorecard {
+export interface PublicDashboard {
   /** The newest block the numbers include. */
   asOf: { blockNumber: number; timestamp: number };
   mandate: {
@@ -137,9 +137,9 @@ function proof(event: PolicyEvent): Proof {
   };
 }
 
-export function buildScorecard(
+export function buildPublicDashboard(
   chain: Pick<ChainView, "events" | "intents" | "head" | "rules" | "paused" | "settlements">,
-): PublicScorecard {
+): PublicDashboard {
   const firstTx = new Map<number, string>();
   const proposed = new Tally();
   const approved = new Tally();
@@ -255,7 +255,7 @@ export function buildScorecard(
   };
 }
 
-function settledOutcomes(settlements: ChainView["settlements"]): PublicScorecard["settled"] {
+function settledOutcomes(settlements: ChainView["settlements"]): PublicDashboard["settled"] {
   const docs = Object.values(settlements).flatMap((view) =>
     view.status === "verified" ? [view.document] : [],
   );

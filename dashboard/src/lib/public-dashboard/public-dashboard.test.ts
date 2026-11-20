@@ -6,12 +6,12 @@ import { fixtureContext, fixtureRules, fixtureSnapshot } from "@/fixtures";
 import { buildChainView } from "@/lib/live/chain-view";
 import type { ChainView } from "@/lib/live/types";
 
-import { PROOF_LIMIT, RECENT_LIMIT, buildScorecard, publicAgentName } from "./scorecard";
+import { PROOF_LIMIT, RECENT_LIMIT, buildPublicDashboard, publicAgentName } from "./public-dashboard";
 
 const fixture = fixtureSnapshot.chain;
 if (!fixture) throw new Error("the fixture snapshot has a chain");
 
-/** The scorecard's numbers, recounted from the audit trail's rows. */
+/** The public dashboard's numbers, recounted from the audit trail's rows. */
 function fromAudit(chain: Pick<ChainView, "events" | "intents">) {
   const rows = auditRows(chain);
   const count = (keep: (row: (typeof rows)[number]) => boolean) => rows.filter(keep).length;
@@ -30,7 +30,7 @@ function fromAudit(chain: Pick<ChainView, "events" | "intents">) {
 }
 
 function numbers(chain: ChainView) {
-  const card = buildScorecard(chain);
+  const card = buildPublicDashboard(chain);
   return {
     version: card.mandate.version,
     proposed: card.proposed.count,
@@ -121,7 +121,7 @@ function longHistory(intents: number): ChainView {
   return buildChainView(reduceEvents(events), { blockNumber: block, timestamp: 1_800_000_000 + block * 12 });
 }
 
-describe("buildScorecard", () => {
+describe("buildPublicDashboard", () => {
   it("counts exactly what the audit trail shows, on the fixture history", () => {
     expect(numbers(fixture)).toEqual(fromAudit(fixture));
   });
@@ -140,7 +140,7 @@ describe("buildScorecard", () => {
 
   it("adds the hedge outcome from the recorded results, as the reducer does", () => {
     const chain = longHistory(60);
-    const card = buildScorecard(chain);
+    const card = buildPublicDashboard(chain);
     expect(card.fills.recordedPnlCents).toBe(chain.realizedPnlCents);
     expect(card.fills.filledCents).toBe(10 * 500);
     expect(card.proposed.count).toBe(chain.intents.length);
@@ -158,16 +158,16 @@ describe("buildScorecard", () => {
           }
         : event,
     );
-    const card = buildScorecard({ ...chain, events });
-    expect(card.fills.filled.count).toBe(buildScorecard(chain).fills.filled.count);
+    const card = buildPublicDashboard({ ...chain, events });
+    expect(card.fills.filled.count).toBe(buildPublicDashboard(chain).fills.filled.count);
     expect(card.fills.outOfRange).toBe(1);
-    expect(card.fills.filledCents).toBe(buildScorecard(chain).fills.filledCents - 500);
-    expect(card.fills.recordedPnlCents).toBe(buildScorecard(chain).fills.recordedPnlCents + 20);
+    expect(card.fills.filledCents).toBe(buildPublicDashboard(chain).fills.filledCents - 500);
+    expect(card.fills.recordedPnlCents).toBe(buildPublicDashboard(chain).fills.recordedPnlCents + 20);
   });
 
   it("lists the newest transactions behind each number, and no more than the cap", () => {
     const chain = longHistory(60);
-    const card = buildScorecard(chain);
+    const card = buildPublicDashboard(chain);
     expect(card.proposed.proofs).toHaveLength(PROOF_LIMIT);
     expect(card.proposed.proofs[0]?.intentId).toBe(59);
     const filledTxs = chain.events
@@ -186,7 +186,7 @@ describe("buildScorecard", () => {
       ...fixture,
       intents: fixture.intents.map((intent, index) => (index === 0 ? { ...intent, market: huge } : intent)),
     };
-    const card = buildScorecard(chain);
+    const card = buildPublicDashboard(chain);
     // The market is the chain view's own string, for MarketName, which never prints it raw: the rest
     // of the card stays small however large the onchain strings are.
     const json = JSON.stringify(card, (key, value: unknown) => (key === "market" ? undefined : value));
@@ -203,7 +203,7 @@ describe("buildScorecard", () => {
   });
 
   it("counts settled outcomes the executor signed, as totals only, and never a tampered one", () => {
-    expect(buildScorecard(fixture).settled).toEqual({
+    expect(buildPublicDashboard(fixture).settled).toEqual({
       positions: 0,
       costCents: 0,
       feeCents: 0,
@@ -241,7 +241,7 @@ describe("buildScorecard", () => {
         storedAt: "2026-11-20T22:01:00.000Z",
         document: doc,
       }) as const;
-    const card = buildScorecard({
+    const card = buildPublicDashboard({
       ...fixture,
       settlements: {
         0: verified(document(0, true)),

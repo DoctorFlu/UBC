@@ -34,7 +34,7 @@ test("the icons are images, and public on the hosted console", async ({ page }) 
   expect(PUBLIC_PATHS).toContain("/favicon.ico");
   const head = watchRebuilds(page);
 
-  // A console page (behind the login when hosted), the public scorecard, and a page that is not there.
+  // A console page (behind the login when hosted), the public dashboard, and a page that is not there.
   for (const path of ["/", `/agent/${AGENT_ADDRESS}`, "/no-such-page"]) {
     await page.goto(path);
     const icons = await declaredIcons(page);

@@ -17,7 +17,7 @@ const baseURL = `http://localhost:${PORT.toString()}`;
 
 export const TEST_APP_URL = "https://app.example.test";
 export const TEST_SITE_URL = "https://site.example.test";
-export const TEST_SCORECARD_AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+export const TEST_DASHBOARD_AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
 const phone = { ...devices["Pixel 7"], viewport: { width: 360, height: 780 }, deviceScaleFactor: 2 };
 const desktop = { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } };
@@ -46,7 +46,7 @@ export default defineConfig({
     env: {
       NEXT_PUBLIC_APP_URL: TEST_APP_URL,
       NEXT_PUBLIC_SITE_URL: TEST_SITE_URL,
-      NEXT_PUBLIC_SCORECARD_AGENT: TEST_SCORECARD_AGENT,
+      NEXT_PUBLIC_DASHBOARD_AGENT: TEST_DASHBOARD_AGENT,
       NEXT_PUBLIC_REPO_URL: "",
     },
   },

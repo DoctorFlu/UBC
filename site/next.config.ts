@@ -30,8 +30,8 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_APP_URL: url("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
     // The devchain's agent (anvil account 1), which the local stack and the hosted demo chain both use.
-    NEXT_PUBLIC_SCORECARD_AGENT: address(
-      "NEXT_PUBLIC_SCORECARD_AGENT",
+    NEXT_PUBLIC_DASHBOARD_AGENT: address(
+      "NEXT_PUBLIC_DASHBOARD_AGENT",
       "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     ),
     NEXT_PUBLIC_REPO_URL: url("NEXT_PUBLIC_REPO_URL", ""),

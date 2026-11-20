@@ -17,7 +17,7 @@ The hosted demo runs on **Arc testnet** since 18 November 2026, against our own 
 It is built from the same source, `contracts/src/Policy.sol`, and `npm run arc:doctor` checks its code byte for byte against that build ([docs/configuration.md](docs/configuration.md#our-own-instance-or-the-teams)).
 The team's first deployment, `0x571D…82f3` in [contracts/README.md](contracts/README.md), is the same contract; ours exists so that its roles name the stack's own keys.
 The console needs a passkey sign-in, and a workspace there is opened with a code from the operator ([docs/accounts.md](docs/accounts.md#sign-in)).
-Two pages need no sign-in: the landing page, and the agent's public scorecard at [`/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E`](https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E), which the landing page links to.
+Two pages need no sign-in: the landing page, and the agent's public dashboard at [`/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E`](https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E), which the landing page links to.
 
 <!-- #96 (members, roles and hosted sign-up): when it is merged, say here how a visitor signs up on the hosted demo. -->
 
@@ -194,7 +194,7 @@ Each payment's receipt id is part of the sealed reason of the orders it informed
 The Stream is designed as the console's source of Policy events on **Arc testnet** (network `arc-testnet`) with the **Logs** dataset.
 Its **filter**, [streams/filter.js](streams/filter.js), runs on QuickNode's side and keeps only the Policy contract's logs.
 Its **destination** is the console's webhook, `/api/webhooks/quicknode`, which verifies the `X-QN-Signature` HMAC, refuses stale deliveries, and stores each event once by transaction hash and log index.
-It is core because the activity feed, the approval queue, the audit trail, the scorecard and the Bot's wake-ups are all built from these events, and the Stream and the RPC poller end in the same function ([docs/event-wake.md](docs/event-wake.md)).
+It is core because the activity feed, the approval queue, the audit trail, the public dashboard and the Bot's wake-ups are all built from these events, and the Stream and the RPC poller end in the same function ([docs/event-wake.md](docs/event-wake.md)).
 No Stream is active yet; [streams/scripts/quicknode-stream.ts](streams/scripts/quicknode-stream.ts) creates, pauses and prices it, and [docs/quicknode-streams.md](docs/quicknode-streams.md) has the design and the credit budget.
 
 **Gemini.**

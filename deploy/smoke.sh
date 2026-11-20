@@ -10,8 +10,8 @@
 #   CONSOLE_SESSION     a member's session: the value of the console's session cookie, copied from a signed-in
 #                       browser. Without it, the test checks that every member route refuses everyone, and
 #                       skips the checks that need a session.
-#   SMOKE_AGENT_ADDRESS the first mandate's agent address, for the public scorecard (it is public: the
-#                       scorecard's URL). Only the first mandate's agent has a scorecard (docs/accounts.md).
+#   SMOKE_AGENT_ADDRESS the first mandate's agent address, for the public dashboard (it is public: the
+#                       public dashboard's URL). Only the first mandate's agent has a public dashboard (docs/accounts.md).
 #                       Without it, the token's agent is used, so set it when MCP_AUTH_TOKEN is another
 #                       mandate's token, or not given.
 #   SMOKE_CA_CERT       a CA certificate to trust, for a host with a private certificate (localhost)
@@ -170,15 +170,15 @@ request none GET /claim --header "Accept: text/html"
 check "claim page without a session (GET /claim -> $status $(location))" \
   '[ "$status" = 200 ] || { [ "$status" = 307 ] && location | grep -q "/sign-in$"; }'
 expect "who is signed in, without a session" none GET /api/auth/session 401
-# The scorecard is the first mandate's agent's: SMOKE_AGENT_ADDRESS when given, else the token's agent.
-scorecard="${SMOKE_AGENT_ADDRESS:-$agent}"
-if [ -n "$scorecard" ]; then
-  expect "public scorecard without a session" none GET "/agent/$scorecard" 200
-  check "the scorecard page loads its assets" 'grep -q "/_next/static/" "$work/body"'
+# The public dashboard is the first mandate's agent's: SMOKE_AGENT_ADDRESS when given, else the token's agent.
+dashboard_agent="${SMOKE_AGENT_ADDRESS:-$agent}"
+if [ -n "$dashboard_agent" ]; then
+  expect "public dashboard without a session" none GET "/agent/$dashboard_agent" 200
+  check "the public dashboard page loads its assets" 'grep -q "/_next/static/" "$work/body"'
   asset="$(sed -n 's/.*\(\/_next\/static\/[^"]*\.js\)".*/\1/p' "$work/body" | head -n 1)"
-  [ -n "$asset" ] && expect "the scorecard's scripts without a session" none GET "$asset" 200
+  [ -n "$asset" ] && expect "the public dashboard's scripts without a session" none GET "$asset" 200
 else
-  fail "the agent's address, for the scorecard (from the MCP server, or set SMOKE_AGENT_ADDRESS)"
+  fail "the agent's address, for the public dashboard (from the MCP server, or set SMOKE_AGENT_ADDRESS)"
 fi
 # Every page links these, the sign-in page's browser tab included.
 for path in /favicon.ico /icon.svg /apple-icon.png; do

@@ -24,7 +24,7 @@ type AdvancedPreference = ReturnType<typeof createAdvanced>;
 
 const AdvancedContext = createContext<AdvancedPreference | null>(null);
 
-// Pages outside the console (the public scorecard) have no provider and always read as default.
+// Pages outside the console (the public dashboard) have no provider and always read as default.
 const alwaysOff = createPreference({ values: VALUES, defaultValue: "off", attribute: "data-advanced" });
 
 /**

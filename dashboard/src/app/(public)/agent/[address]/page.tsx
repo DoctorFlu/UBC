@@ -3,27 +3,31 @@ import { notFound } from "next/navigation";
 import { isAddress, isAddressEqual } from "viem";
 
 import { ChainUnavailable } from "@/components/states/ChainStates";
-import { ScorecardView } from "@/features/scorecard";
+import { PublicDashboardView } from "@/features/public-dashboard";
 import { NetworkProvider } from "@/lib/live/LiveConsole";
 import type { ChainView } from "@/lib/live/types";
 import { fillShares, filledIntentIds } from "@/lib/network";
-import { type PublicScorecard, buildScorecard, publicAgentName } from "@/lib/scorecard/scorecard";
+import {
+  type PublicDashboard,
+  buildPublicDashboard,
+  publicAgentName,
+} from "@/lib/public-dashboard/public-dashboard";
 import { getConsoleService } from "@/server/console";
 
 export const dynamic = "force-dynamic";
 
 /**
- * One scorecard per chain view. The console service hands out the same snapshot until the chain changes,
+ * One public dashboard per chain view. The console service hands out the same snapshot until the chain changes,
  * so a request costs a lookup however often the public page is loaded: the work is bounded by new
  * events, not by visitors. Weak keys let an old view go with its snapshot.
  */
-const scorecards = new WeakMap<ChainView, PublicScorecard>();
+const publicDashboards = new WeakMap<ChainView, PublicDashboard>();
 
-function scorecardOf(chain: ChainView): PublicScorecard {
-  let card = scorecards.get(chain);
+function publicDashboardOf(chain: ChainView): PublicDashboard {
+  let card = publicDashboards.get(chain);
   if (!card) {
-    card = buildScorecard(chain);
-    scorecards.set(chain, card);
+    card = buildPublicDashboard(chain);
+    publicDashboards.set(chain, card);
   }
   return card;
 }
@@ -31,10 +35,10 @@ function scorecardOf(chain: ChainView): PublicScorecard {
 /**
  * The contract's agent, named as it announced itself when that announcement came from the same key.
  * Nothing caller-chosen reaches a store: an address that is not the contract's agent is a 404 before any
- * other work. The scorecard is of the server's own contract, whose record is public onchain; no other
+ * other work. The public dashboard is of the server's own contract, whose record is public onchain; no other
  * mandate has one yet (docs/accounts.md).
  */
-function scorecardAgent(address: string) {
+function publicDashboardAgent(address: string) {
   const service = getConsoleService();
   const snapshot = service.snapshot(service.accounts.store.envMandate());
   const agent = snapshot.contract?.roles?.agent;
@@ -47,26 +51,26 @@ function scorecardAgent(address: string) {
 
 export async function generateMetadata({ params }: PageProps<"/agent/[address]">): Promise<Metadata> {
   const { address } = await params;
-  const { known, agent, paired } = scorecardAgent(address);
-  if (!known || !agent) return { title: "Agent scorecard" };
-  return { title: `${publicAgentName(paired?.agentName ?? null, agent)} scorecard` };
+  const { known, agent, paired } = publicDashboardAgent(address);
+  if (!known || !agent) return { title: "Agent dashboard" };
+  return { title: `${publicAgentName(paired?.agentName ?? null, agent)} dashboard` };
 }
 
 /** Public and wallet-free: anyone with the link can check the agent's record, read from the chain. */
-export default async function AgentScorecardPage({ params }: PageProps<"/agent/[address]">) {
+export default async function AgentDashboardPage({ params }: PageProps<"/agent/[address]">) {
   const { address } = await params;
-  const { snapshot, known, agent, paired } = scorecardAgent(address);
+  const { snapshot, known, agent, paired } = publicDashboardAgent(address);
   const roles = snapshot.contract?.roles;
   const contract = snapshot.contract?.address;
-  // Until the console has read the contract it can't say whose scorecard this is.
+  // Until the console has read the contract it can't say whose public dashboard this is.
   if (!roles || !contract || !snapshot.chain) {
-    return <ChainUnavailable snapshot={snapshot} title="Agent scorecard" />;
+    return <ChainUnavailable snapshot={snapshot} title="Agent dashboard" />;
   }
   // Only the Policy contract's agent has a record here: every intent on it came from agent().
   if (!known || !agent) notFound();
   return (
     <NetworkProvider network={snapshot.network}>
-      <ScorecardView
+      <PublicDashboardView
         agent={{
           address: agent,
           name: publicAgentName(paired?.agentName ?? null, agent),
@@ -75,7 +79,7 @@ export default async function AgentScorecardPage({ params }: PageProps<"/agent/[
         owner={roles.user}
         contract={contract}
         network={snapshot.network}
-        card={scorecardOf(snapshot.chain)}
+        card={publicDashboardOf(snapshot.chain)}
         fills={fillShares(snapshot.chain, snapshot.network, filledIntentIds(snapshot.chain))}
       />
     </NetworkProvider>

@@ -6,10 +6,10 @@ related_targets: []
 ---
 
 Scope: the public landing page (static export) that hands off to the console. Mode: Persuade.
-Audience and job: hackathon judges and crypto-literate owners deciding in seconds whether an AI trading agent can be trusted behind Mandate; the action is "Launch app" (console origin) or "See a live scorecard".
+Audience and job: hackathon judges and crypto-literate owners deciding in seconds whether an AI trading agent can be trusted behind Mandate; the action is "Launch app" (console origin) or "See a live dashboard".
 Proof: the gate runs the product's own rule check (`evaluateIntent` from `@mandate/shared/rules`) against the demo mandate; red-team numbers from redteam/REPORT.md (16 Nov 2026); tool names from agent/src/tools.
 Constraints: brief-pinned section order and structure (Catena for structure and calm only); no claims beyond testnet and simulated fills; no eyebrows (craft floor ban); Martian Mono only for codes, tool names, symbols.
-Unresolved: final public URLs of the console and the scorecard agent (build-time settings).
+Unresolved: final public URLs of the console and the public dashboard's agent (build-time settings).
 
 ## Direction contract
 
@@ -19,7 +19,7 @@ OWN-WORLD: The console's distribution board extended to a public face: switchgea
 
 STORY: In five seconds the visitor drags a trade size and watches the contract's answer change from approved to held to rejected, with the rule that stopped it. They then see how the agent proposes, what they can check, what only their wallet can do, and launch the console.
 
-FIRST VIEWPORT: Desktop: left 5 columns, a two-line condensed headline ("Your agent trades. / You hold the breaker."), one sentence, ink "Launch app" plus a text link to the live scorecard, a one-line testnet note. Right 7 columns, the gate card at full height: trade controls on top (slider graduated with the $20 and $25 marks, typed amount, market, pause switch), the schedule of six breakers in contract order wired by one bus line, and the verdict lamp at the foot. Phone: headline, sentence, actions, then the gate full width.
+FIRST VIEWPORT: Desktop: left 5 columns, a two-line condensed headline ("Your agent trades. / You hold the breaker."), one sentence, ink "Launch app" plus a text link to the live dashboard, a one-line testnet note. Right 7 columns, the gate card at full height: trade controls on top (slider graduated with the $20 and $25 marks, typed amount, market, pause switch), the schedule of six breakers in contract order wired by one bus line, and the verdict lamp at the foot. Phone: headline, sentence, actions, then the gate full width.
 
 FORM: The established distribution-board world (console direction e85f64b4), extended to a Persuade surface; brief-pinned structure, so no concept roll was run.
 

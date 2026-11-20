@@ -7,7 +7,7 @@
 #   NEXT_PUBLIC_SITE_URL         the landing page's own public URL, which link previews need. Default
 #                                https://<MANDATE_SITE_ADDRESS> when that is a name; behind a proxy
 #                                (MANDATE_SITE_ADDRESS http://:8081) only the proxy knows it, so set it.
-#   NEXT_PUBLIC_SCORECARD_AGENT  the agent whose scorecard the page links to. Default: the site's own (the
+#   NEXT_PUBLIC_DASHBOARD_AGENT  the agent whose public dashboard the page links to. Default: the site's own (the
 #                                demo chain's agent).
 #   NEXT_PUBLIC_REPO_URL         the source link in the footer. Default empty: no link.
 #
@@ -57,7 +57,7 @@ if [ -z "$site_url" ]; then
   echo "Set NEXT_PUBLIC_SITE_URL to the landing page's public URL (on InstaBox https://8081-<machine id>.instabox.tech): link previews point at it." >&2
   exit 1
 fi
-agent="$(setting NEXT_PUBLIC_SCORECARD_AGENT)"
+agent="$(setting NEXT_PUBLIC_DASHBOARD_AGENT)"
 repo_url="$(setting NEXT_PUBLIC_REPO_URL)"
 out="$(setting MANDATE_SITE_DIR)"
 out="${out:-../site/out}"
@@ -69,7 +69,7 @@ esac
 echo "NEXT_PUBLIC_APP_URL=$app_url"
 echo "NEXT_PUBLIC_SITE_URL=$site_url"
 site_default="(the site's default)"
-echo "NEXT_PUBLIC_SCORECARD_AGENT=${agent:-$site_default}"
+echo "NEXT_PUBLIC_DASHBOARD_AGENT=${agent:-$site_default}"
 echo "NEXT_PUBLIC_REPO_URL=${repo_url:-(none)}"
 echo "folder: $out"
 if [ "${1:-}" = "--dry-run" ]; then
@@ -84,7 +84,7 @@ trap 'rm -rf "$staging"' EXIT
 docker build --file "$here/Dockerfile" --target site \
   --build-arg NEXT_PUBLIC_APP_URL="$app_url" \
   --build-arg NEXT_PUBLIC_SITE_URL="$site_url" \
-  --build-arg NEXT_PUBLIC_SCORECARD_AGENT="$agent" \
+  --build-arg NEXT_PUBLIC_DASHBOARD_AGENT="$agent" \
   --build-arg NEXT_PUBLIC_REPO_URL="$repo_url" \
   --output "type=local,dest=$staging" \
   "$here/.."

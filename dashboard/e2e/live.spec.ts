@@ -859,10 +859,10 @@ test("a plan's evidence chain says plainly when it breaks, and hostile strings n
   await shoot(page, testInfo, "hedge-request-expanded");
   await page.setViewportSize({ width: 390, height: 844 });
 
-  // The public scorecard stays phone-wide with the hostile intent on it.
+  // The public dashboard stays phone-wide with the hostile intent on it.
   await page.goto(`/agent/${AGENT_ADDRESS}`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  // The public scorecard names it "Not a Gemini market", flagged, and never prints the text itself.
+  // The public dashboard names it "Not a Gemini market", flagged, and never prints the text itself.
   const hostileRow = page
     .getByRole("row")
     .filter({ has: page.getByText(`Intent #${hostile.intentId.toString()}`, { exact: true }) });
@@ -1011,7 +1011,7 @@ test("intents a stolen agent key sent are flagged, never break the page, and nev
       await view(page, path);
       expect.soft(await overflowsViewport(page), `${path} at ${width.toString()} px`).toBe(false);
     }
-    // The public scorecard lists the same intents, flagged, to anyone (no owner session there).
+    // The public dashboard lists the same intents, flagged, to anyone (no owner session there).
     {
       const path = `/agent/${AGENT_ADDRESS}`;
       await view(page, path);
@@ -1341,14 +1341,14 @@ test("an expired ladder settles once: Hedge, Activity and the intent show what i
     await expect(page.getByTestId("intent-onchain-result")).toBeHidden();
     await shoot(page, testInfo, "intent-settled", card);
 
-    // The public scorecard counts the settled positions, from the verified records only.
+    // The public dashboard counts the settled positions, from the verified records only.
     await page.goto(`/agent/${AGENT_ADDRESS}`);
     const counted = page.getByTestId("count-settled");
     await expect(counted).toHaveAttribute("data-count", documents.length.toString());
     await expect(counted).toContainText(`paid ${formatUsdCents(paid)}`);
     await expect(page.getByText("Settled result", { exact: true })).toBeVisible();
     await expect(page.getByTestId("realized")).toHaveCount(0);
-    await shoot(page, testInfo, "scorecard-settled", counted);
+    await shoot(page, testInfo, "public-dashboard-settled", counted);
   } finally {
     executor.stop();
   }
