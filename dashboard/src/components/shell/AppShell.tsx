@@ -25,7 +25,7 @@ export function AppShell({ account, children }: { account: AccountView; children
   const snapshot = useSnapshot();
   const navCounts = { "/approvals": needsOwner(snapshot).total };
   const scope = useMandateScope();
-  // Only the first mandate's agent has a public scorecard (the server's own contract, docs/accounts.md):
+  // Only the first mandate's agent has a public dashboard (the server's own contract, docs/accounts.md):
   // another mandate's link would be a 404.
   const agent = scope?.mandate.deployment === "env" ? (snapshot.contract?.roles?.agent ?? null) : null;
   const switcher = scope ? <MandateSwitcher mandates={scope.mandates} current={scope.mandate} /> : null;
@@ -63,7 +63,7 @@ function SidebarFoot({ agent, account }: { agent: string | null; account: Accoun
         {agent ? (
           <Link href={`/agent/${agent}`} className={styles.footLink}>
             <ExternalLink aria-hidden nonScalingStroke strokeWidth={1.5} />
-            Public scorecard
+            Public dashboard
           </Link>
         ) : null}
         <AdvancedToggle />

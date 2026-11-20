@@ -1,4 +1,4 @@
-import { APP_URL, REPO_URL, SCORECARD_URL } from "../config";
+import { APP_URL, REPO_URL, PUBLIC_DASHBOARD_URL } from "../config";
 import { BrandMark } from "./Brand";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -60,7 +60,7 @@ export function Footer() {
             <a href={APP_URL}>Launch app</a>
           </li>
           <li>
-            <a href={SCORECARD_URL}>Public scorecard</a>
+            <a href={PUBLIC_DASHBOARD_URL}>Public dashboard</a>
           </li>
           {REPO_URL === "" ? null : (
             <li>

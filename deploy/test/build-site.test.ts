@@ -41,7 +41,7 @@ describe.skipIf(!hasBash)("deploy/build-site.sh", () => {
     expect(status).toBe(0);
     expect(output).toContain("NEXT_PUBLIC_APP_URL=https://8080-abc.instabox.tech\n");
     expect(output).toContain("NEXT_PUBLIC_SITE_URL=https://8081-abc.instabox.tech\n");
-    expect(output).toContain("NEXT_PUBLIC_SCORECARD_AGENT=(the site's default)\n");
+    expect(output).toContain("NEXT_PUBLIC_DASHBOARD_AGENT=(the site's default)\n");
     expect(output).toContain("NEXT_PUBLIC_REPO_URL=(none)\n");
     expect(output).toContain(`folder: ${deployDir}/../site/out\n`);
   });
@@ -53,7 +53,7 @@ describe.skipIf(!hasBash)("deploy/build-site.sh", () => {
         "MANDATE_HOST=app.example.com",
         "MANDATE_PUBLIC_URL=https://app.example.com:8443",
         "MANDATE_SITE_ADDRESS=example.com",
-        "NEXT_PUBLIC_SCORECARD_AGENT='0x70997970C51812dc3A010C7d01b50e0d17dc79C8'",
+        "NEXT_PUBLIC_DASHBOARD_AGENT='0x70997970C51812dc3A010C7d01b50e0d17dc79C8'",
         'NEXT_PUBLIC_REPO_URL="https://github.com/example/repo"',
         "MANDATE_SITE_DIR=/srv/mandate-site",
         "",
@@ -62,7 +62,7 @@ describe.skipIf(!hasBash)("deploy/build-site.sh", () => {
     let { output } = dryRun();
     expect(output).toContain("NEXT_PUBLIC_APP_URL=https://app.example.com:8443\n");
     expect(output).toContain("NEXT_PUBLIC_SITE_URL=https://example.com\n");
-    expect(output).toContain("NEXT_PUBLIC_SCORECARD_AGENT=0x70997970C51812dc3A010C7d01b50e0d17dc79C8\n");
+    expect(output).toContain("NEXT_PUBLIC_DASHBOARD_AGENT=0x70997970C51812dc3A010C7d01b50e0d17dc79C8\n");
     expect(output).toContain("NEXT_PUBLIC_REPO_URL=https://github.com/example/repo\n");
     expect(output).toContain("folder: /srv/mandate-site\n");
 

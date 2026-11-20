@@ -28,20 +28,20 @@ import {
   type Counted,
   PROOF_LIMIT,
   type Proof,
-  type PublicScorecard,
+  type PublicDashboard,
   type RecentIntent,
-} from "@/lib/scorecard/scorecard";
+} from "@/lib/public-dashboard/public-dashboard";
 
 import { FillSharesTag } from "@/components/domain/FillSourceTag";
 import type { FillShare } from "@/lib/network";
-import styles from "./scorecard.module.css";
+import styles from "./public-dashboard.module.css";
 
-export interface ScorecardData {
+export interface PublicDashboardData {
   agent: { address: Address; name: string; pairedAt: string | null };
   owner: Address;
   contract: Address;
   network: ConsoleNetwork;
-  card: PublicScorecard;
+  card: PublicDashboard;
   /** Where the counted fills came from (`fillShares`): each source's count when they differ. */
   fills: readonly FillShare[];
 }
@@ -159,14 +159,14 @@ function CountRow({
  * The agent's record as anyone can check it, with no wallet and nothing offchain: every number is read
  * from the Policy contract's events, matches the owner's audit trail, and lists the transactions behind it.
  */
-export function ScorecardView({
+export function PublicDashboardView({
   agent,
   owner,
   contract,
   network,
   card,
   fills: fillSharesOfCard,
-}: ScorecardData) {
+}: PublicDashboardData) {
   const { atProposal, owner: decisions, fills, mandate, settled } = card;
   const proposed = card.proposed.count;
   const inside = atProposal.approved.count + atProposal.held.count;

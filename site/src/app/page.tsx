@@ -1,5 +1,5 @@
 import { Footer, Nav, SkipLink } from "../components/Chrome";
-import { APP_URL, SCORECARD_URL } from "../config";
+import { APP_URL, PUBLIC_DASHBOARD_URL } from "../config";
 import { Gate } from "../features/gate/Gate";
 import { AgentExchange } from "../features/landing/AgentExchange";
 import { DecideVignette, MandateVignette, ProposeVignette } from "../features/landing/Vignettes";
@@ -43,8 +43,8 @@ const PROOFS = [
     body: "We ran 47 scripted attacks on a test chain, through the MCP server and straight at the contract: 42 were stopped, 5 went through but stayed inside the mandate's limits, and none broke it.",
   },
   {
-    title: "A public scorecard",
-    body: "Anyone can open an agent's scorecard and see every order it proposed and what the contract said.",
+    title: "A public dashboard",
+    body: "Anyone can open an agent's public dashboard and see every order it proposed and what the contract said.",
   },
 ] as const;
 
@@ -110,8 +110,8 @@ export default function Home() {
               <a className={styles.primary} href={APP_URL}>
                 Launch app
               </a>
-              <a className={styles.secondary} href={SCORECARD_URL}>
-                See a live scorecard
+              <a className={styles.secondary} href={PUBLIC_DASHBOARD_URL}>
+                See a live dashboard
               </a>
             </div>
             <p className={styles.note}>
@@ -225,8 +225,8 @@ export default function Home() {
             <a className={styles.primary} href={APP_URL}>
               Launch app
             </a>
-            <a className={styles.secondary} href={SCORECARD_URL}>
-              See a live scorecard
+            <a className={styles.secondary} href={PUBLIC_DASHBOARD_URL}>
+              See a live dashboard
             </a>
           </div>
         </section>

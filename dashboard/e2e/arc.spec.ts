@@ -153,7 +153,7 @@ test("on Arc, before the executor names its venue, every fill says its source is
   await expect(page.getByTestId("simulated-fill")).toHaveCount(0);
 });
 
-test("on Arc with the simulated venue, the top bar, Activity, the intent, Audit and the public scorecard say the fills are simulated", async ({
+test("on Arc with the simulated venue, the top bar, Activity, the intent, Audit and the public dashboard say the fills are simulated", async ({
   page,
 }) => {
   const sign = executorSign;
@@ -347,7 +347,7 @@ test("after the switch to Gemini's sandbox, earlier fills still say simulated an
   await expect(page.getByTestId("simulated-fill").filter({ visible: true })).toHaveCount(1);
   await expect(page.getByTestId("sandbox-fill").filter({ visible: true })).toHaveCount(1);
 
-  // The public scorecard splits its Filled count the same way.
+  // The public dashboard splits its Filled count the same way.
   await page.goto(`/agent/${devAccount("agent").address}`);
   const filled = page.getByTestId("count-filled");
   await expect(filled.getByTestId("simulated-fill")).toHaveText("1 simulated");

@@ -76,10 +76,10 @@ for (const scheme of schemes) {
             await expect(page.locator("html[data-page-hydrated]")).toBeAttached();
             // The badge renders once for wide screens and once for phones; one of them shows.
             await expect(page.getByTestId("dev-signer-badge").filter({ visible: true })).toHaveCount(1);
-            // The first mandate's agent is the one with a public scorecard; the sidebar links it.
+            // The first mandate's agent is the one with a public dashboard; the sidebar links it.
             if (viewport.name === "desktop") {
               await expect(
-                page.getByRole("link", { name: "Public scorecard" }).filter({ visible: true }),
+                page.getByRole("link", { name: "Public dashboard" }).filter({ visible: true }),
               ).toHaveCount(1);
             }
           } else {
@@ -468,7 +468,7 @@ test.describe("seeded demo", () => {
     expect(problems).toEqual([]);
   });
 
-  test("the public scorecard counts exactly what the audit trail shows, and nothing private", async ({
+  test("the public dashboard counts exactly what the audit trail shows, and nothing private", async ({
     page,
     context,
     baseURL,
@@ -496,7 +496,7 @@ test.describe("seeded demo", () => {
     }
 
     // Blocked by rule: the same numbers as the audit page's own card.
-    const scorecardBlocked = await page
+    const dashboardBlocked = await page
       .getByTestId("count-blocked")
       .evaluateAll((items) =>
         items.map((item) => [
@@ -516,8 +516,8 @@ test.describe("seeded demo", () => {
           item.querySelector("dd")?.textContent ?? "",
         ]),
       );
-    expect(scorecardBlocked).toEqual(auditBlocked);
-    expect(scorecardBlocked.length).toBeGreaterThan(0);
+    expect(dashboardBlocked).toEqual(auditBlocked);
+    expect(dashboardBlocked.length).toBeGreaterThan(0);
 
     // Each number lists the transactions behind it, and every one is a Policy contract event.
     await gotoHydrated(page, `/agent/${AGENT_ADDRESS}`);

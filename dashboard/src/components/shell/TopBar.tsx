@@ -20,7 +20,7 @@ import { WalletButton } from "./WalletButton";
 
 export interface TopBarProps {
   navCounts: Partial<Record<string, number>>;
-  /** The sidebar's footer (scorecard link, Advanced view, theme), repeated in the phone drawer. */
+  /** The sidebar's footer (public dashboard link, Advanced view, theme), repeated in the phone drawer. */
   foot: ReactNode;
 }
 

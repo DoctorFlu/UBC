@@ -399,8 +399,8 @@ test.describe("a second workspace", () => {
     // His passkey is the owner here, never the dev signer's public anvil key.
     await expect(page.getByTestId("passkey-owner")).toBeVisible();
     await expect(page.getByTestId("dev-signer-badge")).toHaveCount(0);
-    // Only the first mandate's agent has a public scorecard: no link to a page that would be a 404.
-    await expect(page.getByRole("link", { name: "Public scorecard" })).toHaveCount(0);
+    // Only the first mandate's agent has a public dashboard: no link to a page that would be a 404.
+    await expect(page.getByRole("link", { name: "Public dashboard" })).toHaveCount(0);
     await page.getByRole("button", { name: "Review and confirm" }).click();
     const review = page.getByRole("dialog", { name: "Review the first rules" });
     await shotOf(review, testInfo, "rules-passkey-1440-light");

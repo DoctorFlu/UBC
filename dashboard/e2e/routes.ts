@@ -33,7 +33,7 @@ export const routes: readonly RouteCase[] = [
   { name: "audit", path: "/audit", heading: "Audit", console: true },
   { name: "setup", path: "/setup", heading: "Setup", console: true },
   { name: "pair", path: `/setup/pair/${AGENT_ADDRESS}`, heading: "Confirm the agent", console: true },
-  { name: "scorecard", path: `/agent/${AGENT_ADDRESS}`, heading: "Grok Bot", console: false },
+  { name: "public-dashboard", path: `/agent/${AGENT_ADDRESS}`, heading: "Grok Bot", console: false },
   { name: "components", path: "/dev/components", heading: "Components", console: false },
 ];
 

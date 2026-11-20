@@ -181,7 +181,7 @@ export function LiveConsoleProvider({
   );
 }
 
-/** For pages outside the live console (the public scorecard) that still link to the explorer. */
+/** For pages outside the live console (the public dashboard) that still link to the explorer. */
 export function NetworkProvider({ network, children }: { network: ConsoleNetwork; children: ReactNode }) {
   return <NetworkContext value={network}>{children}</NetworkContext>;
 }

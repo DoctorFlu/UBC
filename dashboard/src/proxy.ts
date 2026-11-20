@@ -18,7 +18,7 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // Console pages only: not the API (each route answers 401 itself), the account pages, the public
-  // scorecard, the component gallery, Next's own files or the icons.
+  // public dashboard, the component gallery, Next's own files or the icons.
   matcher: [
     "/((?!api/|_next/|sign-in|sign-up|claim|recover|agent/|dev/|favicon.ico|icon.svg|apple-icon.png).*)",
   ],

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { TEST_APP_URL, TEST_SCORECARD_AGENT } from "../playwright.config";
+import { TEST_APP_URL, TEST_DASHBOARD_AGENT } from "../playwright.config";
 
 const verdict = (page: Page) => page.getByTestId("verdict");
 const rule = (page: Page, id: string) => page.locator(`[data-testid="schedule"] [data-rule="${id}"]`);
@@ -22,8 +22,8 @@ test("one h1, the landmarks, and links that follow the build's settings", async 
   for (const link of await page.getByRole("link", { name: "Launch app" }).all()) {
     await expect(link).toHaveAttribute("href", TEST_APP_URL);
   }
-  for (const link of await page.getByRole("link", { name: /scorecard/i }).all()) {
-    await expect(link).toHaveAttribute("href", `${TEST_APP_URL}/agent/${TEST_SCORECARD_AGENT}`);
+  for (const link of await page.getByRole("link", { name: /dashboard/i }).all()) {
+    await expect(link).toHaveAttribute("href", `${TEST_APP_URL}/agent/${TEST_DASHBOARD_AGENT}`);
   }
   // The repository link is off unless configured.
   await expect(page.getByRole("link", { name: /GitHub/ })).toHaveCount(0);
