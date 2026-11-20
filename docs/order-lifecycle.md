@@ -91,7 +91,7 @@ The console (all from the verified records only):
 - Activity: an "At expiry" column with what each settled position paid and its net, and a "Paid at expiry" total.
 - Intent detail: an "At expiry" card with the resolution, cost, payout and net, and in Advanced view the signer and the hash.
 - The Order line, on the intent page, in Activity and on Home: the contracts the order was placed for on a real venue, sized for its fee, and in Advanced view what the amount buys at the limit when that differs ([gemini-venue.md](gemini-venue.md#the-console)).
-- The public scorecard counts settled positions with their cost, payout and net, and says they are recorded offchain, signed by the executor.
+- The public dashboard counts settled positions with their cost, payout and net, and says they are recorded offchain, signed by the executor.
 
 The agent (no tool input changed):
 

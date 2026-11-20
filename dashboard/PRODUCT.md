@@ -13,7 +13,7 @@ web
 The owner: a crypto-literate person who lets an AI agent (Grok Bot, connected over MCP) trade Gemini prediction markets with their money.
 They write a mandate once, watch every trade intent, approve or reject the ones held for them, and pause the agent when something looks wrong.
 They use the console on a laptop and on a phone, often away from a desk when an approval arrives.
-A second audience reads the public agent scorecard without a wallet.
+A second audience reads the public agent dashboard without a wallet.
 For the hackathon, judges watch it live on a projector and on a phone.
 
 ## Product Purpose
@@ -27,7 +27,7 @@ Success: the owner always knows what the agent did, why, and under which rule, a
 
 The mandate is onchain: anyone can read the rules an agent runs under and every verdict it received.
 Verdicts, not errors: approved, held, or rejected with a reason code.
-Risk rules (daily loss limit, budget, max order size), a backtest of a draft mandate, sealed decision context, a public scorecard, and one kill switch.
+Risk rules (daily loss limit, budget, max order size), a backtest of a draft mandate, sealed decision context, a public dashboard, and one kill switch.
 
 ## Voice
 

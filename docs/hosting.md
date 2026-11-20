@@ -47,7 +47,7 @@ How workspaces, passkeys, sessions and agent tokens work is in [accounts.md](acc
 | `/mcp/health` | anyone | None; it says only that the server is up. |
 | `/api/webhooks/quicknode` | QuickNode | The console verifies QuickNode's HMAC signature and refuses stale or unsigned deliveries. |
 | `/sign-in`, `/sign-up`, `/claim`, `/recover` and `/api/auth/*` | anyone | The way to a session: passkeys, invite, claim and recovery codes, each rate limited by the console. |
-| `/agent/<address>` and its scripts under `/_next/static/` | anyone | None; this is the public scorecard, and it links to nothing private. |
+| `/agent/<address>` and its scripts under `/_next/static/` | anyone | None; this is the public dashboard, and it links to nothing private. |
 | `/api/health` | anyone | None; it reports only `ok` and the feed's health. |
 | `/api/agent/*` | nobody | Answers 404 publicly. The MCP server reaches it inside the Docker network with `CONSOLE_SERVICE_TOKEN`. |
 | `/rpc` (demo chain only) | members of the first workspace | A session in the workspace that holds the demo chain's mandate. It forwards to anvil, so the browser's test signer can send transactions. |
@@ -214,11 +214,11 @@ export MCP_AUTH_TOKEN="$(sed -n 's/^MCP_AUTH_TOKEN=//p' .env)"
 ./smoke.sh https://<host>
 ```
 
-Without `MCP_AUTH_TOKEN` it skips the MCP checks that need a token, so it can run from a machine that should not hold one; set `SMOKE_AGENT_ADDRESS` to the first mandate's agent address then, for the scorecard check.
-Only the first mandate's agent has a public scorecard, so with another mandate's token set `SMOKE_AGENT_ADDRESS` too; otherwise the check uses the token's agent.
+Without `MCP_AUTH_TOKEN` it skips the MCP checks that need a token, so it can run from a machine that should not hold one; set `SMOKE_AGENT_ADDRESS` to the first mandate's agent address then, for the public dashboard check.
+Only the first mandate's agent has a public dashboard, so with another mandate's token set `SMOKE_AGENT_ADDRESS` too; otherwise the check uses the token's agent.
 With `CONSOLE_SESSION`, the value of the console's session cookie copied from a signed-in browser (`read -rs CONSOLE_SESSION && export CONSOLE_SESSION`), it also checks the signed-in routes.
 
-It checks both health endpoints, that `/mcp` refuses a request without a token or with an unknown one and answers `initialize`, `tools/list` and a read-only `whoami` call with the token, that member APIs answer 401 without a session or with a wrong one and pages send the browser to `/sign-in`, that nothing asks for a password, that cross-site writes and sign-ins are refused, that the account pages, the scorecard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs a session.
+It checks both health endpoints, that `/mcp` refuses a request without a token or with an unknown one and answers `initialize`, `tools/list` and a read-only `whoami` call with the token, that member APIs answer 401 without a session or with a wrong one and pages send the browser to `/sign-in`, that nothing asks for a password, that cross-site writes and sign-ins are refused, that the account pages, the public dashboard and its scripts are public, that the webhook checks its own signature, that `/api/agent/*` is not public, and, on the demo chain, that `/rpc` needs a session.
 With a session it also checks the console, the snapshot, the Agents data and the live event stream.
 It ends with `All checks passed.`
 
@@ -361,7 +361,7 @@ docker compose up -d
 ```
 
 [`build-site.sh`](../deploy/build-site.sh) builds it with Docker (the Dockerfile's `site` stage, from the same install as the console), so the host needs no Node.js; once the console has been built it takes about 10 seconds and 1.3 GB of memory.
-It bakes in four public settings from the env file: `NEXT_PUBLIC_APP_URL` (default `MANDATE_PUBLIC_URL`, else `https://<MANDATE_HOST>`), `NEXT_PUBLIC_SITE_URL` (the site's own URL, which link previews need: default `https://<MANDATE_SITE_ADDRESS>` when that is a name, and required in gateway mode), `NEXT_PUBLIC_SCORECARD_AGENT` (default the demo chain's agent) and `NEXT_PUBLIC_REPO_URL` (default empty, no source link).
+It bakes in four public settings from the env file: `NEXT_PUBLIC_APP_URL` (default `MANDATE_PUBLIC_URL`, else `https://<MANDATE_HOST>`), `NEXT_PUBLIC_SITE_URL` (the site's own URL, which link previews need: default `https://<MANDATE_SITE_ADDRESS>` when that is a name, and required in gateway mode), `NEXT_PUBLIC_DASHBOARD_AGENT` (default the demo chain's agent) and `NEXT_PUBLIC_REPO_URL` (default empty, no source link).
 It replaces the folder's contents only when the build succeeds, and in place, so a running Caddy serves the new pages at once.
 Caddy serves `site/out` (or `MANDATE_SITE_DIR`) on a second listener, `MANDATE_SITE_ADDRESS`.
 Files under `/_next/static/` carry a content hash, so they are cached for a year; everything else is revalidated on every visit.
@@ -464,7 +464,7 @@ Publish the app's port, and only that one (never anvil's 8545 or the signal API'
 instabox port publish mandate 8080 --name "Mandate app"
 ```
 
-For the landing page, add `compose.site.yml` to `COMPOSE_FILE` and set `NEXT_PUBLIC_SITE_URL` (`https://8081-<machine id>.instabox.tech`) and `NEXT_PUBLIC_REPO_URL` (and `NEXT_PUBLIC_SCORECARD_AGENT`, for another agent) in the env file, then build it, apply, and publish its port:
+For the landing page, add `compose.site.yml` to `COMPOSE_FILE` and set `NEXT_PUBLIC_SITE_URL` (`https://8081-<machine id>.instabox.tech`) and `NEXT_PUBLIC_REPO_URL` (and `NEXT_PUBLIC_DASHBOARD_AGENT`, for another agent) in the env file, then build it, apply, and publish its port:
 
 ```sh
 MANDATE_ENV_FILE=/data/mandate/mandate.env ./build-site.sh
@@ -810,7 +810,7 @@ Measured on the free plan with the demo chain running and nobody using it:
 Each wake starts a new run of at most 120 minutes.
 With 5 minutes left, InstaBox looks at the last 30 minutes: 5 or more minutes of use add 120 minutes, 1 to 4 add 30, none lets the run end; one run lasts at most 480 minutes.
 When a run ends, the machine pauses for a cooldown of 5 to 20 minutes (60 to 75 for a second one in a row, 120 to 135 after that).
-During a cooldown nothing wakes the machine: the published URL fails (InstaBox documents `409 machine_cooldown` with a `Retry-After`; this setup has not met a cooldown yet), so the console, the scorecard and Grok Bot's connector are all unreachable until it ends.
+During a cooldown nothing wakes the machine: the published URL fails (InstaBox documents `409 machine_cooldown` with a `Retry-After`; this setup has not met a cooldown yet), so the console, the public dashboard and Grok Bot's connector are all unreachable until it ends.
 An idle pause owes no cooldown and ends the run, so a machine that rests between visits rarely meets one.
 
 Event wake-ups of Grok Bot's routine ([event-wake.md](event-wake.md)) add no timer: chain triggers ride on the console's poll and price checks run on it at most every 5 minutes.
@@ -963,7 +963,7 @@ The hosted machine switched on 18 November 2026, to our own instance `0x9a24…4
 - the executor logged `SIMULATED executor ... on Arc testnet (public RPC) as 0x0F7e…4390; serving 0x9a24…412d` and `serving ... from block 72777078`, and the console `reading Policy 0x9a24…412d on Arc testnet from block 72777078`;
 - `/` sends a signed-out visitor to `/sign-in`, which offers the passkey sign-in, a new workspace, a recovery code and the claim; the smoke test, `get_setup_state` through the public URL, and the doctor (`READY`) passed before the owner's claim.
 
-Set `NEXT_PUBLIC_SCORECARD_AGENT` to the Arc agent's address and rebuild the site (`build-site.sh`) in the same step, or the landing page keeps linking to the demo chain's agent.
+Set `NEXT_PUBLIC_DASHBOARD_AGENT` to the Arc agent's address and rebuild the site (`build-site.sh`) in the same step, or the landing page keeps linking to the demo chain's agent.
 
 ### 5. Claim and check
 
@@ -974,7 +974,7 @@ Set `NEXT_PUBLIC_SCORECARD_AGENT` to the Arc agent's address and rebuild the sit
 
 ### Back to the demo chain
 
-Put `COMPOSE_FILE` back to `compose.yml:compose.demo.yml:compose.gateway.yml` (with `:compose.site.yml` if the landing page is served) and `NEXT_PUBLIC_SCORECARD_AGENT` back to the demo agent (or remove the line), rebuild the site with `build-site.sh`, and run the same `up -d --build --remove-orphans`.
+Put `COMPOSE_FILE` back to `compose.yml:compose.demo.yml:compose.gateway.yml` (with `:compose.site.yml` if the landing page is served) and `NEXT_PUBLIC_DASHBOARD_AGENT` back to the demo agent (or remove the line), rebuild the site with `build-site.sh`, and run the same `up -d --build --remove-orphans`.
 The demo chain, its contract and its database are as they were left; the Arc lines in the env file are ignored by the demo compose file.
 If a QuickNode Stream exists, pause and delete it first, because a paused one bills every block it missed when it resumes ([quicknode-streams.md](quicknode-streams.md#plan-for-the-arc-deployment-19)).
 

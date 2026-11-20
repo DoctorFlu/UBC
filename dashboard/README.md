@@ -1,7 +1,7 @@
 # Dashboard
 
 The owner's console for Mandate: set the mandate, watch intents, approve or reject held ones, pause the agent, and read the hedge, payments and audit trail.
-It also serves a public, wallet-free scorecard at `/agent/[address]`.
+It also serves a public, wallet-free dashboard at `/agent/[address]`.
 
 It reads the Policy contract's events into a durable store, pushes every change to the browser over server-sent events, and serves the agent API the MCP server calls (`shared/src/console-api.ts`).
 The owner signs the mandate, approvals, rejections and the kill switch with their own wallet; the console never holds a key.
@@ -14,7 +14,7 @@ Each plan has an evidence chain at `/hedge/plans/[planId]`, reached from the hed
 It links, in order, the owner's request, the paid signal, the plan, and each intent with the contract's verdict, the owner's decision and the fill.
 It is "verified" only when every intent's stored reason hashes to the chain and names the plan and its signal; a tampered reason, an intent with no checkable reason, or a reason that does not name the signal is said in plain words instead.
 
-The public scorecard shows the mandate, intents by verdict at proposal, blocked attempts by rule, the owner's approvals and rejections, fills and the realized result.
+The public dashboard shows the mandate, intents by verdict at proposal, blocked attempts by rule, the owner's approvals and rejections, fills and the realized result.
 Every number is computed from the Policy contract's events, matches the audit trail (a unit test and the smoke test hold it to that), and lists the transactions behind it.
 It gets nothing offchain (no holdings, plans, reasons or payments), links nowhere into the console, clips onchain strings, and is computed once per chain update however often it is loaded.
 
@@ -100,7 +100,7 @@ src/
     (console)/            owner views, inside the shell, the live snapshot and the wallet provider
       <view>/page.tsx     one route folder per view
       hedge/plans/[planId]/   one plan's evidence chain
-    (public)/agent/[address]/   the public scorecard, no wallet
+    (public)/agent/[address]/   the public dashboard, no wallet
     api/agent/v1/         the agent API (bearer token), see shared/src/console-api.ts
     api/console/          snapshot, server-sent events and owner-signed offchain writes
     api/webhooks/         the QuickNode Stream webhook
