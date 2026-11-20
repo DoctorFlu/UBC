@@ -3,7 +3,7 @@ import { inspect } from "node:util";
 import { WAKE_DEFAULT_DAILY_CAP } from "@mandate/shared";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_PRICE_CHECK_MS, readConsoleConfig, readWakeConfig } from "./config";
+import { DEFAULT_PRICE_CHECK_MS, readAccountsConfig, readConsoleConfig, readWakeConfig } from "./config";
 
 const URL_WITH_SECRET = "https://hooks.example.test/routines/secret-path-1/run";
 
@@ -64,6 +64,26 @@ describe("readWakeConfig", () => {
     expect(() => readConsoleConfig({ NODE_ENV: "production", GROK_WAKE_TEST_CLOCK: "on" })).toThrow(
       /refused in production/,
     );
+  });
+});
+
+describe("readAccountsConfig sign-up", () => {
+  const url = "https://console.example";
+
+  it("is open by default, in production too", () => {
+    expect(readAccountsConfig({ CONSOLE_MODE: "development" }, url).signup).toBe("open");
+    expect(readAccountsConfig({ CONSOLE_MODE: "production" }, url).signup).toBe("open");
+    expect(readAccountsConfig({ CONSOLE_MODE: "production", CONSOLE_SIGNUP: "" }, url).signup).toBe("open");
+  });
+
+  it("can be by invite or explicitly open in production, and refuses anything else", () => {
+    expect(readAccountsConfig({ CONSOLE_MODE: "production", CONSOLE_SIGNUP: "invite" }, url).signup).toBe(
+      "invite",
+    );
+    expect(readAccountsConfig({ CONSOLE_MODE: "production", CONSOLE_SIGNUP: "open" }, url).signup).toBe(
+      "open",
+    );
+    expect(() => readAccountsConfig({ CONSOLE_SIGNUP: "closed" }, url)).toThrow(/CONSOLE_SIGNUP/);
   });
 });
 

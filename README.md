@@ -16,7 +16,7 @@ Built for the UBC 2026 Hackathon: track **Agentic Payments & AI**, **Best use of
 The hosted demo runs on **Arc testnet** since 18 November 2026, against our own instance of the Policy contract, [`0x9a240b2aaa2a936DBf4543940341Bb725C92412d`](https://explorer.testnet.arc.io/address/0x9a240b2aaa2a936DBf4543940341Bb725C92412d) (deploy block 72777078), in gateway mode as described in [docs/hosting.md](docs/hosting.md#arc-testnet).
 It is built from the same source, `contracts/src/Policy.sol`, and `npm run arc:doctor` checks its code byte for byte against that build ([docs/configuration.md](docs/configuration.md#our-own-instance-or-the-teams)).
 The team's first deployment, `0x571D…82f3` in [contracts/README.md](contracts/README.md), is the same contract; ours exists so that its roles name the stack's own keys.
-The console needs a passkey sign-in, and a workspace there is opened with a code from the operator ([docs/accounts.md](docs/accounts.md#sign-in)).
+The console needs a passkey sign-in, and anyone can open a workspace of their own on `/sign-up` ([docs/accounts.md](docs/accounts.md#sign-in)).
 Two pages need no sign-in: the landing page, and the agent's public dashboard at [`/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E`](https://8080-agq6mxapjuxoy3aavoouae6yri.instabox.tech/agent/0x2fa2cE1F4780014414207e544C1057B05809a82E), which the landing page links to.
 
 <!-- #96 (members, roles and hosted sign-up): when it is merged, say here how a visitor signs up on the hosted demo. -->

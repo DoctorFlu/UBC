@@ -234,7 +234,8 @@ docker compose exec console node dashboard/admin.mjs claim-code
 The code works once, for 24 hours, and only its hash is stored.
 Open `https://<host>/claim` on the device that will hold your passkey, enter your name and the code, and create the passkey.
 The console then shows a recovery code once: keep it in a password manager, because it is the way back in if every passkey is lost.
-`docker compose exec console node dashboard/admin.mjs status` shows whether the workspace is claimed, and `invite` prints a one-time code that lets one more person create a workspace of their own on `/sign-up`.
+`docker compose exec console node dashboard/admin.mjs status` shows whether the workspace is claimed.
+Anyone can create a workspace of their own on `/sign-up`; with `CONSOLE_SIGNUP=invite` in `deploy/.env` it needs a code, and `invite` prints a one-time one.
 
 ## 6. Connect Grok Bot
 

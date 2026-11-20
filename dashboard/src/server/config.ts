@@ -42,9 +42,9 @@ export class SecretSetting {
 }
 
 export interface AccountsConfig {
-  /** Production refuses to start without a master key and refuses open sign-up. */
+  /** Production refuses to start without a master key. */
   mode: "production" | "development";
-  /** `invite`: a new workspace needs an invite code. `open`: anyone can create one. */
+  /** `open` (the default): anyone can create a workspace. `invite`: a new workspace needs an invite code. */
   signup: "invite" | "open";
   /** The console's origin, from `CONSOLE_URL`: the passkeys' expected origin and every write's `Origin`. */
   origin: string;
@@ -193,17 +193,7 @@ export function readAccountsConfig(env: EnvVars, publicUrl: string): AccountsCon
     ["production", "development"] as const,
     env.NODE_ENV === "production" ? "production" : "development",
   );
-  const signup = oneOf(
-    "CONSOLE_SIGNUP",
-    optional(env.CONSOLE_SIGNUP),
-    ["invite", "open"] as const,
-    mode === "production" ? "invite" : "open",
-  );
-  if (mode === "production" && signup === "open") {
-    throw new Error(
-      'CONSOLE_SIGNUP="open" is refused in production: anyone could create a workspace. Use "invite".',
-    );
-  }
+  const signup = oneOf("CONSOLE_SIGNUP", optional(env.CONSOLE_SIGNUP), ["invite", "open"] as const, "open");
   let url: URL;
   try {
     url = new URL(publicUrl);

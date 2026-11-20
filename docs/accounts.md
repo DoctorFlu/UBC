@@ -166,7 +166,7 @@ User verification is required, and passkeys are discoverable, so signing in asks
   Until then nobody can see the workspace's data.
   Once it is claimed, `/claim` sends visitors to sign in, since no claim code can work again.
 - **Sign-up** (`/sign-up`): creates a new workspace with one mandate (no contract yet) and its agent.
-  In production it needs an invite code from the admin command's `invite`; in local development it is open unless `CONSOLE_SIGNUP=invite`.
+  It is open to anyone by default, the hosted demo included; with `CONSOLE_SIGNUP=invite` it needs an invite code from the admin command's `invite`.
 - **Sign-in** (`/sign-in`): one button, which asks the browser for a passkey of this site.
 - **Recovery** (`/recover`): the recovery code shown after sign-up or claim signs the member in once and asks for a new passkey; using it shows a new code.
   A member can also add a second passkey in Setup, so losing one device does not lock them out.
@@ -240,10 +240,10 @@ The buckets live in each process's memory, which is enough for one console and o
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CONSOLE_MODE` | `production` when `NODE_ENV=production`, else `development` | Production refuses to start without a master key and refuses open sign-up. |
+| `CONSOLE_MODE` | `production` when `NODE_ENV=production`, else `development` | Production refuses to start without a master key. |
 | `CONSOLE_MASTER_KEY_FILE` | unset | File holding the master key (32 bytes, base64 or base64url). Preferred: mount it as a Docker secret. |
 | `CONSOLE_MASTER_KEY` | unset | The master key itself, for hosts whose secrets live in an env file. Set one of the two, not both. |
-| `CONSOLE_SIGNUP` | `invite` in production, `open` in development | `invite` needs a code from `console:admin invite`; `open` lets anyone create a workspace. |
+| `CONSOLE_SIGNUP` | `open` | `open` lets anyone create a workspace; `invite` needs a code from `console:admin invite`. |
 | `CONSOLE_WEBAUTHN_RP_ID` | the host name of `CONSOLE_URL` | The passkeys' relying party id. |
 | `CONSOLE_TRUST_PROXY` | `false` | `true` behind Caddy: rate limits key on the client address in `X-Forwarded-For`. |
 | `MCP_TRUST_PROXY` | `false` | The MCP server's: `true` behind Caddy, so its failed-token limit keys on the client. |

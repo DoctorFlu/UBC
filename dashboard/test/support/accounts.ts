@@ -41,7 +41,7 @@ export function claimFirstWorkspace(service: ConsoleService, name = "Owner"): Me
   return claimed.member;
 }
 
-/** A new workspace with its own mandate and agent, as an invited sign-up makes one. */
+/** A new workspace with its own mandate and agent, as a sign-up makes one. */
 export function signUpWorkspace(service: ConsoleService, name: string): Member {
   const created = service.accounts.store.signUp({
     memberName: name,

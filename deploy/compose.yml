@@ -104,6 +104,8 @@ services:
       CONSOLE_MODE: production
       CONSOLE_MASTER_KEY: ${CONSOLE_MASTER_KEY:?set CONSOLE_MASTER_KEY in deploy/.env (run deploy/init-env.sh)}
       CONSOLE_WEBAUTHN_RP_ID: ${CONSOLE_WEBAUTHN_RP_ID:-}
+      # Who may create a workspace on /sign-up: open (the default) or invite. Empty: open.
+      CONSOLE_SIGNUP: ${CONSOLE_SIGNUP:-}
       # Caddy appends the client's address to X-Forwarded-For; the rate limits key on it.
       CONSOLE_TRUST_PROXY: "true"
       CONSOLE_DATA_DIR: /data/console
