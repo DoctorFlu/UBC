@@ -24,6 +24,7 @@ import {
   type PutSettlementRequest,
 } from "@mandate/shared";
 import {
+  APPROVAL_READ_RETRIES,
   checkApprovedIntent,
   DEMO_POLICY,
   devAccount,
@@ -183,17 +184,41 @@ describe.each(POLICY_CONTRACTS)("the simulated executor on the %s contract", (ki
     lines = [];
   });
 
-  const start = (venue: Venue) => {
+  const start = (venue: Venue, client: PolicyClient = chain.executor) => {
     executor = startExecutor({
-      client: chain.executor,
+      client,
       venue,
       fromBlock: chain.deployBlock,
       fillDelayMs: 0,
       venueRetryMs: 50,
+      lagRetryMs: 50,
       pollingIntervalMs: 50,
       log: (line) => lines.push(line),
     });
   };
+
+  /**
+   * The executor's client, whose intent reads answer as an RPC node behind the log would while `lag.left`
+   * is above zero (each read counts one down): the intent is not there yet.
+   */
+  const laggingReads = (lag: { left: number }): PolicyClient =>
+    new Proxy(chain.executor, {
+      get(target, property) {
+        if (property === "getIntent") {
+          return (intentId: number) => {
+            if (lag.left > 0) {
+              lag.left -= 1;
+              return Promise.resolve(null);
+            }
+            return target.getIntent(intentId);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+
+  const laggedRead = (line: string) => line.includes("approved per the log but read as missing");
 
   it("fills a valid order and refuses everything a stolen key can get approved", async () => {
     const cases: [string, RawProposal][] = [
@@ -304,6 +329,29 @@ describe.each(POLICY_CONTRACTS)("the simulated executor on the %s contract", (ki
     expect(after.get(second)).toBe("executed");
     const [failed, checked] = venue.categoryAt;
     expect((checked ?? 0) - (failed ?? 0)).toBeLessThan(400);
+  });
+
+  it("fills an approval whose first reads came from an RPC node behind the log", async () => {
+    const lag = { left: 2 };
+    const id = await proposeRaw(chain.agent, order());
+    start(fakeVenue(), laggingReads(lag));
+
+    const statuses = await waitForStatus(chain.outsider, [id], (s) => s !== "approved");
+    expect(statuses.get(id)).toBe("executed");
+    expect(lag.left).toBe(0);
+    expect(lines.filter(laggedRead)).toHaveLength(2);
+  });
+
+  it("lets an approval go after the last read behind the log, and never before", async () => {
+    const id = await proposeRaw(chain.agent, order());
+    start(fakeVenue(), laggingReads({ left: Number.POSITIVE_INFINITY }));
+
+    await vi.waitFor(() => {
+      expect(lines.filter(laggedRead)).toHaveLength(APPROVAL_READ_RETRIES);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(lines.filter(laggedRead)).toHaveLength(APPROVAL_READ_RETRIES);
+    expect((await chain.outsider.getIntent(id))?.status).toBe("approved");
   });
 
   it("caps the growing wait at 10 minutes", () => {

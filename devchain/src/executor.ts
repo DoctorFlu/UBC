@@ -145,6 +145,12 @@ export interface ExecutorOptions {
    */
   venueRetryMs?: number;
   /**
+   * How long to wait before reading an approved intent again when the read came back behind the log that
+   * announced it (the intent missing, or still waiting for approval): a public RPC can answer from a node
+   * that has not seen that block yet. Read again at most `APPROVAL_READ_RETRIES` times.
+   */
+  lagRetryMs?: number;
+  /**
    * How often the settlement timer looks for a position that is due. A look is local: the venue and the
    * console are asked only about a position whose market has expired (or whose wait below has ended).
    */
@@ -183,6 +189,12 @@ const SETTLE_GRACE_MS = 5_000;
 const MINUTE_MS = 60_000;
 
 /**
+ * How many times an approval whose intent reads as missing or still waiting is read again before it is let
+ * go. The log said it was approved, so the read was behind; a few seconds covers any node catching up.
+ */
+export const APPROVAL_READ_RETRIES = 5;
+
+/**
  * Waits while an expired ladder has no outcome yet: Gemini usually publishes within seconds, so the first
  * questions come quickly, then they thin out. About 8 requests per ladder in its first two hours, against
  * Gemini's public limit of 120 a minute.
@@ -217,6 +229,7 @@ export function startExecutor(options: ExecutorOptions): Executor {
   const fillDelayMs = options.fillDelayMs ?? 1_500;
   const fillPollMs = options.fillPollMs ?? 5_000;
   const venueRetryMs = options.venueRetryMs ?? 15_000;
+  const lagRetryMs = options.lagRetryMs ?? 2_000;
   const settleIntervalMs = options.settleIntervalMs ?? 60_000;
   const settleBackoffMs = options.settleBackoffMs?.length ? options.settleBackoffMs : SETTLE_BACKOFF_MS;
   const openRecheckMs = options.openRecheckMs;
@@ -235,6 +248,8 @@ export function startExecutor(options: ExecutorOptions): Executor {
   const marketWaits = new Map<number, number>();
   /** How many times in a row each intent's result could not be recorded, for growing waits. */
   const recordWaits = new Map<number, number>();
+  /** How many times in a row each approval's intent read came back behind the log. */
+  const lagWaits = new Map<number, number>();
   /** Fills read from the venue whose result is not onchain yet: a later pass records them as they are. */
   const fills = new Map<number, ClosedFill>();
   let stopped = false;
@@ -282,11 +297,29 @@ export function startExecutor(options: ExecutorOptions): Executor {
     try {
       const intent = await reads.run(() => client.getIntent(intentId));
       if (intent?.status !== "approved") {
+        // The log said approved, but the read says the intent is missing or still waiting: the read came
+        // from an RPC node behind the one that served the log. Ask again a few times before letting it go,
+        // so an approval is not left behind until the next restart. An intent already recorded (a replay
+        // after a restart) reads as executed or failed, and is let go at once.
+        if (intent === null || intent.status === "needs_approval" || intent.status === "none") {
+          const waits = lagWaits.get(intentId) ?? 0;
+          if (waits < APPROVAL_READ_RETRIES) {
+            lagWaits.set(intentId, waits + 1);
+            log(
+              `${tag} intent #${intentId}: approved per the log but read as ${intent === null ? "missing" : intent.status}; ` +
+                `the RPC may be behind, reading it again in ${formatWait(lagRetryMs)}`,
+            );
+            retryLater(intentId, lagRetryMs);
+            return;
+          }
+        }
+        lagWaits.delete(intentId);
         marketWaits.delete(intentId);
         recordWaits.delete(intentId);
         fills.delete(intentId);
         return; // already recorded, for example after a restart
       }
+      lagWaits.delete(intentId);
 
       // A fill this process already read, or an order the venue's journal says reached it, is recorded
       // from what the venue did. Its market is never checked again: it may have expired or left the
