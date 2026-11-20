@@ -136,11 +136,24 @@ The owner has entered a holding in the console, for example 0.05 BTC, and saved 
 | Grok Bot | A real Grok Bot plans and proposes through the connector ([docs/grok-bot.md](docs/grok-bot.md#verified-by-hand-issue-4)). |
 | Console sign-in | Passkeys (WebAuthn) for each workspace member ([docs/accounts.md](docs/accounts.md)). |
 
+### The three demo cases, on Arc testnet
+
+Every verdict is a transaction on the hosted demo's contract, readable on the explorer:
+
+| Case | What the contract did | Transaction |
+| --- | --- | --- |
+| A trade inside the rules | `IntentApproved`, then the executor filled it and called `recordResult` | [`0x7bc1cf5e…576d85`](https://explorer.testnet.arc.io/tx/0x7bc1cf5e618539734be88622814d113edb9a897bbaba407d048e88e560576d85) |
+| A trade that breaks a rule | `IntentRejected` with the reason `over max trade size` | [`0x0f80ccb8…c3f195`](https://explorer.testnet.arc.io/tx/0x0f80ccb81676db9713690265657318c6e0e0c46dff0c4c85c352e53b26c3f195) |
+| A trade above the approval threshold | `IntentNeedsApproval`; it waited for the owner's wallet | [`0x020cda1f…7d3f73`](https://explorer.testnet.arc.io/tx/0x020cda1fe5d0bd4d7baeda987efc3dee22a2323da86f4bb05f8ee75a2f7d3f73) |
+
+The contract's source is verified on the explorer, so the rule behind each verdict can be read next to the transaction.
+
 ## Safety model
 
 - **Rules onchain.**
   The Policy contract checks every proposal against a total budget, a maximum trade size, an approval threshold, a daily loss limit, the allowed categories and a pause switch.
   The demo rules are a $200 budget, $25 per trade, approval above $20, a $40 daily loss limit and Crypto only (`DEMO_POLICY` in `devchain/src/deploy.ts`).
+  One limit of this demo: the daily loss rule is on-chain and tested, but the executor records a fill with a zero profit or loss and records settlement losses off-chain (signed, in the console), so the rule does not trigger here. An on-chain `recordSettlement` is the planned fix ([docs/contract-interface.md](docs/contract-interface.md#24-recordsettlement-issue-92)).
 - **Three keys.**
   The owner sets rules and approves, the agent only proposes, and the executor only places approved orders and records results.
   No MCP tool calls an owner or executor function, and `agent/test/no-owner-calls.test.ts` proves it from the source.
