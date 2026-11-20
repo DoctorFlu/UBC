@@ -24,6 +24,30 @@ export function watchRebuilds(page: Page): HeadWatch {
   return watch;
 }
 
+/**
+ * Resolves once the head has not changed for `quietMs`. A `router.refresh()` streams the page's metadata
+ * after its body, and React replaces the <title> then: for a moment the head has none, which axe reports
+ * as a page without a title (seen on the production build, after a rename).
+ */
+export async function headSettled(page: Page, quietMs = 250): Promise<void> {
+  await page.evaluate(
+    (quiet) =>
+      new Promise<void>((resolve) => {
+        let timer = setTimeout(done, quiet);
+        const observer = new MutationObserver(() => {
+          clearTimeout(timer);
+          timer = setTimeout(done, quiet);
+        });
+        function done() {
+          observer.disconnect();
+          resolve();
+        }
+        observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+      }),
+    quietMs,
+  );
+}
+
 /** The head's titles and icon links now, the rebuilds seen, and how many paths of the checkout are changed. */
 export async function headReport(page: Page, watch: HeadWatch): Promise<string> {
   const head = await page

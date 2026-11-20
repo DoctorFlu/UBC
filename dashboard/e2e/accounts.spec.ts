@@ -8,7 +8,7 @@ import { AGENT_ID_HEADER, CONSOLE_AGENT_ROUTES, hashAgentToken } from "@mandate/
 import type { ConsoleSnapshot } from "../src/lib/live/types";
 import { schemes, viewports } from "./routes";
 import { E2E_SERVICE_TOKEN, ownerHeaders, snapshot } from "./support/console";
-import { type HeadWatch, headReport, watchRebuilds } from "./support/head-report";
+import { type HeadWatch, headReport, headSettled, watchRebuilds } from "./support/head-report";
 import { watchConsole } from "./support/problems";
 import { type VirtualPasskey, addVirtualPasskey, registerOnPage } from "./support/session";
 import { gotoHydrated, waitForHydration } from "./support/navigation";
@@ -166,6 +166,7 @@ test.describe("a second workspace", () => {
 
   /** Axe finds nothing; if it does, the message also says what the head held and what `next dev` did. */
   async function expectAccessible() {
+    await headSettled(page);
     const violations = await axe(page);
     expect(violations, violations.length > 0 ? await headReport(page, head) : undefined).toEqual([]);
   }
@@ -554,8 +555,16 @@ test.describe("a second workspace", () => {
     await expect(card.getByText("Name the mandate, like “Hedge my BTC”.")).toBeVisible();
     await name.fill("Hedge ETH weekly");
     const renamed = page.waitForResponse((response) => response.request().method() === "PATCH");
+    // The rename refreshes the page from the server: its new title comes last, after the switcher's name.
+    const refreshed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.request().headers()["rsc"] === "1" &&
+        new URL(response.url()).pathname === new URL(hedgeSetup).pathname,
+    );
     await card.getByRole("button", { name: "Rename" }).click();
     expect((await renamed).status()).toBe(200);
+    await (await refreshed).finished();
     await expect(page.getByRole("region", { name: "Notifications" })).toContainText("Mandate renamed");
     // The switcher reads the new name at once, with no reload.
     await expect(page.getByTestId("mandate-switcher").filter({ visible: true })).toContainText(
