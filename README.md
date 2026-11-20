@@ -205,6 +205,7 @@ The executor places approved orders through Gemini's signed order API on the san
 Grok Bot is the agent: it connects to the MCP server as a custom connector and uses its tools to read the mandate, plan a hedge, pay for a signal and propose orders, in a chat with the owner or in a scheduled or webhook-started routine.
 It holds no keys and has no direct access to Gemini or the contract, so the contract judges everything it does.
 The instruction text, the skill and the routine are in `agent/grok/` ([docs/grok-bot.md](docs/grok-bot.md)).
+The full chat with the Bot, from the first connector test to the settled sandbox hedge, is exported in [docs/grok-bot-chat-export.pdf](docs/grok-bot-chat-export.pdf) (as text: [docs/grok-bot-chat-export.md](docs/grok-bot-chat-export.md)).
 
 ## Run it locally
 
@@ -259,6 +260,7 @@ Every setting is in [docs/configuration.md](docs/configuration.md), and every se
 | [docs/event-wake.md](docs/event-wake.md) | Which events wake Grok Bot's routine, the event body, and the limits on wake-ups. |
 | [docs/gemini-venue.md](docs/gemini-venue.md) | Orders on Gemini's sandbox: safety rules, fees, settlement, the journal, and what was verified. |
 | [docs/grok-bot.md](docs/grok-bot.md) | How Grok Bot connects to the MCP server, its skills and routines, and what was verified by hand. |
+| [docs/grok-bot-chat-export.md](docs/grok-bot-chat-export.md) | The whole chat with Grok Bot, 15 to 18 Nov 2026, unedited (also as [PDF](docs/grok-bot-chat-export.pdf)). |
 | [docs/hosting.md](docs/hosting.md) | Running the product on one VM with Docker Compose and Caddy, including the InstaBox gateway mode. |
 | [docs/order-lifecycle.md](docs/order-lifecycle.md) | One order from proposal to settlement, and who owns each step. |
 | [docs/quicknode-streams.md](docs/quicknode-streams.md) | The QuickNode Stream on Arc testnet: dataset, filter, webhook, lifecycle and credit budget. |

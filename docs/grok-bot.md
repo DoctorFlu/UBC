@@ -175,8 +175,10 @@ What exists:
 - Files in a message can be downloaded from the message's menu.
 - Call transcripts can be exported, which applies to voice calls only.
 
-Open question for the sponsor: which export format the Grok Bot bounty accepts.
-Fallbacks: ask the Bot to write the full conversation to a file and download it, or capture the chat as a PDF.
+So the export was made from the web client's transcript on 20 Nov 2026: [grok-bot-chat-export.pdf](grok-bot-chat-export.pdf), and the same text as [grok-bot-chat-export.md](grok-bot-chat-export.md).
+It holds every message of the chat with the Bot from 15 to 18 Nov 2026, in order, with nothing added, removed or reworded.
+The transcript is drawn only for the part on screen, so the page was scrolled from the first message to the last, and each message's text was copied as it appeared.
+Scheduled routine runs open as their own chats and are not in it.
 
 ## Verified by hand (issue #4)
 
@@ -196,5 +198,4 @@ Checked on 2026-11-15 against our server through a Cloudflare quick tunnel.
 1. Whether Auto Review asks before a write tool on a scheduled or webhook run.
 2. Tool result size limits and timeouts beyond what we have seen.
 3. A webhook-triggered routine receives our JSON body (`mandate.wake`, [event-wake.md](event-wake.md)), and how the Bot sees it beside the instruction. The notifier is tested only against a local fake receiver.
-4. The export method.
-5. That a daily routine's result reaches the owner as a phone notification, and that Grok keeps the digest's shape (a first line of about 100 characters, then at most five short lines).
+4. That a daily routine's result reaches the owner as a phone notification, and that Grok keeps the digest's shape (a first line of about 100 characters, then at most five short lines).
